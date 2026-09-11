@@ -57,6 +57,39 @@ function newId(): string {
 type ConnectSessionInput = Omit<ConnectSessionClaims, "jti" | "exp" | "v" | "csrf">;
 
 /**
+ * Project a (scope, actor, target) triple into the capability token's claims.
+ *
+ * Every minter goes through here — the `connect/session` route and the
+ * run-kickoff offer (`preflight-connect-offer.ts`) — so the actor projection
+ * (`user_id` XOR `end_user_id`, which `actorFromClaims` reverses) and the
+ * omit-when-absent shape of the optional claims are written once. Optional
+ * fields are omitted rather than set to a falsy value: the claims are signed
+ * and replayed verbatim, so `scopes: []` and "no scopes" must not both appear.
+ */
+export function connectClaimsFor(input: {
+  scope: SpaceScope;
+  actor: Actor;
+  packageId: string;
+  authKey: string;
+  connectionId?: string;
+  scopes?: readonly string[];
+  forceAccountSelect?: boolean;
+}): ConnectSessionInput {
+  return {
+    org_id: input.scope.orgId,
+    space_id: input.scope.spaceId,
+    ...(input.actor.type === "user"
+      ? { user_id: input.actor.id }
+      : { end_user_id: input.actor.id }),
+    package_id: input.packageId,
+    auth_key: input.authKey,
+    ...(input.connectionId ? { connection_id: input.connectionId } : {}),
+    ...(input.scopes && input.scopes.length > 0 ? { scopes: [...input.scopes] } : {}),
+    ...(input.forceAccountSelect ? { force_account_select: true } : {}),
+  };
+}
+
+/**
  * Mint the initial capability token and build the agent-facing connect URL.
  * Returns the URL + absolute expiry (ms) for the API response.
  */

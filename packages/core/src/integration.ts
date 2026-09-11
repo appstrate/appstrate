@@ -880,6 +880,19 @@ export function connectableAuthKeysForAgent(
  * the integration's `allow_undeclared_tools: true`), per-tool inference is
  * bypassed and the selected auth's `default_scopes` (§7.4) is used as the
  * baseline, still unioned with any explicit `agentScopes`.
+ *
+ * `agentScopes` are filtered to what `authKey`'s own `scope_catalog` declares,
+ * because the two ends of that selection are validated against DIFFERENT sets.
+ * An agent's `integrations_configuration[id].scopes` names no auth, so
+ * {@link validateAgentIntegrationScopes} accepts anything in the UNION of every
+ * auth's catalog ({@link getAvailableScopes}); the connect kickoff, in contrast,
+ * is per-auth and refuses a scope the TARGET auth does not declare. Unioning a
+ * sibling auth's scope in here relayed it as `required_scopes` on the 412, and
+ * the kickoff then rejected the platform's own value — a loop nothing in the
+ * agent could break. Tool-contributed scopes need no such filter: they are read
+ * out of `tools_policy[tool].required_scopes[authKey]`, per-auth by
+ * construction. An auth declaring no catalog declares no closed set, so nothing
+ * is filtered and the IdP arbitrates at consent time.
  */
 export function requiredScopesForAgent(input: {
   manifest: IntegrationManifest;
@@ -887,7 +900,10 @@ export function requiredScopesForAgent(input: {
   agentTools: readonly string[] | "*" | undefined;
   agentScopes: readonly string[] | undefined;
 }): string[] {
-  const viaExplicit = input.agentScopes ? [...input.agentScopes] : [];
+  const viaExplicit = partitionScopesByAuthCatalog(
+    input.manifest.auths?.[input.authKey],
+    input.agentScopes,
+  ).declared;
   if (isToolsWildcard(input.agentTools)) {
     const defaultScopes = input.manifest.auths?.[input.authKey]?.default_scopes ?? [];
     return [...new Set([...defaultScopes, ...viaExplicit])];
@@ -898,6 +914,38 @@ export function requiredScopesForAgent(input: {
     agentTools: input.agentTools,
   });
   return [...new Set([...viaTools, ...viaExplicit])];
+}
+
+/**
+ * Split `scopes` by membership of ONE auth's `scope_catalog` (§7.4):
+ * `declared` in caller order, `undeclared` deduped in caller order.
+ *
+ * The single definition of catalog membership. Both ends need it and need the
+ * same carve-out: an auth declaring no catalog declares no closed set, so
+ * everything counts as declared and the IdP arbitrates at consent time.
+ * `declared` filters what {@link requiredScopesForAgent} relays; `undeclared`
+ * is the connect kickoffs' rejection set.
+ *
+ * Keyed by ONE auth, never the union: a scope advertised by a SIBLING auth of
+ * the same integration is still not requestable here. That is the difference
+ * from {@link validateAgentIntegrationScopes}, which validates a selection that
+ * names no auth and so unions the catalogs ({@link getAvailableScopes}).
+ */
+export function partitionScopesByAuthCatalog(
+  auth: { scope_catalog?: readonly { value: string }[] } | undefined,
+  scopes: readonly string[] | undefined,
+): { declared: string[]; undeclared: string[] } {
+  if (!scopes || scopes.length === 0) return { declared: [], undeclared: [] };
+  const catalog = auth?.scope_catalog;
+  if (!catalog || catalog.length === 0) return { declared: [...scopes], undeclared: [] };
+  const known = new Set(catalog.map((entry) => entry.value));
+  const declared: string[] = [];
+  const undeclared = new Set<string>();
+  for (const s of scopes) {
+    if (known.has(s)) declared.push(s);
+    else undeclared.add(s);
+  }
+  return { declared, undeclared: [...undeclared] };
 }
 
 /**
@@ -1150,13 +1198,40 @@ export interface ConnectionResolutionError {
   /** Scopes the agent needs that the connection lacks (insufficient_scopes). */
   missingScopes?: string[];
   /**
+   * The FULL set of oauth scopes the run's selected tools require on
+   * {@link authKey} — not the diff. `insufficient_scopes` also carries
+   * {@link missingScopes} (required minus granted); `not_connected` and
+   * `needs_reconnection` end at a consent that has to stand on its own, so
+   * the full set is the only thing it can be built from. The caller forwards
+   * it as the connect kickoff's `scopes` body field, which unions it with the
+   * auth's `default_scopes` and anything already granted. Omitted when the
+   * auth is not `oauth2`, when the agent's selection requires no scopes, or
+   * when no auth key could be determined.
+   */
+  requiredScopes?: string[];
+  /**
+   * The integration manifest auth the connect flow must target
+   * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
+   * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
+   * connection's own auth) and `not_connected` (the agent dep's pinned
+   * `auth_key`, else the integration's single `oauth2` auth). Omitted on
+   * `not_connected` when the integration declares several oauth2 auths and
+   * the dep pins none — the caller must then let the user choose.
+   */
+  authKey?: string;
+  /**
    * The cascade layer that resolved the (failing) connection, when the error
    * is bound to a specific connection (`insufficient_scopes`). Lets callers
    * derive the pick status directly instead of re-comparing `connectionId`
    * against re-fetched pin ids.
    */
   source?: ConnectionResolutionSource;
-  /** True when the resolved connection belongs to the current actor. */
+  /**
+   * True when the resolved connection belongs to the current actor. Carried on
+   * the two connection-bound connect-flow codes — `insufficient_scopes` and
+   * `needs_reconnection` — because both remedies re-consent THAT row, which is
+   * its owner's to do.
+   */
   ownedByActor?: boolean;
   /**
    * AFPS §4.1 — agent dep's pinned `auth_key` when

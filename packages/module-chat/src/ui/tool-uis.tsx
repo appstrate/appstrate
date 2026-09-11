@@ -44,7 +44,7 @@ import {
   extractRunStatus,
   isRunLaunchOp,
 } from "./run-events.ts";
-import { extractAuthOffer } from "./auth-offer.ts";
+import { extractAuthOffers } from "./auth-offer.ts";
 import {
   asRecord,
   definedEntries,
@@ -317,13 +317,17 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     // place (same geometry). Only the anomalous success-without-offer shape
     // falls through to the generic row.
     if (opId === INITIATE_CONNECT_OP) {
-      const offer = extractAuthOffer(result);
+      // One card: the route behind this operation mints a single `connect_url`.
+      const offer = extractAuthOffers(result)[0];
       if (offer || phase !== "success") {
         return (
           <OAuthConnectCard
             authUrl={offer?.authUrl}
             state={offer?.state}
+            // The session route returns no `package_id`; the call's own path
+            // param is the integration this card connects.
             packageId={args?.path_params?.packageId}
+            toolCallId={props.toolCallId}
             errorText={
               phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
             }
@@ -401,7 +405,28 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 // emits the run id as a preliminary result; the progress panel is mounted for
 // the call's whole life (launch failures render inside it) — no generic-card
 // fallback swap.
+//
+// A launch refused for a missing connection (412) carries a ready-to-open
+// `connect_url` per actionable integration (#1207), so the connect cards render
+// UNDER the run panel and the user clicks straight through — the model is never
+// asked to kick a connect flow off, and never sees the link. Zero offers (every
+// other outcome, including a successful run) adds nothing: unlike the
+// invoke_operation connect branch there is no placeholder card here, because the
+// run panel already holds the block's geometry.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
-  render: (props: AnyToolProps) => <RunLaunchCard {...props} />,
+  render: (props: AnyToolProps) => (
+    <>
+      <RunLaunchCard {...props} />
+      {extractAuthOffers(props.result).map((offer) => (
+        <OAuthConnectCard
+          key={offer.authUrl}
+          authUrl={offer.authUrl}
+          state={offer.state}
+          packageId={offer.packageId}
+          toolCallId={props.toolCallId}
+        />
+      ))}
+    </>
+  ),
 });

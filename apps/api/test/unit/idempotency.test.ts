@@ -6,6 +6,7 @@ import type { AppEnv } from "../../src/types/index.ts";
 import { idempotency } from "../../src/middleware/idempotency.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
+import { getCache } from "../../src/infra/index.ts";
 import { flushRedis } from "../helpers/redis.ts";
 
 let callCount = 0;
@@ -89,6 +90,20 @@ describe("idempotency middleware", () => {
     expect(res2.status).toBe(422);
     const body = (await res2.json()) as { code: string };
     expect(body.code).toBe("idempotency_conflict");
+  });
+
+  it("refuses cached operations without request identity without executing again", async () => {
+    const app = createApp();
+    for (const status of ["processing", "completed"]) {
+      const key = `unbound-${status}`;
+      const cacheKey = `idem:org-1:_org:${key}`;
+      const stored = JSON.stringify({ status, bodyHash: "body-only", body: "{}", statusCode: 201 });
+      await (await getCache()).set(cacheKey, stored, { ttlSeconds: 60 });
+      const res = await post(app, "/test", { name: "Alice" }, key);
+      expect(res.status).toBe(422);
+      expect(callCount).toBe(0);
+      expect(await (await getCache()).get(cacheKey)).toBe(stored);
+    }
   });
 
   it("rejects key longer than 255 chars with 400", async () => {

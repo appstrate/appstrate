@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import codexModule from "../../src/index.ts";
+import codexModule, { PRO_PLAN_MODEL_IDS } from "../../src/index.ts";
 
 const def = (codexModule.modelProviders?.() ?? [])[0]!;
 
-/**
- * Codex declares EXPLICIT arrays, not a catalog selector: the ChatGPT
- * sign-in set is defined by OpenAI documentation and is deliberately narrower
- * than openai.json (which carries API-only models). Both lists are therefore
- * assertable literally here — no catalog is needed.
- */
+/** Pins the shape of the Codex model lists; rationale in `src/index.ts`. */
 const featured = def.featuredModels as readonly string[];
 const candidates = def.modelDiscoveryCandidates as readonly string[];
 
@@ -28,12 +23,14 @@ describe("codex discovery candidates", () => {
     }
   });
 
-  it("includes the Pro-only preview beyond the featured floor", () => {
-    // The run — not the static list — decides what a given plan serves, so
-    // candidates cover `gpt-5.3-codex-spark`, which is recommended for
-    // ChatGPT sign-in but absent from openai.json (hence unfeaturable).
+  it("keeps every Pro-only id selectable but never featured", () => {
+    // The deny-list plus these assertions are the whole enforcement of the
+    // split — see the `PRO_PLAN_MODEL_IDS` docblock.
     expect(candidates.length).toBeGreaterThan(featured.length);
-    expect(candidates).toContain("gpt-5.3-codex-spark");
+    for (const id of PRO_PLAN_MODEL_IDS) {
+      expect(candidates).toContain(id);
+      expect(featured).not.toContain(id);
+    }
   });
 
   it("drops the ids deprecated for ChatGPT sign-in", () => {

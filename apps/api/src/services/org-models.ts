@@ -23,6 +23,7 @@ import {
   scopedWhere,
   createDefaultPointer,
   isInvalidTextRepresentation,
+  isUniqueViolation,
 } from "../lib/db-helpers.ts";
 import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
@@ -396,6 +397,43 @@ export async function deriveModelLabel(
 
 // --- CRUD (DB models only) ---
 
+/**
+ * The loser of a duplicate add — the caller re-sending the same body, or two of
+ * the multi-add path's sequential POSTs racing — gets a 409 naming the row that
+ * already holds the binding, not a 500 carrying an index name. The database is
+ * the only arbiter: a read-then-insert check would reopen the same window
+ * `uq_org_models_unaliased_binding` exists to close.
+ */
+async function asDuplicateBinding(
+  err: unknown,
+  orgId: string,
+  credentialId: string,
+  modelId: string,
+): Promise<never> {
+  if (!isUniqueViolation(err)) throw err;
+  const [existing] = await db
+    .select({ id: orgModels.id })
+    .from(orgModels)
+    .where(
+      scopedWhere(orgModels, {
+        orgId,
+        extra: [
+          eq(orgModels.credentialId, credentialId),
+          eq(orgModels.modelId, modelId),
+          // The index is partial on `aliased = false`; an alias sharing the
+          // binding is legal and is never the row that refused this write.
+          eq(orgModels.aliased, false),
+        ],
+      }),
+    )
+    .limit(1);
+  throw conflict(
+    "model_already_added",
+    `Model '${modelId}' is already added for this credential`,
+    existing ? { existing_model_id: existing.id } : undefined,
+  );
+}
+
 export async function createOrgModel(
   orgId: string,
   label: string,
@@ -411,29 +449,35 @@ export async function createOrgModel(
     aliased?: boolean;
   },
 ): Promise<string> {
-  return db.transaction(async (tx) => {
-    const [row] = await tx
-      .insert(orgModels)
-      .values({
-        orgId,
-        label,
-        modelId,
-        credentialId,
-        input: capabilities?.input ?? null,
-        contextWindow: capabilities?.contextWindow ?? null,
-        maxTokens: capabilities?.maxTokens ?? null,
-        reasoning: capabilities?.reasoning ?? null,
-        cost: capabilities?.cost ?? null,
-        aliased: capabilities?.aliased ?? false,
-        source: "custom",
-        createdBy: userId,
-      })
-      .returning({ id: orgModels.id });
+  // The catch sits OUTSIDE the transaction on purpose: a failed statement
+  // aborts it, so `asDuplicateBinding`'s lookup could not run inside.
+  try {
+    return await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(orgModels)
+        .values({
+          orgId,
+          label,
+          modelId,
+          credentialId,
+          input: capabilities?.input ?? null,
+          contextWindow: capabilities?.contextWindow ?? null,
+          maxTokens: capabilities?.maxTokens ?? null,
+          reasoning: capabilities?.reasoning ?? null,
+          cost: capabilities?.cost ?? null,
+          aliased: capabilities?.aliased ?? false,
+          source: "custom",
+          createdBy: userId,
+        })
+        .returning({ id: orgModels.id });
 
-    // If this is the first model for the org, point the org default at it.
-    await defaultModel.promoteIfFirst(tx, orgId, row!.id);
-    return row!.id;
-  });
+      // If this is the first model for the org, point the org default at it.
+      await defaultModel.promoteIfFirst(tx, orgId, row!.id);
+      return row!.id;
+    });
+  } catch (err) {
+    return await asDuplicateBinding(err, orgId, credentialId, modelId);
+  }
 }
 
 export async function updateOrgModel(
@@ -470,10 +514,24 @@ export async function updateOrgModel(
     "aliased",
   ]);
 
-  await db
-    .update(orgModels)
-    .set(updates)
-    .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+  try {
+    await db
+      .update(orgModels)
+      .set(updates)
+      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+  } catch (err) {
+    // Repointing a row's model or credential can land on a binding another row
+    // already holds. The failed UPDATE rolled back, so the row still reads its
+    // pre-edit values — merge them with the patch to name the effective binding.
+    if (!isUniqueViolation(err)) throw err;
+    const row = await getOrgModelRow(orgId, modelDbId);
+    await asDuplicateBinding(
+      err,
+      orgId,
+      data.credentialId ?? row!.credentialId,
+      data.modelId ?? row!.modelId,
+    );
+  }
   // Drop the cached resolution (modelId/enabled/credential/cost may have changed).
   invalidateResolvedModel(orgId, modelDbId);
 }
@@ -1067,13 +1125,22 @@ type ModelListingFetchResult =
  * The guarded `GET <baseUrl>/models` request, shared by {@link testModelConfig}
  * (reads the status) and `listServedModels` (parses the body): the SSRF
  * pre-flight, the pinned transport and the pre-response failure mapping exist once.
+ *
+ * `pageQuery` asks for a page other than the first, spending the cursor the
+ * previous page published. It is appended to the URL the shape builds rather
+ * than merged into it: the request is always derived from the base URL, so the
+ * cursor cannot accumulate across pages and the first page stays byte-identical
+ * to a request that carries none.
  */
-export async function fetchModelListing(config: {
-  apiShape: string;
-  baseUrl: string;
-  apiKey: string;
-  providerId?: string;
-}): Promise<ModelListingFetchResult> {
+export async function fetchModelListing(
+  config: {
+    apiShape: string;
+    baseUrl: string;
+    apiKey: string;
+    providerId?: string;
+  },
+  pageQuery?: { name: string; value: string },
+): Promise<ModelListingFetchResult> {
   // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
   // DNS-rebind host gate) before the fetch: a public hostname resolving to a
   // private/loopback/link-local address is refused, fail-closed, with the same
@@ -1088,7 +1155,10 @@ export async function fetchModelListing(config: {
     };
   }
 
-  const { url, headers } = buildModelTestRequest(config);
+  const { url: firstPageUrl, headers } = buildModelTestRequest(config);
+  const url = pageQuery
+    ? `${firstPageUrl}${firstPageUrl.includes("?") ? "&" : "?"}${pageQuery.name}=${encodeURIComponent(pageQuery.value)}`
+    : firstPageUrl;
 
   const start = performance.now();
   try {

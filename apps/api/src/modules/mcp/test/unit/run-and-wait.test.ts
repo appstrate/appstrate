@@ -6,6 +6,7 @@ import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { resetCatalog } from "../../catalog.ts";
 import { buildServerInstructions } from "../../router.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
+import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 
 const noExtra = {} as AppstrateRequestExtra;
 
@@ -41,9 +42,22 @@ function makeRunAndWait(opts: {
   files?: Array<Record<string, unknown>>;
 }): {
   tool: ReturnType<typeof buildMcpTools>[number];
-  calls: Array<{ method: string; path: string; search: string; body: unknown }>;
+  calls: Array<{
+    method: string;
+    path: string;
+    search: string;
+    body: unknown;
+    /** The connect-offer opt-in, recorded per request (launch-only contract). */
+    connectOffers: string | null;
+  }>;
 } {
-  const calls: Array<{ method: string; path: string; search: string; body: unknown }> = [];
+  const calls: Array<{
+    method: string;
+    path: string;
+    search: string;
+    body: unknown;
+    connectOffers: string | null;
+  }> = [];
   const getRuns = [...(opts.getRun ?? [jsonResponse({ id: "run_1", status: "success" })])];
   const dispatch: Dispatch = async (req) => {
     const url = new URL(req.url);
@@ -54,7 +68,13 @@ function makeRunAndWait(opts: {
             .json()
             .catch(() => undefined)
         : undefined;
-    calls.push({ method: req.method, path: url.pathname, search: url.search, body });
+    calls.push({
+      method: req.method,
+      path: url.pathname,
+      search: url.search,
+      body,
+      connectOffers: req.headers.get(RUN_CONNECT_OFFERS_HEADER),
+    });
 
     if (
       req.method === "POST" &&
@@ -248,6 +268,18 @@ describe("run_and_wait", () => {
     });
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ input: { topic: "x" } });
     expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
+  });
+
+  it("opts the launch into connect offers, and only the launch", async () => {
+    // The MCP client is a human's own client, so a 412 may carry the link that
+    // human opens. The poll has no 412 to enrich, so it must stay opt-out.
+    const { tool, calls } = makeRunAndWait({
+      getRun: [jsonResponse({ id: "run_1", status: "success" })],
+    });
+    await tool.handler({ kind: "agent", scope: "@acme", name: "writer" }, noExtra);
+
+    expect(calls.find((c) => c.method === "POST")?.connectOffers).toBe("1");
+    expect(calls.find((c) => c.method === "GET")?.connectOffers).toBeNull();
   });
 
   it("launches an inline run from a minimal manifest without rewriting its prompt", async () => {
@@ -484,5 +516,18 @@ describe("run_and_wait", () => {
     expect(res.isError).toBe(true);
     expect(parseResult(res).error).toContain("runs:read");
     expect(calls.length).toBe(0);
+  });
+
+  it("launches for a caller holding only `runs:read-all`", async () => {
+    // `read-all` is a superset of `read`, not a companion to it
+    // (`lib/run-visibility.ts`), and `runs:read-all` is separately grantable to
+    // an API key. A literal `runs:read` test refused this principal before the
+    // launch even though the poll route it gates reads every run in the space.
+    const { tool, calls } = makeRunAndWait({ permissions: ["mcp:invoke", "runs:read-all"] });
+
+    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+
+    expect(res.isError).toBeFalsy();
+    expect(calls.find((c) => c.method === "POST")).toBeDefined();
   });
 });

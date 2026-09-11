@@ -117,6 +117,11 @@ export function renderLayout(props: LayoutProps): RawHtml {
             padding: 10px 0;
             border-bottom: 1px solid #eee;
           }
+          .notice {
+            font-size: 13px;
+            color: #6b7280;
+            margin: -8px 0 0;
+          }
           .actions {
             display: flex;
             gap: 12px;

@@ -364,6 +364,26 @@ const integrationDetailSchema = {
  * the hand-written pair it replaces. Same technique as `paths/files.ts`'s
  * `pipelineResponses`.
  */
+/**
+ * The two fields a caller relays verbatim from a readiness `integrations.<id>`
+ * error onto either connect kickoff (`connect/oauth2`, `connect/session`).
+ * Declared once so both surfaces document the relay identically.
+ */
+const connectKickoffRelayProperties = {
+  scopes: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
+  },
+  connection_id: {
+    type: "string",
+    format: "uuid",
+    description:
+      "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.",
+  },
+} as const;
+
 const connectRunResponses = {
   "503": {
     description:
@@ -877,9 +897,9 @@ export const integrationsPaths = {
             schema: {
               type: "object",
               properties: {
-                scopes: { type: "array", items: { type: "string" } },
+                scopes: connectKickoffRelayProperties.scopes,
                 force_account_select: { type: "boolean" },
-                connection_id: { type: "string", format: "uuid" },
+                connection_id: connectKickoffRelayProperties.connection_id,
               },
               additionalProperties: false,
             },
@@ -929,13 +949,9 @@ export const integrationsPaths = {
             schema: {
               type: "object",
               properties: {
-                scopes: { type: "array", items: { type: "string" } },
+                scopes: connectKickoffRelayProperties.scopes,
                 force_account_select: { type: "boolean" },
-                connection_id: {
-                  type: "string",
-                  format: "uuid",
-                  description: "Reconnect/upgrade an existing connection in place.",
-                },
+                connection_id: connectKickoffRelayProperties.connection_id,
               },
               additionalProperties: false,
             },
@@ -995,15 +1011,17 @@ export const integrationsPaths = {
         "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
         "400": {
           description:
-            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable.",
+            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it.",
         },
         "403": {
           description:
-            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page names the action to take (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint.",
+            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead.",
         },
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "500": {
-          description: "Integration cannot be connected / unexpected failure (HTML error page).",
+          description:
+            "Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable.",
         },
         "502": {
           description:

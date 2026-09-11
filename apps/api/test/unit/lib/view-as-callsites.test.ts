@@ -85,11 +85,15 @@ describe("persona-sensitive call sites", () => {
         ],
         [
           "apps/api/src/routes/spaces.ts",
-          "reads the TARGET member's row on a role change, not the caller's",
+          "reads the TARGET member's row to report what access it leaves behind, not the caller's",
         ],
         [
           "apps/api/src/services/scheduler.ts",
           "background fires revalidate the saved actor's live grants; no request persona survives into a schedule",
+        ],
+        [
+          "apps/api/src/services/space-members.ts",
+          "reads the TARGET member's row inside the write transaction, not the caller's",
         ],
         [
           "apps/api/src/services/spaces.ts",

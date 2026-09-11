@@ -151,7 +151,8 @@ export const profilePaths = {
       operationId: "batchGetProfiles",
       tags: ["Profile"],
       summary: "Batch lookup profiles",
-      description: "Retrieve display names for a list of user IDs.",
+      description:
+        "Retrieve display names for a list of user IDs. Reads the organization directory, so it requires `members:read`.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -199,6 +200,7 @@ export const profilePaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },

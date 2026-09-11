@@ -687,6 +687,63 @@ describe("files service + routes", () => {
     expect(byAdmin.status).toBe(204);
   });
 
+  it("an API key does not inherit its creator's ownership right over their files", async () => {
+    // The file's creator is `ctx.user` — the very identity the key authenticates
+    // as. Its lifecycle right must not travel through a key whose scopes never
+    // asked for `files:delete` (RBAC spec §7.1).
+    const runId = await seedRunRow(scope);
+    const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const makeOwnDoc = async () => {
+      const up = await stageUpload(scope, ctx.user.id, "own.txt", new TextEncoder().encode("own"));
+      const doc = await createFileFromUpload(scope, userActor, up, { runId });
+      await db.update(files).set({ expiresAt: soon }).where(eq(files.id, doc.id));
+      return doc;
+    };
+    const keyHeaders = async (scopes: string[]) => {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes,
+      });
+      return { Authorization: `Bearer ${key.rawKey}`, "X-Space-Id": ctx.defaultSpaceId };
+    };
+
+    const scoped = await keyHeaders(["files:read"]);
+    const doc1 = await makeOwnDoc();
+
+    // The key READS its creator's file (`files:read` is granted)...
+    const read = await app.request(`/api/files/${doc1.id}`, { headers: scoped });
+    expect(read.status).toBe(200);
+    // ...and the DTO says so: no lifecycle affordance on this credential.
+    const dto = (await read.json()) as { capabilities: { keep: boolean; delete: boolean } };
+    expect(dto.capabilities.delete).toBe(false);
+    expect(dto.capabilities.keep).toBe(false);
+
+    // ...but it neither deletes it nor pins it against the expiry GC.
+    const del = await app.request(`/api/files/${doc1.id}`, { method: "DELETE", headers: scoped });
+    expect(del.status).toBe(403);
+    const keep = await app.request(`/api/files/${doc1.id}/keep`, {
+      method: "POST",
+      headers: scoped,
+    });
+    expect(keep.status).toBe(403);
+    const [survivor] = await db.select().from(files).where(eq(files.id, doc1.id));
+    expect(survivor!.expiresAt).not.toBeNull();
+
+    // A key that DOES carry the scope keeps both rights.
+    const full = await keyHeaders(["files:read", "files:delete"]);
+    const doc2 = await makeOwnDoc();
+    const kept = await app.request(`/api/files/${doc2.id}/keep`, { method: "POST", headers: full });
+    expect(kept.status).toBe(200);
+    const doc3 = await makeOwnDoc();
+    const deleted = await app.request(`/api/files/${doc3.id}`, {
+      method: "DELETE",
+      headers: full,
+    });
+    expect(deleted.status).toBe(204);
+  });
+
   it("DELETE returns file_in_use while a consumer run references the file", async () => {
     const producerRun = await seedRunRow(scope);
     const { row: doc } = await publishStream(scope, producerRun, "shared.txt", "shared");
@@ -1151,9 +1208,14 @@ describe("files service + routes", () => {
     const upload = await createFileFromUpload(scope, creatorActor, up, { runId });
     const { row: output } = await publishStream(scope, runId, "o.txt", "output");
 
-    // Creator of the user_upload → full metadata + download + lifecycle.
+    // Creator of the user_upload → full metadata + download + lifecycle (on an
+    // unbounded credential: a cookie session, whose ceiling admits everything).
     expect(
-      (await getFileForActor(scope, creatorActor, upload.id, NO_GRANTS))?.capabilities,
+      (
+        await getFileForActor(scope, creatorActor, upload.id, NO_GRANTS, {
+          creatorCanManage: true,
+        })
+      )?.capabilities,
     ).toMatchObject({
       visible: true,
       metadata: true,
@@ -1359,9 +1421,10 @@ describe("files service + routes", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      // Reads now require the family grant; the DELETE below deliberately does
-      // NOT (it is authorized by the file's creator capability).
-      scopes: ["files:read"],
+      // Reads take the family grant; the DELETE below is authorized by the
+      // file's creator capability, but that ownership right still travels only
+      // as far as the KEY's own scopes reach — hence `files:delete` here.
+      scopes: ["files:read", "files:delete"],
     });
     const euHeaders = {
       Authorization: `Bearer ${key.rawKey}`,
@@ -1391,6 +1454,24 @@ describe("files service + routes", () => {
     });
     const foreign = await app.request(`/api/files/${otherOut.id}`, { headers: euHeaders });
     expect(foreign.status).toBe(404);
+
+    // A key WITHOUT `files:delete` does not reach the creator path, even
+    // impersonating the file's own end-user creator.
+    const readOnlyKey = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["files:read"],
+    });
+    const scopedDel = await app.request(`/api/files/${upload.id}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${readOnlyKey.rawKey}`,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "Appstrate-User": eu.id,
+      },
+    });
+    expect(scopedDel.status).toBe(403);
 
     // The end-user can DELETE its own file (creator path, no permission grant).
     const del = await app.request(`/api/files/${upload.id}`, {
@@ -1470,7 +1551,13 @@ describe("files service + routes", () => {
     await seedPackage({ id: "@chain/consumer", orgId: ctx.orgId });
     const runA = await seedRunRow(scope, { packageId: "@chain/producer" });
     const runB = await seedRunRow(scope, { packageId: "@chain/consumer" });
-    const { row: docX } = await publishStream(scope, runA, "shared.txt", "shared bytes");
+    // Published with the run's attribution, exactly as `runs-events.ts` does
+    // (`getRunAttribution` → `createFileFromStream`) — the mirroring invariant
+    // the detached-visibility check below rests on.
+    const { row: docX } = await publishStream(scope, runA, "shared.txt", "shared bytes", {
+      userId: runOwner,
+      endUserId: null,
+    });
     await db.insert(fileLinks).values({ fileId: docX.id, consumerRunId: runB, orgId: ctx.orgId });
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
@@ -1479,24 +1566,39 @@ describe("files service + routes", () => {
     await deletePackageRuns(scope, "@chain/producer");
 
     // Producer run gone; docX survives, DETACHED (both containers NULL), bytes +
-    // counter untouched, and still resolvable for a member (org-wide read).
+    // counter untouched, and still resolvable for the member who produced it.
     const [gone] = await db.select().from(runs).where(eq(runs.id, runA));
     expect(gone).toBeUndefined();
     const [row] = await db.select().from(files).where(eq(files.id, docX.id));
     expect(row).toBeDefined();
     expect(row!.runId).toBeNull();
     expect(row!.chatSessionId).toBeNull();
+    // The teardown drops the container, never the attribution — that is what
+    // keeps the ownership question answerable once the run is gone.
+    expect(row!.userId).toBe(runOwner);
     expect(await orgBytesUsed(ctx.orgId)).toBe(usedBefore);
     const resolved = await getFileForActor(scope, userActor, docX.id, NO_GRANTS);
     expect(resolved?.row.id).toBe(docX.id);
-    // A detached `agent_output` stays org-readable + listed for ANY member (it
-    // always was, via its run container) — unlike a detached user_upload.
+    expect(
+      (await listFilesForActor(scope, userActor, {}, NO_GRANTS)).data.map((d) => d.id),
+    ).toContain(docX.id);
+    // Detaching must not WIDEN: a member who could not read the producing run
+    // still cannot read its deliverable once the run is deleted — neither by id
+    // nor in the gallery.
     const stranger = await createTestUser({ email: "stranger@producer.test" });
     await addOrgMember(ctx.orgId, stranger.id, "member");
     const strangerActor: Actor = { type: "user", id: stranger.id };
-    expect((await getFileForActor(scope, strangerActor, docX.id, NO_GRANTS))?.row.id).toBe(docX.id);
+    expect(await getFileForActor(scope, strangerActor, docX.id, NO_GRANTS)).toBeNull();
     expect(
       (await listFilesForActor(scope, strangerActor, {}, NO_GRANTS)).data.map((d) => d.id),
+    ).not.toContain(docX.id);
+    // …and must not NARROW either: the supervision grant that read the run
+    // reads the detached deliverable on the same terms.
+    expect((await getFileForActor(scope, strangerActor, docX.id, READS_EVERY_RUN))?.row.id).toBe(
+      docX.id,
+    );
+    expect(
+      (await listFilesForActor(scope, strangerActor, {}, READS_EVERY_RUN)).data.map((d) => d.id),
     ).toContain(docX.id);
     // The consumer run + its link are untouched — a rerun still finds the doc.
     const links = await db.select().from(fileLinks).where(eq(fileLinks.fileId, docX.id));

@@ -75,8 +75,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   produced, and never reads the agent's content, its skills or anyone else's
   runs. What makes that usable is that `agents:run` carries a **summary read**
   of the agent: the list, the detail and the resolved model answer a runner with
-  what the launch form needs — the parameter schema with its stored values and
-  locked fields, the output shape, the enforced timeout, the caller's own run
+  what the launch form needs — the parameter schema with its unlocked stored values and
+  locked field names, the output shape, the enforced timeout, the caller's own run
   counters, and the integrations the agent talks to, which a runner is the one
   who connects — and omit the manifest, the prompt, the authoring history, and
   the skills and MCP servers the agent is built from. Every other agent route,
@@ -99,7 +99,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   omits a withheld group rather than emptying it, and `skills: []` would say the
   agent declares none, which is false rather than unknown. A loosening like this
   is not a breaking change and `detect:breaking` does not classify it, so it is
-  written out here.
+  written out here. Without `agents:read`, registered-agent run responses also
+  return `input: null` so editor-imposed values remain private even after locks
+  change or the agent is reinstalled. Dashboard reruns replay the prior input
+  server-side with `rerun_from`, preserving the original version; inline inputs
+  remain visible.
 
 - **Role preview — see the product as a role before you assign it.** An owner or
   administrator can have every request answered as a lesser persona (an org role,
@@ -367,7 +371,9 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   `apiShape` (`{ data: [{ id }] }`, or `{ models: [{ name: "models/<id>" }] }`
   for the Google shapes), and persists the discovery candidates present in it
   as `available_model_ids`. An auth failure, an unreadable listing, a 429 that
-  survives one retry, or an empty intersection leave the previous list untouched.
+  survives one retry, a listing a page or model cap cut short, or an empty
+  intersection leave the previous list untouched — intersecting against a
+  partial view would drop the candidates sitting past the cut.
 - **Wire change** — `POST /api/model-provider-credentials/{id}/refresh-models`
   answers `candidate_count` in place of `probed_count` (the candidates
   considered; static providers report theirs instead of 0).
@@ -570,6 +576,113 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   membership and now gets `403`. Both scopes are grantable to API keys — re-mint
   the key with them.
 
+- **BREAKING (API keys): `GET /api/schedules/{id}/runs` asks for a run-read
+  permission on top of `schedules:read`.** The response names schedules but
+  every field of a row is a run — input, result, checkpoint, error, context
+  snapshot, cost — and `schedules:read` alone is a legal, grantable scope set,
+  so a credential holding only it read the full enriched run projection. Without
+  `runs:read-all` a colleague's schedule now lists nothing, the same predicate
+  every other run list follows.
+
+- **BREAKING (API keys): `POST /api/profiles/batch` asks for `members:read`.**
+  Resolving user ids to display names IS the org directory, read one page at a
+  time, so it carries the permission the member list carries. A `guest` — the
+  org role defined as "member reads minus `members:read`" — put names on ids and
+  learned membership from which ids came back empty. Re-mint a key that needs
+  the lookup with `members:read`.
+
+- **BREAKING: the per-space SMTP and social-provider routes ask for membership
+  of the space they name.** They address one space by path param but sit outside
+  the space-scoped prefixes, so no space context ran for them and a token
+  holding only `spaces:read`/`spaces:write` reached any space in the
+  organization. They now enter the named space through the core seam (404
+  outside the org, 403 `not_a_space_member`, 404 for a `private` space) and take
+  the space-level `space-settings:write`, the same permission
+  `PATCH /api/spaces/{id}` takes. A space-pinned API key is held to its own
+  space first, since its membership resolves from its creator.
+
+- **BREAKING: a creator's own `keep` / `delete` right over a file is capped by
+  the credential the request arrives on.** Ownership is not a role grant, so
+  `permissions` never bounded it and a key minted without `files:delete`
+  inherited its creator's whole file lifecycle. A cookie session stays
+  unbounded; an API key or token keeps the right only while its scopes name
+  `files:delete` — which the `operator`, `runner` and `viewer` presets do not
+  carry, and which the end-user JWT scope set no longer admits, so an end user
+  no longer deletes its own upload. The file DTO's `capabilities` reports the
+  same ceiling the two enforcement points apply.
+
+- **Eleven agent routes prove the permission before they resolve the agent.**
+  `requireAgent()` answers 404 on an unknown agent, so running it first told a
+  caller with no `agents:read` at all whether a given agent exists — a
+  403-vs-404 oracle over a space's private catalog. The permission middleware is
+  registered first on every one of them now, so such a caller gets 403 whatever
+  name it asks for. Pinned by
+  `test/integration/middleware/agent-lookup-permission-order.test.ts`.
+
+- **Operators: count duplicate `org_models` bindings BEFORE the drizzle batch,
+  and run `scripts/migration/0013` if there are any.**
+  `0062_org_models_unique_binding` adds a partial unique index over
+  `(org_id, credential_id, model_id)` for un-aliased rows, so a database already
+  holding a duplicate cannot take the batch — the `CREATE UNIQUE INDEX` raises
+  23505 and rolls every pending migration back. `0013` keeps the oldest row of
+  each binding and repoints the org default, the space package, the schedule
+  override and `llm_usage.model` at it in one transaction. Most installations
+  count zero and never run it; the count query is in
+  `scripts/migration/README.md`. From this release the two model writes answer
+  `409 model_already_added` (carrying `existing_model_id`) instead of minting a
+  second row. Aliased rows stay exempt — several aliases over one backing model
+  is the alias pattern working, and their spend is meant to report apart.
+
+- **Operators: the two billing-sweep knobs share one read budget, and the module
+  refuses to boot above it (`@appstrate/module-ee`).**
+  `EE_RECONCILIATION_BATCH_SIZE + EE_RECONCILIATION_REPLAY_WINDOW` must not
+  exceed 1000, the platform's `usage.list` ceiling: a pass reads the replay
+  window ON TOP of the batch, so a larger sum does not read more — it shrinks
+  the forward slice below the batch size, which makes raising the batch to clear
+  a backlog lower throughput with nothing saying so. Refused at boot rather than
+  clamped for exactly that reason. New optional
+  `EE_RECONCILIATION_MAX_GAP_SECONDS` (default 86400, `0` disables) bounds how
+  long the sweep may have been absent before it refuses to resume over the gap
+  it left, rather than billing a whole disabled window against today's quotas.
+
+- **`appstrate logout` ends non-zero when the OS keyring keeps its copy of the
+  token.** Every cleanup step still runs — the credentials file is cleared, the
+  profile deleted, the synced skills taken off the disk — and the keyring
+  refusal is printed with its remedies; the exit code is what lets a script
+  chaining on `appstrate logout` tell a completed sign-out from one that left a
+  usable token in the store. An operator who opted into
+  `APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1` never had a keyring entry and still
+  exits 0.
+
+- **`EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering only.** The
+  module's `init()` always arms its maintenance tick (300 s), so account
+  repair and cursor upkeep keep running while the sweep itself is paused; the
+  value is no longer a way to run the module with no timer at all. (#1326)
+
+- **`appstrate skills sync` treats a revoked organization as an empty source.**
+  When `GET /api/spaces` answers 403, every skill the sync installed from that
+  organization is removed and the run exits 0 with a note on stderr; a
+  `--space` flag typed on that run fails instead, because you typed it just
+  now. (#1362)
+
+- **Operators: every enabled Stripe webhook endpoint must pin the API version
+  the module pins** (`STRIPE_API_VERSION` in `packages/module-ee/src/stripe/client.ts`).
+  The live contract suite fails on an endpoint left at the account default or
+  at an older version, because webhook payloads are rendered at the endpoint's
+  version, not the SDK's. (#1332)
+
+- **Operators: `scripts/migration/0010` tolerates a target the module has
+  already booted against.** The watermark `init()` seeds in `ee_billing_cursor`
+  is replaced by the source's; any other billing row on the target still
+  refuses the copy. (#1318)
+
+- **Entering a role preview reports the server's own refusal.** A refused
+  `X-View-As` surfaced as one generic "could not start" message; the dialog now
+  reads the refusal code (`invalid_view_as`, `view_as_unsupported`,
+  `view_as_forbidden`, `view_as_not_found`) and shows the copy written for it,
+  keeping "try again" for a failure the server named nothing for. The shared
+  wording is "Preview unavailable" / "Prévisualisation indisponible".
+
 - **BREAKING: the package JSON bodies are `.strict()` — an unknown key is a
   `400` instead of a silent strip.** `source_code` was dropped from the package
   contract when its last reader died with the `tool` package type, and the
@@ -682,6 +795,48 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   loaded machine arrived as `prin1)`. Every authoring pane now seeds Monaco once
   (`defaultValue`) and receives text it did not type as a remount, keyed by
   what changed it (another file, a discarded draft, a re-read server copy).
+- **Idempotent run retries enforce current permissions and input visibility.**
+  The request fingerprint includes its method, URL and body; using the same key
+  for a different route or version returns `422 idempotency_conflict` without
+  executing again. Existing cache entries without a request fingerprint also
+  return 422 until their 24-hour TTL expires. On deployment, reconcile the
+  original resource before issuing a new key for such a retry.
+
+- **Stripe deliveries use the current subscription for plan and quota.** Late
+  updates and checkout completions preserve the current entitlement and billed
+  consumption. Subscription creation refuses an unknown live price; notifications
+  continue to describe the historical transition, after commit.
+
+- **Pricing refresh refuses missing rates before writing catalog files.**
+  `refresh-pricing-catalog.ts --apply` stops if an existing model or token rate
+  disappears upstream. Resolve the catalog entry explicitly before applying;
+  missing prices cannot silently replace existing prices during a refresh.
+
+- **The hosted connect portal stops burning a link over a refusal that cost
+  nothing upstream.** A package whose auth strategy cannot begin an OAuth flow
+  was answered 500 with the link's `jti` already consumed, so the retry the page
+  offers was a dead end; that branch releases the `jti` now, like the scope
+  resolution beside it. The 403 advice follows the same fork: a link whose OAuth
+  client is auto-provisioned stays burned — releasing it would let one
+  ten-minute link replay an upstream registration on every click — and its
+  message asks for a new connection link instead of telling the caller to reopen
+  the one that will answer 410.
+
+- **A Plus subscriber is no longer handed a Pro-only Codex model (#1357).**
+  `gpt-6-astra` is recommended by the vendor only from Pro plans up, but it sat
+  in the Codex `featuredModels` list — which is not merely a picker section:
+  the platform auto-seeds every featured id into `org_models` on first
+  connection and promotes the first inserted row to the org default. A Plus
+  subscriber was therefore given a model their plan refuses, and found out at
+  the first run. The two documented Pro-only ids (`gpt-6-astra`,
+  `gpt-5.3-codex-spark`) are now named in one place — `PRO_PLAN_MODEL_IDS` in
+  `@appstrate/module-codex`, with the vendor page that says so — and are kept
+  in `modelDiscoveryCandidates`, where a Pro subscriber selects them
+  deliberately, and out of `featuredModels`, which the platform applies on
+  everyone's behalf. A test pins both halves, so featuring a plan-gated id
+  fails CI rather than reaching a picker. Plan tiers appear in no vendored feed
+  and `SUBSCRIPTION_COMPLIANCE.md` forbids asking the vendor, so the
+  hand-written list is the whole mechanism.
 
 - **The hosted connect portal names the missing OAuth client instead of a
   generic "please try again" 502 (#1263).** Opening a `connect_url` for an
@@ -962,7 +1117,12 @@ skills sync is running` and kept the stale plugin. The lock is now
   `0008` is idempotent, runs in one transaction, and verifies by coverage
   rather than by a count that reads the same whether it worked or not: it
   aborts unless every pre-flip (user, space) pair carries a `space_members` row
-  and every pending invitation carries its space snapshot.
+  and every pending invitation carries its space snapshot. It is run-once by
+  construction rather than by convention: the one step whose predicate does not
+  remove its own condition — the OAuth signup snapshot, which after the deploy
+  also matches a client an admin deliberately left with no assignments — is
+  skipped on every run past the first, off a marker the script writes in
+  `drizzle.migration_scripts`, and names the clients it declined to widen.
 
   **A third file can be needed first.** `0056` also creates the partial unique
   index behind "one pending invitation per (organization, email)", and a
@@ -1184,6 +1344,30 @@ skills sync is running` and kept the stale plugin. The lock is now
 
 ### Security
 
+- **A forwarded chain shorter than `TRUST_PROXY` no longer picks the client's
+  own address.** `lib/client-ip.ts` reads `X-Forwarded-For` from the RIGHT,
+  which is unspoofable while each trusted hop appends its entry. When the chain
+  carried FEWER entries than the hop count it used to clamp to the LEFTMOST
+  one — an entry no proxy wrote — so any caller could name its own IP under any
+  `TRUST_PROXY >= 1` and mint a fresh bucket per request. Every per-IP control
+  keyed on that answer, including the rate limit that is the stated defence
+  against `AUTH_BOOTSTRAP_TOKEN` brute force, the Better Auth production limiter
+  and the address recorded on sessions and audit events. A short chain now fails
+  closed: the whole forwarded set is distrusted (`X-Real-IP` included, or
+  stripping the chain would just move the hole) and the socket peer answers.
+
+  The resolved value must also **be** an IP address now. Port suffixes and
+  bracketed IPv6 normalize to the address they name; anything else is dropped.
+  That closes a one-caller denial of service: an unparseable address made
+  Better Auth's `getIP` drop _every_ caller into one shared rate-limit bucket.
+
+  **Operators:** the hop count must match the topology. `TRUST_PROXY=1` behind a
+  single reverse proxy that appends `X-Forwarded-For`; a TLS-terminating L4 load
+  balancer (AWS NLB TLS listener, GCP TCP proxy) appends nothing and is not a
+  hop. Verify too that the origin port is not reachable around the proxy — the
+  shipped compose publishes it on all host interfaces, and Docker's rules bypass
+  host firewalls.
+
 - **The sidecar's HTTP control surface is authenticated, deny-by-default.**
   Every route on the sidecar app now sits behind an `app.use("*")` middleware
   (`runtime-pi/sidecar/app.ts`) that refuses any request not presenting the
@@ -1255,12 +1439,18 @@ skills sync is running` and kept the stale plugin. The lock is now
   self-service client stays confined.
 
 - **Operators: run `scripts/migration/0011` after the drizzle batch carrying
-  `0057`, on any deployment that has ever accepted a self-registered client.**
+  `0057`, on any deployment that has ever accepted a self-registered client —
+  the API refuses to boot in between, and that is the intended sequence.**
   `0057` adds `oauth_clients.self_service` and leaves it `false` on every row;
   `0011` fills it from the `selfService` key already in `metadata`. Until it
   runs, a self-registered client reads as operator-provisioned and its tokens
-  are not confined. Idempotent, one transaction, and it never flips a `true`
-  back.
+  are not confined, so the deployment comes up only far enough to apply `0057`,
+  counts the rows still unfolded and exits naming the script; under a supervisor
+  it restarts into the same refusal. The order is therefore: deploy → the API
+  applies `0057` and exits → run `0011` against the database → restart. A
+  deployment that never accepted a self-registered client counts zero and never
+  sees the refusal. The script is idempotent, runs in one transaction, and never
+  flips a `true` back.
 
 ## [1.0.0-beta.53] - 2026-08-26
 

@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  extractAuthOffer,
+  extractAuthOffers,
   encodeResume,
   parseResume,
   INTEGRATION_RESUME_MARKER,
@@ -11,23 +11,59 @@ import {
 const BODY = { auth_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1", state: "abc-123" };
 const OFFER = { connect_url: "https://app/api/integrations/connect/start?token=t" };
 
-describe("extractAuthOffer", () => {
-  it("reads the typed connectOffer at the top level and one output level down", () => {
-    expect(extractAuthOffer({ content: [], connectOffer: { ...OFFER, state: "st" } })).toEqual({
-      authUrl: OFFER.connect_url,
-      state: "st",
-    });
+describe("extractAuthOffers", () => {
+  it("reads the typed connectOffers at the top level and one output level down", () => {
+    expect(extractAuthOffers({ content: [], connectOffers: [{ ...OFFER, state: "st" }] })).toEqual([
+      { authUrl: OFFER.connect_url, state: "st" },
+    ]);
     // initiateIntegrationConnect returns { connect_url, expires_at } — no state.
     expect(
-      extractAuthOffer({ output: { connectOffer: { ...OFFER, expires_at: 1784142529000 } } }),
-    ).toEqual({ authUrl: OFFER.connect_url });
+      extractAuthOffers({ output: { connectOffers: [{ ...OFFER, expires_at: 1784142529000 }] } }),
+    ).toEqual([{ authUrl: OFFER.connect_url }]);
   });
 
-  it("never renders a relative or non-http offer as a URL (issue #906)", () => {
+  // Issue #1207: a readiness error carries one link per integration to connect,
+  // and the UI mounts one card each.
+  it("returns every offer, in order", () => {
     expect(
-      extractAuthOffer({ connectOffer: { connect_url: "/api/integrations/connect/start" } }),
-    ).toBeNull();
-    expect(extractAuthOffer({ connectOffer: { connect_url: "javascript:alert(1)" } })).toBeNull();
+      extractAuthOffers({
+        connectOffers: [
+          { connect_url: "https://app/c/1", state: "st-1" },
+          { connect_url: "https://app/c/2" },
+        ],
+      }),
+    ).toEqual([{ authUrl: "https://app/c/1", state: "st-1" }, { authUrl: "https://app/c/2" }]);
+  });
+
+  // Issue #1207 phase 5: a run-kickoff 412 item names the integration it
+  // connects, and the card needs that to show the right icon and name and to
+  // claim the resume append.
+  it("surfaces the offer's package_id as packageId", () => {
+    expect(
+      extractAuthOffers({
+        connectOffers: [
+          { ...OFFER, package_id: "@appstrate/gmail", expires_at: 1_900_000_000_000 },
+        ],
+      }),
+    ).toEqual([{ authUrl: OFFER.connect_url, packageId: "@appstrate/gmail" }]);
+    // Absent, not empty: an offer minted by a surface that names no package
+    // leaves the card on its `packageId`-less path.
+    expect(extractAuthOffers({ connectOffers: [OFFER] })).toEqual([{ authUrl: OFFER.connect_url }]);
+  });
+
+  it("drops the invalid entries of a list, keeping the rest (issue #906)", () => {
+    expect(
+      extractAuthOffers({
+        connectOffers: [
+          { connect_url: "/api/integrations/connect/start" },
+          { connect_url: "javascript:alert(1)" },
+          OFFER,
+        ],
+      }),
+    ).toEqual([{ authUrl: OFFER.connect_url }]);
+    expect(extractAuthOffers({ connectOffers: [{ connect_url: "javascript:alert(1)" }] })).toEqual(
+      [],
+    );
   });
 
   it("encodes/parses a resume message round-trip (meta + human text)", () => {
@@ -46,27 +82,30 @@ describe("extractAuthOffer", () => {
     expect(parseResume(`${INTEGRATION_RESUME_MARKER}bare notice`)).toEqual({ packageId: "" });
   });
 
-  it("returns null for nullish, plain-text and offer-less results", () => {
-    expect(extractAuthOffer(null)).toBeNull();
-    expect(extractAuthOffer("not json")).toBeNull();
-    expect(extractAuthOffer({ content: [{ type: "text", text: "an error happened" }] })).toBeNull();
-    expect(extractAuthOffer({ type: "content", value: [{ type: "text", text: "{}" }] })).toBeNull();
+  it("returns nothing for nullish, plain-text and offer-less results", () => {
+    expect(extractAuthOffers(null)).toEqual([]);
+    expect(extractAuthOffers("not json")).toEqual([]);
+    expect(extractAuthOffers({ content: [{ type: "text", text: "an error happened" }] })).toEqual(
+      [],
+    );
+    expect(extractAuthOffers({ type: "content", value: [{ type: "text", text: "{}" }] })).toEqual(
+      [],
+    );
   });
 
-  it("prefers the typed connectOffer channel over anything in the payload", () => {
+  it("prefers the typed connectOffers channel over anything in the payload", () => {
     const result = {
       content: [{ type: "text", text: JSON.stringify({ connect_url: "https://stale/other" }) }],
-      connectOffer: { connect_url: "https://app/connect/start?token=t", state: "st" },
+      connectOffers: [{ connect_url: "https://app/connect/start?token=t", state: "st" }],
     };
-    expect(extractAuthOffer(result)).toEqual({
-      authUrl: "https://app/connect/start?token=t",
-      state: "st",
-    });
+    expect(extractAuthOffers(result)).toEqual([
+      { authUrl: "https://app/connect/start?token=t", state: "st" },
+    ]);
   });
 
   it("never scrapes a URL out of the payload — the typed field is the only channel", () => {
     // Every envelope a tool result can arrive in, each carrying a raw URL where
-    // the pre-`connectOffer` deep-walk used to find one. All must yield nothing:
+    // the pre-`connectOffers` deep-walk used to find one. All must yield nothing:
     // such a result predates the typed field by more than the connect session's
     // 10-minute TTL, so the URL it carries is dead (single-use token, expired).
     // The persisted `details` shape below is the exact issue-#906 report, whose
@@ -104,7 +143,7 @@ describe("extractAuthOffer", () => {
       ],
     ];
     for (const [name, shape] of legacyShapes) {
-      expect(extractAuthOffer(shape), `scraped a URL out of: ${name}`).toBeNull();
+      expect(extractAuthOffers(shape), `scraped a URL out of: ${name}`).toEqual([]);
     }
   });
 });

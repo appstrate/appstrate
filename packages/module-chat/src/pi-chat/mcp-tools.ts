@@ -22,6 +22,7 @@ import { Type, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runne
 import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
+  mergeConnectOffers,
   redactConnectPayload,
   splitConnectPayload,
   splitJsonText,
@@ -37,7 +38,10 @@ interface PiToolResult {
   content: Array<{ type: "text"; text: string }>;
   details: unknown;
   /**
-   * Typed connect offer for the UI card; pi-ai never serializes it upstream.
+   * Typed connect offers for the UI cards — one per connect URL the payload
+   * carried, in walk order; omitted entirely when there were none, so a payload
+   * without connect links stays byte-identical. pi-ai never serializes the
+   * field upstream.
    * CONTRACT: pi-agent-core preserves unknown result fields across the
    * `afterToolCall` hook — `finalizeExecutedToolCall` SPREADS the original
    * result (`{...result, content, details, usage, terminate}`, `agent-loop.js`),
@@ -45,24 +49,24 @@ interface PiToolResult {
    * pinned `@earendil-works/pi-agent-core@0.85.1`; re-check on an SDK bump,
    * because `details` is redacted and nothing would fall back.
    */
-  connectOffer?: ConnectOffer;
+  connectOffers?: ConnectOffer[];
 }
 
 /**
  * Wrap an arbitrary payload as a Pi tool result. The channel split is the
  * point. The model-visible channel: `content` is what pi-ai serializes to
- * the MODEL, so connect links are redacted there; the connect URL surfaces
- * ONLY through the typed `connectOffer` field the connect card reads. `details`
- * (Pi's in-memory UI channel; stripped before persistence by
- * `ui-stream-mapper.ts`) carries the redacted payload — the live URL lives in
+ * the MODEL, so connect links are redacted there; the connect URLs surface
+ * ONLY through the typed `connectOffers` field the connect cards read.
+ * `details` (Pi's in-memory UI channel; stripped before persistence by
+ * `ui-stream-mapper.ts`) carries the redacted payload — the live URLs live in
  * exactly one place.
  */
 export function toPiToolResult(payload: unknown): PiToolResult {
-  const { redacted, offer } = splitConnectPayload(payload);
+  const { redacted, offers } = splitConnectPayload(payload);
   return {
     content: [{ type: "text", text: JSON.stringify(redacted) }],
     details: redacted,
-    ...(offer ? { connectOffer: offer } : {}),
+    ...(offers.length > 0 ? { connectOffers: offers } : {}),
   };
 }
 
@@ -71,15 +75,17 @@ export function mcpResultToPi(result: {
   content: Array<Record<string, unknown>>;
   structuredContent?: unknown;
 }): PiToolResult {
-  let offer: ConnectOffer | null = null;
+  // One list per text block, merged below — a result may split a readiness
+  // error across blocks, and each block's connect links must all reach the UI.
+  const blockOffers: ConnectOffer[][] = [];
   const content = result.content.map((c) => {
     // MODEL-visible channel — scrub connect links from JSON text (valid JSON is
     // redacted and re-stringified only when something changed; non-JSON text
-    // passes through byte-identical). The scrubbed URL is captured as the
-    // typed offer instead.
+    // passes through byte-identical). The scrubbed URLs are captured as the
+    // typed offers instead.
     if (c.type === "text") {
       const split = splitJsonText(String(c.text ?? ""));
-      offer ??= split.offer;
+      blockOffers.push(split.offers);
       return { type: "text" as const, text: split.text };
     }
     // Pi tool results the LLM reads are text/image; render anything else as a
@@ -89,19 +95,22 @@ export function mcpResultToPi(result: {
     }
     return { type: "text" as const, text: JSON.stringify(redactConnectPayload(c)) };
   });
+  let offers = mergeConnectOffers(blockOffers);
   // `details` is Pi's in-memory UI channel (never serialized to the model,
-  // stripped before persistence) — redacted all the same, so the live URL
-  // exists only in the typed `connectOffer` field the connect card reads.
+  // stripped before persistence) — redacted all the same, so the live URLs
+  // exist only in the typed `connectOffers` field the connect cards read.
   let details: unknown;
   if (result.structuredContent !== undefined) {
     const sc = splitConnectPayload(result.structuredContent);
-    // structuredContent is the canonical payload — its offer wins.
-    if (sc.offer) offer = sc.offer;
+    // structuredContent is the canonical payload — its offers replace the
+    // text-derived ones wholesale, rather than merging with a text block that
+    // may be a partial rendering of the same thing.
+    if (sc.offers.length > 0) offers = sc.offers;
     details = sc.redacted;
   } else {
     details = { ...result, content };
   }
-  return { content, details, ...(offer ? { connectOffer: offer } : {}) };
+  return { content, details, ...(offers.length > 0 ? { connectOffers: offers } : {}) };
 }
 
 interface PlatformMcpTools {
@@ -314,6 +323,10 @@ function makeRunAndWaitExtension(
           headers: ctx.headers,
           fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
+          // The chat holds the connect capability itself — the link goes to a
+          // card, never to the model. See `RUN_CONNECT_OFFERS_HEADER` in
+          // `@appstrate/core/run-and-wait-client`.
+          connectOffers: true,
           budget: {
             turnDeadlineAt: ctx.turnBudget.deadlineAt,
             chatSessionId: ctx.turnBudget.chatSessionId,

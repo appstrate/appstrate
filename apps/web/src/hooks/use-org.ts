@@ -3,10 +3,11 @@
 import { useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
-import { exitViewAs } from "../stores/view-as-store";
+import { exitViewAs, serializeViewAs, type ViewAsPersona } from "../stores/view-as-store";
 import { useAutoSelect } from "./use-auto-select";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
 
@@ -15,9 +16,23 @@ export function useCurrentOrgId(): string | null {
   return useStore(orgStore, (s) => s.id);
 }
 
-async function fetchOrgs() {
-  const { data } = await client.GET("/api/orgs");
+async function fetchOrgs(viewAs?: string) {
+  const { data } = await client.GET(
+    "/api/orgs",
+    viewAs ? { params: { header: { [VIEW_AS_HEADER]: viewAs } } } : {},
+  );
   return data?.data ?? [];
+}
+
+/**
+ * The org listing as it would be answered FOR `persona` — the `permissions`
+ * every `can()` gate reads. The header is passed explicitly because the store
+ * does not hold the persona yet, which is the point: `enterViewAs` commits the
+ * persona and this listing together, so nothing ever renders the previewer's
+ * authority under the persona's banner.
+ */
+export function fetchOrgsAs(persona: ViewAsPersona) {
+  return fetchOrgs(serializeViewAs(persona));
 }
 
 /**

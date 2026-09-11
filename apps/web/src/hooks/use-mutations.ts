@@ -90,12 +90,12 @@ export function useSaveInputSettings(packageId: string) {
 
 interface RunAgentParams {
   input?: Record<string, unknown>;
+  /** Replay a prior run's persisted input instead of supplying `input`. */
+  rerun_from?: string;
   /**
    * Version selector forwarded as `?version=`: `"draft"`, `"published"`, or
-   * a version spec. When omitted, the editor default `"draft"` is sent
-   * explicitly — the API's own default is published-when-exists (#636), but
-   * dashboard test-runs must keep executing the working copy the user is
-   * looking at.
+   * a version spec. Omitted selectors use the API's published-when-exists
+   * default; callers testing a working copy explicitly pass `"draft"`.
    */
   version?: string;
   /**
@@ -127,6 +127,7 @@ export function useRunAgent(packageId: string) {
     mutationFn: async (params?: RunAgentParams) => {
       const {
         input,
+        rerun_from,
         version,
         connectionOverrides,
         modelId,
@@ -149,6 +150,7 @@ export function useRunAgent(packageId: string) {
           // never>` — narrow the editor-built input; the server validates it
           // against the agent's input schema.
           ...(input !== undefined ? { input: input as Record<string, never> } : {}),
+          ...(rerun_from !== undefined ? { rerun_from } : {}),
           ...(connectionOverrides !== undefined
             ? { connection_overrides: connectionOverrides }
             : {}),

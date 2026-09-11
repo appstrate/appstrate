@@ -8,13 +8,8 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
 import type { ModelCost } from "@appstrate/core/module";
-import type {
-  ModelFormData,
-  ModelFormMultiData,
-  ModelFormSubmission,
-  ModelFormSubmitOutcome,
-} from "../lib/model-form-payload";
-import { toCreateModelBody } from "../lib/model-form-payload";
+import type { ModelFormSubmission, ModelFormSubmitOutcome } from "../lib/model-form-payload";
+import { submitModelForm } from "../lib/model-form-submit";
 import { useCreateModelProviderCredential } from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -156,15 +151,6 @@ export function useSetAgentModel(packageId: string) {
   });
 }
 
-/** `label` is omitted: the server derives and dedupes one. */
-function credentialBody(credential: NonNullable<ModelFormData["newCredential"]>) {
-  return {
-    providerId: credential.providerId,
-    apiKey: credential.apiKey,
-    ...(credential.baseUrlOverride ? { baseUrlOverride: credential.baseUrlOverride } : {}),
-  };
-}
-
 /**
  * ModelFormModal submission: the inline key first if any, then one create or
  * update — or, for a batch, one create per entry against that one key.
@@ -182,60 +168,24 @@ export function useModelFormHandler(opts: {
   const isPending =
     submitPending || createModel.isPending || updateModel.isPending || createCredential.isPending;
 
-  /** The credential the model(s) bind to: the picked one, or the typed key created first. */
-  const bindCredential = async (data: ModelFormSubmission): Promise<string> =>
-    data.newCredential
-      ? (await createCredential.mutateAsync({ body: credentialBody(data.newCredential) })).id
-      : data.credentialId;
+  const submit = submitModelForm({
+    writes: {
+      createCredential: (body) => createCredential.mutateAsync({ body }),
+      createModel: (body) => createModel.mutateAsync({ body }),
+      updateModel: (id, body) => updateModel.mutateAsync({ params: { path: { id } }, body }),
+    },
+    editModelId: opts.editModel?.id ?? null,
+    onSuccess: opts.onSuccess,
+  });
 
-  /** No bulk create: one POST per entry, refusals collected rather than aborting. */
-  const submitBatch = async (data: ModelFormMultiData): Promise<ModelFormSubmitOutcome> => {
+  const onSubmit = async (data: ModelFormSubmission): Promise<ModelFormSubmitOutcome> => {
     setSubmitPending(true);
     try {
-      const credentialId = await bindCredential(data);
-      const failedModelIds: string[] = [];
-      for (const entry of data.models) {
-        try {
-          await createModel.mutateAsync({ body: { ...entry, credentialId } });
-        } catch {
-          failedModelIds.push(entry.modelId);
-        }
-      }
-      if (failedModelIds.length === 0) opts.onSuccess();
-      return { failedModelIds, credentialId };
-    } catch {
-      // The key itself was refused.
-      return { failedModelIds: data.models.map((m) => m.modelId) };
+      return await submit(data);
     } finally {
       setSubmitPending(false);
     }
   };
-
-  /** A refusal (of the key or the model) is reported the way a batch reports its own. */
-  const submitOne = async (data: ModelFormData): Promise<ModelFormSubmitOutcome> => {
-    setSubmitPending(true);
-    try {
-      const credentialId = await bindCredential(data);
-      if (opts.editModel) {
-        const { newCredential: _, ...modelData } = data;
-        await updateModel.mutateAsync({
-          params: { path: { id: opts.editModel.id } },
-          body: { ...modelData, credentialId },
-        });
-      } else {
-        await createModel.mutateAsync({ body: toCreateModelBody(data, credentialId) });
-      }
-      opts.onSuccess();
-      return { failedModelIds: [] };
-    } catch {
-      return { failedModelIds: [data.modelId] };
-    } finally {
-      setSubmitPending(false);
-    }
-  };
-
-  const onSubmit = (data: ModelFormSubmission) =>
-    "models" in data ? submitBatch(data) : submitOne(data);
 
   return { onSubmit, isPending };
 }

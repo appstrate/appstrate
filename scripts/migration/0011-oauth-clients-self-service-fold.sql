@@ -13,6 +13,12 @@
 -- (`apps/api/src/modules/oidc/auth/guards.ts`). A row left `false` reads as
 -- operator-provisioned, and its tokens are not confined.
 --
+-- The API refuses to boot while any row this script would fold is left, and its
+-- refusal names this file (`assertSelfServiceFoldApplied`,
+-- `apps/api/src/lib/boot.ts`). That check reads the same `WHERE` as the UPDATE
+-- below, so running this script is always enough to clear it — the unparseable
+-- rows it skips are excluded there too.
+--
 -- WHY `pg_input_is_valid`. `metadata` is `text` and the provider persists what
 -- an RFC 7591 registration body presented, so the column is client-influenced:
 -- a bare `metadata::jsonb` aborts the whole statement on the first row whose

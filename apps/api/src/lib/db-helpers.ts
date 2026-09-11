@@ -101,43 +101,56 @@ export function isUuid(value: string): boolean {
 }
 
 /**
- * True when a DB error is Postgres `22P02` (invalid_text_representation) — the
- * class raised when a non-UUID string is compared against a `uuid` column.
- * Matches on the SQLSTATE code with a message fallback, and walks the `cause`
- * chain since Drizzle wraps the driver error in a `DrizzleQueryError`. Covers
- * both the Tier-0 embedded driver (PGlite) and a real server (postgres.js).
+ * True when `err`, or any error up to 5 levels down its `cause` chain, matches.
+ * The walk is what makes the predicates below usable: Drizzle wraps the driver
+ * error in a `DrizzleQueryError` whose own `code` is undefined, on both the
+ * Tier-0 embedded driver (PGlite) and a real server (postgres.js).
  */
-export function isInvalidTextRepresentation(err: unknown): boolean {
+function someCause(err: unknown, match: (e: Record<string, unknown>) => boolean): boolean {
   let current: unknown = err;
   for (let depth = 0; current != null && depth < 5; depth++) {
-    if (typeof current === "object") {
-      if ((current as { code?: unknown }).code === "22P02") return true;
-      const message = (current as { message?: unknown }).message;
-      if (typeof message === "string" && message.includes("invalid input syntax for type uuid")) {
-        return true;
-      }
-      current = (current as { cause?: unknown }).cause;
-    } else {
-      break;
-    }
+    if (typeof current !== "object") break;
+    const node = current as Record<string, unknown>;
+    if (match(node)) return true;
+    current = node.cause;
   }
   return false;
 }
 
+/** True when any error in the `cause` chain carries one of the SQLSTATE codes. */
+function hasSqlState(err: unknown, ...codes: string[]): boolean {
+  return someCause(err, (e) => typeof e.code === "string" && codes.includes(e.code));
+}
+
 /**
- * True when a DB error is Postgres `23505` (unique_violation). Walks the
- * `cause` chain for the same reason {@link isInvalidTextRepresentation} does:
- * Drizzle wraps the driver error in a `DrizzleQueryError` whose own `code` is
- * undefined.
+ * True when a DB error is Postgres `22P02` (invalid_text_representation) — the
+ * class raised when a non-UUID string is compared against a `uuid` column.
+ * Falls back to the driver message, which some wrappers surface without a code.
  */
+export function isInvalidTextRepresentation(err: unknown): boolean {
+  return (
+    hasSqlState(err, "22P02") ||
+    someCause(
+      err,
+      (e) =>
+        typeof e.message === "string" && e.message.includes("invalid input syntax for type uuid"),
+    )
+  );
+}
+
+/**
+ * True when a DB error is a referential-integrity violation on write:
+ * PostgreSQL raises `23503` (foreign_key_violation), while PGlite (tier 0)
+ * surfaces an `ON DELETE RESTRICT` as `23001` (restrict_violation). Both mean
+ * "rows still reference this one".
+ */
+export function isForeignKeyViolation(err: unknown): boolean {
+  return hasSqlState(err, "23503", "23001");
+}
+
+/** True when a DB error is Postgres `23505` (unique_violation). */
 export function isUniqueViolation(err: unknown): boolean {
-  let current: unknown = err;
-  for (let depth = 0; current != null && depth < 5; depth++) {
-    if (typeof current !== "object") break;
-    if ((current as { code?: unknown }).code === "23505") return true;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return false;
+  return hasSqlState(err, "23505");
 }
 
 // --- System + DB merge ---

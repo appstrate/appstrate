@@ -66,12 +66,23 @@ export const parameters = {
     required: false,
     description:
       "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, " +
-      "scoped to the organization and space: a repeat with the same body replays the original response with " +
-      "`Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate " +
-      "is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that " +
+      "scoped to the organization and space: a repeat with the same method, URL and body replays the original response with " +
+      "`Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate " +
+      "is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that " +
       "do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the " +
       "“Idempotency” section of the API description).",
     schema: { type: "string", maxLength: 255 },
+  },
+  ConnectOffers: {
+    name: "X-Appstrate-Connect-Offers",
+    in: "header" as const,
+    required: false,
+    description:
+      "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable " +
+      "item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` " +
+      "(a single-use bearer link that connects AS the actor). Set only by clients that render the " +
+      "connect card or hand the link to that human.",
+    schema: { type: "string", enum: ["1"] },
   },
   SseSpaceId: {
     name: "spaceId",

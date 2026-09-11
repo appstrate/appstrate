@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Index drift detector — declared indexes vs. what the database actually has.
+ * Schema drift detector — the declared shape vs. what a LIVE database has.
  *
  *   DATABASE_URL=postgres://… bun scripts/check-index-drift.ts
+ *
+ * Two populations are compared, both against the same snapshot: INDEXES (by
+ * name) and COLUMNS (presence and nullability). The filename predates the
+ * column half and is kept because `0044_finish_file_rename.sql` — a shipped,
+ * immutable migration — names this path in operator guidance.
  *
  * `DATABASE_URL` is the ONLY input. It is read straight off `process.env` and
  * opened with Bun's native SQL client, so the script never loads `@appstrate/env`
@@ -23,18 +28,23 @@
  * must be verified against the LIVE database. Neither the TS schema nor
  * `0000_init.sql` is evidence that an index exists in production.
  *
- * Declared set: the `tables[*].indexes` keys of the snapshot matching the
- * DATABASE'S OWN migration watermark — NOT the newest snapshot on disk. A
- * database that has not yet run the release being deployed legitimately lacks
- * every index that release adds; diffing it against the newest snapshot would
- * report all of them as drift and invite a duplicate migration. Resolution is
+ * Declared set: the `tables[*].indexes` and `tables[*].columns` keys of the
+ * snapshot matching the DATABASE'S OWN migration watermark — NOT the newest
+ * snapshot on disk. A database that has not yet run the release being deployed
+ * legitimately lacks everything that release adds; diffing it against the newest
+ * snapshot would report all of it as drift and invite a duplicate migration.
+ * Resolution is
  * `max(created_at)` in `drizzle.__drizzle_migrations` → the journal entry whose
  * `when` equals it → that entry's snapshot.
  *
- * Actual set: every index in `public` EXCEPT those on a table a workspace module owns, read from
- * that module's own drizzle snapshot (`scripts/lib/drizzle-snapshots.ts`), never from a prefix.
+ * Actual set: every index and every column in `public` EXCEPT those on a table a workspace module
+ * owns, read from that module's own drizzle snapshot (`scripts/lib/drizzle-snapshots.ts`), never
+ * from a prefix.
  *
- * SCOPE — this compares index NAMES ONLY. An index that exists under the
+ * Why columns and not only indexes, and why none of this runs at boot:
+ * `packages/db/README.md` § "Schema drift".
+ *
+ * SCOPE — indexes are compared by NAME ONLY. An index that exists under the
  * expected name with a different definition (other columns, a lost partial
  * predicate, lost uniqueness) reads as present. That is a real variant of this
  * drift class — a squash can redefine an index while a pre-squash database
@@ -42,8 +52,13 @@
  * scope: rendering snapshot entries into comparable DDL is fiddly and
  * false-positive-prone. Every message the script prints says so.
  *
- * Exit 1 iff an index is declared but absent, or the check could not run at
- * all. Undeclared indexes never fail the run.
+ * Columns are compared by name and by NULLABILITY, never by TYPE — the
+ * normalisation a type comparison needs is where the false positives live.
+ *
+ * Exit 1 iff a declared index is absent, a declared column is absent, a column
+ * disagrees on NOT NULL, or the check could not run at all. Undeclared indexes
+ * and undeclared columns never fail the run — they are reported for an operator
+ * to act on, because pre-squash production legitimately carries some.
  */
 
 import {
@@ -65,6 +80,26 @@ const META_DIR = `${REPO_ROOT}/packages/db/drizzle/meta`;
  */
 export const PUBLIC_INDEXES_QUERY =
   "SELECT indexname, tablename FROM pg_indexes WHERE schemaname = 'public'";
+
+/**
+ * Actual columns in the database, with the table each sits on. Exported so the
+ * restricted-role regression exercises the same query as the operator script.
+ *
+ * Unlike `information_schema.columns`, the catalog is not filtered by table
+ * privileges: no rows for a declared table means it is missing, not merely
+ * unreadable by the operator. Include ordinary and partitioned tables, exclude
+ * system/dropped attributes, and use the catalog's boolean NOT NULL flag.
+ */
+export const PUBLIC_COLUMNS_QUERY = `
+  SELECT c.relname AS tablename, a.attname AS columnname, a.attnotnull AS notnull
+    FROM pg_catalog.pg_attribute a
+    JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public'
+     AND c.relkind IN ('r', 'p')
+     AND a.attnum > 0
+     AND NOT a.attisdropped
+`;
 
 /**
  * Does the drizzle tracking table exist at all?
@@ -116,6 +151,13 @@ const CONSTRAINT_BACKED_INDEXES_QUERY = `
 interface ActualIndex {
   indexname: string;
   tablename: string;
+}
+
+/** One row of `PUBLIC_COLUMNS_QUERY`. */
+interface ActualColumn {
+  tablename: string;
+  columnname: string;
+  notnull: boolean;
 }
 
 interface IndexDiff {
@@ -171,6 +213,62 @@ export function declaredIndexes(snapshot: DrizzleSnapshot): Set<string> {
     for (const name of Object.keys(table.indexes ?? {})) names.add(name);
   }
   return names;
+}
+
+/**
+ * Columns DECLARED by a snapshot, `table name → column name → NOT NULL`.
+ *
+ * Same public-schema filter and same tolerance for a missing key as
+ * `declaredIndexes`: a snapshot entry with no `columns` object declares none
+ * rather than throwing. `notNull` is defaulted to false — drizzle writes it on
+ * every column it emits, so the default only decides what a hand-edited
+ * snapshot means, and the lenient reading is the one that cannot invent drift.
+ */
+export function declaredColumns(snapshot: DrizzleSnapshot): Map<string, Map<string, boolean>> {
+  const tables = new Map<string, Map<string, boolean>>();
+  for (const [key, table] of Object.entries(snapshot.tables)) {
+    const schema = table.schema ?? "";
+    if (schema !== "" && schema !== "public") continue;
+    const columns = new Map<string, boolean>();
+    for (const [name, column] of Object.entries(table.columns ?? {})) {
+      columns.set(name, column.notNull ?? false);
+    }
+    tables.set(key.slice(key.indexOf(".") + 1), columns);
+  }
+  return tables;
+}
+
+/**
+ * Three-way difference between the columns a snapshot declares and the ones a
+ * database has, restricted to the tables the snapshot declares.
+ *
+ * `absent` includes columns of a missing table; `nullability` is a column present while its
+ * declared NOT NULL is not; `undeclared` is pre-squash residue, never fatal.
+ */
+export function diffColumns(
+  declared: Map<string, Map<string, boolean>>,
+  actual: Map<string, Map<string, boolean>>,
+): { absent: string[]; nullability: string[]; undeclared: string[] } {
+  const absent: string[] = [];
+  const nullability: string[] = [];
+  const undeclared: string[] = [];
+  for (const [table, columns] of declared) {
+    const found = actual.get(table) ?? new Map<string, boolean>();
+    for (const [column, notNull] of columns) {
+      const actualNotNull = found.get(column);
+      if (actualNotNull === undefined) absent.push(`${table}.${column}`);
+      else if (actualNotNull !== notNull) {
+        nullability.push(
+          `${table}.${column}: database says ${actualNotNull ? "NOT NULL" : "nullable"}, ` +
+            `snapshot declares ${notNull ? "NOT NULL" : "nullable"}`,
+        );
+      }
+    }
+    for (const column of found.keys()) {
+      if (!columns.has(column)) undeclared.push(`${table}.${column}`);
+    }
+  }
+  return { absent: absent.sort(), nullability: nullability.sort(), undeclared: undeclared.sort() };
 }
 
 /**
@@ -231,6 +329,7 @@ export async function runCheck(input: {
   /** Null when the tracking table exists but holds no applied migration. */
   watermark: number | null;
   actual: ActualIndex[];
+  actualColumns: ActualColumn[];
   constraintBacked: Set<string>;
   /** Table name → the module package that owns it; its indexes are in no platform snapshot, so
    * subtracting by NAME leaves a platform table the schema stopped declaring in the comparison. */
@@ -290,6 +389,18 @@ export async function runCheck(input: {
   const actual = new Set(considered.map((row) => row.indexname));
   const { missing, undeclared } = diffIndexes(declared, actual);
   const { expected, reverseDrift } = classifyUndeclared(undeclared, input.constraintBacked);
+
+  // Same subtraction as the indexes above, so the two halves never disagree
+  // about which tables belong to this journal.
+  const declaredColumnsByTable = declaredColumns(snapshot);
+  const actualColumnsByTable = new Map<string, Map<string, boolean>>();
+  for (const row of input.actualColumns) {
+    if (!tables.has(row.tablename) && input.moduleTables.has(row.tablename)) continue;
+    let columns = actualColumnsByTable.get(row.tablename);
+    if (!columns) actualColumnsByTable.set(row.tablename, (columns = new Map()));
+    columns.set(row.columnname, row.notnull);
+  }
+  const columnDiff = diffColumns(declaredColumnsByTable, actualColumnsByTable);
   const undeclaredTables = [
     ...new Set(considered.filter((row) => !tables.has(row.tablename)).map((r) => r.tablename)),
   ].sort();
@@ -320,30 +431,77 @@ export async function runCheck(input: {
     lines.push("An index the schema no longer declares and no constraint owns — a squash may have");
     lines.push("dropped it without a forward DROP INDEX. Verify before removing it.");
   }
+  if (columnDiff.undeclared.length > 0) {
+    lines.push(
+      `Columns on a declared table that ${at.snapshotName} does not declare: ` +
+        `${columnDiff.undeclared.length}`,
+    );
+    for (const name of columnDiff.undeclared) lines.push(`  undeclared column  ${name}`);
+    lines.push("A column the schema no longer declares — a squash may have dropped it without a");
+    lines.push("forward DROP COLUMN. Verify before removing it.");
+  }
   if (
     skipped.length > 0 ||
     undeclaredTables.length > 0 ||
     expected.length > 0 ||
-    reverseDrift.length > 0
+    reverseDrift.length > 0 ||
+    columnDiff.undeclared.length > 0
   )
     lines.push("");
 
+  // Both halves are reported before the exit code is decided: an operator who
+  // is missing an index AND a column must see both in one run, not discover the
+  // second only after fixing the first.
+  const declaredColumnCount = [...declaredColumnsByTable.values()].reduce(
+    (total, columns) => total + columns.size,
+    0,
+  );
+
   if (missing.length > 0) {
-    lines.push(`Declared in ${at.snapshotName} but ABSENT from the database: ${missing.length}`);
-    for (const name of missing) lines.push(`  missing  ${name}`);
+    lines.push(
+      `Indexes declared in ${at.snapshotName} but ABSENT from the database: ${missing.length}`,
+    );
+    for (const name of missing) lines.push(`  missing index   ${name}`);
     lines.push("");
-    lines.push("These are declared by a migration the database has already applied, so the squash");
-    lines.push("never reached it. Add a forward migration creating them.");
-    return { exitCode: 1, lines };
+  } else {
+    lines.push(
+      `No missing index: all ${declared.size} indexes declared by ${at.snapshotName} are present ` +
+        `among the ${actual.size} the database carries outside the module-owned tables.`,
+    );
+    lines.push(
+      "Names only — index DEFINITIONS (columns, uniqueness, partial predicates) are not compared.",
+    );
   }
 
-  lines.push(
-    `No missing index: all ${declared.size} indexes declared by ${at.snapshotName} are present ` +
-      `among the ${actual.size} the database carries outside the module-owned tables.`,
-  );
-  lines.push(
-    "Names only — index DEFINITIONS (columns, uniqueness, partial predicates) are not compared.",
-  );
+  if (columnDiff.absent.length > 0) {
+    lines.push(
+      `Columns declared in ${at.snapshotName} but ABSENT from the database: ` +
+        `${columnDiff.absent.length}`,
+    );
+    for (const name of columnDiff.absent) lines.push(`  missing column  ${name}`);
+    lines.push("");
+  }
+  if (columnDiff.nullability.length > 0) {
+    lines.push(
+      `Columns whose NOT NULL disagrees with ${at.snapshotName}: ` +
+        `${columnDiff.nullability.length}`,
+    );
+    for (const name of columnDiff.nullability) lines.push(`  nullability     ${name}`);
+    lines.push("");
+  }
+  if (columnDiff.absent.length === 0 && columnDiff.nullability.length === 0) {
+    lines.push(
+      `No missing column: all ${declaredColumnCount} columns declared by ${at.snapshotName} are ` +
+        `present, with the declared nullability.`,
+    );
+    lines.push("Names and NOT NULL only — column TYPES are not compared.");
+  }
+
+  if (missing.length > 0 || columnDiff.absent.length > 0 || columnDiff.nullability.length > 0) {
+    lines.push("Each of these is declared by a migration the database has already applied, so the");
+    lines.push("squash never reached it. Add a forward migration bringing the database up.");
+    return { exitCode: 1, lines };
+  }
   return { exitCode: 0, lines };
 }
 
@@ -368,6 +526,7 @@ async function main(): Promise<number> {
   let trackingTableExists: boolean;
   let watermark: number | null = null;
   const actual: ActualIndex[] = [];
+  const actualColumns: ActualColumn[] = [];
   const constraintBacked = new Set<string>();
   try {
     // `.unsafe` rather than tagged templates so each query stays a named
@@ -387,6 +546,9 @@ async function main(): Promise<number> {
     for (const row of await sql.unsafe<ActualIndex[]>(PUBLIC_INDEXES_QUERY)) {
       actual.push(row);
     }
+    for (const row of await sql.unsafe<ActualColumn[]>(PUBLIC_COLUMNS_QUERY)) {
+      actualColumns.push(row);
+    }
     for (const row of await sql.unsafe<{ indexname: string }[]>(CONSTRAINT_BACKED_INDEXES_QUERY)) {
       constraintBacked.add(row.indexname);
     }
@@ -405,6 +567,7 @@ async function main(): Promise<number> {
     trackingTableExists,
     watermark,
     actual,
+    actualColumns,
     constraintBacked,
     moduleTables,
     loadSnapshot: (snapshotName) => Bun.file(`${META_DIR}/${snapshotName}`).json(),

@@ -103,6 +103,12 @@ export async function bootCritical(): Promise<void> {
   // the repair is an operator task, see the function's doc comment.
   await assertOAuthResourceColumnsPresent();
 
+  // Refuse to boot while `oauth_clients.self_service` still disagrees with the
+  // `metadata` JSON key migration 0057 left behind — a self-registered client
+  // reading as operator-provisioned is a security control that is OFF.
+  // Detection only; the fold is an operator task, see the function's doc comment.
+  await assertSelfServiceFoldApplied();
+
   // Bootstrap-token reconciliation (#344). If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
   // flip the in-memory consumed flag so the per-request `bootstrapTokenPending`
@@ -560,6 +566,70 @@ async function oauthResourcesColumnExists(): Promise<boolean> {
     `),
   );
   return present.length > 0;
+}
+
+/**
+ * Refuse to boot while `oauth_clients.self_service` still contradicts the
+ * `metadata` JSON key it replaced — i.e. while
+ * `scripts/migration/0011-oauth-clients-self-service-fold.sql` has not been run
+ * on this database.
+ *
+ * `0057_oauth_provider_1_7_3` lands the column `false` on every row and leaves
+ * `metadata` standing, so filling the column from it is operator data repair
+ * rather than migration. That opens a window in which every already-registered
+ * DCR/CIMD client reads as operator-provisioned.
+ *
+ * `/oauth2/token` reads `self_service = true` to confine such a client's tokens
+ * to exactly one protected resource (`modules/oidc/auth/guards.ts`); a `false`
+ * row skips that branch, so the client may bind its token to the broad platform
+ * audience and act across the REST API with the connecting user's full
+ * authority. Registration is unauthenticated, so it need not be a client an
+ * operator knows about.
+ *
+ * Refusing rather than warning, for the reason
+ * {@link assertOAuthResourceColumnsPresent} does.
+ *
+ * The predicate is EXACTLY the script's `WHERE`, `pg_input_is_valid` included:
+ * a row whose `metadata` text is not JSON is one the fold deliberately skips,
+ * and counting it here would refuse a boot the script can never clear.
+ *
+ * §4: delete this, its tests and the README note in the PR that records `0011`
+ * as run.
+ *
+ * `pendingFolds` is injected for tests — production reads the live database.
+ */
+export async function assertSelfServiceFoldApplied(
+  pendingFolds: () => Promise<number> = unfoldedSelfServiceClientCount,
+): Promise<void> {
+  const pending = await pendingFolds();
+  if (pending === 0) return;
+
+  throw new Error(
+    `Security control off: ${pending} oauth client(s) carry the metadata key \`selfService\` ` +
+      "while their `self_service` column is still false, so migration 0057 has been applied " +
+      "and scripts/migration/0011-oauth-clients-self-service-fold.sql has not. Until it runs, " +
+      "/oauth2/token reads those self-registered (DCR/CIMD) clients as operator-provisioned " +
+      "and stops confining their tokens to a single protected resource — each one may bind a " +
+      "token to the whole platform audience and act across the REST API with the connecting " +
+      "user's full authority. Refusing to boot: apply " +
+      "scripts/migration/0011-oauth-clients-self-service-fold.sql to this database, then " +
+      "restart.",
+  );
+}
+
+async function unfoldedSelfServiceClientCount(): Promise<number> {
+  const { sql: rawSql } = await import("drizzle-orm");
+  const [row] = toRows<{ pending: number }>(
+    await db.execute(rawSql`
+      SELECT count(*)::int AS pending
+      FROM oauth_clients
+      WHERE self_service = false
+        AND metadata IS NOT NULL
+        AND pg_input_is_valid(metadata, 'jsonb')
+        AND metadata::jsonb ->> 'selfService' = 'true'
+    `),
+  );
+  return row?.pending ?? 0;
 }
 
 /**

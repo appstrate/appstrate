@@ -103,16 +103,34 @@ function watchConnectionSse(
   return () => es?.close();
 }
 
+/**
+ * Browsing-context name for this card's popup — one per integration, because a
+ * fixed name is a single popup: clicking a second card while the first popup is
+ * open NAVIGATES it to the second URL, silently abandoning flow 1. Sanitized to
+ * `[A-Za-z0-9_]`, a window name being a target token.
+ */
+function popupName(packageId: string | undefined): string {
+  if (!packageId) return "appstrate_oauth";
+  return `appstrate_oauth_${packageId.replace(/[^A-Za-z0-9_]+/g, "_")}`;
+}
+
 export function OAuthConnectCard({
   authUrl,
   state,
   packageId,
+  toolCallId,
   errorText,
 }: {
   /** Absent while the initiate call is still streaming — renders "Préparation…". */
   authUrl?: string;
   state?: string;
   packageId?: string;
+  /**
+   * Tool call this card was rendered from. Several cards share one when a
+   * run-kickoff 412 lists several integrations to connect; it is the second
+   * axis of the resume claim (see {@link claimResume}).
+   */
+  toolCallId?: string;
   /** Set when the initiate call itself failed (no auth url will ever arrive). */
   errorText?: string;
 }) {
@@ -173,10 +191,11 @@ export function OAuthConnectCard({
         return;
       }
       resumed.current = true;
-      // Another card already appended the resume for this package (same
-      // completion burst) — show the connected state without a second append,
-      // which would fork the conversation into two concurrent turns.
-      if (!claimResume(packageId)) {
+      // Another card already appended the resume for this burst — same package,
+      // or a sibling card from the same tool call — so show the connected state
+      // without a second append, which would fork the conversation into two
+      // concurrent turns.
+      if (!claimResume({ packageId, toolCallId })) {
         setPhase("connected");
         return;
       }
@@ -196,7 +215,7 @@ export function OAuthConnectCard({
         ],
       });
     },
-    [aui, label, meta, packageId],
+    [aui, label, meta, packageId, toolCallId],
   );
 
   // Listen from mount until the connection lands — NOT only after the user
@@ -251,7 +270,7 @@ export function OAuthConnectCard({
     setErrMsg(null);
     setPhase("pending");
     // Keep the opener (no `noopener`) so the callback can postMessage us back.
-    const popup = window.open(authUrl, "appstrate_oauth", "width=520,height=680");
+    const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
     if (!popup) {
       // Popup blocked — fall back to a same-tab navigation; the BroadcastChannel
       // + SSE backstops still resume the (now backgrounded) chat tab.

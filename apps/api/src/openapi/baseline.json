@@ -1715,6 +1715,9 @@
             "$ref": "#/components/parameters/IdempotencyKey"
           },
           {
+            "$ref": "#/components/parameters/ConnectOffers"
+          },
+          {
             "$ref": "#/components/parameters/PackageScope"
           },
           {
@@ -2163,6 +2166,9 @@
           },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/ConnectOffers"
           }
         ],
         "requestBody": {
@@ -6610,14 +6616,16 @@
                     "type": "array",
                     "items": {
                       "type": "string"
-                    }
+                    },
+                    "description": "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
                   },
                   "force_account_select": {
                     "type": "boolean"
                   },
                   "connection_id": {
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "description": "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error."
                   }
                 },
                 "additionalProperties": false
@@ -6711,7 +6719,8 @@
                     "type": "array",
                     "items": {
                       "type": "string"
-                    }
+                    },
+                    "description": "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
                   },
                   "force_account_select": {
                     "type": "boolean"
@@ -6719,7 +6728,7 @@
                   "connection_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "Reconnect/upgrade an existing connection in place."
+                    "description": "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error."
                   }
                 },
                 "additionalProperties": false
@@ -22851,6 +22860,16 @@
           "maxLength": 255
         }
       },
+      "ConnectOffers": {
+        "name": "X-Appstrate-Connect-Offers",
+        "in": "header",
+        "required": false,
+        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human.",
+        "schema": {
+          "type": "string",
+          "enum": ["1"]
+        }
+      },
       "SseSpaceId": {
         "name": "spaceId",
         "in": "query",
@@ -23022,7 +23041,18 @@
           },
           "owned_by_actor": {
             "type": "boolean",
-            "description": "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error)."
+            "description": "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error)."
+          },
+          "required_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them."
+          },
+          "auth_key": {
+            "type": "string",
+            "description": "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`)."
           },
           "required_auth_key": {
             "type": "string",
@@ -23034,6 +23064,19 @@
               "type": "string"
             },
             "description": "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method."
+          },
+          "connect_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
+          },
+          "expires_at": {
+            "type": "integer",
+            "description": "Absolute expiry of `connect_url`, epoch ms."
+          },
+          "package_id": {
+            "type": "string",
+            "description": "Integration package id `connect_url` connects (`@scope/name`)."
           }
         }
       },
