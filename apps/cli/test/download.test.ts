@@ -56,7 +56,7 @@ describe("streamDownload", () => {
 
   it("round-trips a payload larger than the sink watermark", async () => {
     // The destination `FileSink` is opened with an explicit `highWaterMark`
-    // (SINK_FLUSH_BYTES, 1 MiB) so it flushes mid-stream instead of holding
+    // (STREAM_FLUSH_BYTES, 1 MiB) so it flushes mid-stream instead of holding
     // the whole artifact in memory until `end()`. That watermark is the only
     // thing that makes `FileSink.write` ever return a promise — a download
     // smaller than it never drains, so it never exercises the awaited write.

@@ -239,6 +239,20 @@ export const responses = {
       },
     },
   },
+  /**
+   * The 409 of both model writes — the one-row-per-binding rule is a property
+   * of the table, so `POST` and `PATCH` refuse for the same reason and share
+   * one description.
+   */
+  ModelAlreadyAdded: {
+    description:
+      "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+      },
+    },
+  },
   InternalServerError: {
     description: "Unexpected server error",
     content: {
