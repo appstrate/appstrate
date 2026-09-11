@@ -64,7 +64,7 @@ export function OrgSettingsLayout() {
       to: "/org-settings/space/auth",
       icon: Shield,
       label: t("spaceSettings.tabAuth"),
-      show: oidcEnabled && can("spaces:write"),
+      show: oidcEnabled && can("space-settings:write"),
     },
     {
       to: "/org-settings/space/oauth",

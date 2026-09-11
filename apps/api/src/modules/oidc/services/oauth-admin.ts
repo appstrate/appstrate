@@ -38,7 +38,7 @@ import { spaces } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../../../lib/logger.ts";
-import { getAppstrateScopeSet } from "../auth/scopes.ts";
+import { getAppstrateScopeSet, getEndUserScopeSet } from "../auth/scopes.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import { assertSpaceAssignmentsValid } from "../../../services/space-assignments.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
@@ -85,38 +85,52 @@ export class OAuthAdminValidationError extends Error {
 }
 
 /**
- * The scopes in `scopes` that are outside the OIDC vocabulary — i.e. exactly
- * what {@link assertValidScopes} would refuse. Empty for a valid list, and for
- * `undefined`/empty input (nothing to validate, the caller's default applies).
+ * The scopes in `scopes` that a client at `level` may not register — i.e.
+ * exactly what {@link assertValidScopes} would refuse. Empty for a valid list,
+ * and for `undefined`/empty input (nothing to validate, the caller's default
+ * applies).
+ *
+ * The vocabulary is level-dependent because the token shape is: a space-level
+ * client only ever mints `end_user` tokens, whose scopes are filtered through
+ * the end-user allowlist at every mint, so a dashboard-only scope registered
+ * there would be silently dropped forever. Instance and org clients get the
+ * full vocabulary.
  *
  * Exported for `instance-client-sync.ts`, which must know whether a declaration
  * would SURVIVE a re-create before it tells an operator to delete a row and
  * restart. Answering that with a predicate rather than a catch keeps the
  * vocabulary in one place.
  */
-export function invalidScopesIn(scopes: readonly string[] | undefined): string[] {
+export function invalidScopesIn(
+  scopes: readonly string[] | undefined,
+  level: OAuthClientLevel,
+): string[] {
   if (!scopes || scopes.length === 0) return [];
-  // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
-  const allowed = getAppstrateScopeSet();
+  // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES
+  // + the dashboard-only scopes, which space clients cannot carry).
+  const allowed = level === "space" ? getEndUserScopeSet() : getAppstrateScopeSet();
   return scopes.filter((s) => !allowed.has(s));
 }
 
 /**
- * Reject any requested scope outside the OIDC vocabulary (identity scopes +
- * `OIDC_ALLOWED_SCOPES` + module `endUserGrantable` contributions).
+ * Reject any requested scope a client at `level` cannot register — outside the
+ * OIDC vocabulary (identity scopes + `OIDC_ALLOWED_SCOPES` +
+ * `OIDC_DASHBOARD_ONLY_SCOPES` + module `endUserGrantable` contributions), or,
+ * for a space-level client, outside the end-user half of it.
  *
  * `undefined` / empty in — nothing to validate, the caller's own default
  * applies.
  */
-function assertValidScopes(scopes: readonly string[] | undefined): void {
-  const invalid = invalidScopesIn(scopes);
+function assertValidScopes(scopes: readonly string[] | undefined, level: OAuthClientLevel): void {
+  const invalid = invalidScopesIn(scopes, level);
   if (invalid.length === 0) return;
 
   throw new OAuthAdminValidationError(
     "scopes",
-    `OIDC: unknown scopes rejected at service boundary: ${invalid.join(", ")}. ` +
-      `Only scopes in the OIDC vocabulary (identity scopes + OIDC_ALLOWED_SCOPES) ` +
-      `may be registered.`,
+    `OIDC: scopes rejected at service boundary for a ${level}-level client: ${invalid.join(", ")}. ` +
+      `A space-level client may only register scopes an end-user token can carry ` +
+      `(identity scopes + OIDC_ALLOWED_SCOPES); every other level may register the ` +
+      `full OIDC vocabulary.`,
   );
 }
 
@@ -334,7 +348,7 @@ type CreateClientInput = CreateInstanceClientInput | CreateOrgClientInput | Crea
 
 export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
   assertValidRedirectUris(input.redirectUris);
-  assertValidScopes(input.scopes);
+  assertValidScopes(input.scopes, input.level);
 
   const id = prefixedId("oac");
   const clientId = `oauth_${randomSecret().slice(0, 24)}`;
@@ -422,6 +436,11 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
  * Both are columns, never the `metadata` JSON: the provider owns that JSON and
  * a registration body may set it, so a flag kept there is a flag the client can
  * name. Idempotent — a refreshed CIMD client is re-stamped on every resolution.
+ *
+ * It writes exactly those two columns and never `scopes`: the provider owns the
+ * scope set (`persistOAuthClientRegistration` writes the self-service ceiling in
+ * the statement that creates the row), and a writer here would let the client
+ * choose the ceiling `/authorize` enforces.
  */
 export async function markClientSelfService(clientId: string): Promise<void> {
   await db
@@ -471,15 +490,25 @@ export async function updateClient(
   if (input.redirectUris !== undefined) {
     assertValidRedirectUris(input.redirectUris);
   }
+  // Both the scope vocabulary and the signup-policy rules depend on the
+  // client's level, which only the stored row knows — read it once when either
+  // is in play, and not at all otherwise.
+  const existing =
+    input.scopes !== undefined ||
+    input.signupRole !== undefined ||
+    input.signupSpaceAssignments !== undefined
+      ? await getClient(clientId)
+      : null;
+
   if (input.scopes !== undefined) {
-    assertValidScopes(input.scopes);
+    if (!existing) return null;
+    assertValidScopes(input.scopes, existing.level);
   }
 
   // `signupRole` is only meaningful on org-level clients — reject updates
   // targeting instance/space levels loudly so configuration mistakes
   // surface. `allowSignup` is valid on every level.
   if (input.signupRole !== undefined || input.signupSpaceAssignments !== undefined) {
-    const existing = await getClient(clientId);
     if (!existing) return null;
     if (existing.level !== "org" || !existing.referencedOrgId) {
       throw new OAuthAdminValidationError(
@@ -819,7 +848,7 @@ export async function createInstanceClientFromEnv(
   input: CreateInstanceClientFromEnvInput,
 ): Promise<OAuthClientRecord> {
   assertValidRedirectUris(input.redirectUris);
-  assertValidScopes(input.scopes);
+  assertValidScopes(input.scopes, "instance");
 
   const id = prefixedId("oac");
   const hashedSecret = await hashSecret(input.clientSecretPlaintext);

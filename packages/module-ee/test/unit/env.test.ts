@@ -1,9 +1,25 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
 import { describe, expect, it } from "bun:test";
-import { describeEnvIssues, getEeEnv, _resetEeEnvForTests } from "../../src/env.ts";
+import {
+  LEDGER_LIST_MAX_LIMIT,
+  eeEnvSchema,
+  describeEnvIssues,
+  getEeEnv,
+  _resetEeEnvForTests,
+} from "../../src/env.ts";
+import requirements from "../requirements.ts";
+import { applyEeFixtureEnv } from "../helpers/fixture-env.ts";
+
+applyEeFixtureEnv();
 
 describe("env", () => {
+  it("pins the platform's usage.list ceiling", () => {
+    // Neither side may import the other's constant across the licence boundary,
+    // so this pin mirrors `apps/api/test/unit/llm-usage-list-cap.test.ts`.
+    expect(LEDGER_LIST_MAX_LIMIT).toBe(1000);
+  });
+
   describe("getEeEnv()", () => {
     it("returns a valid EeEnv object with all required fields", () => {
       const env = getEeEnv();
@@ -13,7 +29,7 @@ describe("env", () => {
       expect(env.STRIPE_PRICE_ID_PRO).toBeString();
     });
 
-    it("returns the test values set by preload", () => {
+    it("returns the fixture values the module declares for its tests", () => {
       const env = getEeEnv();
       expect(env.STRIPE_SECRET_KEY).toBe("sk_test_fake_key_for_testing");
       expect(env.STRIPE_WEBHOOK_SECRET).toBe("whsec_test_secret_for_webhook_verification");
@@ -64,11 +80,44 @@ describe("env", () => {
       expect(env.EE_RECONCILIATION_REPLAY_WINDOW).toBe(200);
     });
 
+    it("refuses a batch size the replay window leaves no room for", () => {
+      // REGRESSION (#1328). A pass reads `replayWindow + batchSize` rows and the
+      // platform caps that read at 1000, so a sum above the ceiling shrinks the
+      // FORWARD slice below `batchSize` instead of reading more — and the
+      // sweeper's within-tick drain loop, gated on `processed >= batchSize`,
+      // then stops after one pass. Raising the batch to clear a backlog made
+      // throughput fall, and the "drain cap reached" warning could not fire to
+      // say so. Boot has to refuse the combination, not clamp it.
+      const parse = (batchSize: string, replayWindow: string) =>
+        eeEnvSchema.safeParse({
+          ...requirements.env,
+          EE_RECONCILIATION_BATCH_SIZE: batchSize,
+          EE_RECONCILIATION_REPLAY_WINDOW: replayWindow,
+        }).success;
+      expect(parse("800", "200")).toBe(true);
+      expect(parse("801", "200")).toBe(false);
+      expect(parse("1000", "0")).toBe(true);
+      expect(parse("501", "500")).toBe(false);
+    });
+
+    it("names the batch size when the two reconciliation knobs overrun the read budget", () => {
+      const result = eeEnvSchema.safeParse({
+        ...requirements.env,
+        EE_RECONCILIATION_BATCH_SIZE: "1000",
+        EE_RECONCILIATION_REPLAY_WINDOW: "200",
+      });
+      expect(result.success).toBe(false);
+      const message = describeEnvIssues(result.error);
+      expect(message).toContain("EE_RECONCILIATION_BATCH_SIZE");
+      expect(message).toContain("EE_RECONCILIATION_REPLAY_WINDOW");
+    });
+
     it("bounds the replay window so it can never starve the forward batch", () => {
       // A pass reads `replaySpan + BATCH_SIZE` capped at the platform's 1000-row
       // ceiling, so a window above 500 could leave a maxed-out batch with less
-      // forward capacity than replay. Capping at 500 keeps forward progress
-      // structural rather than dependent on operator discipline.
+      // forward capacity than replay. The 500 cap is a FLOOR on forward
+      // capacity, not the whole guarantee — what makes it exactly BATCH_SIZE is
+      // the cross-field rule covered by the test above.
       const parse = (value: string): boolean => {
         process.env.EE_RECONCILIATION_REPLAY_WINDOW = value;
         _resetEeEnvForTests();

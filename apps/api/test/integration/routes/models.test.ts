@@ -452,6 +452,79 @@ describe("Models API", () => {
         .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.label, "Phantom")));
       expect(rows).toHaveLength(0);
     });
+
+    // Issue #1358 — `llm_usage.model` stores the org_models row id, so a second
+    // row for the same (credential, model) pair splits that model's spend
+    // across the copies. `uq_org_models_unaliased_binding` is what refuses
+    // it; only the LABEL was deduped before, which is not the invariant.
+    it("refuses a second model for the same credential and model id", async () => {
+      const credentialId = await createProviderKey();
+      const body = JSON.stringify({ modelId: "gpt-4o", credentialId });
+
+      const first = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body,
+      });
+      expect(first.status).toBe(201);
+      const created = (await first.json()) as any;
+
+      const second = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body,
+      });
+
+      expect(second.status).toBe(409);
+      const problem = (await second.json()) as any;
+      expect(problem.code).toBe("model_already_added");
+      // The row that already holds the binding, so the caller can act on it.
+      expect(problem.existing_model_id).toBe(created.id);
+
+      const rows = await db
+        .select()
+        .from(orgModels)
+        .where(and(eq(orgModels.orgId, ctx.orgId), eq(orgModels.modelId, "gpt-4o")));
+      expect(rows).toHaveLength(1);
+    });
+
+    // The index is partial: an alias is a deliberate public identity over a
+    // backing model, so it may share a binding with the direct row.
+    it("still allows a managed (aliased) model over an already-added binding", async () => {
+      const credentialId = await createProviderKey();
+      const plain = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: "gpt-4o", credentialId }),
+      });
+      expect(plain.status).toBe(201);
+
+      const alias = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: "gpt-4o",
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(alias.status).toBe(201);
+    });
+
+    it("still allows the same model id against a different credential", async () => {
+      const first = await createProviderKey();
+      const second = await createProviderKey();
+
+      for (const credentialId of [first, second]) {
+        const res = await app.request("/api/models", {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ modelId: "gpt-4o", credentialId }),
+        });
+        expect(res.status).toBe(201);
+      }
+    });
   });
 
   describe("DELETE /api/models/:id", () => {
@@ -968,6 +1041,29 @@ describe("Models API", () => {
       // Hard guarantee: the real upstream id never appears anywhere in the
       // update payload (mirrors the list-projection test above).
       expect(JSON.stringify(updated)).not.toContain(realModelId);
+    });
+
+    // The same invariant on the edit path: repointing a row onto a binding
+    // another row already holds is the same duplicate, reached sideways.
+    it("refuses an edit that would collide with another row's binding", async () => {
+      const credentialId = await createProviderKey();
+      const mine = await seedOrgModel({ orgId: ctx.orgId, credentialId, modelId: "gpt-4o" });
+      const other = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId,
+        modelId: "gpt-4o-mini",
+      });
+
+      const res = await app.request(`/api/models/${other.id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: "gpt-4o" }),
+      });
+
+      expect(res.status).toBe(409);
+      const problem = (await res.json()) as any;
+      expect(problem.code).toBe("model_already_added");
+      expect(problem.existing_model_id).toBe(mine.id);
     });
   });
 

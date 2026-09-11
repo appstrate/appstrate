@@ -2,7 +2,7 @@
 
 /**
  * The DB half of "personal has to mean one thing" (RBAC spec §3.6, migration
- * `0062`). The API refuses each of these with a named 4xx; these are the
+ * `0064`). The API refuses each of these with a named 4xx; these are the
  * constraints that make the refusal a property of the data rather than of the
  * code path that happened to run.
  *

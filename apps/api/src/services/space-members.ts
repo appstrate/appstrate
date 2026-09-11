@@ -22,8 +22,9 @@ import {
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
-import { resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
-import { assertCanGrantSpaceRole } from "../lib/space-role-policy.ts";
+import { loadSpaceMember, resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
+import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
+import { assertCustomRolesFeature } from "./space-roles.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -188,13 +189,14 @@ export async function saveSpaceMember(params: {
       );
     }
     const memberFilter = and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId));
-    if (!params.requireExisting) {
-      const [existing] = await tx
-        .select({ userId: spaceMembers.userId })
-        .from(spaceMembers)
-        .where(memberFilter)
-        .limit(1);
-      if (existing) throw existingSpaceMember();
+    // Read in the SAME transaction as the write: a role change is authority
+    // over the standing the target holds NOW, not only over the one handed out.
+    const existing = await loadSpaceMember(spaceId, userId, tx);
+    if (params.requireExisting) {
+      if (!existing) throw notFound("Space member not found");
+      assertCanManageSpaceMember(params.actorPermissions, existing.ref);
+    } else if (existing) {
+      throw existingSpaceMember();
     }
     const values = await assignmentColumns(orgId, assignment, params.actorPermissions, tx);
 
@@ -251,13 +253,34 @@ interface RoleColumns {
   customRoleId: string | null;
 }
 
-/** Remove an explicit row. Returns false when there was none. */
-export async function removeSpaceMember(spaceId: string, userId: string): Promise<boolean> {
-  const deleted = await db
-    .delete(spaceMembers)
-    .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
-    .returning({ userId: spaceMembers.userId });
-  return deleted.length > 0;
+/**
+ * Remove an explicit row. Returns false when there was none.
+ *
+ * The target bound lives here, not at the route: the row read it rests on and
+ * the DELETE that acts on it must be one statement's worth of truth. The lock
+ * is the grant path's — org promotion/removal take it before touching space
+ * memberships — so the role asserted here cannot change under the delete.
+ *
+ * @throws 403 when the caller could not have granted the role being dropped.
+ */
+export async function removeSpaceMember(params: {
+  orgId: string;
+  spaceId: string;
+  userId: string;
+  actorPermissions: ReadonlySet<string> | undefined;
+}): Promise<boolean> {
+  const { orgId, spaceId, userId } = params;
+  return db.transaction(async (tx) => {
+    await lockOrgMemberForSpaceGrant(tx, orgId, userId);
+    const existing = await loadSpaceMember(spaceId, userId, tx);
+    if (!existing) return false;
+    assertCanManageSpaceMember(params.actorPermissions, existing.ref);
+    const deleted = await tx
+      .delete(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
+      .returning({ userId: spaceMembers.userId });
+    return deleted.length > 0;
+  });
 }
 
 /** A grant that was dropped, as the audit trail records it. */
@@ -302,7 +325,13 @@ export async function deleteSpaceMembershipsInOrg(
     });
 }
 
-/** The FK alone would accept another org's bundle, so the org is checked here. */
+/**
+ * The FK alone would accept another org's bundle, so the org is checked here.
+ *
+ * Granting a bundle is the licensed half of the feature, not just defining one
+ * — the gate comes before the lookup so the refusal is about the deployment
+ * and says nothing about which `srl_` ids exist. Presets never ask.
+ */
 async function assignmentColumns(
   orgId: string,
   assignment: SpaceRoleAssignment,
@@ -313,6 +342,7 @@ async function assignmentColumns(
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
+  assertCustomRolesFeature("assign");
   const [role] = await tx
     .select({
       id: spaceRoles.id,

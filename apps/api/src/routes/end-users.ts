@@ -64,8 +64,8 @@ export function createEndUsersRouter() {
   router.post(
     "/",
     rateLimit(60),
-    idempotency(),
     requirePermission("end-users", "write"),
+    idempotency(),
     async (c) => {
       const scope = getSpaceScope(c);
       // A personal space takes no end-users, for the same reason it takes no

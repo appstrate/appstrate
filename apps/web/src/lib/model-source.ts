@@ -2,8 +2,8 @@
 
 /**
  * Where the model form's pick list comes from, and the one row shape all three
- * sources produce. `origin` travels on the row so the batch payload knows how
- * much of it to put on the wire.
+ * sources produce. Descriptions serve the picker; endpoint capabilities alone
+ * may become overrides when adding a discovered model.
  */
 
 import type { ModelCost } from "@appstrate/core/module";
@@ -44,6 +44,9 @@ export interface ModelPickRow {
   reasoning: boolean | null;
   /** Who described the row — rendered as a badge. */
   source: "endpoint" | "catalog" | null;
+  endpointCapabilities: Partial<
+    Pick<ModelPickRow, "input" | "contextWindow" | "maxTokens" | "reasoning">
+  >;
   cost: ModelCost | null;
   /** The listing it came from: what the batch is allowed to send. */
   origin: ModelSource;
@@ -59,6 +62,7 @@ function pickRow(row: Partial<ModelPickRow> & Pick<ModelPickRow, "id" | "origin"
     input: null,
     reasoning: null,
     source: null,
+    endpointCapabilities: {},
     cost: null,
     featured: false,
     ...row,
@@ -99,6 +103,12 @@ export function discoveredRows(models: readonly DiscoveredModel[]): ModelPickRow
       input: m.input,
       reasoning: m.reasoning,
       source: m.source,
+      endpointCapabilities: {
+        contextWindow: m.endpoint_capabilities.context_window,
+        maxTokens: m.endpoint_capabilities.max_tokens,
+        input: m.endpoint_capabilities.input,
+        reasoning: m.endpoint_capabilities.reasoning,
+      },
       origin: "discover",
     }),
   );

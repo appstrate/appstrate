@@ -104,10 +104,10 @@ describe("migrateEeDb", () => {
     ).resolves.toBeArray();
 
     // Schema is back and usable (table exists, empty).
-    const [{ count }] = await db.execute(
+    const [countRow] = await db.execute<{ count: number }>(
       sql.raw("SELECT count(*)::int AS count FROM ee_billing_accounts"),
     );
-    expect(count).toBe(0);
+    expect(countRow?.count).toBe(0);
   });
 });
 
@@ -154,14 +154,14 @@ describe("migration chain upgrades", () => {
     expect(billedCols.map((c) => c.column_name)).not.toContain("run_id");
 
     // retry queue gone; cursor table present.
-    const [{ pending }] = await db.execute(
+    const [pendingRow] = await db.execute<{ pending: string | null }>(
       sql.raw("SELECT to_regclass('cloud_pending_bills') AS pending"),
     );
-    expect(pending).toBeNull();
-    const [{ cursor }] = await db.execute(
+    expect(pendingRow?.pending).toBeNull();
+    const [cursorRow] = await db.execute<{ cursor: string | null }>(
       sql.raw("SELECT to_regclass('cloud_billing_cursor') AS cursor"),
     );
-    expect(cursor).not.toBeNull();
+    expect(cursorRow?.cursor).not.toBeNull();
   });
 
   it("0001 → 0002 converts cost_usd to numeric without losing a stored value", async () => {
@@ -234,7 +234,7 @@ describe("migration chain upgrades", () => {
         ORDER BY org_id
       `),
     );
-    expect(rows).toEqual([
+    expect([...rows]).toEqual([
       { org_id: canceledOrg, subscription_status: null, credits_used: 0, credit_quota: 0 },
       { org_id: incompleteOrg, subscription_status: null, credits_used: 0, credit_quota: 0 },
       {
@@ -271,10 +271,10 @@ describe("migration chain upgrades", () => {
     await db.execute(sql.raw("DELETE FROM cloud_pending_bills"));
     await applyMigration("0001_cursor_billing");
 
-    const [{ pending }] = await db.execute(
+    const [pendingRow] = await db.execute<{ pending: string | null }>(
       sql.raw("SELECT to_regclass('cloud_pending_bills') AS pending"),
     );
-    expect(pending).toBeNull();
+    expect(pendingRow?.pending).toBeNull();
   });
 
   it("0004 → 0005 renames every table, index and constraint off the cloud_ prefix", async () => {
@@ -310,7 +310,72 @@ describe("migration chain upgrades", () => {
         WHERE connamespace = 'public'::regnamespace AND conname LIKE 'cloud%'
       `),
     );
-    expect(named).toEqual([]);
+    expect([...named]).toEqual([]);
+  });
+
+  it("0006 → 0007 widens cost_credits to bigint past the int4 ceiling", async () => {
+    await resetToBlankSlate();
+    for (const tag of [
+      "0000_init",
+      "0001_cursor_billing",
+      "0002_numeric_cost",
+      "0003_normalize_free_subscription_status",
+      "0004_billing_managers_and_contact",
+      "0005_rename_ee_tables",
+      "0006_cutover_floor_and_pricing_status",
+    ]) {
+      await applyMigration(tag);
+    }
+
+    const [before] = await db.execute(
+      sql.raw(
+        `SELECT data_type FROM information_schema.columns
+         WHERE table_name = 'ee_usage_records' AND column_name = 'cost_credits'`,
+      ),
+    );
+    expect(before!.data_type).toBe("integer");
+
+    // A pre-existing row must survive the type change with its value intact.
+    const org = "00000000-0000-4000-a000-0000000000f1";
+    await db.execute(sql.raw(`INSERT INTO ee_billing_accounts (org_id) VALUES ('${org}')`));
+    await db.execute(
+      sql.raw(
+        `INSERT INTO ee_usage_records (org_id, context_type, context_id, cost_credits, cost_usd)
+         VALUES ('${org}', 'unattributed', '${org}', 2000000000, 2000000)`,
+      ),
+    );
+
+    await applyMigration("0007_bigint_cost_credits");
+
+    const [after] = await db.execute(
+      sql.raw(
+        `SELECT data_type FROM information_schema.columns
+         WHERE table_name = 'ee_usage_records' AND column_name = 'cost_credits'`,
+      ),
+    );
+    expect(after!.data_type).toBe("bigint");
+
+    const [kept] = await db.execute(
+      sql.raw(`SELECT cost_credits FROM ee_usage_records WHERE org_id = '${org}'`),
+    );
+    expect(Number(kept!.cost_credits)).toBe(2_000_000_000);
+
+    // Past the int4 ceiling — see the `cost_credits` note in `drizzle/schema.ts`.
+    await db.execute(
+      sql.raw(
+        `UPDATE ee_usage_records
+         SET cost_credits = round((cost_usd + 1000000) * 1000)::bigint,
+             cost_usd = cost_usd + 1000000
+         WHERE org_id = '${org}'`,
+      ),
+    );
+    const [grown] = await db.execute(
+      sql.raw(`SELECT cost_credits FROM ee_usage_records WHERE org_id = '${org}'`),
+    );
+    expect(Number(grown!.cost_credits)).toBe(3_000_000_000);
+
+    // Re-runnable: applying it a second time is a no-op, not an error.
+    await applyMigration("0007_bigint_cost_credits");
   });
 });
 
@@ -328,6 +393,6 @@ describe("isolation from the platform test database", () => {
     const [applied] = await live.execute<{ count: number }>(sql`
       SELECT count(*)::int AS count FROM drizzle.ee_migrations
     `);
-    expect(applied?.count).toBe(7);
+    expect(applied?.count).toBe(8);
   });
 });

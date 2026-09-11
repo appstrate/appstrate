@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Field, FieldGroup } from "@appstrate/ui/components/field";
@@ -16,11 +17,12 @@ import {
 import { Modal } from "./modal";
 import { OrgRoleOptions } from "./org-role-options";
 import { RoleCatalogState } from "./role-catalog-state";
-import { useCurrentOrgId } from "../hooks/use-org";
+import { fetchOrgsAs, useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useSpaces } from "../hooks/use-spaces";
 import { useSpaceRoleOptions } from "../hooks/use-roles";
 import { enterViewAs, toViewAsPersona } from "../stores/view-as-store";
+import { viewAsRefusalCode } from "../lib/view-as-refusal";
 
 /** "No space" option. Not the empty string — Radix refuses an empty item value. */
 const NO_SPACE = "none";
@@ -56,6 +58,23 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
   const [orgRole, setOrgRole] = useState<ViewAsOrgRole>("member");
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId);
   const [roleValue, setRoleValue] = useState("");
+  const [entering, setEntering] = useState(false);
+  /** A closed or unmounted dialog must never commit a pending preview. */
+  const abandoned = useRef(false);
+  useLayoutEffect(() => {
+    // Reset for StrictMode's setup/cleanup replay. Layout cleanup marks an
+    // unmount before any pending promise continuation can apply its response.
+    abandoned.current = false;
+    return () => {
+      abandoned.current = true;
+    };
+  }, []);
+
+  /** The one exit: whatever closed the dialog, the preview it started is off. */
+  const close = () => {
+    abandoned.current = true;
+    onClose();
+  };
 
   const inSpace = selectedSpaceId !== NO_SPACE;
   const {
@@ -73,30 +92,54 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
   const catalogUsable = rolesKnown && !rolesError && options.length > 0;
   const ready = !!orgId && (!inSpace || (!!roleOption && !!space));
 
-  const submit = () => {
-    if (!orgId || !ready) return;
+  const submit = async () => {
+    if (!orgId || !ready || entering) return;
     // Replaces any preview already running: the store commits one persona and
     // resets the cache either way.
-    enterViewAs(toViewAsPersona(orgId, orgRole, space, roleOption));
+    const persona = toViewAsPersona(orgId, orgRole, space, roleOption);
+    setEntering(true);
+    try {
+      // Load the persona's own org row BEFORE committing it: the permissions
+      // and the banner must appear together, and a load that fails must leave
+      // the admin exactly where they were rather than under a persona wearing
+      // their own authority.
+      const orgs = await fetchOrgsAs(persona);
+      // Committing a preview the user already left would persist it, and a
+      // persona the server accepts is never stopped later: nothing would undo it.
+      if (abandoned.current) return;
+      enterViewAs(persona, orgs);
+    } catch (err) {
+      if (abandoned.current) return;
+      setEntering(false);
+      // Three of the four refusals are permanent; "try again" is only ever true
+      // of a failure the server named nothing for.
+      const code = viewAsRefusalCode(err);
+      toast.error(code ? t(`viewAs.stopped.${code}`, { ns: "common" }) : t("viewAs.enterFailed"));
+      return;
+    }
     // Land where the persona's role applies. Elsewhere the persona is only its
     // org role — an implicit member of open spaces — and a banner naming
     // "Lecteur dans Default" over a page answered for another space reads as
     // a preview that does not work.
     if (space && roleOption) switchSpace(space.id);
-    onClose();
+    close();
   };
 
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={close}
       title={t("viewAs.title")}
       actions={
         <>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={close}>
             {t("btn.cancel", { ns: "common" })}
           </Button>
-          <Button data-testid="view-as-submit" disabled={!ready} onClick={submit}>
+          <Button
+            data-testid="view-as-submit"
+            disabled={!ready || entering}
+            onClick={() => void submit()}
+          >
             {t("viewAs.submit")}
           </Button>
         </>

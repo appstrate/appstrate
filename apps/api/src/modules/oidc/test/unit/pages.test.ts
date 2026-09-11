@@ -98,6 +98,7 @@ describe("renderConsentPage", () => {
       ...DEFAULT_PROPS,
       clientName: `<img src=x>`,
       scopes: ["openid", "runs:read", `<evil>`],
+      clientLevel: "space",
       action: "/api/oauth/consent?state=x",
     }).value;
     expect(out).not.toContain(`<img src=x>`);
@@ -113,11 +114,40 @@ describe("renderConsentPage", () => {
       ...DEFAULT_PROPS,
       clientName: "Acme",
       scopes: ["openid", "agents:run", "integrations:connect"],
+      clientLevel: "space",
       action: "/x",
     }).value;
     expect(out).toContain("Votre identité");
     expect(out).toContain("Lancer des agents pour vous");
     expect(out).toContain("Ajouter des connexions en votre nom");
+  });
+
+  // An `instance` token carries `actor_type: "user"`: the scope claim grants
+  // nothing on its own (`scopesToPermissions` returns empty) and the pipeline
+  // writes no `scopeCeiling`, so the request runs on the user's live org role.
+  // Listing `mcp:invoke` and stopping there would read as a cap (issue #1351).
+  it("warns that the scope list is not a cap for an instance-level client", () => {
+    const out = renderConsentPage({
+      ...DEFAULT_PROPS,
+      clientName: "Claude Code",
+      scopes: ["mcp:read", "mcp:invoke"],
+      clientLevel: "instance",
+      action: "/x",
+    }).value;
+    expect(out.replace(/\s+/g, " ")).toContain("elle agit avec vos propres droits");
+  });
+
+  // `org` and `space` tokens DO carry the claim as a ceiling — the list is the
+  // limit it looks like, so the notice would be a lie there.
+  it.each(["org", "space"] as const)("omits that warning for a %s-level client", (level) => {
+    const out = renderConsentPage({
+      ...DEFAULT_PROPS,
+      clientName: "Acme",
+      scopes: ["openid", "runs:read"],
+      clientLevel: level,
+      action: "/x",
+    }).value;
+    expect(out).not.toContain("vos propres droits");
   });
 });
 
@@ -159,6 +189,7 @@ describe("page branding + CSRF", () => {
       ...DEFAULT_PROPS,
       clientName: "Acme",
       scopes: ["openid"],
+      clientLevel: "space",
       action: "/api/oauth/consent",
       csrfToken: "tok_consent",
     }).value;
@@ -200,6 +231,7 @@ describe("page branding + CSRF", () => {
     const out = renderConsentPage({
       clientName: "Acme",
       scopes: ["openid"],
+      clientLevel: "space",
       action: "/x",
       branding,
       csrfToken: "tok_test",

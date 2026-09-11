@@ -340,9 +340,14 @@ function projectConnectionsUsed(
   }));
 }
 
-function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
+function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
   return {
     ...runRowToWireDto(r.run),
+    // Resolved input includes editor-imposed values. Current installation locks
+    // cannot protect historical values after an unlock or reinstall, so readers
+    // without agents:read get no registered-agent input. Inline input is entirely
+    // caller-provided. Storage remains complete for execution and server-side rerun.
+    input: canReadAgentInput || r.packageEphemeral === true ? r.run.input : null,
     user_name: r.userName ?? null,
     end_user_name: r.endUserName ?? null,
     api_key_name: r.apiKeyName ?? null,
@@ -1540,8 +1545,7 @@ export async function deletePackageRuns(scope: SpaceScope, packageId: string): P
 type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
 /**
- * The enriched page + total behind the two list surfaces in this module
- * (`listPackageRuns`, `listScheduleRuns`). Module-private: a caller outside
+ * The enriched page + total behind all run lists in this module. Module-private: a caller outside
  * builds its WHERE by hand, and a hand-built `runs` predicate is what the
  * `runs:read` visibility rule exists to keep out of the query.
  */
@@ -1550,12 +1554,17 @@ async function listRunsWithFilter(
   limit: number,
   offset: number,
   actor: Actor | null,
+  canReadAgentInput: boolean,
 ): Promise<RunListPage> {
   // The `total` count and the page share the same filter but are independent
   // reads — issued concurrently so the endpoint costs one round trip instead
   // of two serialized ones. Both are tenant-indexed; neither is a seq scan.
   const [countRows, rows] = await Promise.all([
-    db.select({ count: count() }).from(runs).where(filter),
+    db
+      .select({ count: count() })
+      .from(runs)
+      .leftJoin(packages, eq(packages.id, runs.packageId))
+      .where(filter),
     db
       .select(enrichedRunSelect(actor))
       .from(runs)
@@ -1571,7 +1580,7 @@ async function listRunsWithFilter(
   ]);
   const [countRow] = countRows;
 
-  const data = rows.map(mapEnrichedRun);
+  const data = rows.map((row) => mapEnrichedRun(row, canReadAgentInput));
   const total = countRow?.count ?? 0;
   return {
     ...listResponse(data, { hasMore: offset + data.length < total }),
@@ -1588,16 +1597,17 @@ export async function listPackageRuns(
     actor?: Actor | null;
     /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
     visibility?: SQL;
+    canReadAgentInput?: boolean;
   } = {},
 ) {
-  const { limit = 50, offset = 0, actor = null, visibility } = options;
+  const { limit = 50, offset = 0, actor = null, visibility, canReadAgentInput = false } = options;
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
   if (visibility) conditions.push(visibility);
-  return listRunsWithFilter(and(...conditions)!, limit, offset, actor);
+  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
 
 /**
@@ -1631,6 +1641,7 @@ interface ListGlobalRunsOptions {
   actor?: Actor | null;
   /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
   visibility?: SQL;
+  canReadAgentInput?: boolean;
 }
 
 export async function listGlobalRuns(
@@ -1647,6 +1658,7 @@ export async function listGlobalRuns(
     chatSessionId,
     actor = null,
     visibility,
+    canReadAgentInput = false,
   } = options;
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
@@ -1687,45 +1699,21 @@ export async function listGlobalRuns(
     conditions.push(or(eq(packages.ephemeral, false), isNull(packages.ephemeral))!);
   }
 
-  const filter = and(...conditions)!;
-
-  // Same rationale as `listRunsWithFilter`: count and page are independent
-  // reads over one filter, so they go out concurrently.
-  const [countRows, rows] = await Promise.all([
-    db
-      .select({ count: count() })
-      .from(runs)
-      .leftJoin(packages, eq(packages.id, runs.packageId))
-      .where(filter),
-    db
-      .select(enrichedRunSelect(actor))
-      .from(runs)
-      .leftJoin(packages, eq(packages.id, runs.packageId))
-      .leftJoin(profiles, eq(runs.userId, profiles.id))
-      .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
-      .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
-      .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
-      .where(filter)
-      .orderBy(desc(runs.startedAt))
-      .limit(limit)
-      .offset(offset),
-  ]);
-  const [countRow] = countRows;
-
-  const data = rows.map(mapEnrichedRun);
-  const total = countRow?.count ?? 0;
-  return {
-    ...listResponse(data, { hasMore: offset + data.length < total }),
-    total,
-  };
+  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
 
 export async function listScheduleRuns(
   scope: SpaceScope,
   scheduleId: string,
-  options: { limit?: number; offset?: number; actor?: Actor | null; visibility?: SQL } = {},
+  options: {
+    limit?: number;
+    offset?: number;
+    actor?: Actor | null;
+    visibility?: SQL;
+    canReadAgentInput?: boolean;
+  } = {},
 ) {
-  const { limit = 20, offset = 0, actor = null, visibility } = options;
+  const { limit = 20, offset = 0, actor = null, visibility, canReadAgentInput = false } = options;
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
@@ -1735,6 +1723,7 @@ export async function listScheduleRuns(
     limit,
     offset,
     actor,
+    canReadAgentInput,
   );
 }
 
@@ -1742,12 +1731,15 @@ export async function listScheduleRuns(
  * One run, enriched. `visibility` is the caller's run-read predicate
  * (`lib/run-visibility.ts`): a run the caller may not read simply misses, so
  * the handler's existing `notFound` covers it — hidden is 404, never 403.
+ * Agent input requires an explicit agents:read grant; callers without one
+ * retain the run's observable result but cannot read imposed input values.
  */
 export async function getRunFull(
   scope: SpaceScope,
   id: string,
   actor: Actor | null = null,
   visibility?: SQL,
+  canReadAgentInput = false,
 ) {
   const conditions = [
     eq(runs.id, id),
@@ -1796,7 +1788,7 @@ export async function getRunFull(
   }
 
   return {
-    ...mapEnrichedRun(row),
+    ...mapEnrichedRun(row, canReadAgentInput),
     inline_manifest: inlineManifest,
     inline_prompt: inlinePrompt,
   };
@@ -1928,7 +1920,16 @@ export async function listOrphanRunIds(): Promise<string[]> {
 
 /** Default / max batch sizes for the cursor ledger read (plain clamp, internal service). */
 const LLM_USAGE_LIST_DEFAULT_LIMIT = 500;
-const LLM_USAGE_LIST_MAX_LIMIT = 1000;
+/**
+ * The ceiling {@link listLlmUsage} clamps to, and the number the `usage.list`
+ * module service therefore honours. It is a module-contract value:
+ * `@appstrate/module-ee` sizes its reconciliation knobs against the same
+ * number (`LEDGER_LIST_MAX_LIMIT`) and refuses to boot above it. The licence
+ * boundary forbids either side importing the other's constant, so each pins
+ * the number in its own unit tests (`test/unit/llm-usage-list-cap.test.ts`
+ * here) — moving one without the other fails a test on that side.
+ */
+export const LLM_USAGE_LIST_MAX_LIMIT = 1000;
 
 /** Terminal run statuses as a SQL value list, for the `settled` predicate. */
 const terminalRunStatusSqlList = sql.join(

@@ -1,8 +1,8 @@
--- 0014 — give every existing organization member their personal space.
+-- 0015 — give every existing organization member their personal space.
 --
--- Run AFTER the release carrying `packages/db/drizzle/0062_personal_spaces.sql`
+-- Run AFTER the release carrying `packages/db/drizzle/0064_personal_spaces.sql`
 -- has been deployed and validated, NOT inside the window. The opposite of
--- `0013`: nothing is degraded while this script has not run. `provisionMember`
+-- `0014`: nothing is degraded while this script has not run. `provisionMember`
 -- creates the space at every membership door from the deploy onward, and
 -- `GET /api/spaces` repairs the caller's own on first read — so a member who
 -- logs in gets their space with or without this script. What the script adds is

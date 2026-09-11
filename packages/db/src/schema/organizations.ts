@@ -494,6 +494,12 @@ export const orgModels = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_org_models_created_by").on(table.createdBy),
+    // One direct row per (org, credential, model), so usage cannot split across
+    // duplicate bindings. Deliberate aliases keep their own reporting identity.
+    // Migration 0062 documents the concurrency invariant and existing-row repair.
+    uniqueIndex("uq_org_models_unaliased_binding")
+      .on(table.orgId, table.credentialId, table.modelId)
+      .where(sql`${table.aliased} = false`),
     check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );

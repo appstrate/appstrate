@@ -355,6 +355,36 @@ export function knownSpaceLevelPermissions(): ReadonlySet<string> {
   return known;
 }
 
+/**
+ * A stored custom bundle read against the CURRENT vocabulary: what it grants
+ * here, and the entries this deployment cannot name.
+ *
+ * A write refuses an unknown string (`normalizePermissions`), so an entry only
+ * becomes unnameable when the platform changes under the row — a module dropped
+ * from `MODULES`, or a fleet whose replicas disagree on it. This is the ONE
+ * place that narrowing happens: the enforcement path (`spacePermissions`) takes
+ * `granted`, the wire projection (`GET /api/roles`) reports both halves. So
+ * what an admin is shown is what a holder is granted, the `permissions` array a
+ * listing returns is one a `PATCH` accepts back, and the difference is named
+ * rather than silent.
+ *
+ * The stored row is left alone: a rename issued against a replica that lost a
+ * module must not erase the organization's intent for the replicas that kept it.
+ */
+export function partitionSpacePermissions(stored: readonly string[]): {
+  granted: Set<Permission>;
+  unavailable: string[];
+} {
+  const known = knownSpaceLevelPermissions();
+  const granted = new Set<Permission>();
+  const unavailable: string[] = [];
+  for (const permission of stored) {
+    if (known.has(permission)) granted.add(permission as Permission);
+    else unavailable.push(permission);
+  }
+  return { granted, unavailable };
+}
+
 /** One space-level permission, with the delegation facts the roles UI shows. */
 export interface SpacePermissionEntry {
   permission: string;

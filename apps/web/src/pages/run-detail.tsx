@@ -13,6 +13,7 @@ import { Spinner } from "../components/spinner";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
@@ -64,6 +65,8 @@ export function RunDetailPage() {
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const { can, ready: permissionsReady } = usePermissions();
+  const canReadAgent = can("agents:read");
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -265,7 +268,7 @@ export function RunDetailPage() {
         <RunRow run={enrichedRun} variant="detail" />
       </div>
 
-      {agent && (
+      {agent && canReadAgent && (
         <RunModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}
@@ -357,7 +360,21 @@ export function RunDetailPage() {
               for the readings, the live cadence and when it renders nothing. */}
                 <ContextGaugeReadout turns={turnRows} status={run.status} />
                 {!isRunning && !isInline && agent && (
-                  <Button variant="outline" size="sm" onClick={() => setInputOpen(true)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!permissionsReady || runAgent.isPending}
+                    onClick={() => {
+                      if (canReadAgent) {
+                        setInputOpen(true);
+                      } else {
+                        // The API conceals resolved input from runners. Replay
+                        // that snapshot server-side, preserving its parameters.
+                        runAgent.mutate({ rerun_from: run.id, version: run.version_ref });
+                      }
+                    }}
+                  >
+                    {runAgent.isPending && <Spinner />}
                     <Play className="size-3.5" />
                     {t("run.rerun")}
                   </Button>

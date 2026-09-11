@@ -42,8 +42,9 @@ import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
+import { agentReadIsSummary } from "../lib/package-access.ts";
 import { listScheduleRuns } from "../services/state/runs.ts";
-import { runVisibilityFilter } from "../lib/run-visibility.ts";
+import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -303,8 +304,8 @@ export function createSchedulesRouter() {
   router.post(
     `/agents/${SCOPED_PACKAGE_ROUTE}/schedules`,
     rateLimit(10),
-    requireAgent(),
     requirePermission("schedules", "write"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
 
@@ -570,22 +571,33 @@ export function createSchedulesRouter() {
   });
 
   // GET /api/schedules/:id/runs — list runs for a schedule
-  router.get("/schedules/:id/runs", requirePermission("schedules", "read"), async (c) => {
-    const scheduleId = c.req.param("id")!;
-    const scope = getSpaceScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
-    // `schedules:read` is space-wide, so the schedule itself is readable to
-    // every member — but its RUNS are runs, and follow the run predicate:
-    // without `runs:read-all` a colleague's schedule lists nothing.
-    const result = await listScheduleRuns(scope, scheduleId, {
-      limit,
-      offset,
-      actor: getActor(c),
-      visibility: runVisibilityFilter(c),
-    });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
-    return c.json(result);
-  });
+  // Two permissions, because the response is two resources: the schedule
+  // names the rows, but every field of them is a run. `schedules:read` alone
+  // is a legal, grantable scope set, so without the run gate a credential with
+  // no run permission at all reads the full enriched run projection — input,
+  // result, checkpoint, error, context snapshot, cost.
+  router.get(
+    "/schedules/:id/runs",
+    requirePermission("schedules", "read"),
+    requireRunsRead,
+    async (c) => {
+      const scheduleId = c.req.param("id")!;
+      const scope = getSpaceScope(c);
+      const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+      // `schedules:read` is space-wide, so the schedule itself is readable to
+      // every member — but its RUNS are runs, and follow the run predicate:
+      // without `runs:read-all` a colleague's schedule lists nothing.
+      const result = await listScheduleRuns(scope, scheduleId, {
+        limit,
+        offset,
+        actor: getActor(c),
+        visibility: runVisibilityFilter(c),
+        canReadAgentInput: !agentReadIsSummary(c),
+      });
+      setOffsetLinkHeader({ c, limit, offset, total: result.total });
+      return c.json(result);
+    },
+  );
 
   return router;
 }

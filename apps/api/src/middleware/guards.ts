@@ -6,11 +6,23 @@ import { getPackage, getPackageWithAccess } from "../services/package-catalog.ts
 import { assertPackageMutationAccess } from "../lib/package-access.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
+import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
+
+/** Stamped on middleware that resolves an agent and 404s on an unreachable one.
+ *  Mounting it ahead of the permission guard turns 403-vs-404 into a catalog
+ *  oracle; a conformance test reads the real order off the route table. */
+const AGENT_LOOKUP = Symbol.for("appstrate.agentLookup");
+
+/** True when `handler` is a middleware produced by {@link requireAgent} or
+ *  {@link requireOrgAgent} — i.e. it can 404 on an unreachable agent. */
+export function isAgentLookup(handler: unknown): boolean {
+  return hasHandlerMarker(handler, AGENT_LOOKUP);
+}
 
 /** Middleware: load an agent by route param and set it on context, or 404.
  *  Also checks that the current space has access to the package. */
 export function requireAgent() {
-  return async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const scope = c.req.param("scope");
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
@@ -28,14 +40,14 @@ export function requireAgent() {
     }
     c.set("package", agent);
     return next();
-  };
+  }, AGENT_LOOKUP);
 }
 
 /** Middleware: load an agent by route param and set it on context, or 404.
  *  Checks org ownership only — does NOT check space-level access.
  *  Use for org-level operations (editing manifest, skills, tools). */
 export function requireOrgAgent() {
-  return async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const scope = c.req.param("scope");
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
@@ -52,7 +64,7 @@ export function requireOrgAgent() {
     }
     c.set("package", agent);
     return next();
-  };
+  }, AGENT_LOOKUP);
 }
 
 /** Extract the package ID from route params (scoped `@scope/name` or unscoped `id`). */
@@ -101,18 +113,27 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
   return next();
 }
 
-/** Middleware: for API key callers, reject with 403 when the `:id`/`:spaceId`
- *  route param does not match the key's bound space. Sessions are
- *  passed through unchanged — any member can manage any space in their org.
+/** Middleware: reject with 403 when the `:id`/`:spaceId` route param names a
+ *  space other than the one the CREDENTIAL is pinned to. Callers that pin no
+ *  space (sessions, OIDC instance tokens) pass through unchanged — any member
+ *  reaches any space in their org, subject to the per-space permission gates.
  *
- *  Why: `/api/spaces` is org-scoped, not space-scoped, so the
- *  same orgId-only filtering pattern that lets a key escape its org also
- *  lets it escape its space within the same org. */
-export async function apiKeySpaceScopeGuard(c: Context<AppEnv>, next: Next) {
-  if (c.get("authMethod") !== "api_key") return next();
+ *  Why: `/api/spaces` is org-scoped, not space-scoped, so `requireSpaceContext`
+ *  never runs on it and the same orgId-only filtering that lets a credential
+ *  escape its org also lets it escape its space within the same org.
+ *
+ *  Keyed on the pinned space, NOT on `authMethod === "api_key"`: an OIDC
+ *  end-user token pins a space too, and carries no `orgRole`, so
+ *  `applySpacePermissions` returns early for it (RBAC spec §7.2) and nothing
+ *  downstream compares the path space to the pinned one — an end-user of space
+ *  A read space B's `run-config`, private spaces included (issue #1313). Both
+ *  pinned kinds are confined here, once, instead of per route. */
+export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
+  const pinnedSpaceId = c.get("spaceId");
+  if (!pinnedSpaceId) return next();
   const paramSpaceId = c.req.param("id") ?? c.req.param("spaceId");
-  if (paramSpaceId && paramSpaceId !== c.get("spaceId")) {
-    throw forbidden("API key scope does not include this space");
+  if (paramSpaceId && paramSpaceId !== pinnedSpaceId) {
+    throw forbidden("Credential scope does not include this space");
   }
   return next();
 }

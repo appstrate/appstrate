@@ -23,6 +23,7 @@ import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts"
 import { getInstalledPackageSettings } from "../services/space-packages.ts";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
@@ -189,11 +190,18 @@ export async function buildAgentDetailDto(
     // The agent's ONE parameter schema, plus the per-space layers the
     // launch form needs: `values` are the editor's stored defaults and
     // `locked_fields` the fields it froze (not asked at launch, not
-    // overridable). Emitted unconditionally — a manifest with no `input`
-    // section can still carry stored values from an earlier manifest.
+    // overridable). The three members are always present — a manifest with no
+    // `input` section can still carry stored values from an earlier manifest.
+    //
+    // A summary read gets the locks but not the values behind them: a locked
+    // field is one the launcher never supplies (the run refuses it with 400
+    // `locked_input_field`), so its stored value — the editor's, often a
+    // credential or an account id — has no place in a launch payload. The
+    // NAMES stay: they are what tells the form to render the field as imposed
+    // instead of asking for it (issue #1338).
     input: {
       ...(m.input ?? { schema: { type: "object", properties: {} } }),
-      values: storedValues,
+      values: summaryOnly ? withoutLockedFields(storedValues, lockedFields) : storedValues,
       locked_fields: lockedFields,
     },
     ...(m.output ? { output: m.output } : {}),

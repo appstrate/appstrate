@@ -28,6 +28,10 @@ import { useSpaces } from "../hooks/use-spaces";
  * banner also names the role it holds in the space being looked at — "Lecteur
  * dans Default" over a page answered for Marketing otherwise reads as a preview
  * that does not work.
+ *
+ * It also states the preview's one boundary: a persona RESTRICTS the caller
+ * without replacing them (`apps/api/src/lib/view-as.ts`), so anything gated on
+ * identity survives it — `runs:read` still means "mine".
  */
 export function ViewAsBanner() {
   const { t } = useTranslation(["common", "settings"]);
@@ -88,6 +92,7 @@ export function ViewAsBanner() {
             />
           </>
         )}
+        <span className="block text-xs font-normal opacity-80">{t("viewAs.bannerOwn")}</span>
       </span>
       <Button variant="outline" size="sm" onClick={() => exitViewAs()}>
         {t("viewAs.exit")}

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isIP } from "node:net";
 import type { Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { getEnv } from "@appstrate/env";
@@ -48,25 +49,70 @@ export function resetClientIpCache(): void {
   _cachedHops = null;
 }
 
-function pickFromXff(xff: string | null | undefined, hops: number): string | undefined {
-  if (!xff || hops <= 0) return undefined;
+/**
+ * Reduce a forwarded entry to the bare IP address it names, or `undefined`
+ * when it names none.
+ *
+ * Proxies disagree on the shape of one entry: most write a bare address,
+ * Azure's front end appends `:port`, and some write IPv6 in brackets, with or
+ * without a port. Those are three spellings of one address, so they normalize
+ * to it; anything else — a hostname, `unknown`, an attacker-supplied string —
+ * is not an address and is dropped rather than stamped.
+ *
+ * Dropping it is not hygiene. The resolved value travels to Better Auth on
+ * {@link CLIENT_IP_HEADER}, and its `getIP` collapses every caller whose
+ * address does not parse into ONE shared rate-limit bucket — so a single
+ * caller sending `X-Forwarded-For: not-an-ip` would otherwise rate-limit the
+ * whole instance.
+ */
+function normalizeForwardedIp(value: string): string | undefined {
+  let v = value.trim();
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(v);
+  if (bracketed) {
+    v = bracketed[1]!;
+  } else if (v.split(":").length === 2) {
+    // Exactly one colon is `<ipv4>:<port>` — a bare IPv6 always carries more.
+    v = v.slice(0, v.lastIndexOf(":"));
+  }
+  return isIP(v) === 0 ? undefined : v;
+}
+
+/**
+ * The entry `hops` positions from the RIGHT of an `X-Forwarded-For` chain —
+ * the last address a trusted proxy wrote, and the first one it did not.
+ *
+ * Counting from the right is what makes the pick unspoofable: every trusted
+ * hop APPENDS the address it saw, so under `TRUST_PROXY=1` and
+ * `X-Forwarded-For: <attacker text>, <real peer>` the rightmost entry — the
+ * one our own proxy wrote — wins, and the attacker's prefix is inert.
+ *
+ * That holds only while the chain is at least as long as the hop count. A
+ * SHORTER chain proves the trusted hops did not all append, which leaves every
+ * entry in it caller-supplied, so this fails closed and returns `undefined`:
+ * the caller falls back to the socket peer, the one address no header can
+ * forge.
+ */
+function pickFromXff(xff: string, hops: number): string | undefined {
   const parts = xff
     .split(",")
     .map((p) => p.trim())
     .filter(Boolean);
-  if (parts.length === 0) return undefined;
-  const idx = parts.length - hops;
-  return idx >= 0 ? parts[idx] : parts[0];
+  if (parts.length < hops) return undefined;
+  return normalizeForwardedIp(parts[parts.length - hops]!);
 }
 
 function resolveFromHeaders(headers: Headers): string | undefined {
   const hops = trustedHops();
   if (hops <= 0) return undefined;
-  const fromXff = pickFromXff(headers.get("x-forwarded-for"), hops);
-  if (fromXff) return fromXff;
+  // A present `X-Forwarded-For` settles the question on its own: a proxy that
+  // writes the chain writes it on every request, so a caller cannot strip it
+  // to reach the `X-Real-IP` branch below. Where the chain is present but
+  // untrustworthy, the whole forwarded set is — falling through to `X-Real-IP`
+  // there would reopen the hole this closes.
+  const xff = headers.get("x-forwarded-for");
+  if (xff !== null) return pickFromXff(xff, hops);
   const real = headers.get("x-real-ip");
-  if (real) return real;
-  return undefined;
+  return real ? normalizeForwardedIp(real) : undefined;
 }
 
 /**
@@ -75,7 +121,9 @@ function resolveFromHeaders(headers: Headers): string | undefined {
  * Honors `TRUST_PROXY` env var — set to `true`/`1` behind a single reverse
  * proxy, `N` behind N trusted hops, leave `false` for direct exposure.
  * When untrusted, `X-Forwarded-For`/`X-Real-IP` are ignored and the socket
- * remote address is returned.
+ * remote address is returned. So are they when the forwarded chain is shorter
+ * than the trusted hop count, or does not name an IP address at all — see
+ * {@link pickFromXff}.
  */
 export function getClientIp(c: Context): string {
   const fromHeaders = resolveFromHeaders(c.req.raw.headers);
@@ -118,7 +166,8 @@ export const CLIENT_IP_HEADER = "x-appstrate-client-ip";
  * Resolve the client IP from a raw `Request`. Used inside contexts that do
  * not own a Hono `Context` (e.g. Better Auth plugin hooks). Reads, in order:
  *   1. Trusted forwarded headers (`X-Forwarded-For`, `X-Real-IP`) per
- *      `TRUST_PROXY`.
+ *      `TRUST_PROXY`, skipped when the chain is too short to have been
+ *      written by the trusted hops or the entry is not an IP address.
  *   2. The per-Request IP map populated by `clientIpMiddleware` from
  *      `getConnInfo(c).remote.address`.
  *   3. `null` when no source resolves an address. Callers that need a

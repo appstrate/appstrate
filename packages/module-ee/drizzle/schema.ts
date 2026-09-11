@@ -5,6 +5,7 @@ import {
   uuid,
   text,
   boolean,
+  bigint,
   integer,
   numeric,
   timestamp,
@@ -28,6 +29,8 @@ export const billingAccounts = pgTable(
     stripeCustomerId: text("stripe_customer_id"),
     stripeSubscriptionId: text("stripe_subscription_id"),
     planId: text("plan_id").default("free").notNull(),
+    /** Credits spent in the CURRENT period — reset to 0 on each
+     * `subscription_cycle` invoice, so it never accumulates past int4. */
     creditsUsed: integer("credits_used").default(0).notNull(),
     creditQuota: integer("credit_quota").default(0).notNull(),
     periodEnd: timestamp("period_end", { withTimezone: true }),
@@ -90,6 +93,17 @@ export const billingAccounts = pgTable(
  * Drizzle maps `numeric` to a decimal STRING in TS (no `mode` option at
  * drizzle-orm 0.39) — deliberate: the value never round-trips through a JS
  * float. Callers that need a number convert explicitly.
+ *
+ * `cost_credits` is `bigint` for the same unbounded-growth reason. It is the
+ * cumulative credit total for the context, so an `integer` would top out at
+ * 2 147 483 647 credits (~$2.15M) — reachable by the `unattributed` bucket,
+ * which never resets. The overflow would not be one org's problem: the
+ * `round(...)::bigint` write and the `RETURNING` delta both run INSIDE the
+ * sweep transaction, so an `integer out of range` there rolls back the whole
+ * pass — no ledger row claimed, no watermark advanced — and billing stops for
+ * every tenant on every tick until the row is found. `bigint` moves the
+ * ceiling to ~$9.2e15, and `mode: "number"` keeps the TS type a plain number:
+ * a JS number is exact to 2^53 credits (~$9e12), far past any real total.
  */
 export const orgUsageRecords = pgTable(
   "ee_usage_records",
@@ -98,7 +112,7 @@ export const orgUsageRecords = pgTable(
     orgId: uuid("org_id").notNull(),
     contextType: text("context_type").notNull(),
     contextId: text("context_id").notNull(),
-    costCredits: integer("cost_credits").notNull(),
+    costCredits: bigint("cost_credits", { mode: "number" }).notNull(),
     /** Cumulative raw dollar total for this context — the delta-billing basis. */
     costUsd: numeric("cost_usd", { precision: 24, scale: 12 }).default("0").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

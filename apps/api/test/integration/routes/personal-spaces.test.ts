@@ -161,7 +161,7 @@ describe("personal spaces — provisioning at every membership door", () => {
   it("GET /api/spaces repairs a missing one, and two concurrent reads make ONE row", async () => {
     const ctx = await createTestContext({ orgSlug: "lazy-personal" });
     // The fixture seeds membership straight into the table, so this org starts
-    // in exactly the state `scripts/migration/0014` exists for: no personal
+    // in exactly the state `scripts/migration/0015` exists for: no personal
     // space anywhere.
     await db.delete(spaces).where(isNotNull(spaces.ownerUserId));
     expect(await personalSpaceRowsOf(ctx.orgId, ctx.user.id)).toHaveLength(0);

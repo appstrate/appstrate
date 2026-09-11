@@ -71,12 +71,12 @@ describe("getFileCapabilities", () => {
 
   it("keep/delete follow creator OR the files:delete grant (canManage)", () => {
     const doc = { purpose: "user_upload" as const, userId: "user-a", endUserId: null, mime };
-    // Creator, no manage grant → keep/delete via creator.
-    const creator = getFileCapabilities(doc, userA, { visible: true });
+    // Creator, no manage grant, credential admits lifecycle → keep/delete via creator.
+    const creator = getFileCapabilities(doc, userA, { visible: true, creatorCanManage: true });
     expect(creator.keep).toBe(true);
     expect(creator.delete).toBe(true);
     // Non-creator without the grant → no lifecycle control.
-    const stranger = getFileCapabilities(doc, userB, { visible: true });
+    const stranger = getFileCapabilities(doc, userB, { visible: true, creatorCanManage: true });
     expect(stranger.keep).toBe(false);
     expect(stranger.delete).toBe(false);
     // Non-creator WITH the grant → may keep/delete, but the manage permission
@@ -86,6 +86,25 @@ describe("getFileCapabilities", () => {
     expect(admin.delete).toBe(true);
     expect(admin.metadata).toBe(false);
     expect(admin.download).toBe(false);
+  });
+
+  it("the creator arm is capped by the credential ceiling, the grant arm is not", () => {
+    const doc = { purpose: "user_upload" as const, userId: "user-a", endUserId: null, mime };
+    // Creator on a credential that does not admit file lifecycle (an API key
+    // minted without `files:delete`): the ownership right does not survive it.
+    const scoped = getFileCapabilities(doc, userA, { visible: true, creatorCanManage: false });
+    expect(scoped.keep).toBe(false);
+    expect(scoped.delete).toBe(false);
+    // Reading its own upload is untouched — only lifecycle is capped.
+    expect(scoped.download).toBe(true);
+    expect(scoped.metadata).toBe(true);
+    // Omitting the option is the same fail-closed answer.
+    expect(getFileCapabilities(doc, userA, { visible: true }).delete).toBe(false);
+    // The grant arm already passed through the ceiling (`permissions` is
+    // role ∩ scopes), so holding it is enough on its own.
+    const granted = getFileCapabilities(doc, userA, { visible: true, canManage: true });
+    expect(granted.keep).toBe(true);
+    expect(granted.delete).toBe(true);
   });
 
   it("preview requires download AND a previewable mime", () => {

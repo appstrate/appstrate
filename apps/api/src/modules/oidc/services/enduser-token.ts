@@ -18,7 +18,7 @@
  */
 
 import * as jose from "jose";
-import { verifyJwsAccessToken } from "@better-auth/core/oauth2";
+import { verifyJwsAccessToken } from "better-auth/oauth2";
 import { getEnv } from "@appstrate/env";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { logger } from "../../../lib/logger.ts";

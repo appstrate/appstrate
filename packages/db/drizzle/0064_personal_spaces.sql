@@ -26,11 +26,11 @@
 -- `owner_user_id IS NULL`, i.e. they stay team spaces, so all three CHECKs hold
 -- on the whole table at creation and nothing here needs a backfill to be
 -- correct. Provisioning the spaces of members who already exist is
--- `scripts/migration/0014-personal-spaces-backfill.sql`, run AFTER the deploy
+-- `scripts/migration/0015-personal-spaces-backfill.sql`, run AFTER the deploy
 -- has been validated — it creates one space per membership, which is a cloud
 -- plan-limit question first (see the script header).
 --
--- ROLLBACK: ONE-WAY from the first boot of the new build, and 0014 has nothing
+-- ROLLBACK: ONE-WAY from the first boot of the new build, and 0015 has nothing
 -- to do with when that starts. `provisionMember` creates a personal space at
 -- every membership door and `GET /api/spaces` repairs the caller's own, so
 -- personal spaces exist from the first request the new build serves — the

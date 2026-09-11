@@ -657,7 +657,7 @@ export const schemas = {
           },
         ],
         description:
-          "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
+          "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`. A summary read (`agents:run` without `agents:read`) still receives every locked field's NAME, but `values` carries no entry for one — a field the launcher cannot set is not one it reads the stored value of.",
       },
       output: {
         type: "object",
@@ -913,9 +913,12 @@ export const schemas = {
         type: "string",
         enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
       },
-      // `runs.input` is a nullable jsonb column (createFailedRun writes null);
-      // emitted verbatim, so the wire value can be null.
-      input: { type: ["object", "null"], additionalProperties: true },
+      input: {
+        type: ["object", "null"],
+        additionalProperties: true,
+        description:
+          "Resolved run input. Registered-agent input is null without agents:read because it can contain editor-imposed values, including historical locks. Inline input remains visible. Execution and rerun retain the complete input server-side.",
+      },
       result: {
         type: ["object", "null"],
         description:
@@ -1947,6 +1950,7 @@ export const schemas = {
       "name",
       "description",
       "permissions",
+      "unavailable_permissions",
       "createdAt",
       "updatedAt",
     ],
@@ -1965,7 +1969,19 @@ export const schemas = {
       permissions: {
         type: "array",
         items: { type: "string" },
-        description: "Space-level permission strings the role grants, sorted.",
+        description:
+          "Space-level permission strings the role grants on this deployment, sorted. " +
+          "A custom bundle is projected through the same vocabulary enforcement uses, so " +
+          "this array is always one a `PATCH` accepts back.",
+      },
+      unavailable_permissions: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Entries stored on the bundle that this deployment cannot name — their module is " +
+          "no longer loaded — sorted. They grant nothing and are never part of `permissions`; " +
+          "sending a `permissions` array without them is what drops them from the row. " +
+          "Always empty for a preset.",
       },
       createdAt: { type: ["string", "null"], format: "date-time" },
       updatedAt: { type: ["string", "null"], format: "date-time" },

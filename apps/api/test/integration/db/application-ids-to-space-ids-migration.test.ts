@@ -459,8 +459,8 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     // 21 FK columns + the constraint-less `audit_events.space_id`. Two of the
     // 21 arrived with `0056_space_roles` (`space_members.space_id`,
     // `chat_sessions.space_id`), and two more with the personal-spaces work:
-    // `packages.home_space_id` (`0061_packages_home_space`) and
-    // `package_shares.space_id` (`0063_package_shares`). 0003 derives the
+    // `packages.home_space_id` (`0063_packages_home_space`) and
+    // `package_shares.space_id` (`0065_package_shares`). 0003 derives the
     // columns it rewrites FROM the FK set, so it covers them without an edit —
     // which is exactly the property this count guards.
     expect(survivors.length).toBe(22);
@@ -486,7 +486,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     `);
     // Byte-for-byte the same set, same names, same delete actions — twenty of
     // the twenty-one `c` (cascade), and exactly one `r` (restrict):
-    // `packages.home_space_id`, from `0061_packages_home_space`, where SET NULL
+    // `packages.home_space_id`, from `0063_packages_home_space`, where SET NULL
     // would silently promote a package to the org catalogue on a space delete
     // and WIDEN who may write it. `audit_events` used to be one more entry at
     // `n` (set null); `0055_schema_integrity_repairs` dropped that FK, because

@@ -244,8 +244,8 @@ export function createAgentsRouter() {
   // input defaults + field locks (admin-only).
   router.put(
     `/${SCOPED_PACKAGE_ROUTE}/input-settings`,
-    requireAgent(),
     requirePermission("agents", "configure"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
 
@@ -321,9 +321,11 @@ export function createAgentsRouter() {
   );
 
   // GET /api/agents/:scope/:name/proxy — get agent proxy configuration.
-  // Permission BEFORE `requireAgent()`: that middleware 404s on an unknown
-  // agent, so the reverse order answers "does this agent exist?" to a caller
-  // that is not allowed to read agents at all.
+  // Permission BEFORE `requireAgent()`, as on every agent route: that
+  // middleware 404s on an unknown agent, so the reverse order answers "does
+  // this agent exist?" to a caller that is not allowed to read agents at all —
+  // 403-vs-404 enumerates the space's private catalog (#1341). The order is
+  // enforced by `test/integration/middleware/agent-lookup-permission-order.test.ts`.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/proxy`,
     requirePermission("agents", "read"),
@@ -352,8 +354,8 @@ export function createAgentsRouter() {
   // authority; this is what the badge renders.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/connection-readiness`,
-    requireAgent(),
     requirePermission("integrations", "read"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       return c.json(
@@ -373,8 +375,8 @@ export function createAgentsRouter() {
   // PUT /api/agents/:scope/:name/proxy — set agent proxy override (admin-only)
   router.put(
     `/${SCOPED_PACKAGE_ROUTE}/proxy`,
-    requireAgent(),
     requirePermission("agents", "configure"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const scope = getSpaceScope(c);
@@ -397,9 +399,8 @@ export function createAgentsRouter() {
   );
 
   // GET /api/agents/:scope/:name/model — get agent model configuration.
-  // Permission-first, same reason as `…/proxy` above. `agents:run` opens it
-  // too: this is where the launch form reads the model a run will resolve to,
-  // and the body carries no manifest and no prompt.
+  // `agents:run` opens it too: this is where the launch form reads the model a
+  // run will resolve to, and the body carries no manifest and no prompt.
   router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgentRead, requireAgent(), async (c) => {
     const agent = c.get("package");
     const spaceId = c.get("spaceId");
@@ -411,8 +412,8 @@ export function createAgentsRouter() {
   // PUT /api/agents/:scope/:name/model — set agent model override (admin-only)
   router.put(
     `/${SCOPED_PACKAGE_ROUTE}/model`,
-    requireAgent(),
     requirePermission("agents", "configure"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const scope = getSpaceScope(c);
@@ -466,8 +467,8 @@ export function createAgentsRouter() {
   // Read the unified persistence rows visible to the caller.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/persistence`,
-    requireAgent(),
     requirePermission("persistence", "read"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");
@@ -541,8 +542,8 @@ export function createAgentsRouter() {
   // DELETE /api/agents/:scope/:name/persistence/memories/:id
   router.delete(
     `/${SCOPED_PACKAGE_ROUTE}/persistence/memories/:id`,
-    requireAgent(),
     requirePermission("persistence", "delete"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");
@@ -567,8 +568,8 @@ export function createAgentsRouter() {
   // DELETE /api/agents/:scope/:name/persistence/pinned/:id
   router.delete(
     `/${SCOPED_PACKAGE_ROUTE}/persistence/pinned/:id`,
-    requireAgent(),
     requirePermission("persistence", "delete"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");
@@ -595,8 +596,8 @@ export function createAgentsRouter() {
   // in this space. Narrow with query params.
   router.delete(
     `/${SCOPED_PACKAGE_ROUTE}/persistence`,
-    requireAgent(),
     requirePermission("persistence", "delete"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");

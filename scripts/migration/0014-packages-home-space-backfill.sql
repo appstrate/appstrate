@@ -1,7 +1,7 @@
--- 0013 — give every organization package a home space.
+-- 0014 — give every organization package a home space.
 --
 -- Run BETWEEN the drizzle batch carrying
--- `packages/db/drizzle/0061_packages_home_space.sql` and bringing the new
+-- `packages/db/drizzle/0063_packages_home_space.sql` and bringing the new
 -- version up — the shape `0008` uses, for the same reason. That migration adds
 -- `packages.home_space_id` and leaves it NULL on every row, and NULL means
 -- "organization catalogue: owners and admins only": a builder who authored an

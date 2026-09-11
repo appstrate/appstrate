@@ -15,13 +15,18 @@
  * (dashboard tokens skip `resolveOrCreateEndUser`; end-user tokens run it).
  */
 
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
-import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
+import {
+  requireModulePermission,
+  requireCorePermission,
+  enterSpaceContext,
+} from "@appstrate/core/permissions";
+import { pinnedSpaceScopeGuard } from "../../middleware/guards.ts";
 import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
 import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -485,8 +490,8 @@ export function createOidcRouter() {
   router.post(
     "/api/oauth/clients",
     rateLimit(10),
-    idempotency(),
     requireModulePermission("oauth-clients", "write"),
+    idempotency(),
     async (c) => {
       const orgId = c.get("orgId");
       const data = await readJsonBody(c, createOAuthClientSchema);
@@ -655,6 +660,34 @@ export function createOidcRouter() {
     },
   );
 
+  /**
+   * Gate for the per-space auth configuration (SMTP + social providers).
+   *
+   * These routes address ONE space by path param but sit at the app root,
+   * outside `SPACE_SCOPED_PREFIXES`, so no space-context middleware runs for
+   * them. The router therefore enters the space named by `:id` itself, through
+   * the core seam every module route uses (`enterSpaceContext`, which runs the
+   * canonical `validateSpaceInOrg` — 400 on a malformed id, 404 outside the org
+   * — then resolves the caller's role there, refusing a non-member with 403
+   * `not_a_space_member`, or 404 for a `private` space). Each route below then
+   * declares the SPACE-level `space-settings:write`: this IS per-space
+   * configuration, and it is the same permission `PATCH /api/spaces/:id`
+   * requires. Reads take the same string as writes because `space-settings` has
+   * one action by design — no role wants to read a space's mail relay without
+   * administering it.
+   *
+   * `pinnedSpaceScopeGuard` runs first: an API key's membership is resolved
+   * from its CREATOR, so without it a key bound to space A whose creator
+   * administers space B would reach B through the path param.
+   */
+  const enterParamSpace = async (c: Context<AppEnv>, next: Next) => {
+    await enterSpaceContext(c, c.req.param("id")!);
+    return next();
+  };
+
+  router.use("/api/spaces/:id/smtp-config/*", pinnedSpaceScopeGuard, enterParamSpace);
+  router.use("/api/spaces/:id/social-providers/*", pinnedSpaceScopeGuard, enterParamSpace);
+
   // ── Admin: per-space SMTP configuration ─────────────────────────────
   //
   // Scoped to spaces owned by the caller's org. Per-space SMTP replaces
@@ -662,29 +695,12 @@ export function createOidcRouter() {
   // row, verification emails, magic-link, and reset-password are disabled for
   // that space's clients. See `services/smtp.ts` for the resolver.
 
-  /**
-   * Resolve `:id` as a space of the caller's org, or refuse.
-   *
-   * Delegates to the canonical `validateSpaceInOrg` rather than repeating its
-   * SELECT: this copy used to run the query with NO id-shape guard, so a
-   * retired `app_` id — the one input `assertSpaceId` exists to diagnose —
-   * answered a generic 404 instead of naming the un-run `app_` → `spc_`
-   * migration. A well-formed `spc_` id that names no row of this org is still
-   * a 404; a malformed id is now a 400, as it is on every other space-scoped
-   * surface.
-   */
-  const assertSpaceBelongsToOrg = async (c: Context<AppEnv>, spaceId: string) => {
-    const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
-    if (!space) throw notFound("Space not found");
-  };
-
   router.get(
     "/api/spaces/:id/smtp-config",
     rateLimit(300),
-    requireCorePermission("spaces", "read"),
+    requireCorePermission("space-settings", "write"),
     async (c) => {
       const spaceId = c.req.param("id")!;
-      await assertSpaceBelongsToOrg(c, spaceId);
       const config = await getSmtpConfig(spaceId);
       if (!config) throw notFound("SMTP configuration not found");
       return c.json(config);
@@ -694,10 +710,9 @@ export function createOidcRouter() {
   router.put(
     "/api/spaces/:id/smtp-config",
     rateLimit(20),
-    requireCorePermission("spaces", "write"),
+    requireCorePermission("space-settings", "write"),
     async (c) => {
       const spaceId = c.req.param("id")!;
-      await assertSpaceBelongsToOrg(c, spaceId);
       const data = await readJsonBody(c, smtpConfigUpsertSchema);
       // SSRF: block configurations that would make Appstrate bounce
       // email traffic off internal metadata endpoints / loopback relays.
@@ -724,10 +739,9 @@ export function createOidcRouter() {
   router.delete(
     "/api/spaces/:id/smtp-config",
     rateLimit(10),
-    requireCorePermission("spaces", "write"),
+    requireCorePermission("space-settings", "write"),
     async (c) => {
       const spaceId = c.req.param("id")!;
-      await assertSpaceBelongsToOrg(c, spaceId);
       const deleted = await deleteSmtpConfig(spaceId);
       if (!deleted) throw notFound("SMTP configuration not found");
       return c.body(null, 204);
@@ -737,10 +751,9 @@ export function createOidcRouter() {
   router.post(
     "/api/spaces/:id/smtp-config/test",
     rateLimit(5),
-    requireCorePermission("spaces", "write"),
+    requireCorePermission("space-settings", "write"),
     async (c) => {
       const spaceId = c.req.param("id")!;
-      await assertSpaceBelongsToOrg(c, spaceId);
       const data = await readJsonBody(c, smtpConfigTestSchema);
       try {
         const result = await sendTestEmail(spaceId, data.to);
@@ -776,10 +789,9 @@ export function createOidcRouter() {
   router.get(
     "/api/spaces/:id/social-providers/:provider",
     rateLimit(300),
-    requireCorePermission("spaces", "read"),
+    requireCorePermission("space-settings", "write"),
     async (c) => {
       const spaceId = c.req.param("id")!;
-      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
       const config = await getSocialProvider(spaceId, provider);
       if (!config) throw notFound("Social provider configuration not found");
@@ -790,10 +802,9 @@ export function createOidcRouter() {
   router.put(
     "/api/spaces/:id/social-providers/:provider",
     rateLimit(20),
-    requireCorePermission("spaces", "write"),
+    requireCorePermission("space-settings", "write"),
     async (c) => {
       const spaceId = c.req.param("id")!;
-      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
       const data = await readJsonBody(c, socialProviderUpsertSchema);
       const saved = await upsertSocialProvider(spaceId, provider, data);
@@ -804,10 +815,9 @@ export function createOidcRouter() {
   router.delete(
     "/api/spaces/:id/social-providers/:provider",
     rateLimit(10),
-    requireCorePermission("spaces", "write"),
+    requireCorePermission("space-settings", "write"),
     async (c) => {
       const spaceId = c.req.param("id")!;
-      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
       const deleted = await deleteSocialProvider(spaceId, provider);
       if (!deleted) throw notFound("Social provider configuration not found");
@@ -2104,6 +2114,7 @@ export function createOidcRouter() {
     const body = renderConsentPage({
       clientName: ctx.client.name ?? ctx.client.clientId,
       scopes,
+      clientLevel: ctx.client.level,
       action: `/api/oauth/consent${url.search}`,
       branding: ctx.branding,
       csrfToken: ctx.csrfToken,
@@ -2124,6 +2135,7 @@ export function createOidcRouter() {
       const body = renderConsentPage({
         clientName: ctx.client.name ?? ctx.client.clientId,
         scopes: scope.split(/\s+/).filter(Boolean),
+        clientLevel: ctx.client.level,
         action: `/api/oauth/consent${url.search}`,
         branding: ctx.branding,
         csrfToken: ctx.csrfToken,

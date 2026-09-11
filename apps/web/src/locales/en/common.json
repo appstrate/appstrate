@@ -123,10 +123,11 @@
   "viewAs.banner": "You are viewing the organization as <b>{{role}}</b>",
   "viewAs.bannerSpace": "You are viewing the organization as <b>{{role}}</b>, <b>{{spaceRole}}</b> in <b>{{space}}</b>",
   "viewAs.bannerHere": "· in <b>{{space}}</b>: <b>{{role}}</b> (open space)",
+  "viewAs.bannerOwn": "What you created stays visible — your runs, your files, your connections. This role sees less.",
   "viewAs.exit": "Exit",
-  "viewAs.stopped.invalid_view_as": "Preview stopped: the saved preview can no longer be read.",
-  "viewAs.stopped.view_as_unsupported": "Preview stopped: this session cannot preview a role.",
-  "viewAs.stopped.view_as_forbidden": "Preview stopped: you may no longer preview this role.",
-  "viewAs.stopped.view_as_not_found": "Preview stopped: the previewed space or role no longer exists.",
-  "viewAs.stopped.generic": "Preview stopped."
+  "viewAs.stopped.invalid_view_as": "Preview unavailable: this preview could not be read.",
+  "viewAs.stopped.view_as_unsupported": "Preview unavailable: this session cannot preview a role.",
+  "viewAs.stopped.view_as_forbidden": "Preview unavailable: you may not preview this role.",
+  "viewAs.stopped.view_as_not_found": "Preview unavailable: the space or role to preview does not exist.",
+  "viewAs.stopped.generic": "Preview unavailable."
 }

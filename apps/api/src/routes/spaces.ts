@@ -15,7 +15,7 @@ import {
 } from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { apiKeySpaceScopeGuard } from "../middleware/guards.ts";
+import { pinnedSpaceScopeGuard } from "../middleware/guards.ts";
 import { ApiError, forbidden, invalidRequest, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -81,7 +81,7 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { listSpaceRoles } from "../services/space-roles.ts";
+import { hasCustomRoles, listSpaceRoles } from "../services/space-roles.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
@@ -318,8 +318,8 @@ function toSweepWire(
 export function createSpacesRouter() {
   const router = new Hono<AppEnv>();
 
-  router.use("/:id", apiKeySpaceScopeGuard);
-  router.use("/:spaceId/*", apiKeySpaceScopeGuard);
+  router.use("/:id", pinnedSpaceScopeGuard);
+  router.use("/:spaceId/*", pinnedSpaceScopeGuard);
 
   // GET /api/spaces — list spaces the caller reaches (RBAC spec §6.3)
   router.get("/", requirePermission("spaces", "read"), async (c) => {
@@ -342,13 +342,13 @@ export function createSpacesRouter() {
       personalOwnerId,
       personaMemberships(personaFor(c, orgId)),
     );
-    // An API key never enumerates its siblings: it sees the one space it is
-    // bound to, whatever its creator reaches.
-    const keySpaceId = c.get("spaceId");
-    const scoped =
-      c.get("authMethod") === "api_key"
-        ? entries.filter((e) => e.space.id === keySpaceId)
-        : entries;
+    // A credential PINNED to a space never enumerates its siblings: it sees the
+    // one space it is bound to, whatever its subject reaches. Keyed on the
+    // pinned space rather than on `authMethod === "api_key"`, for the reason
+    // `pinnedSpaceScopeGuard` is (issue #1313) — any strategy that pins a space
+    // is confined, not just the one auth method that did when this was written.
+    const pinnedSpaceId = c.get("spaceId");
+    const scoped = pinnedSpaceId ? entries.filter((e) => e.space.id === pinnedSpaceId) : entries;
     return c.json(
       listResponse(scoped.map(({ space, role }) => spaceWireForCaller(c, space, role))),
     );
@@ -568,16 +568,23 @@ export function createSpacesRouter() {
     ]),
     async (c) => {
       const permissions = c.get("permissions");
+      // This listing answers "what can I assign HERE", so it is filtered by the
+      // same two things the assignment refuses on: the feature, then the
+      // caller's own permissions. A bundle nobody can grant is not offered —
+      // the org catalogue (`GET /api/roles`) still lists leftovers, which is
+      // where a downgraded deployment finds them to delete.
+      const customGrantable = hasCustomRoles();
       const roles = await listSpaceRoles(c.get("orgId"));
       return c.json(
         listResponse(
           roles.filter((role) =>
-            canGrantSpaceRole(
-              permissions,
-              role.kind === "preset"
-                ? { kind: "preset", preset: role.key as SpaceRolePreset }
-                : { kind: "custom", role: { ...role, id: role.id! } },
-            ),
+            role.kind === "preset"
+              ? canGrantSpaceRole(permissions, {
+                  kind: "preset",
+                  preset: role.key as SpaceRolePreset,
+                })
+              : customGrantable &&
+                canGrantSpaceRole(permissions, { kind: "custom", role: { ...role, id: role.id! } }),
           ),
         ),
       );
@@ -659,15 +666,27 @@ export function createSpacesRouter() {
     const space = c.get("space")!;
     const userId = c.req.param("userId")!;
 
-    // Dropping an explicit restriction can grant the open-space default.
+    // Two bounds, not one. This one: dropping an explicit restriction can grant
+    // the open-space default. The other — the standing being DROPPED must be
+    // one the caller could have granted, or `space-members:remove` alone ejects
+    // a space admin — is asserted inside `removeSpaceMember`, on the row it
+    // deletes, under the same lock the grant path holds.
+    const permissions = c.get("permissions");
     const member = await getOrgMember(orgId, userId);
     assertCanGrantSpaceRole(
-      c.get("permissions"),
+      permissions,
       // The target's standing, so the caller id is THEIRS — a personal space
       // resolves `admin` for its owner and nothing for anyone else.
       member ? resolveSpaceRole(member.role, space, null, userId) : null,
     );
-    if (!(await removeSpaceMember(space.id, userId))) {
+    if (
+      !(await removeSpaceMember({
+        orgId,
+        spaceId: space.id,
+        userId,
+        actorPermissions: permissions,
+      }))
+    ) {
       throw notFound("Space member not found");
     }
     await recordAuditFromContext(c, {

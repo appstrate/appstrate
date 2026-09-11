@@ -8,6 +8,7 @@ import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { lockOrgMemberForSpaceGrant } from "./space-members.ts";
+import { assertCustomRolesFeature } from "./space-roles.ts";
 
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -66,6 +67,15 @@ export async function assertSpaceAssignmentsValid(
     ...new Set(assignments.map((a) => a.custom_role_id).filter((id): id is string => Boolean(id))),
   ];
   if (roleIds.length === 0) return;
+  // Naming a bundle in a deferred grant is granting one, just later — so it
+  // asks the same licence the immediate grant does. Checked at the moment the
+  // grant is AUTHORED (an invitation, an OAuth signup policy) and at the moment
+  // a standing policy is replayed for a new signup, which is the only replay
+  // that would otherwise keep propagating bundles forever after a downgrade.
+  // Accepting an invitation issued while the feature was on is not re-checked:
+  // that grant was authored under licence, and refusing it would strand an
+  // invitee who has no way to fix it.
+  assertCustomRolesFeature("assign");
   const liveRoles = await tx
     .select({ id: spaceRoles.id })
     .from(spaceRoles)
