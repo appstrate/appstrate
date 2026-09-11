@@ -488,7 +488,7 @@ export function createIntegrationsRouter() {
       // the branch above and as `/connect/start` (issue #1345) — this page is
       // session-less, so the text goes to the log and the user gets the
       // generic sentence.
-      logger.error("Integration OAuth callback failed", { err: String(err) });
+      logger.error("Integration OAuth callback threw", { err: String(err) });
       return c.html(
         popupHtmlError("Could not complete the connection. Please try again.", { state }),
       );
