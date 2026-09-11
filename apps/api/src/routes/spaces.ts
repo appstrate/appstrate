@@ -75,11 +75,7 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { hasCustomRoles, listSpaceRoles } from "../services/space-roles.ts";
-import {
-  assertCanGrantSpaceRole,
-  assertCanManageSpaceMember,
-  canGrantSpaceRole,
-} from "../lib/space-role-policy.ts";
+import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
   assertExplicitModelExists,
@@ -534,19 +530,25 @@ export function createSpacesRouter() {
     const space = c.get("space")!;
     const userId = c.req.param("userId")!;
 
-    // Two bounds, not one. The standing being DROPPED must be one the caller
-    // could have granted — otherwise `space-members:remove` alone ejects a
-    // space admin, since the grant check below sees nothing in a `closed` or
-    // `private` space. Then: dropping an explicit restriction can grant the
-    // open-space default.
+    // Two bounds, not one. This one: dropping an explicit restriction can grant
+    // the open-space default. The other — the standing being DROPPED must be
+    // one the caller could have granted, or `space-members:remove` alone ejects
+    // a space admin — is asserted inside `removeSpaceMember`, on the row it
+    // deletes, under the same lock the grant path holds.
     const permissions = c.get("permissions");
     const member = await getOrgMember(orgId, userId);
-    assertCanManageSpaceMember(permissions, (await loadSpaceMember(space.id, userId))?.ref ?? null);
     assertCanGrantSpaceRole(
       permissions,
       member ? resolveSpaceRole(member.role, space, null) : null,
     );
-    if (!(await removeSpaceMember(space.id, userId))) {
+    if (
+      !(await removeSpaceMember({
+        orgId,
+        spaceId: space.id,
+        userId,
+        actorPermissions: permissions,
+      }))
+    ) {
       throw notFound("Space member not found");
     }
     await recordAuditFromContext(c, {

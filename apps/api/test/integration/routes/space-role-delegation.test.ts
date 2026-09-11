@@ -11,6 +11,7 @@ import {
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
 import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
+import { removeSpaceMember } from "../../../src/services/space-members.ts";
 
 const app = getTestApp();
 
@@ -180,6 +181,30 @@ describe("space role delegation", () => {
     // The same two calls from someone who holds preset `admin` still work.
     expect((await request(owner, path, "PATCH", { preset_role: "operator" })).status).toBe(200);
     expect((await request(owner, path, "DELETE")).status).toBe(200);
+  });
+
+  // The same refusal as above, asked of the SERVICE rather than the route. It
+  // belongs there because the row the bound is judged on and the row the DELETE
+  // removes have to be one transaction's worth of truth: judged at the route,
+  // a promotion committing in between turns a permitted removal into the
+  // ejection of a space admin.
+  it("refuses a removal from inside the service, on the row it is about to delete", async () => {
+    const space = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
+    const target = await member();
+    await seedSpaceMember({ spaceId: space.id, userId: target.user.id, presetRole: "admin" });
+    const actorPermissions = new Set([...presetPermissions("viewer"), "space-members:remove"]);
+    const remove = (userId: string) =>
+      removeSpaceMember({ orgId: owner.orgId, spaceId: space.id, userId, actorPermissions });
+
+    await expect(remove(target.user.id)).rejects.toMatchObject({ status: 403 });
+    expect(await roleKey(target, space.id)).toBe("admin");
+
+    // Same bundle, a standing it could have granted: removed, and asked twice
+    // it reports the missing row instead of refusing it.
+    const weaker = await member();
+    await seedSpaceMember({ spaceId: space.id, userId: weaker.user.id, presetRole: "viewer" });
+    expect(await remove(weaker.user.id)).toBe(true);
+    expect(await remove(weaker.user.id)).toBe(false);
   });
 
   it("settings-only authority can rename and close but cannot open a stronger default or change it", async () => {

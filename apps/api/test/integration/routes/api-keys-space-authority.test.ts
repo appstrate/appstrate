@@ -7,8 +7,8 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
-import { auditEvents } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+import { auditEvents, spaceMembers } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import {
@@ -25,7 +25,6 @@ import {
   seedPackage,
   seedInstalledPackage,
 } from "../../helpers/seed.ts";
-import { removeSpaceMember } from "../../../src/services/space-members.ts";
 
 const app = getTestApp();
 
@@ -115,7 +114,9 @@ describe("API keys carry their creator's authority in the key's space", () => {
     expect((await read()).status).toBe(200);
 
     // Live ceiling, no revocation sweep: the row goes, the key stops working.
-    await removeSpaceMember(closed.id, creator.id);
+    await db
+      .delete(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, closed.id), eq(spaceMembers.userId, creator.id)));
     expect((await read()).status).toBe(403);
   });
 

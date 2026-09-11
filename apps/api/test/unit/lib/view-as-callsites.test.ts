@@ -85,7 +85,7 @@ describe("persona-sensitive call sites", () => {
         ],
         [
           "apps/api/src/routes/spaces.ts",
-          "reads the TARGET member's row on a role change, not the caller's",
+          "reads the TARGET member's row to report what access it leaves behind, not the caller's",
         ],
         [
           "apps/api/src/services/scheduler.ts",
