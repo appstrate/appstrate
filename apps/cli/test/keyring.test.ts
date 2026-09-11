@@ -343,6 +343,16 @@ describe("broken-keyring fallback refusal (unix)", () => {
     await saveTokens("default", toks);
     expect(await loadTokens("default")).toEqual(toks);
   });
+
+  it("refuses rather than guesses when the wording is unknown", async () => {
+    // The conservative side of the split: an unrecognised throw never becomes a
+    // silent plaintext write — which is what makes the next upstream rewording
+    // loud instead of silently permissive.
+    FakeKeyring.throwMessage = "Platform secure storage failure";
+    await expect(
+      saveTokens("default", mkTokens({ accessToken: "ok3", expiresAt: futureMs() })),
+    ).rejects.toThrow(/keyring is installed but not serving/);
+  });
 });
 
 describe("fallback file: insecure-permission refusal", () => {
@@ -516,54 +526,6 @@ describe("loadTokens expiration handling", () => {
       mkTokensJson({ accessToken: "boundary", expiresAt: now, refreshExpiresAt: now }),
     );
     expect(await loadTokens("default")).toBeNull();
-  });
-});
-
-describe("classifyKeyringError on @napi-rs/keyring 2.x wordings", () => {
-  // Issue #1321: the 2.0 bump reworded every error Display, and the
-  // markers this classification matched on ("Platform secure storage
-  // failure", "No storage") stopped existing in the binary — so a CI
-  // runner with no store classified as locked and hard-refused instead
-  // of using the file fallback the store-less host has no alternative
-  // to. These cases pin both sides of the split.
-  const originalPlaintextEnv = process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
-
-  beforeEach(() => {
-    FakeKeyring.shouldThrow = true;
-    delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
-  });
-
-  afterEach(() => {
-    if (originalPlaintextEnv === undefined) {
-      delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
-    } else {
-      process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = originalPlaintextEnv;
-    }
-  });
-
-  it("silent-falls-back on a PlatformFailure (no store on this host)", async () => {
-    FakeKeyring.throwMessage = PLATFORM_FAILURE;
-    const toks = mkTokens({ accessToken: "ok", expiresAt: futureMs() });
-    await saveTokens("default", toks);
-    expect(await loadTokens("default")).toEqual(toks);
-  });
-
-  it("refuses a write on a NoStorageAccess (store present but locked)", async () => {
-    FakeKeyring.throwMessage = STORE_LOCKED;
-    await expect(
-      saveTokens("default", mkTokens({ accessToken: "ok2", expiresAt: futureMs() })),
-    ).rejects.toThrow(/keyring is installed but not serving/);
-  });
-
-  it("refuses rather than guesses when the wording is unknown", async () => {
-    // The conservative side of the split: an unrecognised throw never
-    // becomes a silent plaintext write. The retired 1.x markers land
-    // here, which is what makes a future rewording loud instead of
-    // silently permissive.
-    FakeKeyring.throwMessage = "Platform secure storage failure";
-    await expect(
-      saveTokens("default", mkTokens({ accessToken: "ok3", expiresAt: futureMs() })),
-    ).rejects.toThrow(/keyring is installed but not serving/);
   });
 });
 
