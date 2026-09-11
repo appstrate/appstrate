@@ -228,12 +228,9 @@ const codexProvider: ModelProviderDefinition = {
   // `gpt-5-search-api`, the `-chat-latest` aliases…) that a Codex
   // subscription never serves, so deriving from it would over-list by a wide
   // margin. Reviewed against
-  // https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in,
-  // fetched 2026-07-27, re-read 2026-09-07 when `gpt-6-astra` reached the
-  // catalog) and re-reviewed whenever
-  // `apps/api/src/data/subscription-watch/chatgpt.json` drifts.
+  // https://learn.chatgpt.com/docs/models (Codex with ChatGPT sign-in).
   //
-  // That review is no longer trust-based: `apps/api/test/unit/services/
+  // That review is not trust-based: `apps/api/test/unit/services/
   // curated-model-drift.test.ts` fails CI when the vendored openai catalog
   // gains an id newer than this list. A catalog id the subscription does NOT
   // serve is recorded — after checking the doc above — in
