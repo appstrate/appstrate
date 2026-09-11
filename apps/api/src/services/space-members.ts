@@ -216,13 +216,34 @@ interface RoleColumns {
   customRoleId: string | null;
 }
 
-/** Remove an explicit row. Returns false when there was none. */
-export async function removeSpaceMember(spaceId: string, userId: string): Promise<boolean> {
-  const deleted = await db
-    .delete(spaceMembers)
-    .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
-    .returning({ userId: spaceMembers.userId });
-  return deleted.length > 0;
+/**
+ * Remove an explicit row. Returns false when there was none.
+ *
+ * The target bound lives here, not at the route: the row read it rests on and
+ * the DELETE that acts on it must be one statement's worth of truth. The lock
+ * is the grant path's — org promotion/removal take it before touching space
+ * memberships — so the role asserted here cannot change under the delete.
+ *
+ * @throws 403 when the caller could not have granted the role being dropped.
+ */
+export async function removeSpaceMember(params: {
+  orgId: string;
+  spaceId: string;
+  userId: string;
+  actorPermissions: ReadonlySet<string> | undefined;
+}): Promise<boolean> {
+  const { orgId, spaceId, userId } = params;
+  return db.transaction(async (tx) => {
+    await lockOrgMemberForSpaceGrant(tx, orgId, userId);
+    const existing = await loadSpaceMember(spaceId, userId, tx);
+    if (!existing) return false;
+    assertCanManageSpaceMember(params.actorPermissions, existing.ref);
+    const deleted = await tx
+      .delete(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, userId)))
+      .returning({ userId: spaceMembers.userId });
+    return deleted.length > 0;
+  });
 }
 
 /** A grant that was dropped, as the audit trail records it. */
