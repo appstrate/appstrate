@@ -518,7 +518,7 @@ function ModelForm({
             </div>
           )}
           {duplicateModelIds.length > 0 && (
-            <div className="text-destructive text-sm">
+            <div className="text-muted-foreground text-sm">
               {t("models.form.addSkippedDuplicate", { ids: duplicateModelIds.join(", ") })}
             </div>
           )}
