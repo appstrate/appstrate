@@ -1314,6 +1314,21 @@ describe("skills sync — multiple spaces", () => {
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
   });
 
+  it("fails a typed --space instead of deleting every skill on a revocation", async () => {
+    // The flag was typed just now, so a revocation that makes it unhonourable
+    // has to say so: applied as the removal plan it wiped the tree and exited 0,
+    // never acknowledging the space the user named.
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    failSpaceListing(403);
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsSyncCommand({ space: ["spc_1"] }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("no longer grants this profile access to them");
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+  });
+
   it("keeps every skill when the space listing fails for anything but a revocation", async () => {
     // A 5xx says nothing about this profile's grants, so the tree is left
     // exactly as it was and the run fails — the revocation branch must not
