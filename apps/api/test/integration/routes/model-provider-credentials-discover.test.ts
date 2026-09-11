@@ -286,6 +286,10 @@ describe("POST /api/model-provider-credentials/discover", () => {
     expect(body.message).toBeNull();
     expect(body.models.map((m) => m.id)).toEqual(["gpt-4o", "qwen3:8b"]);
 
+    // One page, one request — and the caller is told the list is complete.
+    expect(body.truncated).toBe(false);
+    expect(listingRequests.get("openai")).toBe(1);
+
     // `gpt-4o` is a vendored id — the cross-catalog lookup describes it even
     // though `openai-compatible` has no catalog of its own.
     const known = body.models[0]!;
@@ -441,18 +445,6 @@ describe("POST /api/model-provider-credentials/discover", () => {
       base_url_override: GOOD_BASE_URL,
     });
     expect(res.status).toBe(400);
-  });
-
-  it("reads a one-page listing with exactly one request", async () => {
-    const res = await discover(ctx, {
-      provider_id: "openai-compatible",
-      api_key: "good-key",
-      base_url_override: GOOD_BASE_URL,
-    });
-
-    expect(res.status).toBe(200);
-    expect(((await res.json()) as DiscoverBody).truncated).toBe(false);
-    expect(listingRequests.get("openai")).toBe(1);
   });
 
   it("follows the listing cursor instead of returning a silently short first page", async () => {

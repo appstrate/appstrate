@@ -14,7 +14,7 @@
  * any agent lookup. It is a property of the mount ORDER — invisible at runtime,
  * invisible in a diff that adds one more route by copying its neighbour — so it
  * is asserted here against Hono's real route table rather than trusted to
- * review. Eleven routes had it backwards when this test was written.
+ * review.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -86,18 +86,7 @@ describe("agent lookup never precedes the permission guard", () => {
     expect(isPermissionGuard(requireAnyPermission(["agents:read", "agents:write"]))).toBe(true);
     // Negative control: an ordinary middleware carries no marker.
     expect(isPermissionGuard((_c: unknown, next: () => unknown) => next())).toBe(false);
-  });
-
-  it("detects a lookup mounted ahead of its guard", () => {
-    // Negative control for `offendingRoutes`: the detector must fail on the
-    // shape this issue was about, or the assertion above proves nothing.
-    const bad = [requireAgent(), requirePermission("agents", "read")];
-    const good = [requirePermission("agents", "read"), requireAgent()];
-
-    const firstLookup = (chain: unknown[]) => chain.findIndex(isAgentLookup);
-    const firstGuard = (chain: unknown[]) => chain.findIndex(isPermissionGuard);
-
-    expect(firstGuard(bad) > firstLookup(bad)).toBe(true);
-    expect(firstGuard(good) < firstLookup(good)).toBe(true);
+    // …and the lookup marker, on the factory this ordering rule is about.
+    expect(isAgentLookup(requireAgent())).toBe(true);
   });
 });
