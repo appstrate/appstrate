@@ -10,20 +10,13 @@
  * (npm shebang, curl binary), so the libc call comes through `bun:ffi`.
  *
  * **Why errno is read.** A non-zero return means "did not lock", not "someone
- * else holds it". `EWOULDBLOCK` is the only answer that names a competitor;
- * `ENOLCK` / `EOPNOTSUPP` (NFS without lockd, some 9p and virtiofs container
- * mounts) mean the filesystem has no `flock` at all. Treating those as busy
- * blocked the command for the full timeout and then reported a concurrent
- * process that does not exist.
+ * else holds it". Only `EWOULDBLOCK` names a competitor; `ENOLCK` /
+ * `EOPNOTSUPP` (NFS without lockd, some 9p and virtiofs mounts) mean the
+ * filesystem has no `flock` at all, and must not enter the poll loop.
  *
  * **Why an unavailable lock fails open.** Where `flock` does not work — an
- * unsupported mount, or Windows, which has no `flock(2)` and whose
- * `LockFileEx` equivalent this project cannot test — the choice is between
- * running the sync unsynchronised and not syncing at all. The lock guards a
- * rare race (two syncs started within the same window); refusing every sync
- * on those hosts is the larger breakage, so the body runs and the user is
- * told on stderr. That is one path, not a Windows-specific one: a
- * `LockFileEx` binding lands the day someone can verify it on Windows.
+ * unsupported mount, or Windows — refusing every sync is a larger breakage
+ * than the rare race the lock guards, so the body runs and stderr says so.
  */
 
 import { dlopen, FFIType, read, type Pointer } from "bun:ffi";

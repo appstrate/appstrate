@@ -95,19 +95,9 @@ export function _setKeyringFactoryForTesting(factory: KeyringFactory | null): vo
  * Read side of the seam above, for the fixture's own test only.
  *
  * Unwiring cannot be observed through `_keyringFactory`: passing `null`
- * reinstalls a NEW closure over `new Entry(...)`, so the variable is never
- * `null` and two reads of it are never equal. The fixture test therefore tried
- * to observe the unwiring by READING through the restored factory and expecting
- * a miss — which reaches `@napi-rs/keyring` for real. On a Linux CI runner with
- * no keyring daemon that call SEGFAULTS the process (Bun 1.3.14, exit 132)
- * before any JS error handling runs, so neither `classifyKeyringError` nor the
- * `APPSTRATE_ALLOW_PLAINTEXT_TOKENS` fallback can catch it: those guard a
- * thrown error, and a native crash is not one.
- *
- * A boolean beside the factory is the whole fix. It changes no resolution
- * behaviour — `_keyringFactory` is assigned exactly as before — and it lets the
- * test assert the property directly instead of inferring it from a native call
- * nobody should be making in a unit test.
+ * reinstalls a NEW closure, so the variable is never `null`. Observing it by
+ * READING instead reaches `@napi-rs/keyring` for real, which SEGFAULTS on a
+ * daemon-less runner — a native crash no `catch` can see.
  */
 export function _isKeyringFactoryOverriddenForTesting(): boolean {
   return _keyringFactoryOverridden;
@@ -131,35 +121,16 @@ let _backendWarningEmitted = false;
 /**
  * Sort a keyring throw into the only two outcomes that change what we do.
  *
- * `@napi-rs/keyring` 2.x surfaces `keyring-core` errors as plain JS
- * `Error`s, so the variant survives only as its Display prefix — the
- * prefix IS the discriminator, and the one we split on is pinned
- * against the shipped native binary by
- * `test/keyring-error-markers.test.ts`, which fails on the next bump
- * that reworded them (the failure this classification had already
- * silently suffered once, issue #1321).
+ * `@napi-rs/keyring` 2.x reports errors as plain `Error`s, so the Display
+ * prefix IS the discriminator; `test/keyring-error-markers.test.ts` pins it
+ * against the shipped native binary, so a rewording is a red test.
  *
- *   • `store-unavailable` (`PlatformFailure`) — there is no keyring
- *     protection on this host to downgrade FROM, so the 0600 file
- *     store is the only option: fall back silently. This is the whole
- *     reason the file store exists.
- *   • `store-locked` (everything else, chiefly `NoStorageAccess`, whose
- *     Display prefix is `Couldn't access platform storage: `) — the
- *     store exists and answered, but refused us: locked Keychain on a
- *     headless SSH session, a gnome-keyring that will not unlock, a
- *     user who denied access. The machine IS configured to protect
- *     secrets and merely won't serve us right now. Writing plaintext
- *     here would be a real downgrade, so the write path refuses unless
- *     the operator opts in.
+ * `store-unavailable` (`PlatformFailure`): no keyring on this host, nothing to
+ * downgrade FROM — the 0600 file store is the only option. Everything else is
+ * `store-locked`: the store answered and refused us, so a plaintext write
+ * would be a real downgrade. Unknown wording lands on the conservative side.
  *
- * Unknown wording therefore lands on the conservative side: refuse and
- * say why, never a silent plaintext write.
- *
- * There is no third "the entry simply isn't there" class: 2.x reports
- * a missing credential as `getPassword() === null` and
- * `deletePassword() === false`, never as a throw (contract stated in
- * `@napi-rs/keyring`'s own `index.d.ts`). Every throw reaching us
- * means the store did not serve the operation.
+ * There is no "entry missing" class: 2.x returns `null`/`false` for that.
  */
 function classifyKeyringError(err: unknown): "store-unavailable" | "store-locked" {
   return getErrorMessage(err).includes(PLATFORM_FAILURE_MARKER)
@@ -197,15 +168,6 @@ function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): n
   );
 }
 
-/**
- * Refuse the plaintext file fallback on unix hosts where the keyring
- * daemon is installed but broken (locked Keychain on headless SSH, a
- * gnome-keyring that can't unlock, etc.). Returns instead of throwing
- * so callers can still layer their own context (op name), but always
- * ends by throwing. Silent plaintext-on-disk is the worst failure mode
- * — a bearer token in `~/.config/appstrate/credentials.json` equals
- * full account takeover for anyone with read access to the file.
- */
 /** Per-OS unlock instructions, shared by every keyring refusal message. */
 const KEYRING_UNLOCK_HINT =
   `    • macOS: run the CLI from a Terminal attached to a logged-in\n` +

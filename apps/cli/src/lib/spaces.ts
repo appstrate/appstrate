@@ -59,11 +59,8 @@ export async function listSpaces(profileName: string): Promise<Space[]> {
  * predates them serves neither — and a blind cast would hand that row on as a
  * space whose standing reads `undefined`. `skills sync` compares that against
  * `"member"`, finds no space that supplies skills, and deletes every skill it
- * had installed (issue #1320). An older server is a version mismatch to say out
- * loud, never an emptied set of grants, so the standing is checked, not cast.
- *
- * `SpaceObject` requires both fields, so a 200 without them is a server that
- * broke its own contract — the same grade of fault `apiList` reports.
+ * had installed. An older server is a version mismatch to say out loud, never
+ * an emptied set of grants, so the standing is checked, not cast.
  */
 function asSpace(row: unknown): Space {
   const space = row as Space | null;

@@ -590,21 +590,12 @@ function unusableReason(space: Space): string {
  * The spaces this profile reaches, or `null` when the organization no longer
  * lets it reach any.
  *
- * `GET /api/spaces` answers 403 to a caller the pinned organization does not
- * admit: `orgContext` refuses one with no membership row ("You are not a member
- * of this organization"), and `requirePermission("spaces", "read")` refuses one
- * whose org role cannot read the catalog. Either way the server has stated that
- * this profile draws no skills from this organization any more — a REVOCATION,
- * which the sync must APPLY, not a fault to retry. Reported as a fault it exits
- * 1, and under `--print-path` Claude Code then discards the run and keeps
- * serving the stale plugin, so an offboarded machine kept every one of that
- * organization's skills forever (issue #1362).
- *
- * Only 403 is a statement about this profile's grants. A 401 is about the
- * SESSION — `apiFetch` turns it into a re-login `AuthError` after a refresh
- * attempt, and a lapsed login must never take working skills away (same reason
- * `bootstrapPlugin` keeps an existing plugin) — and a 5xx or a network error is
- * a fault that leaves the tree untouched.
+ * A 403 from `GET /api/spaces` — no membership row, or an org role without
+ * `spaces:read` — is the server stating this profile draws no skills from this
+ * organization any more. That is a REVOCATION the sync must APPLY, not a fault
+ * to retry. Only 403 says that: a 401 is about the SESSION (`apiFetch` turns it
+ * into a re-login `AuthError`, and a lapsed login must never take working
+ * skills away), and a 5xx or network error leaves the tree untouched.
  */
 async function reachableSpaces(
   profileName: string,
