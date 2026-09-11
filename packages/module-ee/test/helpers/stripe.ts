@@ -48,7 +48,7 @@ function clearRequests(): void {
 // ─── Response overrides ─────────────────────────────────────────
 
 let checkoutOverride: Record<string, unknown> | null = null;
-let subscriptionOverride: Record<string, unknown> | null = null;
+let subscriptionOverride: Fixture<Stripe.Subscription> | null = null;
 let nextError: { status: number; body: Record<string, unknown> } | null = null;
 
 export function setCheckoutResponse(response: Record<string, unknown>): void {
@@ -60,7 +60,7 @@ export function setCheckoutResponse(response: Record<string, unknown>): void {
  * the in-place plan change retrieves then updates the same subscription, so an override
  * both verbs consumed would be spent by the retrieve and never reach the update.
  */
-export function setSubscriptionResponse(response: Record<string, unknown>): void {
+export function setSubscriptionResponse(response: Fixture<Stripe.Subscription>): void {
   subscriptionOverride = response;
 }
 

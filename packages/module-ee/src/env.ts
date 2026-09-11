@@ -42,17 +42,10 @@ export const eeEnvSchema = z
     // confirm — and keeps its own timer, because a paused sweep that also stopped
     // those retries would keep charging customers for deleted organizations.
     EE_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
-    // The absolute ceiling is {@link LEDGER_LIST_MAX_LIMIT}, the platform's
-    // `usage.list` limit: the cursor read is capped there server-side, so a larger
-    // batch would silently cap. The batch does NOT own that budget alone — the
-    // replay window is read on top of it — so the real bound is the cross-field
-    // rule under this object, and this `.max` is only the replay-window-of-0 case.
-    EE_RECONCILIATION_BATCH_SIZE: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(LEDGER_LIST_MAX_LIMIT)
-      .default(100),
+    // Upper-bounded by the cross-field rule under this object, not here: the
+    // batch shares {@link LEDGER_LIST_MAX_LIMIT} with the replay window, which is
+    // read on top of it.
+    EE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).default(100),
 
     // How far BELOW the watermark every sweep pass re-reads the ledger.
     //
@@ -100,25 +93,11 @@ export const eeEnvSchema = z
     EE_RECONCILIATION_REPLAY_WINDOW: z.coerce.number().int().min(0).max(500).default(200),
 
     // How long the sweep may have been ABSENT before it refuses to resume over
-    // the gap it left. Guards ONE situation: the module (or metering) was off
-    // while the platform kept appending to `llm_usage`. The watermark survives
-    // that window, so the first tick after re-enabling claims every row of it
-    // and debits the lot against TODAY's quotas — soft-cap overshoots and
-    // quota-warning emails fleet-wide, credits already spent by the time anyone
-    // reads the heartbeat. Whether that gap should be billed or forgiven is an
-    // operator's call, not a default, so the module refuses to boot and names
-    // both paths (see `assertCursorResumable` in `billing/billing-sweeper.ts`).
-    //
-    // The refusal needs BOTH halves of the predicate, because each alone has a
-    // false positive that would brick a healthy boot:
-    //   - AGE ALONE would refuse a platform that was simply SHUT DOWN for a
-    //     week: no sweep ran, but no usage accrued either, and there is nothing
-    //     to back-bill.
-    //   - BACKLOG ALONE would refuse a deployment whose sweep is legitimately
-    //     behind (ingest above drain capacity) while ticking normally — the
-    //     case that needs capacity, not an operator decision.
-    // Together they say: the sweeper was NOT running, and a gap large enough to
-    // outrun one tick's drain accumulated while it wasn't.
+    // the gap it left. Resuming would bill a whole disabled window against
+    // TODAY's quotas, so the module refuses to boot and names both operator
+    // paths — forgive the gap, or bill it. What the refusal actually tests, and
+    // why it takes two measurements rather than one, is on
+    // `assertCursorResumable` in `billing/billing-sweeper.ts`.
     //
     // DEFAULT 86400 (a day). A sweep that has not confirmed the watermark in 24
     // hours on a platform that kept metering was not running. 0 disables the

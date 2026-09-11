@@ -29,6 +29,10 @@ export const billingAccounts = pgTable(
     stripeCustomerId: text("stripe_customer_id"),
     stripeSubscriptionId: text("stripe_subscription_id"),
     planId: text("plan_id").default("free").notNull(),
+    /** Credits spent in the CURRENT period. Stays `integer` where
+     * `ee_usage_records.cost_credits` had to widen: a paid plan resets it to 0
+     * on every `subscription_cycle` invoice, and the free tier is held near its
+     * 5000-credit quota by the admission gate, so it never accumulates. */
     creditsUsed: integer("credits_used").default(0).notNull(),
     creditQuota: integer("credit_quota").default(0).notNull(),
     periodEnd: timestamp("period_end", { withTimezone: true }),

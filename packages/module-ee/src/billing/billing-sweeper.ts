@@ -103,9 +103,9 @@ const ALERT_AFTER_FAILED_TICKS = 3;
 const MAX_DRAIN_ITERATIONS = 50;
 
 /**
- * Tick cadence when `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering.
- * Matches the default sweep cadence: {@link runMaintenance} is idempotent and,
- * in steady state, one indexed SELECT that returns nothing.
+ * Tick cadence when `EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering. Its
+ * own cadence, not a fallback to the sweep's: {@link runMaintenance} is
+ * idempotent and, in steady state, one indexed SELECT that returns nothing.
  */
 const MAINTENANCE_INTERVAL_SECONDS = 300;
 
