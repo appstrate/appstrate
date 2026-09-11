@@ -8,11 +8,19 @@
  *
  * `runCheck` is where every decision lives — which snapshot to diff against,
  * the three refusals, the exit codes, the report — so it carries the bulk of
- * these tests. The pure helpers keep only the cases `runCheck` cannot reach.
+ * these tests. Direct helper regressions also pin their result shapes,
+ * independently of the operator report's wording.
  */
 
 import { describe, it, expect } from "bun:test";
-import { declaredColumns, declaredIndexes, diffColumns, runCheck } from "../check-index-drift.ts";
+import { PGlite } from "@electric-sql/pglite";
+import {
+  declaredColumns,
+  declaredIndexes,
+  diffColumns,
+  PUBLIC_COLUMNS_QUERY,
+  runCheck,
+} from "../check-index-drift.ts";
 import {
   declaredTables,
   latestSnapshotName,
@@ -152,6 +160,24 @@ describe("runCheck — drift", () => {
 });
 
 describe("runCheck — column drift (#1349)", () => {
+  it("exits 1 when jwks is missing even though it declares no standalone index", async () => {
+    const { exitCode, lines } = await check({
+      snapshots: {
+        "0001_snapshot.json": withColumns(snapshot({ jwks: [] }), {
+          jwks: { id: true, public_key: true, private_key: true },
+        }),
+      },
+      actual: [],
+      actualColumns: [],
+    });
+
+    expect(exitCode).toBe(1);
+    expect(lines.join("\n")).toContain("  missing column  jwks.id");
+    expect(lines.join("\n")).toContain("  missing column  jwks.public_key");
+    expect(lines.join("\n")).toContain("  missing column  jwks.private_key");
+    expect(lines.join("\n")).not.toContain("No missing column");
+  });
+
   it("exits 1 and names a declared column the database lacks", async () => {
     // The 42703 the Better Auth adapter check cannot see: it diffs the plugin's
     // expectations against the TS object, never against a database.
@@ -414,11 +440,53 @@ describe("declaredColumns", () => {
 });
 
 describe("diffColumns", () => {
-  it("skips a declared table the database does not have at all", () => {
-    // The index half already names it once; forty "missing column" lines under
-    // it would bury that.
-    const diff = diffColumns(new Map([["runs", new Map([["id", true]])]]), new Map());
-    expect(diff).toEqual({ absent: [], nullability: [], undeclared: [] });
+  it("reports every column of a missing table as absent, including nullable columns", () => {
+    const diff = diffColumns(
+      new Map([
+        [
+          "jwks",
+          new Map([
+            ["public_key", true],
+            ["expires_at", false],
+            ["id", true],
+          ]),
+        ],
+      ]),
+      new Map(),
+    );
+
+    expect(diff).toEqual({
+      absent: ["jwks.expires_at", "jwks.id", "jwks.public_key"],
+      nullability: [],
+      undeclared: [],
+    });
+  });
+});
+
+describe("column introspection", () => {
+  it("sees public columns without table privileges and excludes dropped columns", async () => {
+    const pg = new PGlite();
+    try {
+      await pg.exec(`
+        CREATE TABLE public.jwks (id text PRIMARY KEY, public_key text NOT NULL, expires_at timestamp, retired text);
+        ALTER TABLE public.jwks DROP COLUMN retired;
+        CREATE SCHEMA audit;
+        CREATE TABLE audit.events (id text);
+        CREATE ROLE drift_reader;
+        SET ROLE drift_reader;
+      `);
+      const { rows } = await pg.query(PUBLIC_COLUMNS_QUERY);
+      expect(rows).toHaveLength(3);
+      expect(rows).toEqual(
+        expect.arrayContaining([
+          { tablename: "jwks", columnname: "id", notnull: true },
+          { tablename: "jwks", columnname: "public_key", notnull: true },
+          { tablename: "jwks", columnname: "expires_at", notnull: false },
+        ]),
+      );
+    } finally {
+      await pg.close();
+    }
   });
 });
 

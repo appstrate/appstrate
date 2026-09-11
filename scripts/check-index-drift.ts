@@ -82,17 +82,23 @@ export const PUBLIC_INDEXES_QUERY =
   "SELECT indexname, tablename FROM pg_indexes WHERE schemaname = 'public'";
 
 /**
- * Actual columns in the database, with the table each sits on.
+ * Actual columns in the database, with the table each sits on. Exported so the
+ * restricted-role regression exercises the same query as the operator script.
  *
- * `is_nullable` is a `YES`/`NO` string in `information_schema`; it is folded to
- * a boolean in SQL so the comparison here is against the same `notNull` the
- * snapshot writes, with no string convention crossing the boundary. Aliased to
- * unprefixed names so a row reads like a `pg_indexes` one.
+ * Unlike `information_schema.columns`, the catalog is not filtered by table
+ * privileges: no rows for a declared table means it is missing, not merely
+ * unreadable by the operator. Include ordinary and partitioned tables, exclude
+ * system/dropped attributes, and use the catalog's boolean NOT NULL flag.
  */
-const PUBLIC_COLUMNS_QUERY = `
-  SELECT table_name AS tablename, column_name AS columnname, (is_nullable = 'NO') AS notnull
-    FROM information_schema.columns
-   WHERE table_schema = 'public'
+export const PUBLIC_COLUMNS_QUERY = `
+  SELECT c.relname AS tablename, a.attname AS columnname, a.attnotnull AS notnull
+    FROM pg_catalog.pg_attribute a
+    JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public'
+     AND c.relkind IN ('r', 'p')
+     AND a.attnum > 0
+     AND NOT a.attisdropped
 `;
 
 /**
@@ -236,8 +242,8 @@ export function declaredColumns(snapshot: DrizzleSnapshot): Map<string, Map<stri
  * Three-way difference between the columns a snapshot declares and the ones a
  * database has, restricted to the tables the snapshot declares.
  *
- * `absent` is the 42703 case; `nullability` is a column present while its declared NOT NULL is
- * not; `undeclared` is pre-squash residue, never fatal.
+ * `absent` includes columns of a missing table; `nullability` is a column present while its
+ * declared NOT NULL is not; `undeclared` is pre-squash residue, never fatal.
  */
 export function diffColumns(
   declared: Map<string, Map<string, boolean>>,
@@ -247,11 +253,7 @@ export function diffColumns(
   const nullability: string[] = [];
   const undeclared: string[] = [];
   for (const [table, columns] of declared) {
-    const found = actual.get(table);
-    // `information_schema.columns` is PRIVILEGE-FILTERED: silence about a table is not evidence
-    // it is absent, so a declared table with no column row is skipped. The table-level question
-    // belongs to `apps/api/test/unit/migration-schema-parity.test.ts`.
-    if (!found) continue;
+    const found = actual.get(table) ?? new Map<string, boolean>();
     for (const [column, notNull] of columns) {
       const actualNotNull = found.get(column);
       if (actualNotNull === undefined) absent.push(`${table}.${column}`);

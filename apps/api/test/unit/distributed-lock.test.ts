@@ -13,7 +13,7 @@
  * behaviour under test), so they skip on tier 0.
  */
 
-import { it, expect, afterAll } from "bun:test";
+import { it, expect, beforeAll, afterAll } from "bun:test";
 import Redis from "ioredis";
 import { describeRequiresRedis } from "../helpers/tier.ts";
 import { withRedisLock } from "../../src/lib/distributed-lock.ts";
@@ -21,8 +21,12 @@ import { withRedisLock } from "../../src/lib/distributed-lock.ts";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describeRequiresRedis("withRedisLock lease watchdog", () => {
-  const redis = new Redis(process.env.REDIS_URL as string, { maxRetriesPerRequest: 3 });
+  let redis: Redis;
   const keys: string[] = [];
+
+  beforeAll(() => {
+    redis = new Redis(process.env.REDIS_URL as string, { maxRetriesPerRequest: 3 });
+  });
 
   function uniqueKey(name: string): string {
     const key = `test-lock:${name}:${Date.now()}`;

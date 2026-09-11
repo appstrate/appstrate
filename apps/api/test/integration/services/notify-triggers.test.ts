@@ -23,7 +23,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { listenClient } from "@appstrate/db/client";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { integrationConnections, runs } from "@appstrate/db/schema";
+import { integrationConnections, runLogs, runs } from "@appstrate/db/schema";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedRunLog, seedPackage } from "../../helpers/seed.ts";
 import {
@@ -31,6 +31,13 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
+import { appendRunLog } from "../../../src/services/state/runs.ts";
+
+const oversizedTextCases = [
+  ["multibyte", "😀", 2_000],
+  // Multiplying this length by the 2 000-byte budget overflows a PostgreSQL int4.
+  ["large ASCII", "x", 1_073_742],
+] as const;
 
 describe("NOTIFY triggers (regression)", () => {
   let ctx: TestContext;
@@ -254,97 +261,117 @@ describe("NOTIFY triggers (regression)", () => {
   // character emoji log line is 8 000 bytes on its own. The trigger used to cap
   // with `LEFT(NEW.message, 2000)`, so such a line made pg_notify raise INSIDE
   // the trigger and the agent lost the run_logs ROW, not just the live frame.
-  it("notify_run_log_insert keeps a multibyte log line and trims it by bytes", async () => {
-    const run = await seedRun({
-      packageId: "@notifyorg/trigger-agent",
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      userId: ctx.user.id,
-      status: "running",
-    });
+  it.each(oversizedTextCases)(
+    "notify_run_log_insert keeps a %s log line and trims its notification by bytes",
+    async (_label, character, count) => {
+      const run = await seedRun({
+        packageId: "@notifyorg/trigger-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "running",
+      });
 
-    const received: Array<Record<string, unknown>> = [];
-    await listenClient.listen("run_log_insert", (raw) => {
-      try {
-        const payload = JSON.parse(raw) as Record<string, unknown>;
-        if (payload.run_id === run.id) received.push(payload);
-      } catch {
-        /* ignore */
+      const received: Array<Record<string, unknown>> = [];
+      await listenClient.listen("run_log_insert", (raw) => {
+        try {
+          const payload = JSON.parse(raw) as Record<string, unknown>;
+          if (payload.run_id === run.id) received.push(payload);
+        } catch {
+          /* ignore */
+        }
+      });
+
+      // 400 × 3 bytes = 1 200 bytes — inside the 2 000-byte message budget.
+      const fits = "漢".repeat(400);
+      const overflows = character.repeat(count);
+
+      // A trigger error aborts the INSERT. The full message must remain stored;
+      // only the notification has a byte budget.
+      await seedRunLog({ runId: run.id, orgId: ctx.orgId, event: "fits", message: fits });
+      const logId = await appendRunLog(
+        { orgId: ctx.orgId },
+        run.id,
+        "log",
+        "overflows",
+        overflows,
+        null,
+      );
+      const [row] = await db
+        .select({ message: runLogs.message })
+        .from(runLogs)
+        .where(eq(runLogs.id, logId));
+      expect(row?.message).toBe(overflows);
+      for (let i = 0; i < 40 && received.length < 2; i++) {
+        await new Promise((r) => setTimeout(r, 25));
       }
-    });
 
-    // 400 × 3 bytes = 1 200 bytes — inside the 2 000-byte message budget.
-    const fits = "漢".repeat(400);
-    // 2 000 × 4 bytes = 8 000 bytes — over the whole NOTIFY ceiling by itself.
-    const overflows = "😀".repeat(2_000);
+      expect(received).toHaveLength(2);
+      // Under budget → delivered verbatim; the budget is bytes, not a blanket
+      // character cap that would mangle CJK that comfortably fits.
+      expect(received[0]).toMatchObject({ event: "fits", message: fits });
 
-    // Both `seedRunLog` calls RETURNING the row is half the assertion: a
-    // trigger that raises aborts the INSERT, so the second one used to throw
-    // `payload string too long` here.
-    await seedRunLog({ runId: run.id, orgId: ctx.orgId, event: "fits", message: fits });
-    await seedRunLog({ runId: run.id, orgId: ctx.orgId, event: "overflows", message: overflows });
-    for (let i = 0; i < 40 && received.length < 2; i++) {
-      await new Promise((r) => setTimeout(r, 25));
-    }
-
-    expect(received).toHaveLength(2);
-    // Under budget → delivered verbatim; the budget is bytes, not a blanket
-    // character cap that would mangle CJK that comfortably fits.
-    expect(received[0]).toMatchObject({ event: "fits", message: fits });
-
-    // Over budget → trimmed on whole code points, never mid-character.
-    const trimmed = received[1]!.message as string;
-    const bytes = new TextEncoder().encode(trimmed).length;
-    expect(bytes).toBeLessThanOrEqual(2_000);
-    expect(bytes).toBeGreaterThan(1_900);
-    expect(trimmed).toBe("😀".repeat(bytes / 4));
-  });
+      // Over budget → trimmed on whole code points, never mid-character.
+      const trimmed = received[1]!.message as string;
+      const bytes = new TextEncoder().encode(trimmed).length;
+      expect(bytes).toBeLessThanOrEqual(2_000);
+      expect(bytes).toBeGreaterThan(1_900);
+      expect(trimmed).toBe(character.repeat(bytes / new TextEncoder().encode(character).length));
+    },
+  );
 
   // Same defect, worse blast radius: `notify_run_change` interpolates
   // `runs.error`, and it fires on the finalize UPDATE. A raise there rolls the
   // finalize back and leaves the run stuck in 'running' forever.
-  it("notify_run_change survives a multibyte run error", async () => {
-    const run = await seedRun({
-      packageId: "@notifyorg/trigger-agent",
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      userId: ctx.user.id,
-      status: "running",
-    });
+  it.each(oversizedTextCases)(
+    "notify_run_change survives a %s run error",
+    async (_label, character, count) => {
+      const run = await seedRun({
+        packageId: "@notifyorg/trigger-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "running",
+      });
 
-    const received: Array<Record<string, unknown>> = [];
-    await listenClient.listen("run_update", (raw) => {
-      try {
-        const payload = JSON.parse(raw) as Record<string, unknown>;
-        // The channel is already LISTENed by the earlier cases, so the seed
-        // INSERT's own notification can land on this callback too — only the
-        // finalize is under test.
-        if (payload.id === run.id && payload.status === "failed") received.push(payload);
-      } catch {
-        /* ignore */
+      const received: Array<Record<string, unknown>> = [];
+      await listenClient.listen("run_update", (raw) => {
+        try {
+          const payload = JSON.parse(raw) as Record<string, unknown>;
+          // The channel is already LISTENed by the earlier cases, so the seed
+          // INSERT's own notification can land on this callback too — only the
+          // finalize is under test.
+          if (payload.id === run.id && payload.status === "failed") received.push(payload);
+        } catch {
+          /* ignore */
+        }
+      });
+
+      const error = character.repeat(count);
+      await db.execute(
+        sql`UPDATE runs SET status = 'failed', error = ${error}, completed_at = now() WHERE id = ${run.id}`,
+      );
+      for (let i = 0; i < 40 && received.length < 1; i++) {
+        await new Promise((r) => setTimeout(r, 25));
       }
-    });
 
-    // 2 000 × 4 bytes = 8 000 bytes — over the whole NOTIFY ceiling by itself.
-    await db.execute(
-      sql`UPDATE runs SET status = 'failed', error = ${"😀".repeat(2_000)}, completed_at = now() WHERE id = ${run.id}`,
-    );
-    for (let i = 0; i < 40 && received.length < 1; i++) {
-      await new Promise((r) => setTimeout(r, 25));
-    }
+      // A raise inside the trigger rolls the finalize back, so the row itself is
+      // the first half of the assertion.
+      const [row] = await db
+        .select({ status: runs.status, error: runs.error })
+        .from(runs)
+        .where(eq(runs.id, run.id));
+      expect(row?.status).toBe("failed");
+      expect(row?.error).toBe(error);
 
-    // A raise inside the trigger rolls the finalize back, so the row itself is
-    // the first half of the assertion.
-    const [row] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id));
-    expect(row?.status).toBe("failed");
-
-    expect(received).toHaveLength(1);
-    const trimmed = received[0]!.error as string;
-    const bytes = new TextEncoder().encode(trimmed).length;
-    expect(bytes).toBeLessThanOrEqual(2_000);
-    expect(bytes).toBeGreaterThan(1_900);
-    expect(trimmed).toBe("😀".repeat(bytes / 4));
-  });
+      expect(received).toHaveLength(1);
+      const trimmed = received[0]!.error as string;
+      const bytes = new TextEncoder().encode(trimmed).length;
+      expect(bytes).toBeLessThanOrEqual(2_000);
+      expect(bytes).toBeGreaterThan(1_900);
+      expect(trimmed).toBe(character.repeat(bytes / new TextEncoder().encode(character).length));
+    },
+  );
 
   // Drives the live "Reconnection required" badge end-to-end: trigger →
   // pg_notify → LISTEN → SSE event. The actor filter on the realtime

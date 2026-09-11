@@ -97,7 +97,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
       LOOP
         _bytes := octet_length(to_json(_value)::text);
         EXIT WHEN _bytes <= _max_bytes OR _value = '';
-        _value := left(_value, (length(_value) * _max_bytes) / _bytes);
+        _value := left(_value, ((length(_value)::bigint * _max_bytes) / _bytes)::int);
       END LOOP;
       RETURN _value;
     END;
