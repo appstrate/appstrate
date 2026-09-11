@@ -322,27 +322,6 @@ const config: KnipConfig = {
    */
   ignoreIssues: {
     "packages/ui/src/components/*.tsx": ["exports"],
-    /**
-     * Redesign components built but not yet mounted. They are kept, not
-     * deleted, because the screens that consume them are the next items on
-     * `docs/redesign-2026.md`'s ordered list — and a component deleted for
-     * being early is a component rewritten later from memory.
-     *
-     * This list is a debt, not a carve-out: an entry that outlives its screen
-     * should be removed, not renewed.
-     */
-    "apps/web/src/components/appstrate-mark.tsx": ["files"],
-    "apps/web/src/components/sidebar-billing.tsx": ["files"],
-    "apps/web/src/components/run-detail/run-source-card.tsx": ["files"],
-    "apps/web/src/components/agent-detail/agent-bundle-tab.tsx": ["files"],
-    "apps/web/src/components/persistence/memory-row.tsx": ["files"],
-    "apps/web/src/components/persistence/pinned-slot-card.tsx": ["files"],
-    "apps/web/src/components/source-badge.tsx": ["files"],
-    /**
-     * The lab's fixture catalogue is consumed as a namespace (`import * as f`),
-     * which knip does not resolve per named export. Reporting each fixture as
-     * unused would make the whole file unreadable as a signal.
-     */
     "apps/web/src/lab/fixtures.ts": ["exports"],
     "apps/web/src/lab/handlers.ts": ["exports"],
     /** Helpers of the screens listed above, same debt. */
