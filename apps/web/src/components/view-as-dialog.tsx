@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
@@ -59,12 +59,16 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId);
   const [roleValue, setRoleValue] = useState("");
   const [entering, setEntering] = useState(false);
-  /**
-   * Every way out of this dialog — the Cancel button, Escape, the overlay —
-   * unmounts it without stopping the listing `submit` is awaiting. The closure
-   * survives the unmount, so it asks this before committing anything.
-   */
+  /** A closed or unmounted dialog must never commit a pending preview. */
   const abandoned = useRef(false);
+  useLayoutEffect(() => {
+    // Reset for StrictMode's setup/cleanup replay. Layout cleanup marks an
+    // unmount before any pending promise continuation can apply its response.
+    abandoned.current = false;
+    return () => {
+      abandoned.current = true;
+    };
+  }, []);
 
   /** The one exit: whatever closed the dialog, the preview it started is off. */
   const close = () => {

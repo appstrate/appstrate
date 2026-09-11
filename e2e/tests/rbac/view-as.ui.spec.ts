@@ -224,6 +224,58 @@ test.describe("View as role", () => {
     await expect(banner(page)).toHaveCount(0);
   });
 
+  test("does not activate a loading preview after SPA navigation unmounts the dialog", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/org-settings");
+    await page.locator('a[href="/org-settings/roles"]').first().click();
+    await expect(page.getByTestId("view-as-button")).toBeVisible();
+
+    let release = () => {};
+    const stalled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let pending = false;
+    await page.route(
+      (url) => url.pathname === "/api/orgs",
+      async (route) => {
+        if (!route.request().headers()["x-view-as"]) return route.continue();
+        pending = true;
+        await stalled;
+        await route.continue();
+      },
+    );
+
+    await page.getByTestId("view-as-button").click();
+    const dialog = page.getByRole("dialog");
+    await dialog.locator("#view-as-space").click();
+    await page.getByRole("option", { name: "Aucun espace" }).click();
+    await dialog.getByTestId("view-as-submit").click();
+    await expect.poll(() => pending).toBe(true);
+
+    // The preceding Link made a same-document history entry: back unmounts
+    // the route without closing the dialog or destroying the fetch's realm.
+    await page.goBack();
+    await expect(dialog).toHaveCount(0);
+    const reply = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/orgs" &&
+        !!response.request().headers()["x-view-as"],
+    );
+    release();
+    await (await reply).finished();
+    // Let the response's promise continuation and React's render both settle
+    // before asserting absence — an immediate check can pass before activation.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull();
+    await expect(banner(page)).toHaveCount(0);
+  });
+
   test("previews a viewer, then gives the owner their authority back @critical", async ({
     authedPage: page,
     apiClient,
