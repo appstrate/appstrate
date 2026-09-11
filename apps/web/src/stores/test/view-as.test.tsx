@@ -196,11 +196,11 @@ describe("cache reset", () => {
   });
 
   it("publishes the persona's own org row in the same tick as the persona", () => {
-    // #1322: the persona used to be committed on its own and `["orgs"]` merely
-    // refetched. React Query serves the previous value for the whole of a
-    // background refetch — and forever if it fails — so `usePermissions` kept
-    // reading the previewer's permissions and every org-level admin entry
-    // stayed in the menu under a "Lecteur" banner.
+    // #1322: React Query serves the previous value for the whole of a
+    // background refetch — and forever if it fails — so committing the persona
+    // without its org row leaves `usePermissions` on the previewer's
+    // permissions, every org-level admin entry in the menu under a "Lecteur"
+    // banner.
     queryClient.setQueryData(orgKeys.all, [
       { ...ORGS_AS_PERSONA[0]!, role: "owner", permissions: ["org:read", "webhooks:read"] },
     ]);
