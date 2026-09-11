@@ -316,7 +316,10 @@ describe("NOTIFY triggers (regression)", () => {
     await listenClient.listen("run_update", (raw) => {
       try {
         const payload = JSON.parse(raw) as Record<string, unknown>;
-        if (payload.id === run.id) received.push(payload);
+        // The channel is already LISTENed by the earlier cases, so the seed
+        // INSERT's own notification can land on this callback too — only the
+        // finalize is under test.
+        if (payload.id === run.id && payload.status === "failed") received.push(payload);
       } catch {
         /* ignore */
       }
