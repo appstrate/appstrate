@@ -26,18 +26,11 @@
  * with no column here raises `SchemaMismatchError` and rejects auth traffic.
  * Adding a plugin means adding its tables here in the same change.
  *
- * READ THAT CHECK NARROWLY — it says NOTHING about any database (issue #1349).
- * `findDrizzleSchemaProblems` diffs the plugin's expectations against THIS
- * TYPESCRIPT OBJECT; all three findings it can emit (`missing-table`,
- * `missing-column`, `unexpected-required-column`) are computed from TS, it
- * never reads `information_schema`, and it does not look at indexes at all. A
- * database missing a column declared below therefore boots perfectly clean and
- * fails as a Postgres 42703 on the first `/oauth2/token`. The two checks that
- * do look at a database are `apps/api/test/unit/migration-schema-parity.test.ts`
- * (CI: replays the journal into a throwaway PGlite and diffs the catalog
- * against this file) and `scripts/check-index-drift.ts` (operator: diffs a LIVE
- * database against its own watermark snapshot — the only one that can see a
- * production database that predates the `0000_init.sql` squash).
+ * That check reads THIS TypeScript object, never `information_schema`, and
+ * never indexes: a database missing a column declared below boots clean and
+ * fails as a Postgres 42703 on the first `/oauth2/token`. The database-facing
+ * checks are `apps/api/test/unit/migration-schema-parity.test.ts` (CI) and
+ * `scripts/check-index-drift.ts` (operator, live DB).
  *
  * Raw-SQL CHECK constraints from the module's migrations are reproduced here
  * via Drizzle `check()` so regen keeps them. The `oauth_clients_level_immutable`
