@@ -51,12 +51,17 @@ describe("Invitation space assignments", () => {
   }
 
   describe("POST /api/orgs/:orgId/members — validation", () => {
-    it("refuses a guest invitation with no space (400)", async () => {
+    // A guest with no team grant is the SHARING invitation (plan decision 4):
+    // the membership provisions their own personal space, where they hold
+    // `operator`, and a shared package is what they are there for. Demanding a
+    // team space on top would grant more than the invitation means.
+    it("accepts a guest invitation with no space (201)", async () => {
       const res = await invite({ email: "lonely@test.com", role: "guest" });
 
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { detail: string };
-      expect(body.detail).toContain("space_assignments");
+      expect(res.status, await res.clone().text()).toBe(201);
+      const body = (await res.json()) as { role: string; space_assignments: unknown[] };
+      expect(body.role).toBe("guest");
+      expect(body.space_assignments).toEqual([]);
     });
 
     it("accepts a guest invitation that names a space (201)", async () => {
@@ -181,17 +186,21 @@ describe("Invitation space assignments", () => {
     });
 
     it("re-checks the role rules against the stored list when the body omits it", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Promotion" });
       const inv = await seedInvitation({
         orgId: ctx.orgId,
         email: "promote@test.com",
         invitedBy: ctx.user.id,
-        spaceAssignments: [],
+        spaceAssignments: [{ space_id: space.id, preset_role: "viewer" }],
       });
 
+      // The surviving role rule is the admin one — an admin runs every space,
+      // so the stored grants have to be gone before the promotion lands. The
+      // body names only the role, so the check has to read the STORED list.
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${inv.id}`, {
         method: "PUT",
         headers: { ...orgOnlyHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "guest" }),
+        body: JSON.stringify({ role: "admin" }),
       });
 
       expect(res.status).toBe(400);

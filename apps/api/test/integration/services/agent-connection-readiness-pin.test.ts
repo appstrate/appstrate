@@ -32,6 +32,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedInstalledPackage } from "../../helpers/seed.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 
 const INTEG = "@readyorg/integ";
 const SERVER = "@readyorg/server";
@@ -170,6 +171,11 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       version: "1.0.0",
       manifest: agentManifest({ withIntegration: false }),
     });
+    await uploadPackageZip(
+      AGENT,
+      "1.0.0",
+      buildMinimalZip(agentManifest({ withIntegration: false }), "Published prompt.", "prompt.md"),
+    );
 
     const base = {
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },

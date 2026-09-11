@@ -32,7 +32,8 @@ import {
 } from "@appstrate/core/permissions";
 import type { OrgRole, SpaceRolePreset, ViewAsOrgRole } from "@appstrate/core/permissions";
 import { ApiError } from "./errors.ts";
-import { isSpaceRoleId, SPACE_ID_RE } from "./ids.ts";
+import { isSpaceRoleId } from "./ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { effectivePermissions, orgPermissions, type Permission } from "./permissions.ts";
 import {
   loadSpaceMember,
@@ -218,12 +219,23 @@ async function validatePersonaSpace(
 ): Promise<NonNullable<ViewAsPersona["space"]>> {
   const space = await validateSpaceInOrg(requested.spaceId, orgId);
   if (!space) throw viewAsNotFound(`Space '${requested.spaceId}' not found in this organization`);
+  // A personal space has exactly one member and no role to preview: whatever
+  // persona were asked for, the answer would be its owner's `admin`. Refusing
+  // is also what keeps the preview a pure restriction — a previewing admin
+  // holds nothing there to narrow (RBAC spec §3.6).
+  if (space.ownerUserId !== null) {
+    throw invalidViewAs(
+      `Space '${space.id}' is a personal space; there is no role to preview in it.`,
+    );
+  }
   const role = await resolvePersonaSpaceRole(orgId, requested.role);
   // Grantability against what the real caller holds THERE, the same rule that gates handing
   // the role to someone else. Owners and admins carry no `space_members` row, so `null` IS it.
   const real = effectivePermissions({
     orgPermissions: orgPermissions(realOrgRole),
-    spacePermissions: spacePermissions(resolveSpaceRole(realOrgRole, space, null)),
+    // `null` caller: the space is not personal (refused above), so the
+    // parameter cannot change the answer.
+    spacePermissions: spacePermissions(resolveSpaceRole(realOrgRole, space, null, null)),
   });
   if (!canGrantSpaceRole(real, role)) {
     onDenial(`view_as:${requested.role.kind}`);
@@ -403,6 +415,35 @@ export function effectiveInSpace(
 
 export function callerOrgRole(c: Context<AppEnv>, orgId = c.get("orgId")): OrgRole {
   return personaFor(c, orgId)?.orgRole ?? c.get("orgRole");
+}
+
+/**
+ * The user whose personal spaces this request may reach, or `null` when the
+ * principal is not one (RBAC spec §3.6). Every `resolveSpaceRole` call site
+ * passes it — no default, because a default would hand an API key its
+ * creator's private drafts.
+ *
+ * A personal space is a member's private half, so it answers to that member's
+ * own credential and to nothing else: an API key is pinned to one space and
+ * carries its creator's authority, not their privacy, and an end-user is not a
+ * member at all. The `deferOrgResolution` strategies — the CLI device-flow
+ * token and the MCP instance token — DO reach it: they are the human's own
+ * credential by another transport, the same reading `viewAsTransportGuard`
+ * takes, so "session-only" would be the wrong way to say this.
+ *
+ * Under a role preview it is `null`: a persona has no personal space, and
+ * `X-View-As` cannot even name one ({@link validatePersonaSpace}). Answering
+ * the previewer's own would put a space in the preview that the previewed role
+ * does not have, which is the one thing a preview must not do.
+ */
+export function callerPersonalOwnerId(
+  c: Context<AppEnv>,
+  orgId: string | undefined = c.get("orgId"),
+): string | null {
+  if (c.get("endUser")) return null;
+  if (c.get("authMethod") !== "session" && !c.get("deferOrgResolution")) return null;
+  if (orgId !== undefined && personaFor(c, orgId)) return null;
+  return c.get("user")?.id ?? null;
 }
 
 /** Its own row, or none anywhere else. Exported for SSE, which has no `c.get("user")`. */

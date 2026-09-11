@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { VERSION_DRAFT } from "../lib/version-selector";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
@@ -27,14 +28,6 @@ interface RunWithOptionsSubmit {
   overrides: RunOverridesValue;
   dependencyOverrides: Record<string, string>;
 }
-
-/**
- * Default version selector — `draft` (the working copy), matching the plain
- * "Lancer" button. The dashboard's run path forces `?version=draft` rather than
- * omitting it (`useRunAgent`), so the editor always runs the draft regardless
- * of the server's published-by-default for API/MCP callers (#636).
- */
-const DEFAULT_VERSION = "draft";
 
 interface RunWithOptionsModalProps {
   open: boolean;
@@ -102,7 +95,7 @@ function RunWithOptionsForm({
   const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
     storedInputValues(agent.input),
   );
-  const [version, setVersion] = useState<string>(DEFAULT_VERSION);
+  const [version, setVersion] = useState<string>(agent.version_pin ?? VERSION_DRAFT);
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
   const inputFormRef = useRef<AgentInputFormHandle>(null);
@@ -129,7 +122,7 @@ function RunWithOptionsForm({
         onSubmit={fire}
       />
 
-      {/* Run version — default `draft` (= plain "Lancer", which forces draft).
+      {/* Run version — defaults to the installed pin, else the working copy.
           The only leading option is `draft`; a run has no schedule-style
           "inherit" to defer to. Any published version is an explicit pick,
           applied verbatim. */}
@@ -138,7 +131,7 @@ function RunWithOptionsForm({
         label={t("run.overrides.versionLabel")}
         value={version}
         onChange={setVersion}
-        leadingOptions={[{ value: DEFAULT_VERSION, label: t("run.overrides.versionDraft") }]}
+        leadingOptions={[{ value: VERSION_DRAFT, label: t("run.overrides.versionDraft") }]}
       />
 
       {deps && (

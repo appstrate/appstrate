@@ -3,7 +3,7 @@
 import { orgRoleEnum } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
-import { SPACE_ID_RE } from "../lib/ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -35,7 +35,37 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
  * does not keep. Sharing the PROPERTIES instead is what keeps the two halves
  * from drifting on the descriptions.
  */
+/**
+ * The `home_space_id` / `home_writable` / `home_shareable` trio, on every shape
+ * that carries a package's home (`AgentDetail`, `OrgPackageItem`,
+ * `OrgPackageItemDetail`, `LibraryPackageList`). ONE definition: the server
+ * computes all three in one place (`homeWireForCaller`), and four hand-copied
+ * descriptions drifted the moment the contract changed.
+ */
+const PACKAGE_HOME_PROPERTIES = {
+  home_space_id: {
+    type: ["string", "null"],
+    description:
+      "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority.",
+  },
+  home_writable: {
+    type: "boolean",
+    description:
+      "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld.",
+  },
+  home_shareable: {
+    type: "boolean",
+    description:
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+  },
+} as const;
+
 export const ORG_SETTINGS_PROPERTIES = {
+  restrict_package_copy: {
+    type: "boolean",
+    description:
+      "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about.",
+  },
   api_version: {
     type: "string",
     description:
@@ -554,16 +584,23 @@ export const schemas = {
     // shared-type marks them optional to match). `forked_from` is optional for
     // a second reason: a summary read (`agents:run` without `agents:read`)
     // withholds the authoring history along with the manifest and the prompt.
+    // `home_space_id`/`home_writable` are NOT part of that withheld set: a
+    // summary read still has to know it may not edit, and an absent
+    // `home_writable` would read as "not answered yet" rather than "no".
     required: [
       "id",
       "source",
       "scope",
       "version",
+      "version_pin",
       "dependencies",
       "input",
       "running_runs",
       "last_run",
       "effective_timeout_seconds",
+      "home_space_id",
+      "home_writable",
+      "home_shareable",
     ],
     properties: {
       id: { type: "string" },
@@ -576,6 +613,11 @@ export const schemas = {
           "Scope from manifest name, including the leading `@` (e.g. `@myorg`). Directly usable as the `{scope}` path parameter of package/agent operations.",
       },
       version: { type: ["string", "null"], description: "Version from manifest" },
+      version_pin: {
+        type: ["string", "null"],
+        description:
+          "Installed version in the current space. The default launch uses this pin when present.",
+      },
       manifest: {
         allOf: [{ $ref: "#/components/schemas/AgentManifest" }],
         description: "Full manifest object (user agents only)",
@@ -706,6 +748,7 @@ export const schemas = {
         description: "Number of published versions (0 for built-in agents)",
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      ...PACKAGE_HOME_PROPERTIES,
       has_unarchived_changes: {
         type: "boolean",
         description: "Whether the active version has changes not yet archived as a version",
@@ -1297,6 +1340,9 @@ export const schemas = {
       "version",
       "auto_installed",
       "forked_from",
+      "home_space_id",
+      "home_writable",
+      "home_shareable",
     ],
     properties: {
       id: { type: "string" },
@@ -1313,6 +1359,7 @@ export const schemas = {
       version: { type: ["string", "null"], description: "Manifest version (semver)" },
       auto_installed: { type: "boolean" },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      ...PACKAGE_HOME_PROPERTIES,
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -1335,6 +1382,9 @@ export const schemas = {
       "version",
       "auto_installed",
       "forked_from",
+      "home_space_id",
+      "home_writable",
+      "home_shareable",
       "agents",
     ],
     properties: {
@@ -1365,6 +1415,7 @@ export const schemas = {
         description: "Whether the active version has changes not yet archived as a version",
       },
       forked_from: { type: ["string", "null"], description: "Source package ID if forked" },
+      ...PACKAGE_HOME_PROPERTIES,
       agents: {
         type: "array",
         items: {
@@ -1749,6 +1800,23 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
+  SpaceSweepResult: {
+    type: "object",
+    required: ["object", "space_id", "rehomed_packages", "deleted_packages"],
+    properties: {
+      object: { type: "string", enum: ["space_sweep"] },
+      space_id: { type: "string", description: "The personal space that was swept and deleted" },
+      rehomed_packages: {
+        type: "integer",
+        description:
+          "Packages this space homed that another space has installed: handed to the organization catalogue (`home_space_id = null`) rather than deleted",
+      },
+      deleted_packages: {
+        type: "integer",
+        description: "Packages this space homed that no other space had installed: deleted",
+      },
+    },
+  },
   SpaceObject: {
     type: "object",
     required: [
@@ -1760,6 +1828,7 @@ export const schemas = {
       "settings",
       "visibility",
       "default_role",
+      "personal",
       "access",
       "role",
       "permissions",
@@ -1793,6 +1862,17 @@ export const schemas = {
         type: "string",
         enum: [...SPACE_ROLE_PRESETS],
         description: "Preset the implicit members of an `open` space hold",
+      },
+      personal: {
+        type: "boolean",
+        description:
+          "Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire.",
+      },
+      orphaned_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When the owner of this personal space stopped being a member of the organization; null while they are one. Present only for organization owners and admins, the only callers an orphaned personal space is listed to — they may convert it to a team space or sweep it immediately. Absent on every other projection.",
       },
       access: {
         type: "string",
@@ -2048,7 +2128,18 @@ export const schemas = {
       "is currently installed (empty array = not installed in any of the caller's spaces).",
     items: {
       type: "object",
-      required: ["id", "type", "source", "name", "description", "installed_in"],
+      required: [
+        "id",
+        "type",
+        "source",
+        "name",
+        "description",
+        "home_space_id",
+        "home_writable",
+        "home_shareable",
+        "installed_in",
+        "update_available",
+      ],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
         type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
@@ -2067,13 +2158,80 @@ export const schemas = {
           description:
             "Description from the package draft manifest; empty string when not provided.",
         },
+        ...PACKAGE_HOME_PROPERTIES,
         installed_in: {
           type: "array",
           description:
             "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
           items: { type: "string" },
         },
+        update_available: {
+          type: "boolean",
+          description:
+            "The caller's own personal space has this package installed at a version PIN older than the `latest` dist-tag. An installation in a personal space is pinned at install time so a newly published version never executes with the recipient's credentials unseen; re-calling `POST /api/packages/{scope}/{name}/shares/accept` re-pins it to `latest`. Always `false` for team-space installations, which follow `latest`.",
+        },
       },
+    },
+  },
+  ShareTarget: {
+    type: "object",
+    description:
+      "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+    required: ["kind"],
+    oneOf: [
+      {
+        type: "object",
+        required: ["kind", "user_id"],
+        properties: {
+          kind: { type: "string", enum: ["user"] },
+          user_id: { type: "string", description: "Organization member's user id." },
+        },
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        required: ["kind", "space_id"],
+        properties: {
+          kind: { type: "string", enum: ["space"] },
+          space_id: { type: "string", description: "Space id (`spc_…`) the caller can reach." },
+        },
+        additionalProperties: false,
+      },
+    ],
+  },
+  ShareTargetView: {
+    type: "object",
+    description:
+      "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
+    required: ["kind", "name"],
+    properties: {
+      kind: { type: "string", enum: ["user", "space"] },
+      user_id: { type: "string", description: "Present when `kind` is `user`." },
+      space_id: { type: "string", description: "Present when `kind` is `space`." },
+      name: {
+        type: "string",
+        description: "The member's display name, or the space's name.",
+      },
+    },
+  },
+  PackageShare: {
+    type: "object",
+    description:
+      "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to install; it is never an installation, and no execution path consults it.",
+    required: ["object", "target", "shared_by", "created_at"],
+    properties: {
+      object: { type: "string", enum: ["package_share"] },
+      target: { $ref: "#/components/schemas/ShareTargetView" },
+      shared_by: {
+        type: ["object", "null"],
+        description: "Who shared it. `null` once that account is gone.",
+        required: ["user_id", "name"],
+        properties: {
+          user_id: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+      created_at: { type: "string", format: "date-time" },
     },
   },
 } as const;

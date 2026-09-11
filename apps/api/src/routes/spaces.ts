@@ -20,8 +20,13 @@ import { ApiError, forbidden, invalidRequest, internalError, notFound } from "..
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { listResponse } from "../lib/list-response.ts";
+import { toISO } from "../lib/date-helpers.ts";
 import {
+  assertSpaceAdminAct,
+  convertPersonalSpaceToTeam,
   createSpace,
+  emptyAndDeletePersonalSpace,
+  ensurePersonalSpaceFor,
   isSpaceVisibleTo,
   listSpacesForPrincipal,
   getSpace,
@@ -38,6 +43,7 @@ import {
 } from "../services/space-members.ts";
 import {
   callerOrgRole,
+  callerPersonalOwnerId,
   callerSpaceMember,
   effectiveInSpace,
   personaFor,
@@ -73,6 +79,7 @@ import {
   toAssignment,
 } from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { hasCustomRoles, listSpaceRoles } from "../services/space-roles.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
@@ -85,8 +92,16 @@ import {
 
 /**
  * The wire shape every space response carries: the row plus the CALLER's
- * standing in it. `SpaceObject` requires all five, so a route that returned
+ * standing in it. `SpaceObject` requires all six, so a route that returned
  * only the row would answer a body its own contract refuses.
+ *
+ * `personal` replaces `owner_user_id` on the wire on purpose: the SPA needs to
+ * know THAT a space is somebody's personal space (to pin it, to hide the
+ * Members tab, to lock visibility), never whose — and it renders its own
+ * translated label rather than the stored `"Mon espace"`. `orphaned_at` is
+ * added only for owners and admins, the only callers who see an orphaned
+ * personal space at all and the only ones with an act to perform on it
+ * (RBAC spec §3.6).
  */
 function spaceWireForCaller(
   c: Context<AppEnv>,
@@ -95,12 +110,18 @@ function spaceWireForCaller(
     createdBy: string | null;
     visibility: SpaceVisibility;
     defaultRole: SpaceRolePreset;
+    ownerUserId: string | null;
+    orphanedAt: Date | null;
   },
   role: SpaceRoleRef | null,
 ) {
+  const orgRole = callerOrgRole(c);
+  const administers = orgRole === "owner" || orgRole === "admin";
   return {
     object: "space" as const,
     ...toSpaceWire(space),
+    personal: space.ownerUserId !== null,
+    ...(administers ? { orphaned_at: toISO(space.orphanedAt) } : {}),
     access: role ? ("member" as const) : ("none" as const),
     role: toSpaceRoleWire(role),
     permissions: [...effectiveInSpace(c, role)].sort(),
@@ -111,16 +132,44 @@ function spaceWireForCaller(
  * Project a Drizzle space row onto the wire shape. The DB columns are
  * `created_by` / `default_role`; the Drizzle TS fields are `createdBy` /
  * `defaultRole` and the wire contract (SpaceObject) is snake_case for both, so
- * both are renamed here.
+ * both are renamed here. `ownerUserId` / `orphanedAt` are dropped and replaced
+ * by what {@link spaceWireForCaller} computes from them.
  */
-function toSpaceWire<T extends { createdBy: string | null; defaultRole: SpaceRolePreset }>(
+function toSpaceWire<
+  T extends {
+    createdBy: string | null;
+    defaultRole: SpaceRolePreset;
+    ownerUserId: string | null;
+    orphanedAt: Date | null;
+  },
+>(
   space: T,
-): Omit<T, "createdBy" | "defaultRole"> & {
+): Omit<T, "createdBy" | "defaultRole" | "ownerUserId" | "orphanedAt"> & {
   created_by: string | null;
   default_role: SpaceRolePreset;
 } {
-  const { createdBy, defaultRole, ...rest } = space;
+  const {
+    createdBy,
+    defaultRole,
+    ownerUserId: _ownerUserId,
+    orphanedAt: _orphanedAt,
+    ...rest
+  } = space;
   return { ...rest, created_by: createdBy, default_role: defaultRole };
+}
+
+/**
+ * Who is acting, for {@link assertSpaceAdminAct}: the principal's
+ * PERSONAL-SPACE identity, `null` for a principal that owns none.
+ *
+ * `callerPersonalOwnerId` and not `c.get("user").id`, because the question the
+ * helper asks — "is this space the caller's own" — has to be answered the same
+ * way here as on every other route. An API key carries its creator's authority
+ * but not their privacy, so reading the creator's id made `DELETE` answer a
+ * named 409 on the creator's personal space while every other route 404s on it.
+ */
+function callerFor(c: Context<AppEnv>) {
+  return { userId: callerPersonalOwnerId(c), orgRole: callerOrgRole(c) };
 }
 
 export const createSpaceSchema = z
@@ -253,6 +302,19 @@ async function gateSpacePackageWrite(
   return type;
 }
 
+/** snake_case on the wire, camelCase in the service that counted them. */
+function toSweepWire(
+  spaceId: string,
+  counts: { rehomedPackages: number; deletedPackages: number },
+): SpaceSweepResult {
+  return {
+    object: "space_sweep",
+    space_id: spaceId,
+    rehomed_packages: counts.rehomedPackages,
+    deleted_packages: counts.deletedPackages,
+  };
+}
+
 export function createSpacesRouter() {
   const router = new Hono<AppEnv>();
 
@@ -262,10 +324,22 @@ export function createSpacesRouter() {
   // GET /api/spaces — list spaces the caller reaches (RBAC spec §6.3)
   router.get("/", requirePermission("spaces", "read"), async (c) => {
     const orgId = c.get("orgId");
+    // Lazy repair (plan decision 4). Every membership door provisions the
+    // personal space in its own transaction; this is the net for a member
+    // provisioned before the feature existed — `scripts/migration/0014` does
+    // them in bulk, and this makes the script optional for anyone who logs in.
+    // Only for a principal that HAS one — a session, or the same human through
+    // a CLI device-flow / MCP instance token (`callerPersonalOwnerId`). An API
+    // key or an end-user must not create one for the key's creator behind
+    // their back. `ensurePersonalSpace` reads before it writes, so the common
+    // case costs one indexed lookup and no row lock.
+    const personalOwnerId = callerPersonalOwnerId(c);
+    if (personalOwnerId) await ensurePersonalSpaceFor(orgId, personalOwnerId);
     const entries = await listSpacesForPrincipal(
       orgId,
       callerOrgRole(c),
       c.get("user").id,
+      personalOwnerId,
       personaMemberships(personaFor(c, orgId)),
     );
     // A credential PINNED to a space never enumerates its siblings: it sees the
@@ -305,7 +379,7 @@ export function createSpacesRouter() {
       // The creator holds org-level `spaces:write`, i.e. owner or admin, so
       // the resolver answers preset `admin` without any row — and no row is
       // written, per RBAC spec §6.3.
-      const role = resolveSpaceRole(callerOrgRole(c), space, null);
+      const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c));
       return c.json(spaceWireForCaller(c, space, role), 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -328,7 +402,12 @@ export function createSpacesRouter() {
       const orgRole = callerOrgRole(c);
       // One PK lookup, not the whole membership set: a single-space read has
       // exactly one row to find.
-      const role = resolveSpaceRole(orgRole, space, await callerSpaceMember(c, orgId, space.id));
+      const role = resolveSpaceRole(
+        orgRole,
+        space,
+        await callerSpaceMember(c, orgId, space.id),
+        callerPersonalOwnerId(c),
+      );
       if (!isSpaceVisibleTo(orgRole, space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }
@@ -398,6 +477,10 @@ export function createSpacesRouter() {
     const spaceId = c.req.param("id")!;
 
     try {
+      // 404 vs 409 for a personal space, decided where all three
+      // administrative acts decide it — a 409 on somebody else's LIVE personal
+      // space would confirm that the id is one (RBAC spec §3.6).
+      assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "delete");
       await deleteSpace(orgId, spaceId);
       await recordAuditFromContext(c, {
         action: "space.deleted",
@@ -413,6 +496,59 @@ export function createSpacesRouter() {
       });
       throw internalError();
     }
+  });
+
+  // ─── Personal spaces: the two administrative acts (RBAC spec §3.6) ──
+  //
+  // Owners and admins do not read or write a personal space. Both acts apply to
+  // an ORPHANED one only — the 30-day window after its owner left — and what
+  // separates 404 from 409 on either is `assertSpaceAdminAct`, the one place
+  // that decision is made for all three routes.
+  //
+  // Both are audited and both refuse an API KEY: a key holds `spaces:write`
+  // and `spaces:delete` legitimately (it provisions spaces headlessly), but
+  // converting somebody's personal space is a decision about a person, not an
+  // automation step — the same line `POST /api/spaces` draws. The guard is on
+  // the transport, so a human's OAuth dashboard or instance token does reach
+  // them; it is their own credential by another carrier.
+
+  // POST /api/spaces/:id/convert-to-team — the transfer.
+  router.post("/:id/convert-to-team", requirePermission("spaces", "write"), async (c) => {
+    if (c.get("authMethod") === "api_key") {
+      throw forbidden("API keys cannot convert a personal space");
+    }
+    const orgId = c.get("orgId");
+    const spaceId = c.req.param("id")!;
+    assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "convert-to-team");
+    const space = await convertPersonalSpaceToTeam(orgId, spaceId);
+    await recordAuditFromContext(c, {
+      action: "space.converted_to_team",
+      resourceType: "space",
+      resourceId: space.id,
+    });
+    // The caller now holds `admin` here through their org role, so the
+    // projection is the ordinary one.
+    const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c));
+    return c.json(spaceWireForCaller(c, space, role));
+  });
+
+  // POST /api/spaces/:id/sweep-now — run the offboarding routine immediately,
+  // instead of waiting for the rest of the 30-day window.
+  router.post("/:id/sweep-now", requirePermission("spaces", "delete"), async (c) => {
+    if (c.get("authMethod") === "api_key") {
+      throw forbidden("API keys cannot delete a personal space");
+    }
+    const orgId = c.get("orgId");
+    const spaceId = c.req.param("id")!;
+    assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "sweep");
+    const counts = await emptyAndDeletePersonalSpace(orgId, spaceId);
+    await recordAuditFromContext(c, {
+      action: "space.swept",
+      resourceType: "space",
+      resourceId: spaceId,
+      after: counts,
+    });
+    return c.json(toSweepWire(spaceId, counts));
   });
 
   // ─── Space members (RBAC spec §6.4) ────────────────────────────────
@@ -539,7 +675,9 @@ export function createSpacesRouter() {
     const member = await getOrgMember(orgId, userId);
     assertCanGrantSpaceRole(
       permissions,
-      member ? resolveSpaceRole(member.role, space, null) : null,
+      // The target's standing, so the caller id is THEIRS — a personal space
+      // resolves `admin` for its owner and nothing for anyone else.
+      member ? resolveSpaceRole(member.role, space, null, userId) : null,
     );
     if (
       !(await removeSpaceMember({
@@ -561,7 +699,7 @@ export function createSpacesRouter() {
     // The row was just deleted, so this can only find one an admin re-added
     // concurrently; the org role is what usually answers.
     const after = member
-      ? resolveSpaceRole(member.role, space, await loadSpaceMember(space.id, userId))
+      ? resolveSpaceRole(member.role, space, await loadSpaceMember(space.id, userId), userId)
       : null;
     return c.json({ access_after: after ? "implicit" : "none" });
   });

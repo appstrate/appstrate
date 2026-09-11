@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage } from "../../helpers/seed.ts";
+import { seedAgent, seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { eq } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -49,6 +49,35 @@ describe("User Agents API", () => {
       });
 
       expect(res.status).toBe(404);
+    });
+
+    it("conceals existing and absent agents from a key without agent permissions", async () => {
+      const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["files:read"],
+      });
+      for (const [name, homeSpaceId] of [
+        ["visible-agent", ctx.defaultSpaceId],
+        ["hidden-agent", hidden.id],
+      ] as const) {
+        await seedAgent({ id: `@myorg/${name}`, orgId: ctx.orgId, homeSpaceId });
+      }
+
+      for (const name of ["visible-agent", "hidden-agent", "nonexistent"]) {
+        const res = await app.request(`/api/agents/@myorg/${name}/skills`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${key.rawKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ skillIds: [] }),
+        });
+        expect(res.status, await res.clone().text()).toBe(404);
+        expect(await res.json()).toMatchObject({ code: "not_found" });
+      }
     });
 
     it("updates skills in manifest", async () => {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { SPACE_ID_RE } from "../../../lib/ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 export const webhooksSchemas = {
   WebhookObject: {
     type: "object",

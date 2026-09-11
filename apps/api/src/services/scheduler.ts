@@ -214,7 +214,12 @@ async function isScheduleActorValid(
       .limit(1);
     if (!space) return false;
     const membership = await loadSpaceMember(spaceId, actor.id);
-    return spacePermissions(resolveSpaceRole(row.role, space, membership)).has("agents:run");
+    // The frozen actor IS the caller here: a schedule in a personal space runs
+    // as its owner, and stops the moment they are no longer the owner
+    // (RBAC spec §3.6).
+    return spacePermissions(resolveSpaceRole(row.role, space, membership, actor.id)).has(
+      "agents:run",
+    );
   }
   const [row] = await db
     .select({ id: endUsers.id })
@@ -524,20 +529,15 @@ export async function triggerScheduledRun(
     }
     agentDenorm = extractRunAgentDenorm(draftAgent);
 
-    // Resolve which definition this scheduled run executes (#636). The
-    // schedule's `version_override` is a selector (`draft` | `published` |
-    // spec); when absent it defaults to `published` — same unified default as
-    // the API run route, the working copy is never an implicit default. A
-    // schedule inheriting on a never-published agent therefore resolves to
-    // 404 `no_published_version`, caught just below: no run executes, a warning
-    // is logged AND a visible failed run is recorded via failSchedule() (never
-    // a silent skip — pin `version_override = draft` to schedule the working
-    // copy). Pre-fix, `version_override` only relabeled the run while the
-    // draft executed regardless; resolving here makes the pin real.
+    // Apply the same installation pin as manual runs. Explicit schedule
+    // overrides still win; missing versions produce a visible failed run.
     let agent: LoadedPackage;
     let overrideVersionLabel: string | undefined;
     try {
-      const resolved = await resolveAgentRunVersion(draftAgent, overrides.versionOverride);
+      const resolved = await resolveAgentRunVersion(draftAgent, overrides.versionOverride, {
+        orgId,
+        spaceId,
+      });
       agent = resolved.agent;
       overrideVersionLabel = resolved.overrideVersionLabel;
     } catch (err) {

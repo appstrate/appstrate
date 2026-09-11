@@ -34,7 +34,7 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
-import { SPACE_ID_RE } from "../../../src/lib/ids.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 
 const SCRIPT = new URL(
   "../../../../../scripts/migration/0003-application-ids-to-space-ids.sql",
@@ -456,12 +456,14 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       SELECT 'audit_events.space_id',
              (SELECT count(*)::int FROM audit_events WHERE space_id LIKE 'app\\_%')
     `);
-    // 19 FK columns + the constraint-less `audit_events.space_id`. Two of the
-    // 19 arrived with `0056_space_roles` (`space_members.space_id`,
-    // `chat_sessions.space_id`); 0003 derives the columns it rewrites FROM the
-    // FK set, so it covers them without an edit — which is exactly the property
-    // this count guards.
-    expect(survivors.length).toBe(20);
+    // 21 FK columns + the constraint-less `audit_events.space_id`. Two of the
+    // 21 arrived with `0056_space_roles` (`space_members.space_id`,
+    // `chat_sessions.space_id`), and two more with the personal-spaces work:
+    // `packages.home_space_id` (`0063_packages_home_space`) and
+    // `package_shares.space_id` (`0065_package_shares`). 0003 derives the
+    // columns it rewrites FROM the FK set, so it covers them without an edit —
+    // which is exactly the property this count guards.
+    expect(survivors.length).toBe(22);
     expect(survivors.filter((r) => r.n !== 0)).toEqual([]);
   });
 
@@ -472,7 +474,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    expect(before.length).toBe(19);
+    expect(before.length).toBe(21);
 
     await replayScript();
 
@@ -482,17 +484,23 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    // Byte-for-byte the same set, same names, same delete actions — all
-    // nineteen `c` (cascade). `audit_events` used to be one more entry at
+    // Byte-for-byte the same set, same names, same delete actions — twenty of
+    // the twenty-one `c` (cascade), and exactly one `r` (restrict):
+    // `packages.home_space_id`, from `0063_packages_home_space`, where SET NULL
+    // would silently promote a package to the org catalogue on a space delete
+    // and WIDEN who may write it. `audit_events` used to be one more entry at
     // `n` (set null); `0055_schema_integrity_repairs` dropped that FK, because
     // the SET NULL was doing exactly what the old comment here warned a wrong
     // action would do — erasing the space attribution of every historical audit
     // row — and doing it on purpose, on every space delete.
     //
-    // So the assertion inverts: a resurrected `n` now means either 0055 was
-    // reverted or the capture/restore invented an action of its own.
+    // So the assertion names its one exception instead of allowing any
+    // non-cascade action: a resurrected `n`, or a second `r`, means either 0055
+    // was reverted or the capture/restore invented an action of its own.
     expect(after).toEqual(before);
-    expect(after.filter((r) => r.d !== "c")).toEqual([]);
+    expect(after.filter((r) => r.d !== "c")).toEqual([
+      { child: "packages", conname: "packages_home_space_id_spaces_id_fk", d: "r" },
+    ]);
   });
 
   // ── Permission scope strings ───────────────────────────────────────────────

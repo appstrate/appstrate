@@ -3,7 +3,7 @@
   "info": {
     "title": "Appstrate API",
     "version": "1.0.0",
-    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Viewing as a role\n\nAn organization owner or administrator can preview the API as a lesser role by sending the `X-View-As` header (grammar, refusal codes and examples: the `X-View-As` parameter, declared on the operations a client derives its permission gates from). **Every authenticated operation that resolves an organization honours it**, not only the ones that declare it: the persona is applied where permissions are resolved, so every subsequent guard, listing and write answers as the previewed role would. It is documented on those few operations rather than on all of them for the same reason `Idempotency-Key` is documented here.\n\nTwo exceptions, both by design. Personal operations that resolve no organization — `/api/profile*`, `/api/me/connections*`, `/api/welcome/*` — accept the header and ignore it: they answer about the person, not about a role in an organization, so there is nothing for a persona to narrow. And the Server-Sent-Events routes (`/api/realtime/*`) take the persona as the `view_as` QUERY parameter rather than the header, because `EventSource` cannot send headers; the value, the validation and the refusals are identical.\n\nThe persona only ever REMOVES: it is intersected with what the caller really holds, it carries no per-principal grants, and it is refused — never silently ignored — when the credential cannot carry it or the caller is not eligible. The authenticated identity is unchanged; audit rows keep the real actor and record the persona under `after.view_as`. Responses produced under a validated persona carry `X-View-As-Active: 1`.\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same body replays the original response with `Idempotent-Replayed: true`; the same key with a different body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
+    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Viewing as a role\n\nAn organization owner or administrator can preview the API as a lesser role by sending the `X-View-As` header (grammar, refusal codes and examples: the `X-View-As` parameter, declared on the operations a client derives its permission gates from). **Every authenticated operation that resolves an organization honours it**, not only the ones that declare it: the persona is applied where permissions are resolved, so every subsequent guard, listing and write answers as the previewed role would. It is documented on those few operations rather than on all of them for the same reason `Idempotency-Key` is documented here.\n\nTwo exceptions, both by design. Personal operations that resolve no organization — `/api/profile*`, `/api/me/connections*`, `/api/welcome/*` — accept the header and ignore it: they answer about the person, not about a role in an organization, so there is nothing for a persona to narrow. And the Server-Sent-Events routes (`/api/realtime/*`) take the persona as the `view_as` QUERY parameter rather than the header, because `EventSource` cannot send headers; the value, the validation and the refusals are identical.\n\nThe persona only ever REMOVES: it is intersected with what the caller really holds, it carries no per-principal grants, and it is refused — never silently ignored — when the credential cannot carry it or the caller is not eligible. The authenticated identity is unchanged; audit rows keep the real actor and record the persona under `after.view_as`. Responses produced under a validated persona carry `X-View-As-Active: 1`.\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same method, URL and body replays the original response with `Idempotent-Replayed: true`; the same key with a different method, URL or body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
     "contact": {
       "name": "Appstrate",
       "url": "https://appstrate.dev",
@@ -926,7 +926,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). **Omitting the parameter resolves the `draft`** — preserving the launch-badge default. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents."
+            "description": "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the installed version pin, else draft, matching the launch button. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents."
           }
         ],
         "responses": {
@@ -956,6 +956,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
           }
         }
       }
@@ -1577,7 +1580,7 @@
         "operationId": "exportAgentBundle",
         "tags": ["Agents"],
         "summary": "Export an agent as an .afps-bundle",
-        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this space (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.",
+        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this space (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space (owners and admins when it has none): `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1730,7 +1733,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range; 3-step resolution). **Omitting the parameter is strictly identical to `published`** — the latest published version, or `404 no_published_version` when nothing is published. The working copy is NEVER an implicit default: run it by passing `version=draft` explicitly (the editor UI does this for test-runs). This unified default keeps every caller — API, MCP, CLI, CI, schedules and the dashboard — coherent on every selector. The run object's `version_ref` states which definition executed. Ignored for system agents."
+            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, then the latest published version; returns `404 no_published_version` when neither exists. An explicit selector deliberately overrides the installation. The run object's `version_ref` states which definition executed. Ignored for system agents."
           }
         ],
         "requestBody": {
@@ -1955,7 +1958,7 @@
             }
           },
           "422": {
-            "description": "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2387,7 +2390,7 @@
             }
           },
           "422": {
-            "description": "Same Idempotency-Key used with a different request body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
+            "description": "Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`)",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4111,7 +4114,7 @@
         "operationId": "extendRunSink",
         "tags": ["Runs"],
         "summary": "Extend the sink expiry for a long-running remote run",
-        "description": "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`. Only open sinks (not closed, not already expired) owned by the caller's org can be extended; mismatches return 404 to avoid cross-tenant leaks.",
+        "description": "Pushes `sink_expires_at` out to `now() + ttl_seconds`, clamped to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, and bumps `last_heartbeat_at` (the column the stall watchdog reads). Extendable sinks are the open ones (not closed, not already expired) on a run in the caller's org and space that the caller may READ: `runs:read` is the runs they launched, `runs:read-all` the whole space. Anything else returns 404 rather than confirming the run exists.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -4798,7 +4801,7 @@
                   },
                   "version_override": {
                     "type": ["string", "null"],
-                    "description": "Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only)."
+                    "description": "Version selector (`draft` | `published` | version spec). Pass `null` to clear (inherits the installed version pin, then latest published; the working copy is opt-in via `draft` only)."
                   },
                   "connection_overrides": {
                     "type": ["object", "null"],
@@ -4931,7 +4934,7 @@
         "operationId": "listScheduleRuns",
         "tags": ["Schedules"],
         "summary": "List runs for a schedule",
-        "description": "List recent runs triggered by a specific schedule.",
+        "description": "List recent runs triggered by a specific schedule. Takes `schedules:read` AND a run read permission: the rows are runs, so `runs:read` lists the ones the caller launched — including the runs of the caller's own schedules — and `runs:read-all` the whole space. A credential holding `schedules:read` alone is rejected with 403.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6800,16 +6803,19 @@
             "description": "Redirect to the provider OAuth screen or the hosted form."
           },
           "400": {
-            "description": "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable."
+            "description": "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it."
           },
           "403": {
-            "description": "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page names the action to take (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint."
+            "description": "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead."
           },
           "410": {
             "description": "Invalid, expired, or already-used token (HTML error page)."
           },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
           "500": {
-            "description": "Integration cannot be connected / unexpected failure (HTML error page)."
+            "description": "Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable."
           },
           "502": {
             "description": "Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry."
@@ -8257,7 +8263,7 @@
         "operationId": "createModel",
         "tags": ["Models"],
         "summary": "Create a custom model",
-        "description": "Create a new custom LLM model for the organization.",
+        "description": "Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8360,6 +8366,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/ModelAlreadyAdded"
           }
         }
       }
@@ -8472,6 +8481,7 @@
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 50,
+                    "uniqueItems": true,
                     "items": {
                       "type": "string",
                       "minLength": 1
@@ -8897,6 +8907,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/ModelAlreadyAdded"
           }
         }
       },
@@ -9425,7 +9438,7 @@
         "operationId": "discoverModelProviderCredentialModels",
         "tags": ["Model Provider Credentials"],
         "summary": "Enumerate the models an endpoint serves",
-        "description": "Asks an endpoint once for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists nothing**: no credential is created, no `available_model_ids` is written. Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. Only providers with `authMode: api_key` are accepted — a subscription (OAuth) token is never read or spent to enumerate models. Rate limited to 6 requests per minute.",
+        "description": "Asks an endpoint for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists no model state**: no credential is created, no `available_model_ids` is written (the probe itself is recorded in the audit trail, without the key). Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. A provider declaring a static model list (every subscription/OAuth provider) is refused — its token is never read or spent to enumerate models. A listing that declares a next page (Anthropic `has_more` / `last_id`, Google `nextPageToken`) is followed to its end, so a paginated endpoint is enumerated whole; `truncated` says when a page or model cap stopped the read instead; a page whose body streams past the size budget is refused as `bad_response`. Rate limited to 6 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -9467,7 +9480,7 @@
         },
         "responses": {
           "200": {
-            "description": "Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id.",
+            "description": "Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id. `truncated` marks a list that is short of what the endpoint serves.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -9480,7 +9493,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["outcome", "models", "message"],
+                  "required": ["outcome", "models", "truncated", "message"],
                   "properties": {
                     "outcome": {
                       "type": "string",
@@ -9506,7 +9519,8 @@
                           "max_tokens",
                           "input",
                           "reasoning",
-                          "source"
+                          "source",
+                          "endpoint_capabilities"
                         ],
                         "properties": {
                           "id": {
@@ -9536,9 +9550,39 @@
                             "type": ["string", "null"],
                             "enum": ["endpoint", "catalog", null],
                             "description": "Where the description came from: `endpoint` when the listing published at least one of these fields for this model, `catalog` on a pure catalog hit, `null` when neither described it."
+                          },
+                          "endpoint_capabilities": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "description": "Capabilities explicitly published by the endpoint, suitable for persisting as model overrides. Omitted fields are unknown to the endpoint listing; the top-level description may fill them from a catalog for display only.",
+                            "properties": {
+                              "context_window": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "max_tokens": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "input": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {
+                                  "type": "string",
+                                  "enum": ["text", "image"]
+                                }
+                              },
+                              "reasoning": {
+                                "type": "boolean"
+                              }
+                            }
                           }
                         }
                       }
+                    },
+                    "truncated": {
+                      "type": "boolean",
+                      "description": "`true` when the endpoint had more models to declare and a safety cap stopped the read (more than 1000 models, more than 10 listing pages, or a listing that declares a next page without publishing a cursor to follow). The ids returned are then a prefix of what the endpoint serves, not the whole of it. Always `false` for a non-`ok` outcome."
                     },
                     "message": {
                       "type": ["string", "null"],
@@ -10707,7 +10751,7 @@
         "operationId": "createApiKey",
         "tags": ["API Keys"],
         "summary": "Create an API key",
-        "description": "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later.",
+        "description": "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later. The key is bound to the space named by `X-Space-Id`, which must be a TEAM space: a personal space takes no keys (409 `personal_space_takes_no_keys`), because a key carries no user and so could never resolve one.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -10802,6 +10846,16 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "The current space is a personal space (`personal_space_takes_no_keys`). API keys are team-space only.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -11227,7 +11281,7 @@
                   },
                   "space_assignments": {
                     "type": "array",
-                    "description": "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+                    "description": "Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every team space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting.",
                     "items": {
                       "$ref": "#/components/schemas/SpaceAssignment"
                     }
@@ -11278,7 +11332,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -11480,7 +11534,7 @@
                   },
                   "space_assignments": {
                     "type": "array",
-                    "description": "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+                    "description": "Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every team space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting.",
                     "items": {
                       "$ref": "#/components/schemas/SpaceAssignment"
                     }
@@ -11526,7 +11580,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -11648,6 +11702,10 @@
                 "type": "object",
                 "description": "Organization settings patch — only provided fields are updated.",
                 "properties": {
+                  "restrict_package_copy": {
+                    "type": "boolean",
+                    "description": "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about."
+                  },
                   "api_version": {
                     "type": "string",
                     "description": "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization."
@@ -11895,7 +11953,7 @@
         "operationId": "batchGetProfiles",
         "tags": ["Profile"],
         "summary": "Batch lookup profiles",
-        "description": "Retrieve display names for a list of user IDs.",
+        "description": "Retrieve display names for a list of user IDs. Reads the organization directory, so it requires `members:read`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11976,6 +12034,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -14892,6 +14953,9 @@
                       "used_by_agents": 2,
                       "auto_installed": false,
                       "forked_from": null,
+                      "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "home_writable": true,
+                      "home_shareable": true,
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
                     }
@@ -15102,7 +15166,7 @@
         "operationId": "createSkillVersion",
         "tags": ["Packages"],
         "summary": "Create a version from draft",
-        "description": "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden.",
+        "description": "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15183,7 +15247,7 @@
         "operationId": "restoreSkillVersion",
         "tags": ["Packages"],
         "summary": "Restore a skill version into the draft",
-        "description": "Restore a previously published version into the skill draft. Does not create a new version.",
+        "description": "Restore a previously published version into the skill draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15316,7 +15380,7 @@
         "operationId": "deleteSkillVersion",
         "tags": ["Packages"],
         "summary": "Delete a skill version",
-        "description": "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version.",
+        "description": "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15356,6 +15420,10 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionInUse",
+            "description": "The version is pinned by an installation (version_in_use)."
           }
         }
       }
@@ -15414,7 +15482,7 @@
         "operationId": "updateSkill",
         "tags": ["Packages"],
         "summary": "Update a skill",
-        "description": "Update a skill in the organization packages. Built-in skills cannot be modified.",
+        "description": "Update a skill in the organization packages. Built-in skills cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15494,7 +15562,7 @@
         "operationId": "deleteSkill",
         "tags": ["Packages"],
         "summary": "Delete a skill",
-        "description": "Delete a skill from the organization packages. Built-in skills cannot be deleted.",
+        "description": "Delete a skill from the organization packages. Built-in skills cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15671,7 +15739,7 @@
         "operationId": "getAgentPackage",
         "tags": ["Packages"],
         "summary": "Get agent detail",
-        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
+        "description": "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15692,7 +15760,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
+            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, else the draft. Explicit `draft` always reads the working copy. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
           }
         ],
         "responses": {
@@ -15722,6 +15790,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/VersionArtifactUnavailable"
           }
         }
       },
@@ -15729,7 +15800,7 @@
         "operationId": "updateAgent",
         "tags": ["Packages"],
         "summary": "Update a user agent",
-        "description": "Update manifest and content of a user agent with optimistic locking.",
+        "description": "Update manifest and content of a user agent with optimistic locking. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15816,7 +15887,7 @@
         "operationId": "deleteAgent",
         "tags": ["Packages"],
         "summary": "Delete a user agent",
-        "description": "Delete a user agent. Built-in agents cannot be deleted.",
+        "description": "Delete a user agent. Built-in agents cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15984,7 +16055,7 @@
         "operationId": "createAgentVersion",
         "tags": ["Packages"],
         "summary": "Create an agent version from draft",
-        "description": "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs.",
+        "description": "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16064,7 +16135,7 @@
         "operationId": "restoreAgentVersion",
         "tags": ["Packages"],
         "summary": "Restore an agent version into the draft",
-        "description": "Restore a published version into the draft. Requires no runs in progress.",
+        "description": "Restore a published version into the draft. Requires no runs in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16191,7 +16262,7 @@
         "operationId": "deleteAgentVersion",
         "tags": ["Packages"],
         "summary": "Delete an agent version",
-        "description": "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress.",
+        "description": "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16233,7 +16304,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Agent has runs in progress. RFC 9457 problem+json with `code` of `agent_in_use`.",
+            "description": "Agent has runs in progress (`agent_in_use`) or the version is pinned by an installation (`version_in_use`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16241,6 +16312,356 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/packages/{scope}/{name}": {
+      "patch": {
+        "operationId": "movePackageHome",
+        "tags": ["Packages"],
+        "summary": "Move a package to another home space",
+        "description": "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. This route touches nothing else: the draft is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["home_space_id"],
+                "properties": {
+                  "home_space_id": {
+                    "type": ["string", "null"],
+                    "description": "Destination space id (`spc_…`), or `null` for the organization catalog."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The package resource, with its new `home_space_id`.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AgentDetail"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OrgPackageItemDetail"
+                    }
+                  ],
+                  "description": "The moved package resource — same shape as its GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`). No follow-up GET needed."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/packages/{scope}/{name}/shares": {
+      "get": {
+        "operationId": "listPackageShares",
+        "tags": ["Packages"],
+        "summary": "List the spaces a package is shared with",
+        "description": "The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space (organization owner or admin when the package has none); a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The package's shares, oldest first.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "data", "hasMore"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PackageShare"
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "Always false — a package's audience is not paginated."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "operationId": "sharePackage",
+        "tags": ["Packages"],
+        "summary": "Share a package with a person or a space",
+        "description": "Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST …/shares/accept`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. Idempotent: sharing the same pair twice answers 200 with the same entry.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["target"],
+                "properties": {
+                  "target": {
+                    "$ref": "#/components/schemas/ShareTarget"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The share, new or already present.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackageShare"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The target space is the package's own home (`share_target_is_home`). RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages/{scope}/{name}/shares/accept": {
+      "post": {
+        "operationId": "acceptPackageShare",
+        "tags": ["Packages"],
+        "summary": "Add a shared package to your own space",
+        "description": "Install a package that was shared with you into your OWN personal space, pinned to the `latest` published version. Deliberately requires neither the `share` permission nor the package type's install grant: the space's owner consented by calling this, and a `guest` holds only the `operator` preset in their own space. The package must have a share row for that space, otherwise 404 — an offer the caller never received is indistinguishable from a package that does not exist. Idempotent in the useful direction: calling it again RE-PINS the installation to `latest`, which is how the owner takes a version the author has since published. API keys, end-users and role previews have no personal space and answer 404.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Installed (or re-pinned) in the caller's personal space.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "package_id", "version_id"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["space_package"]
+                    },
+                    "package_id": {
+                      "type": "string"
+                    },
+                    "version_id": {
+                      "type": "integer",
+                      "description": "The pinned version's id — the `latest` dist-tag at accept time."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The package has no published version to pin (`package_has_no_version`). A shared package is always installed at a pin, so there is nothing to install until its author publishes. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/PackageArchiveUnreadable"
+          }
+        }
+      }
+    },
+    "/api/packages/{scope}/{name}/shares/{target}": {
+      "delete": {
+        "operationId": "revokePackageShare",
+        "tags": ["Packages"],
+        "summary": "Withdraw a package share",
+        "description": "Remove the offer AND the installation it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "target",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. The two are told apart by the space-id shape. There is no third spelling: the id of another member's personal space is never on the wire, so it cannot be the handle here."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Share (and any installation behind it) removed."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -16600,7 +17021,7 @@
         "operationId": "createIntegrationPackageVersion",
         "tags": ["Packages"],
         "summary": "Create a version from draft",
-        "description": "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden.",
+        "description": "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16680,7 +17101,7 @@
         "operationId": "restoreIntegrationPackageVersion",
         "tags": ["Packages"],
         "summary": "Restore an integration package version into the draft",
-        "description": "Restore a previously published version into the integration package draft. Does not create a new version.",
+        "description": "Restore a previously published version into the integration package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16809,7 +17230,7 @@
         "operationId": "deleteIntegrationPackageVersion",
         "tags": ["Packages"],
         "summary": "Delete an integration package version",
-        "description": "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version.",
+        "description": "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16849,6 +17270,10 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionInUse",
+            "description": "The version is pinned by an installation (version_in_use)."
           }
         }
       }
@@ -16907,7 +17332,7 @@
         "operationId": "updateIntegrationPackage",
         "tags": ["Packages"],
         "summary": "Update an integration package",
-        "description": "Update an integration package in the organization packages. Built-in integration packages cannot be modified.",
+        "description": "Update an integration package in the organization packages. Built-in integration packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16986,7 +17411,7 @@
         "operationId": "deleteIntegrationPackage",
         "tags": ["Packages"],
         "summary": "Delete an integration package",
-        "description": "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted.",
+        "description": "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17284,7 +17709,7 @@
         "operationId": "createMcpServerPackageVersion",
         "tags": ["Packages"],
         "summary": "Create a version from draft",
-        "description": "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden.",
+        "description": "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17364,7 +17789,7 @@
         "operationId": "restoreMcpServerPackageVersion",
         "tags": ["Packages"],
         "summary": "Restore an MCP-server package version into the draft",
-        "description": "Restore a previously published version into the MCP-server package draft. Does not create a new version.",
+        "description": "Restore a previously published version into the MCP-server package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17493,7 +17918,7 @@
         "operationId": "deleteMcpServerPackageVersion",
         "tags": ["Packages"],
         "summary": "Delete an MCP-server package version",
-        "description": "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version.",
+        "description": "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17533,6 +17958,10 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/VersionInUse",
+            "description": "The version is pinned by an installation (version_in_use)."
           }
         }
       }
@@ -17591,7 +18020,7 @@
         "operationId": "updateMcpServerPackage",
         "tags": ["Packages"],
         "summary": "Update an MCP-server package",
-        "description": "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified.",
+        "description": "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17670,7 +18099,7 @@
         "operationId": "deleteMcpServerPackage",
         "tags": ["Packages"],
         "summary": "Delete an MCP-server package",
-        "description": "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted.",
+        "description": "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17788,6 +18217,7 @@
                   },
                   "visibility": "open",
                   "default_role": "operator",
+                  "personal": false,
                   "access": "member",
                   "role": {
                     "kind": "preset",
@@ -17873,6 +18303,7 @@
                       },
                       "visibility": "open",
                       "default_role": "operator",
+                      "personal": false,
                       "access": "member",
                       "role": {
                         "kind": "preset",
@@ -17895,6 +18326,7 @@
                       },
                       "visibility": "closed",
                       "default_role": "operator",
+                      "personal": false,
                       "access": "none",
                       "role": null,
                       "permissions": ["org:read", "spaces:read"],
@@ -17982,7 +18414,7 @@
         "operationId": "updateSpace",
         "tags": ["Spaces"],
         "summary": "Update a space",
-        "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.",
+        "description": "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18068,6 +18500,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The space is a personal space and the body changes more than its name (`personal_space_immutable`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -18075,7 +18517,7 @@
         "operationId": "deleteSpace",
         "tags": ["Spaces"],
         "summary": "Delete a space",
-        "description": "Delete a space and all associated end-users. The default space cannot be deleted.",
+        "description": "Delete a space and all associated end-users. The default space cannot be deleted; neither can a space with runs in progress (the delete cascade-drops `runs`, which would rip the rows out from under a live container), nor one that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move those with `PATCH /api/packages/{scope}/{name}` first. A personal space is not deletable here at all — it goes away through offboarding, once its owner has left the organization; a live personal space that is not the caller's own answers 404 rather than 409, and an API key is never its owner (a key carries its creator's authority, not their privacy), so it gets the 404 too.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18109,6 +18551,136 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/convert-to-team": {
+      "post": {
+        "operationId": "convertSpaceToTeam",
+        "tags": ["Spaces"],
+        "summary": "Convert a personal space to a team space",
+        "description": "Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); API keys are refused.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The space, now a team space",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The space is already a team space (`space_not_personal`), or it is the CALLER'S OWN personal space and its owner — them — is still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404, not 409.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spaces/{id}/sweep-now": {
+      "post": {
+        "operationId": "sweepPersonalSpace",
+        "tags": ["Spaces"],
+        "summary": "Sweep an orphaned personal space now",
+        "description": "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space has it installed) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The space was swept",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceSweepResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Runs are in progress in the space (`space_has_active_runs`) — the sweep deletes the space, whose cascade drops `runs`, so it refuses for the same reason `DELETE` does and before it has emptied anything —, the space is a team space (`space_not_personal`), or it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -18548,7 +19120,7 @@
         "operationId": "listAssignableSpaceRoles",
         "tags": ["Spaces"],
         "summary": "List assignable space roles",
-        "description": "Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.",
+        "description": "Returns presets and organization roles whose permissions are held by the caller in this space, and nothing the caller could not actually grant: where `custom_roles` is unavailable the bundles are omitted here (the org catalogue `GET /api/roles` still lists them, which is where a leftover is deleted). Requires space-members:invite, space-members:change-role, or space-settings:write.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18691,7 +19263,7 @@
         "operationId": "addSpaceMember",
         "tags": ["Spaces"],
         "summary": "Add a space member",
-        "description": "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.",
+        "description": "Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise); a `preset_role` never does.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18782,7 +19354,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -18805,7 +19377,7 @@
         "operationId": "updateSpaceMember",
         "tags": ["Spaces"],
         "summary": "Change a space member's role",
-        "description": "Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.",
+        "description": "Change the role of an EXISTING explicit membership row (404 when there is none). Both ends are bounded by the caller: the new role may only grant permissions they hold, and the member's CURRENT role must be one they could have granted (403 otherwise) — including when changing their own role. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise), so moving a holder OFF a leftover bundle and onto a preset stays available where moving another one onto it does not.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18886,7 +19458,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -18907,7 +19479,7 @@
         "operationId": "removeSpaceMember",
         "tags": ["Spaces"],
         "summary": "Remove a space member",
-        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.",
+        "description": "Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19087,40 +19659,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                },
-                "examples": {
-                  "forbidden": {
-                    "summary": "Missing permission",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/forbidden",
-                      "title": "Forbidden",
-                      "status": 403,
-                      "detail": "Insufficient permissions: roles:write required",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "forbidden",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  },
-                  "feature_unavailable": {
-                    "summary": "Feature not on this deployment",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
-                      "title": "Feature Unavailable",
-                      "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "feature_unavailable",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "409": {
             "description": "A role with this key already exists (`role_key_taken`)",
@@ -19271,40 +19810,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                },
-                "examples": {
-                  "forbidden": {
-                    "summary": "Missing permission",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/forbidden",
-                      "title": "Forbidden",
-                      "status": 403,
-                      "detail": "Insufficient permissions: roles:write required",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "forbidden",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  },
-                  "feature_unavailable": {
-                    "summary": "Feature not on this deployment",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
-                      "title": "Feature Unavailable",
-                      "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "feature_unavailable",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/CustomRoleFeatureForbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -19325,7 +19831,7 @@
         "operationId": "deleteRole",
         "tags": ["Roles"],
         "summary": "Delete a custom space role",
-        "description": "Requires the `custom_roles` feature. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
+        "description": "Never requires the `custom_roles` feature: removing a leftover bundle is what an EE → OSS downgrade needs, and it is the one verb that only ever shrinks what a bundle reaches. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19357,40 +19863,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable).",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                },
-                "examples": {
-                  "forbidden": {
-                    "summary": "Missing permission",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/forbidden",
-                      "title": "Forbidden",
-                      "status": 403,
-                      "detail": "Insufficient permissions: roles:write required",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "forbidden",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  },
-                  "feature_unavailable": {
-                    "summary": "Feature not on this deployment",
-                    "value": {
-                      "type": "https://docs.appstrate.dev/errors/feature-unavailable",
-                      "title": "Feature Unavailable",
-                      "status": 403,
-                      "detail": "Defining custom space roles requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
-                      "instance": "urn:appstrate:request:req_2f1c6d84",
-                      "code": "feature_unavailable",
-                      "requestId": "req_2f1c6d84"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -19431,7 +19904,7 @@
         "operationId": "createEndUser",
         "tags": ["End Users"],
         "summary": "Create an end-user",
-        "description": "Create a new end-user within a space. At least one of name, email, or externalId should be provided for identification.",
+        "description": "Create a new end-user within a space. At least one of name, email, or externalId should be provided for identification. The space named by `X-Space-Id` must be a TEAM space: a personal space takes no end-users (409 `personal_space_takes_no_end_users`), because an end-user is an external identity signing in to a space that exists for exactly one member and goes away with them.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -19543,7 +20016,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the space (external_id_taken)",
+            "description": "Conflict — a request with the same Idempotency-Key is already being processed (idempotency_in_progress), the externalId is already in use by another end-user in the space (external_id_taken), or the current space is a personal space (personal_space_takes_no_end_users; end-users are team-space only)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -20220,7 +20693,7 @@
         "operationId": "listFiles",
         "tags": ["Files"],
         "summary": "List files",
-        "description": "List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own files (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.",
+        "description": "List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so a member sees the files of the runs it may read (the whole space with `runs:read-all`, otherwise the runs it launched) plus its own chat and container-less files, and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20668,7 +21141,7 @@
         "operationId": "deleteFile",
         "tags": ["Files"],
         "summary": "Delete a file",
-        "description": "Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. A file referenced by a run cannot be deleted until those consumer runs are removed.",
+        "description": "Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. A file referenced by a run cannot be deleted until those consumer runs are removed.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -20735,7 +21208,7 @@
         "operationId": "keepFile",
         "tags": ["Files"],
         "summary": "Keep a file (clear its expiry)",
-        "description": "Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.",
+        "description": "Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin), or the file's own creator on a credential that admits `files:delete` — an API key or token whose scopes omit it does not inherit its creator's files. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -22515,7 +22988,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["object", "spaces", "packages"],
+                  "required": ["object", "spaces", "packages", "shared"],
                   "properties": {
                     "object": {
                       "type": "string",
@@ -22559,6 +23032,63 @@
                           "$ref": "#/components/schemas/LibraryPackageList"
                         }
                       }
+                    },
+                    "shared": {
+                      "type": "array",
+                      "description": "Packages OFFERED to a space the caller reads and not installed there — \"shared with me\", i.e. the offers still waiting on a decision. An accepted offer leaves this list and appears as an installation in `packages`. Empty for a caller nobody has shared anything with.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "type",
+                          "source",
+                          "name",
+                          "description",
+                          "space_id",
+                          "personal",
+                          "shared_by"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Package id (`@scope/name`)."
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": ["agent", "skill", "mcp-server", "integration"]
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "space_id": {
+                            "type": "string",
+                            "description": "The space the package is offered to (`spc_…`) — always one the caller reads, so no private id is disclosed."
+                          },
+                          "personal": {
+                            "type": "boolean",
+                            "description": "The offered space is the caller's OWN personal space, i.e. `POST /api/packages/{scope}/{name}/shares/accept` applies. When false the offer targets a team space and is installed through `POST /api/spaces/{spaceId}/packages` by someone holding the type's install grant there."
+                          },
+                          "shared_by": {
+                            "type": ["object", "null"],
+                            "description": "Who shared it. `null` once that account is gone.",
+                            "required": ["user_id", "name"],
+                            "properties": {
+                              "user_id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
                     }
                   }
                 },
@@ -22584,7 +23114,11 @@
                         "source": "local",
                         "name": "Inbox Triage",
                         "description": "Sorts incoming Gmail threads into priority buckets.",
-                        "installed_in": ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"]
+                        "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                        "home_writable": true,
+                        "home_shareable": true,
+                        "installed_in": ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+                        "update_available": false
                       }
                     ],
                     "skill": [],
@@ -22596,13 +23130,32 @@
                         "source": "system",
                         "name": "Gmail",
                         "description": "Google Mail OAuth integration.",
+                        "home_space_id": null,
+                        "home_writable": false,
+                        "home_shareable": false,
                         "installed_in": [
                           "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                           "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
-                        ]
+                        ],
+                        "update_available": false
                       }
                     ]
-                  }
+                  },
+                  "shared": [
+                    {
+                      "id": "@acme/weekly-digest",
+                      "type": "agent",
+                      "source": "local",
+                      "name": "Weekly Digest",
+                      "description": "Summarises the week's threads.",
+                      "space_id": "spc_9a1b3c5d-7e9f-4a1b-8c3d-5e7f9a1b3c5d",
+                      "personal": true,
+                      "shared_by": {
+                        "user_id": "usr_1",
+                        "name": "Alex"
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -22715,7 +23268,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description).",
+        "description": "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description).",
         "schema": {
           "type": "string",
           "maxLength": 255
@@ -23154,6 +23707,10 @@
         "type": "object",
         "description": "Organization settings (extensible)",
         "properties": {
+          "restrict_package_copy": {
+            "type": "boolean",
+            "description": "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about."
+          },
           "api_version": {
             "type": "string",
             "description": "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization."
@@ -23503,11 +24060,15 @@
           "source",
           "scope",
           "version",
+          "version_pin",
           "dependencies",
           "input",
           "running_runs",
           "last_run",
-          "effective_timeout_seconds"
+          "effective_timeout_seconds",
+          "home_space_id",
+          "home_writable",
+          "home_shareable"
         ],
         "properties": {
           "id": {
@@ -23530,6 +24091,10 @@
           "version": {
             "type": ["string", "null"],
             "description": "Version from manifest"
+          },
+          "version_pin": {
+            "type": ["string", "null"],
+            "description": "Installed version in the current space. The default launch uses this pin when present."
           },
           "manifest": {
             "allOf": [
@@ -23582,7 +24147,7 @@
                 }
               }
             ],
-            "description": "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`."
+            "description": "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`. A summary read (`agents:run` without `agents:read`) still receives every locked field's NAME, but `values` carries no entry for one — a field the launcher cannot set is not one it reads the stored value of."
           },
           "output": {
             "type": "object",
@@ -23697,6 +24262,18 @@
           "forked_from": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
+          },
+          "home_space_id": {
+            "type": ["string", "null"],
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority."
+          },
+          "home_writable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
+          },
+          "home_shareable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "has_unarchived_changes": {
             "type": "boolean",
@@ -23916,7 +24493,8 @@
           },
           "input": {
             "type": ["object", "null"],
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Resolved run input. Registered-agent input is null without agents:read because it can contain editor-imposed values, including historical locks. Inline input remains visible. Execution and rerun retain the complete input server-side."
           },
           "result": {
             "type": ["object", "null"],
@@ -24444,7 +25022,10 @@
           "used_by_agents",
           "version",
           "auto_installed",
-          "forked_from"
+          "forked_from",
+          "home_space_id",
+          "home_writable",
+          "home_shareable"
         ],
         "properties": {
           "id": {
@@ -24484,6 +25065,18 @@
             "type": ["string", "null"],
             "description": "Source package ID if forked"
           },
+          "home_space_id": {
+            "type": ["string", "null"],
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority."
+          },
+          "home_writable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
+          },
+          "home_shareable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -24508,6 +25101,9 @@
           "version",
           "auto_installed",
           "forked_from",
+          "home_space_id",
+          "home_writable",
+          "home_shareable",
           "agents"
         ],
         "properties": {
@@ -24565,6 +25161,18 @@
           "forked_from": {
             "type": ["string", "null"],
             "description": "Source package ID if forked"
+          },
+          "home_space_id": {
+            "type": ["string", "null"],
+            "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority."
+          },
+          "home_writable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
+          },
+          "home_shareable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
           },
           "agents": {
             "type": "array",
@@ -25147,6 +25755,28 @@
           }
         }
       },
+      "SpaceSweepResult": {
+        "type": "object",
+        "required": ["object", "space_id", "rehomed_packages", "deleted_packages"],
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["space_sweep"]
+          },
+          "space_id": {
+            "type": "string",
+            "description": "The personal space that was swept and deleted"
+          },
+          "rehomed_packages": {
+            "type": "integer",
+            "description": "Packages this space homed that another space has installed: handed to the organization catalogue (`home_space_id = null`) rather than deleted"
+          },
+          "deleted_packages": {
+            "type": "integer",
+            "description": "Packages this space homed that no other space had installed: deleted"
+          }
+        }
+      },
       "SpaceObject": {
         "type": "object",
         "required": [
@@ -25158,6 +25788,7 @@
           "settings",
           "visibility",
           "default_role",
+          "personal",
           "access",
           "role",
           "permissions",
@@ -25209,6 +25840,15 @@
             "type": "string",
             "enum": ["admin", "builder", "operator", "runner", "viewer"],
             "description": "Preset the implicit members of an `open` space hold"
+          },
+          "personal": {
+            "type": "boolean",
+            "description": "Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire."
+          },
+          "orphaned_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the owner of this personal space stopped being a member of the organization; null while they are one. Present only for organization owners and admins, the only callers an orphaned personal space is listed to — they may convert it to a team space or sweep it immediately. Absent on every other projection."
           },
           "access": {
             "type": "string",
@@ -25342,6 +25982,7 @@
           "name",
           "description",
           "permissions",
+          "unavailable_permissions",
           "createdAt",
           "updatedAt"
         ],
@@ -25373,7 +26014,14 @@
             "items": {
               "type": "string"
             },
-            "description": "Space-level permission strings the role grants, sorted."
+            "description": "Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back."
+          },
+          "unavailable_permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Entries stored on the bundle that this deployment cannot name — their module is no longer loaded — sorted. They grant nothing and are never part of `permissions`; sending a `permissions` array without them is what drops them from the row. Always empty for a preset."
           },
           "createdAt": {
             "type": ["string", "null"],
@@ -25536,7 +26184,18 @@
         "description": "Packages of a single type visible to the org. Each entry carries an `installed_in` array listing the caller-org spaces where the package is currently installed (empty array = not installed in any of the caller's spaces).",
         "items": {
           "type": "object",
-          "required": ["id", "type", "source", "name", "description", "installed_in"],
+          "required": [
+            "id",
+            "type",
+            "source",
+            "name",
+            "description",
+            "home_space_id",
+            "home_writable",
+            "home_shareable",
+            "installed_in",
+            "update_available"
+          ],
           "properties": {
             "id": {
               "type": "string",
@@ -25558,18 +26217,155 @@
               "type": "string",
               "description": "Description from the package draft manifest; empty string when not provided."
             },
+            "home_space_id": {
+              "type": ["string", "null"],
+              "description": "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority."
+            },
+            "home_writable": {
+              "type": "boolean",
+              "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
+            },
+            "home_shareable": {
+              "type": "boolean",
+              "description": "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it."
+            },
             "installed_in": {
               "type": "array",
               "description": "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
               "items": {
                 "type": "string"
               }
+            },
+            "update_available": {
+              "type": "boolean",
+              "description": "The caller's own personal space has this package installed at a version PIN older than the `latest` dist-tag. An installation in a personal space is pinned at install time so a newly published version never executes with the recipient's credentials unseen; re-calling `POST /api/packages/{scope}/{name}/shares/accept` re-pins it to `latest`. Always `false` for team-space installations, which follow `latest`."
             }
+          }
+        }
+      },
+      "ShareTarget": {
+        "type": "object",
+        "description": "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+        "required": ["kind"],
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["kind", "user_id"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["user"]
+              },
+              "user_id": {
+                "type": "string",
+                "description": "Organization member's user id."
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": ["kind", "space_id"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["space"]
+              },
+              "space_id": {
+                "type": "string",
+                "description": "Space id (`spc_…`) the caller can reach."
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ShareTargetView": {
+        "type": "object",
+        "description": "A share's subject as the server renders it back. A personal-space target comes back as its OWNER — never as a space id, which is the one fact a personal space withholds.",
+        "required": ["kind", "name"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["user", "space"]
+          },
+          "user_id": {
+            "type": "string",
+            "description": "Present when `kind` is `user`."
+          },
+          "space_id": {
+            "type": "string",
+            "description": "Present when `kind` is `space`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The member's display name, or the space's name."
+          }
+        }
+      },
+      "PackageShare": {
+        "type": "object",
+        "description": "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to install; it is never an installation, and no execution path consults it.",
+        "required": ["object", "target", "shared_by", "created_at"],
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": ["package_share"]
+          },
+          "target": {
+            "$ref": "#/components/schemas/ShareTargetView"
+          },
+          "shared_by": {
+            "type": ["object", "null"],
+            "description": "Who shared it. `null` once that account is gone.",
+            "required": ["user_id", "name"],
+            "properties": {
+              "user_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }
     },
     "responses": {
+      "VersionInUse": {
+        "description": "The version is pinned by an installation (`version_in_use`). Update or uninstall it before deletion.",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
+      "VersionArtifactUnavailable": {
+        "description": "The selected published agent has no readable prompt archive (`version_artifact_unavailable`). The working copy is never substituted.",
+        "headers": {
+          "Request-Id": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
       "Unauthorized": {
         "description": "Missing or invalid authentication",
         "headers": {
@@ -25607,6 +26403,42 @@
               "detail": "Insufficient permissions",
               "code": "forbidden",
               "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "CustomRoleFeatureForbidden": {
+        "description": "`forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The four built-in presets stay usable, and DELETING a leftover bundle never asks for the feature.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "examples": {
+              "forbidden": {
+                "summary": "Missing permission",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/forbidden",
+                  "title": "Forbidden",
+                  "status": 403,
+                  "detail": "Insufficient permissions",
+                  "instance": "urn:appstrate:request:req_2f1c6d84",
+                  "code": "forbidden",
+                  "requestId": "req_2f1c6d84"
+                }
+              },
+              "feature_unavailable": {
+                "summary": "Feature not on this deployment",
+                "value": {
+                  "type": "https://docs.appstrate.dev/errors/feature-unavailable",
+                  "title": "Feature Unavailable",
+                  "status": 403,
+                  "detail": "Defining a custom space role requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
+                  "instance": "urn:appstrate:request:req_2f1c6d84",
+                  "code": "feature_unavailable",
+                  "requestId": "req_2f1c6d84"
+                }
+              }
             }
           }
         }
@@ -25794,6 +26626,16 @@
           }
         }
       },
+      "ModelAlreadyAdded": {
+        "description": "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            }
+          }
+        }
+      },
       "InternalServerError": {
         "description": "Unexpected server error",
         "content": {
@@ -25902,7 +26744,7 @@
         }
       },
       "IdempotencyConflict": {
-        "description": "Same Idempotency-Key used with a different request body",
+        "description": "Same Idempotency-Key used with a different method, URL or body",
         "headers": {
           "Request-Id": {
             "$ref": "#/components/headers/RequestId"
@@ -25917,7 +26759,7 @@
               "type": "https://docs.appstrate.dev/errors/idempotency-conflict",
               "title": "Idempotency Conflict",
               "status": 422,
-              "detail": "This Idempotency-Key was already used with a different request body. Use a new key for different requests.",
+              "detail": "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
               "code": "idempotency_conflict",
               "requestId": "req_abc123"
             }

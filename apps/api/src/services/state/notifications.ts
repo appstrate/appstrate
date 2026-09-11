@@ -139,6 +139,44 @@ export async function createRunNotifications(scope: SpaceScope, runId: string): 
 }
 
 /**
+ * Tell one member that a package was shared INTO a space of theirs — the
+ * "user" half of `POST /api/packages/{scope}/{name}/shares` (RBAC spec §6.10).
+ *
+ * The notification is scoped to the TARGET space, which for a share to a person
+ * is their personal space: that is where the package actually became available,
+ * and the bell reads notifications of the space the recipient is in.
+ *
+ * No `runId` — the entity is the package, carried in the payload the way
+ * `agent_id` is for a run, so the bell renders without a join. The SHARER's
+ * name is in there for the same reason: "X shared Y with you" is the whole
+ * content of this notification, and the bell has no query that would resolve a
+ * user id. Best-effort like the run fan-out: the caller wraps it, because a
+ * share that succeeded must not be reported as failed because a notification
+ * row would not write.
+ */
+export async function createPackageShareNotification(params: {
+  orgId: string;
+  spaceId: string;
+  recipientUserId: string;
+  packageId: string;
+  packageType: string;
+  sharedByName: string;
+}): Promise<void> {
+  await db.insert(notifications).values({
+    orgId: params.orgId,
+    spaceId: params.spaceId,
+    recipientType: "user",
+    recipientId: params.recipientUserId,
+    type: "package_shared",
+    payload: {
+      package_id: params.packageId,
+      package_type: params.packageType,
+      shared_by_name: params.sharedByName,
+    },
+  });
+}
+
+/**
  * Mark a single notification read. Idempotent for the recipient (already-read
  * → still `true`); returns `false` only when the notification does not exist
  * or does not belong to the caller, which the route maps to `404`.

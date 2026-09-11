@@ -64,6 +64,7 @@ export async function provisionDefaultAgentForOrg(
         description: HELLO_WORLD_MANIFEST.description,
         content: HELLO_WORLD_PROMPT,
         createdBy,
+        homeSpaceId: defaultSpaceId,
       },
       CONFIG_BY_TYPE.agent,
       manifest,

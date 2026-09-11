@@ -14,17 +14,10 @@
  *   - anything else → 3-step resolution (exact version → dist-tag → semver
  *                     range) via {@link getVersionDetail}. 404 when nothing
  *                     matches.
- *   - omitted       → **strictly identical to `"published"`** (latest
- *                     published; 404 `no_published_version` when none). One
- *                     unified default for every caller — API / MCP / CLI /
- *                     schedule AND the dashboard transport: "run what was
- *                     published" is the least-surprising, reproducible default
- *                     for programmatic use. The working copy is NEVER an
- *                     implicit default: running it is opt-in via the explicit
- *                     `draft` selector (the editor UI passes it explicitly).
- *                     This keeps API and front coherent on every selector —
- *                     `draft` is the one editor-only capability, always
- *                     requested by name, never silently inferred.
+ *   - omitted       → the installed version pin in the current space, else
+ *                     `"published"`. Accepting a share freezes this default
+ *                     until the recipient accepts an update. An explicit
+ *                     selector is an intentional per-run override.
  *
  * System agents have no published versions (their definition ships with the
  * platform), so any selector is ignored and the loaded definition runs as-is
@@ -48,6 +41,8 @@
 import { ApiError, notFound } from "../lib/errors.ts";
 import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
+import type { SpaceScope } from "../lib/scope.ts";
+import { getInstalledPackageVersion } from "./space-packages.ts";
 
 // Both keywords are reserved dist-tag names (`isProtectedTag` in
 // `@appstrate/core/dist-tags`): they resolve here BEFORE dist-tag lookup,
@@ -80,12 +75,20 @@ function substituteVersion(
   agent: LoadedPackage,
   detail: { version: string; manifest: Record<string, unknown>; prompt: string | null },
 ): ResolvedRunAgent {
+  if (detail.prompt === null) {
+    throw new ApiError({
+      status: 422,
+      code: "version_artifact_unavailable",
+      title: "Version Artifact Unavailable",
+      detail: `Published agent '${agent.id}@${detail.version}' has no readable prompt archive`,
+    });
+  }
   return {
     agent: {
       ...agent,
       // Version manifest replaces the draft manifest entirely.
       manifest: detail.manifest as unknown as AgentManifest,
-      prompt: detail.prompt ?? agent.prompt,
+      prompt: detail.prompt,
     },
     overrideVersionLabel: detail.version,
   };
@@ -99,20 +102,21 @@ function substituteVersion(
 export async function resolveAgentRunVersion(
   agent: LoadedPackage,
   selector: string | undefined,
+  scope: SpaceScope,
 ): Promise<ResolvedRunAgent> {
   // System agents ship their definition with the platform — no published
   // versions exist, the selector is ignored (pre-existing route behavior).
   if (agent.source === "system") return { agent };
 
   // Empty string ⇒ treated as omitted (query params arrive as "" easily).
-  const sel = selector?.trim() || undefined;
+  const sel = selector?.trim() || (await getInstalledPackageVersion(scope, agent.id)) || undefined;
 
   if (sel === VERSION_SELECTOR_DRAFT) return { agent };
 
   if (sel === undefined || sel === VERSION_SELECTOR_PUBLISHED) {
     const latest = await getLatestVersionInfo(agent.id).catch(() => null);
     if (!latest) {
-      // omit ≡ published — no silent draft fallback. A never-published agent
+      // No installation pin and no publication — no silent draft fallback. An agent
       // run without a selector is an explicit error, not a surprise draft
       // execution; the working copy is opt-in via `version=draft` only.
       throw new ApiError({

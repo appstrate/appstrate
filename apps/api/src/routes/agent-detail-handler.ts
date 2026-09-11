@@ -5,7 +5,7 @@ import type { AgentManifest, AppEnv } from "../types/index.ts";
 import type { AgentDetail } from "@appstrate/shared-types";
 import {
   getPackage,
-  getPackageWithAccess,
+  getPackageForRead,
   resolveDeclaredSkills,
 } from "../services/package-catalog.ts";
 import {
@@ -20,7 +20,10 @@ import {
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
-import { getInstalledPackageSettings } from "../services/space-packages.ts";
+import {
+  getInstalledPackageSettings,
+  getInstalledPackageVersion,
+} from "../services/space-packages.ts";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -28,7 +31,11 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
-import { agentReadIsSummary } from "../lib/package-access.ts";
+import {
+  agentReadIsSummary,
+  homeWireForCaller,
+  packageAccessSpaces,
+} from "../lib/package-access.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 
 /**
@@ -126,24 +133,26 @@ export async function buildAgentDetailDto(
   // content: a launcher connects them, so they stay.
   const summaryOnly = agentReadIsSummary(c);
 
-  const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
-    requireAccess ? getPackageWithAccess(itemId, orgId, spaceId) : getPackage(itemId, orgId),
+  const [agent, rawItem, versionCount, latestVersionDate, accessible] = await Promise.all([
+    requireAccess ? getPackageForRead(itemId, orgId, spaceId) : getPackage(itemId, orgId),
     getOrgItem(orgId, itemId, CONFIG_BY_TYPE.agent),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
+    packageAccessSpaces(c),
   ]);
 
   if (!agent) {
     return null;
   }
 
-  // Version-aware projection (issue #770). `draft`/omitted reads the live
-  // manifest; a concrete version substitutes the published manifest + prompt
-  // via the same resolver the run uses, so the detail (config/input/integrations)
-  // matches what the run will execute.
-  const versionSel = opts.version?.trim();
+  // Launch forms read the installed snapshot by default; unpinned authoring
+  // still reads the draft. Explicit selectors use the run's own resolver.
+  const versionPin = await getInstalledPackageVersion(scope, agent.id);
+  const versionSel = opts.version?.trim() || versionPin;
   const versioned = !!versionSel && versionSel !== VERSION_SELECTOR_DRAFT;
-  const effective = versioned ? await resolveAgentRunVersion(agent, versionSel) : null;
+  const effective = versioned
+    ? await resolveAgentRunVersion(agent, versionSel ?? undefined, scope)
+    : null;
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 
@@ -181,6 +190,7 @@ export async function buildAgentDetailDto(
     // `{scope}` path params accept (issue #629).
     scope: parsed ? `@${parsed.scope}` : null,
     version: m.version ?? null,
+    version_pin: versionPin,
     dependencies,
     // The agent's ONE parameter schema, plus the per-space layers the
     // launch form needs: `values` are the editor's stored defaults and
@@ -216,6 +226,16 @@ export async function buildAgentDetailDto(
     // system agents, so making this field conditional too would leave a system
     // agent's cap undiscoverable from the API.
     effective_timeout_seconds: resolveRunTimeout(m.timeout).effectiveSeconds,
+    // Which space's `agents:write` governs this agent, and whether THIS caller
+    // holds it (`homeWireForCaller`, RBAC spec §6.9). Both emitted
+    // UNCONDITIONALLY, for the same reason as the timeout above: a summary read
+    // still needs to know it may not edit, and an absent `home_writable` would
+    // read as "not answered yet" rather than "no".
+    ...homeWireForCaller(
+      c,
+      { type: "agent", source: agent.source, homeSpaceId: rawItem?.homeSpaceId ?? null },
+      accessible,
+    ),
     // The authoring history: who it was forked from, how many versions stand
     // behind it, whether the draft is ahead of them. A summary read omits it —
     // a launcher does not edit or publish.

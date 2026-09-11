@@ -9,7 +9,7 @@ import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { useOrgOnlyScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (GET /api/library response). */
-type LibraryResponse =
+export type LibraryResponse =
   paths["/api/library"]["get"]["responses"][200]["content"]["application/json"];
 
 export type LibraryPackageItem = components["schemas"]["LibraryPackageList"][number];
@@ -56,8 +56,14 @@ function updateLibraryCache(
 }
 
 /**
- * Derive install state for a single package from the library cache.
- * Returns which space names have it installed and whether the current space does.
+ * Derive install state for a single package from the library cache: which space
+ * names have it installed, and whether the current space does.
+ *
+ * The package's HOME is deliberately NOT derived here. It comes from the
+ * package's own detail response (`home_space_id`), which every page showing it
+ * already fetches — a cache built for install state is not the authority on who
+ * may write the package, and reading it from two places invites the two to
+ * disagree.
  */
 export function usePackageInstallState(packageId: string) {
   const { data: libraryData } = useLibrary();
@@ -85,8 +91,19 @@ export function usePackageInstallState(packageId: string) {
   }, [libraryData, packageId, currentSpaceId]);
 }
 
+/** Installation changes affect the library and every space's package/agent cache. */
+export function useInvalidatePackageInstallation() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+    void qc.invalidateQueries({ queryKey: packageKeys.all });
+    void qc.invalidateQueries({ queryKey: agentsKeys.all });
+  };
+}
+
 export function useTogglePackageInstall() {
   const qc = useQueryClient();
+  const invalidate = useInvalidatePackageInstallation();
   const scope = useOrgOnlyScope();
   // Exact key of the useLibrary query (same init) for the optimistic update.
   const libraryKey = $api.queryOptions("get", "/api/library", {
@@ -132,11 +149,6 @@ export function useTogglePackageInstall() {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(libraryKey, ctx.prev);
     },
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
-      // Legacy keys — package/agent lists are still on the legacy cache.
-      void qc.invalidateQueries({ queryKey: packageKeys.all });
-      void qc.invalidateQueries({ queryKey: agentsKeys.all });
-    },
+    onSettled: invalidate,
   });
 }

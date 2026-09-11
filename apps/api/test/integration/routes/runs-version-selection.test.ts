@@ -15,6 +15,7 @@
  * opt-in via `version=draft` only).
  */
 
+import { asRecord } from "@appstrate/core/safe-json";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -23,6 +24,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedPackageVersion, seedRun } from "../../helpers/seed.ts";
+import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
@@ -142,6 +144,11 @@ describe("POST /api/agents/:scope/:name/run — published deps diverged from the
         dependencies: { skills: { [DEP_X]: "^2.0.0" } },
       },
     });
+    await uploadPackageZip(
+      DRIFTED,
+      "1.0.0",
+      buildMinimalZip(asRecord(version.manifest), "Published prompt.", "prompt.md"),
+    );
     await db
       .insert(packageDistTags)
       .values({ packageId: DRIFTED, tag: "latest", versionId: version.id });

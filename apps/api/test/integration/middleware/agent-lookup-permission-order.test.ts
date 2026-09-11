@@ -19,7 +19,11 @@
 
 import { describe, it, expect } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
-import { isAgentLookup, requireAgent } from "../../../src/middleware/guards.ts";
+import {
+  isAgentLookup,
+  requireAgent,
+  requirePackageInOrg,
+} from "../../../src/middleware/guards.ts";
 import {
   isPermissionGuard,
   requireAnyPermission,
@@ -84,6 +88,8 @@ describe("agent lookup never precedes the permission guard", () => {
     expect(isPermissionGuard(requireCorePermission("agents", "read"))).toBe(true);
     expect(isPermissionGuard(requireModulePermission("mcp", "read"))).toBe(true);
     expect(isPermissionGuard(requireAnyPermission(["agents:read", "agents:write"]))).toBe(true);
+    expect(isPermissionGuard(requirePackageInOrg())).toBe(true);
+    expect(isPermissionGuard(requirePackageInOrg("delete"))).toBe(true);
     // Negative control: an ordinary middleware carries no marker.
     expect(isPermissionGuard((_c: unknown, next: () => unknown) => next())).toBe(false);
     // …and the lookup marker, on the factory this ordering rule is about.

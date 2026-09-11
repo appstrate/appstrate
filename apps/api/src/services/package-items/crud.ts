@@ -3,7 +3,7 @@
 import { eq, and, or, ne, desc, sql, isNotNull } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages } from "@appstrate/db/schema";
+import { spacePackages, packages, packageShares } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -144,6 +144,13 @@ export interface CreateItemInput {
   description?: string;
   content: string;
   createdBy?: string;
+  /**
+   * The space whose `<type>:write` will govern this package
+   * (`packages.home_space_id`). Every caller that runs inside a space context
+   * passes it; `null` is the organization catalogue, writable by owners and
+   * admins only — the shape an org-level import with no space has.
+   */
+  homeSpaceId: string | null;
 }
 
 /**
@@ -177,6 +184,7 @@ export async function createOrgItem(
       .values({
         id: packageId,
         orgId,
+        homeSpaceId: item.homeSpaceId,
         type: cfg.type,
         source: "local",
         draftManifest: finalManifest,
@@ -286,9 +294,22 @@ export async function listOrgItems(
   // "system always shows" branch. Used by the agent editor's integration
   // picker so it only offers usable integrations (server-side filter — the
   // full catalogue can be large).
+  // The catalogue branch mirrors `placementGrantsRead` (`lib/package-access.ts`,
+  // RBAC spec §6.9, §6.10): installed here OR shared here OR homed here.
+  // Without the home half a package this space governs but has uninstalled
+  // disappears from its own type's index page while staying editable — write
+  // without read; without the share half a package offered to this space is
+  // invisible on the page the recipient would go looking for it.
+  // `activeOnly` stays install-only: neither a home nor an offer is a usable
+  // instance.
   const installFilter = opts?.activeOnly
     ? and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true))
-    : or(eq(packages.source, "system"), isNotNull(spacePackages.packageId));
+    : or(
+        eq(packages.source, "system"),
+        isNotNull(spacePackages.packageId),
+        isNotNull(packageShares.packageId),
+        eq(packages.homeSpaceId, spaceId),
+      );
   // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
   // projected: the list mapper never reads it, and it is by far the largest
   // column on the row.
@@ -304,12 +325,17 @@ export async function listOrgItems(
       updatedAt: packages.updatedAt,
       autoInstalled: packages.autoInstalled,
       forkedFrom: packages.forkedFrom,
+      homeSpaceId: packages.homeSpaceId,
       lockVersion: packages.lockVersion,
     })
     .from(packages)
     .leftJoin(
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
+    )
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
     )
     .where(
       and(
@@ -343,6 +369,10 @@ export async function listOrgItems(
       version: typeof m.version === "string" ? m.version : null,
       auto_installed: row.autoInstalled,
       forked_from: row.forkedFrom ?? null,
+      // camelCase, and NOT on the wire: the route projects the pair
+      // `home_space_id` / `home_writable` through `homeWireForCaller`, which
+      // needs the caller's reach and so cannot live in a service.
+      homeSpaceId: row.homeSpaceId,
     };
   });
 }
@@ -367,6 +397,8 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
   return {
     id: data.id,
     orgId: data.orgId,
+    // camelCase, and NOT on the wire — see the note in `listOrgItems`.
+    homeSpaceId: data.homeSpaceId,
     name: getPackageDisplayName(data),
     description: m.description ?? null,
     content: data.draftContent,

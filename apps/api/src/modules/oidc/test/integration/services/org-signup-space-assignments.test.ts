@@ -45,8 +45,10 @@ describe("OIDC signup space assignments", () => {
     });
   }
 
-  it("rejects guest configurations without assignments and admin configurations with them", async () => {
-    await expect(orgClient({ signupRole: "guest" })).rejects.toThrow("at least one space");
+  it("accepts guest configurations without assignments and rejects admin configurations with them", async () => {
+    // A guest lands in their own personal space (RBAC spec §3.6), so a signup
+    // policy that grants no team space is a policy, not a dead account.
+    expect((await orgClient({ signupRole: "guest" })).signupSpaceAssignments).toEqual([]);
     await expect(
       orgClient({
         signupRole: "admin",
@@ -68,12 +70,16 @@ describe("OIDC signup space assignments", () => {
         ?.signupSpaceAssignments,
     ).toEqual(second);
     expect((await loadClientSignupPolicy(client.clientId))?.signupSpaceAssignments).toEqual(second);
-    await expect(updateClient(client.clientId, { signupSpaceAssignments: [] })).rejects.toThrow(
-      "at least one space",
-    );
+    // Promoting to `admin` while grants are stored is refused against the
+    // STORED list, so this has to run before the list is cleared.
     await expect(updateClient(client.clientId, { signupRole: "admin" })).rejects.toThrow(
       "must be empty",
     );
+    // Clearing the grants of a guest policy is allowed — the personal space
+    // remains, so the policy still provisions somewhere.
+    expect(
+      (await updateClient(client.clientId, { signupSpaceAssignments: [] }))?.signupSpaceAssignments,
+    ).toEqual([]);
     expect(
       (await updateClient(client.clientId, { signupRole: "admin", signupSpaceAssignments: [] }))
         ?.signupRole,

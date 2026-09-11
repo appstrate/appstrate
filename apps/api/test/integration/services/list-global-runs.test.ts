@@ -21,7 +21,7 @@ import { seedPackage, seedRun } from "../../helpers/seed.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import { listGlobalRuns } from "../../../src/services/state/runs.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
-import { prefixedId } from "../../../src/lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 const inlineManifest = {
   name: "@inline/r-test",

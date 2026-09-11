@@ -7,6 +7,7 @@ import { assertPackageMutationAccess } from "../lib/package-access.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { ApiError, forbidden, conflict, invalidRequest } from "../lib/errors.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
+import { PERMISSION_GUARD } from "./require-permission.ts";
 
 /** Stamped on middleware that resolves an agent and 404s on an unreachable one.
  *  Mounting it ahead of the permission guard turns 403-vs-404 into a catalog
@@ -80,13 +81,20 @@ function extractPackageId(c: Context<AppEnv>): string {
   return packageId;
 }
 
-/** Package ownership plus mutation authority in every affected installation space. */
+/**
+ * Package ownership plus mutation authority in the package's HOME space —
+ * `packages.home_space_id`, the one authority over a draft, its versions and its
+ * identity, whatever other spaces it is installed in (RBAC spec §6.9). A NULL
+ * home is the org catalog: owners and admins on a session only. This is the
+ * whole authorization for a mutation of an existing package; routes carrying it
+ * deliberately have no second permission guard against the current space.
+ */
 export function requirePackageInOrg(action: "write" | "delete" = "write") {
-  return async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const packageId = extractPackageId(c);
     await assertPackageMutationAccess(c, packageId, action);
     return next();
-  };
+  }, PERMISSION_GUARD);
 }
 
 /** Middleware: for API key callers, reject with 403 when the `:orgId` route

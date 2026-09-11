@@ -44,6 +44,20 @@ export function useCanPreviewRole(): boolean {
 }
 
 /**
+ * Display name of a package's home space, or `null` when there is none to show.
+ *
+ * `home_space_id` is already `null` whenever the caller does not reach the home
+ * (the server withholds the id — RBAC spec §6.9), so this covers both the
+ * organization catalog and a home that belongs to somebody else. There is no
+ * companion "can I write it" hook: that answer is `home_writable` on the
+ * package's own read, computed server-side.
+ */
+export function useHomeSpaceName(homeSpaceId: string | null | undefined): string | null {
+  const { data: spaces } = useSpaces();
+  return (homeSpaceId && spaces?.find((s) => s.id === homeSpaceId)?.name) || null;
+}
+
+/**
  * Permission gating for the UI.
  *
  * `can` answers over the caller's ORG-level effective set (`GET /api/orgs`)

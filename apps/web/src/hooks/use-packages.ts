@@ -10,7 +10,6 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
 import { triggerBlobDownload } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
-import { VERSION_DRAFT, isVersioned } from "../lib/version-selector";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
@@ -114,11 +113,9 @@ async function fetchPackageDetail(
 ): Promise<AgentDetail | OrgPackageItemDetail> {
   const path = splitPackageRef(packageId);
   if (type === "agent") {
-    // `version` is only meaningful for agents (issue #770): a non-`draft`
-    // selector projects that published manifest's input/integrations/skills,
-    // matching what the run will execute. Omitted/`draft` → draft.
+    // Omitted inherits the installation; explicit draft is an editor read.
     const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
-      params: { path, ...(isVersioned(version) ? { query: { version } } : {}) },
+      params: { path, ...(version ? { query: { version } } : {}) },
     });
     return normalizeAgentDetail(data!);
   }
@@ -167,13 +164,11 @@ function usePackageDetail<T extends PackageType>(
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const cfg = PACKAGE_CONFIG[type];
-  // `version` rides the query key so switching the run-options version dropdown
-  // refetches the version-pinned detail instead of serving the cached draft
-  // (issue #770). Omitted → `"draft"`, preserving every existing caller's key.
-  const version = opts?.version ?? VERSION_DRAFT;
+  // Inherited installation and explicit draft must never share a cache entry.
+  const version = opts?.version;
 
   return useQuery({
-    queryKey: packageKeys.detail(cfg.path, orgId, spaceId, id!, version),
+    queryKey: packageKeys.detail(cfg.path, orgId, spaceId, id!, version ?? null),
     queryFn: () => fetchPackageDetail(type, id!, version),
     enabled: !!orgId && !!spaceId && !!id && (opts?.enabled ?? true),
   });
@@ -223,12 +218,39 @@ function useDeletePackage(type: PackageType) {
   });
 }
 
+/**
+ * Move a package to another home space — `PATCH /api/packages/{scope}/{name}`.
+ *
+ * The home is what authorizes every later edit (`packages.home_space_id`, RBAC
+ * spec §6.9), and it is also a read grant: the destination gains sight of the
+ * package and the old home may lose it. So this invalidates the family (detail
+ * + lists), the agent catalog and the library, not just the one detail row.
+ */
+function useMovePackageHome(type: PackageType) {
+  const qc = useQueryClient();
+  const cfg = PACKAGE_CONFIG[type];
+  return useMutation({
+    mutationFn: async ({ id, homeSpaceId }: { id: string; homeSpaceId: string }) => {
+      await client.PATCH("/api/packages/{scope}/{name}", {
+        params: { path: splitPackageRef(id) },
+        body: { home_space_id: homeSpaceId },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
+      qc.invalidateQueries({ queryKey: agentsKeys.all });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+    },
+  });
+}
+
 // Re-export factory hooks for direct use
 export {
   usePackageList,
   usePackageDetail,
   useUploadPackage,
   useDeletePackage,
+  useMovePackageHome,
   type PackageType,
   PACKAGE_CONFIG,
 };

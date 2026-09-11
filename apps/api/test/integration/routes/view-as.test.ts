@@ -76,6 +76,7 @@ function wait(ms = 150): Promise<void> {
 
 interface ListedSpace {
   id: string;
+  personal: boolean;
   role: { kind: string; key: string } | null;
   permissions: string[];
 }
@@ -234,16 +235,44 @@ describe("view as role", () => {
     expect((await createAgent("@view-as/allowed")).status).toBe(201);
   });
 
+  it("refuses the SHARE a previewed viewer cannot make in the package's home", async () => {
+    // `share` is a third verb on the home space (§6.10), held by `admin` and
+    // `builder` and by neither `operator` nor `viewer`. A preview must narrow it
+    // like any other: an administrator previewing a viewer must not be able to
+    // hand an agent to somebody the viewer could not.
+    expect((await createAgent("@view-as/shared")).status).toBe(201);
+    const target = await space("Share target", "closed");
+    const share = (view?: string) =>
+      request("/api/packages/@view-as/shared/shares", {
+        view,
+        space: owner.defaultSpaceId,
+        body: { target: { kind: "space", space_id: target.id } },
+      });
+
+    await expectProblem(await share(persona("member", "preset:viewer")), 403);
+    // Same request, no header: the owner is `admin` in the agent's home.
+    const real = await share();
+    expect(real.status, await real.clone().text()).toBe(200);
+  });
+
   // ─── 2. A guest with no assignment reaches nothing ────────────────
 
   it("shows a guest with no space assignment an empty catalog and the role's walls", async () => {
     const privateSpace = await space("Private", "private");
     const view = persona("guest");
 
+    // Empty, personal space included: a persona has no personal space, and the
+    // previewer's own must not appear in a preview of a role that has none
+    // (RBAC spec §3.6). Without the header the owner sees theirs.
     expect(await listedSpaces(view)).toEqual([]);
-    expect((await listedSpaces()).map((s) => s.id).sort()).toEqual(
-      [owner.defaultSpaceId, privateSpace.id].sort(),
-    );
+    const real = await listedSpaces();
+    expect(
+      real
+        .filter((s) => !s.personal)
+        .map((s) => s.id)
+        .sort(),
+    ).toEqual([owner.defaultSpaceId, privateSpace.id].sort());
+    expect(real.filter((s) => s.personal)).toHaveLength(1);
 
     const inSpace = (spaceId: string, view?: string) =>
       request("/api/agents", { space: spaceId, view });

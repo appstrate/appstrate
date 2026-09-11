@@ -31,7 +31,7 @@ import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, spaces } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
-import { prefixedId } from "../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import type { SpaceContextRow } from "../../../lib/space-lookup.ts";
 import type { AuthIdentity } from "../auth/types.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
@@ -52,6 +52,8 @@ export async function loadSpaceById(spaceId: string): Promise<SpaceContextRow | 
       isDefault: spaces.isDefault,
       visibility: spaces.visibility,
       defaultRole: spaces.defaultRole,
+      ownerUserId: spaces.ownerUserId,
+      orphanedAt: spaces.orphanedAt,
     })
     .from(spaces)
     .where(eq(spaces.id, spaceId))

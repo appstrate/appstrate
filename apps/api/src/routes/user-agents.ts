@@ -8,7 +8,6 @@ import { packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { caretRange } from "@appstrate/core/semver";
-import { requirePermission } from "../middleware/require-permission.ts";
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { assertCatalogPackageAccess, packageAccessSpaces } from "../lib/package-access.ts";
 import { requireOrgAgent, requireMutableAgent, requirePackageInOrg } from "../middleware/guards.ts";
@@ -72,9 +71,11 @@ export function createUserAgentsRouter() {
   const router = new Hono<AppEnv>();
 
   // PUT /api/agents/:scope/:name/skills — set skill references for an agent
+  // `requirePackageInOrg()` is the whole authorization: setting an agent's skill
+  // references is a write to the agent, so the permission is asked in the
+  // agent's HOME space and nowhere else (RBAC spec §6.9).
   router.put(
     `/${SCOPED_PACKAGE_ROUTE}/skills`,
-    requirePermission("agents", "write"),
     requirePackageInOrg(),
     requireOrgAgent(),
     requireMutableAgent(),
@@ -110,7 +111,11 @@ export function createUserAgentsRouter() {
       // `dependencies.skills`. `requireAccess: false`: the caller just wrote
       // this agent in their org, so the app-install gate must not 404 a
       // successful write.
-      const detail = await buildAgentDetailDto(c, { itemId: packageId, requireAccess: false });
+      const detail = await buildAgentDetailDto(c, {
+        itemId: packageId,
+        requireAccess: false,
+        version: "draft",
+      });
       if (!detail) {
         logger.error("Updated agent could not be re-read", {
           packageId,

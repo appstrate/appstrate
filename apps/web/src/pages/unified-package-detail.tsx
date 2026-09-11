@@ -16,7 +16,7 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { SchemaWrapper } from "@appstrate/core/form";
-import { usePermissions } from "../hooks/use-permissions";
+import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState } from "../components/page-states";
@@ -203,6 +203,14 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const uninstallMutation = useTogglePackageInstall();
   const currentSpaceId = useCurrentSpaceId();
   const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
+  // The package's own detail response is the authority on both halves of the
+  // home contract: the id (only when this caller reaches that space) and the
+  // write verdict. `undefined` means "not loaded yet", which every gate reads
+  // as "no".
+  const homeSpaceId = (agentDetail ?? pkgDetail)?.home_space_id;
+  const homeWritable = (agentDetail ?? pkgDetail)?.home_writable;
+  const homeShareable = (agentDetail ?? pkgDetail)?.home_shareable;
+  const homeSpaceName = useHomeSpaceName(homeSpaceId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
     type: "deletePackage" | "uninstallPackage";
@@ -297,6 +305,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     source: source ?? ("local" as const),
     type,
     version,
+    homeSpaceName,
   };
 
   // ── Render ──
@@ -382,6 +391,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 isOwned={isOwned}
                 isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
+                homeSpaceId={homeSpaceId}
+                homeWritable={homeWritable}
+                homeShareable={homeShareable}
                 downloadVersion={downloadVersion}
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}

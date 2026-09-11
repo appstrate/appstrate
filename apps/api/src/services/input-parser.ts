@@ -62,7 +62,7 @@ import { isUploadUri, isFileUri, parseFileUri, fileUri } from "@appstrate/core/f
 import { getActor } from "../lib/actor.ts";
 import { callerPermissions } from "../lib/permissions.ts";
 import { assertRunVisible } from "../lib/run-visibility.ts";
-import { prefixedId } from "../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";

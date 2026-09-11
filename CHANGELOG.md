@@ -8,6 +8,174 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A package can be SHARED with a person or with a space.** Sharing writes an
+  AUDIENCE row (`package_shares`, migration **0065**, a brand-new table with no
+  backfill); installing stays the recipient's own act on `space_packages`. Two
+  tables, because a package runs with the RECIPIENT's credentials: activating
+  one is a consent, and an "offered but not accepted" state carried on
+  `space_packages` would have had to be filtered at each of that table's
+  thirteen readers, where one miss executes a package nobody agreed to. The
+  subject is always a SPACE — "share with Bob" is a share with Bob's personal
+  space, resolved server-side from his user id and created if he has none, and
+  the sharer never learns that id: the listing renders such a target as its
+  owner. Three routes are authorized by a THIRD verb on the package's home space
+  (§6.9's authority, `<type>:share`): `POST /api/packages/{scope}/{name}/shares`
+  (idempotent, 409 `share_target_is_home` when the target is the home itself,
+  404 for a space the caller cannot reach — so another member's personal space
+  is not targetable by a guessed id), `GET …/shares` and
+  `DELETE …/shares/{target}` (which removes the installation behind the share in
+  the SAME transaction — otherwise the package keeps running where it may no
+  longer be seen). A fourth, `POST …/shares/accept`, is the recipient's own act
+  and requires NEITHER `share` NOR the type's install grant: the owner of the
+  space consented by calling it, and a `guest` holds only the `operator` preset
+  in their own space. It installs pinned to `latest`, so an author publishing a
+  v3 never changes what the recipient executes; calling it again re-pins, which
+  is the update path. A share is a READ grant and nothing more — `placementGrantsRead`
+  becomes `installed ∨ shared ∨ home` and `GET /api/library` gains a `shared`
+  section listing the offers not yet installed — while execution, the version
+  pin, the per-space model and the credential resolution all stay on
+  `space_packages`. No execution path reads `package_shares`.
+
+- **New permission `share`** on `agents`, `skills`, `mcp-servers` and
+  `integrations` (`@appstrate/core`, additive): held by the `admin` and
+  `builder` presets, by no API key (the share decides who runs what with whose
+  credentials, so it is session-only like `integrations:configure`), and
+  droppable from a custom role by an organization that wants Notion's split of
+  authoring from distributing. Every package read now carries a third home field
+  beside `home_space_id` / `home_writable`: `home_shareable`, the same predicate
+  for `share`, which is what the SPA's "Partager…" action is gated on.
+
+- **Organization setting `restrict_package_copy`** (default `false`). Reading a
+  package implies being able to copy it, as in Notion, Drive and Figma. An
+  organization may close that: at `true`, `POST …/fork` and
+  `GET …/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` require
+  `<type>:share` in the SOURCE package's home space (owners and admins when it
+  has none) and answer `403 package_copy_restricted` otherwise. Without it,
+  personal spaces open "fork it into mine, then share it on" to every reader —
+  `share` would protect the link and not the content. **Skills and system
+  packages are exempt** on all three: the CLI's skills sync downloads skills
+  into a local checkout by design and a skill's audience is already the space it
+  is installed in, while a system package is shipped readable in every space of
+  every organization and so has no owning space for the setting to protect.
+  `/bundle` is the widest of the three and the one to know about: **a
+  SERVER-side agent run is unaffected** — it assembles the same bundle and hands
+  it to nobody — but `appstrate run @scope/agent --local` downloads one, so
+  under a restricted organization it answers `403 package_copy_restricted`. That
+  is the flag's meaning rather than a side effect: a copy of the agent leaves
+  the platform to perform a local run. Reading a package's files in the file
+  explorer stays open in both settings — a screen is not a copy. Toggled from
+  the organization's general settings page under `org:settings`.
+
+- **Every member of an organization now has a personal space — "Mon espace".**
+  It is created at the moment they join (organization creation, invitation
+  accept, SSO auto-provision and first-boot bootstrap all go through one
+  `provisionMember` seam, in the same transaction as the membership row, so a
+  member without one cannot exist), and `GET /api/spaces` repairs a missing one
+  for the caller. It is `private`, holds exactly one member, and is reached by
+  its **owner alone** — an organization owner or admin gets a 404 on it, on
+  every route: the detail, the members list, the package detail of a draft homed
+  there, `PATCH`, `DELETE`, the SSE stream, and a schedule pointed at it. That
+  is the whole point: agents, runs, files and chat sessions started there are
+  private, and a draft nobody has shared is nobody else's business. The owner's
+  own session reaches it, and so does the same person through a CLI device-flow
+  or MCP instance token — their own credential by another transport. An **API
+  key** and an **end-user** never do: a key is pinned to a space and carries its
+  creator's authority, not their privacy, so a key minted into a personal space
+  would 404 on every request it made and `POST /api/api-keys` refuses it with a
+  409 `personal_space_takes_no_keys` (API keys are team-space only). A role
+  preview (`X-View-As`) can neither list nor target one (400). A **guest** who
+  owns a personal space holds preset `operator` there rather than `admin`:
+  receive and run what is shared with them, not author agents on the
+  organization's LLM budget. Only the name is editable: `visibility` or
+  `default_role` on it is a 409 `personal_space_immutable`, `DELETE` is a 409
+  `personal_space_not_deletable`, and a `space_members` write is a 409
+  `personal_space_has_no_members`. Two administrative acts remain — both
+  audited, both refused to API keys, and both applying to an **orphaned** space
+  only:
+  `POST /api/spaces/{id}/convert-to-team` turns one whose owner has LEFT into an
+  ordinary team space (it stays `private`), the one way an administrator ever
+  reaches inside one, and `POST /api/spaces/{id}/sweep-now` deletes it
+  immediately. A live personal space is never convertible, and all three acts —
+  those two plus `DELETE` — answer **404 rather than 409** on a live personal
+  space that is not the caller's own, an API key included (a key carries its
+  creator's authority, not their privacy): a named refusal would confirm that
+  the id is somebody's private workspace. Leaving the organization does not delete
+  anything: `spaces` gains `orphaned_at`, stamped by the member removal (whose
+  audit event now names the spaces it put on the clock), and for 30 days the
+  space is listed to owners and admins (`personal: true`, `orphaned_at` set,
+  `access: "none"`) so it can be converted, while a re-invite inside the window
+  hands it back untouched. During that window a package homed there but
+  installed elsewhere is writable by nobody, which is the intended state —
+  converting the space ends it early. After 30 days the new hourly
+  `personal-space-sweeper` worker empties it — a package it homes moves to the
+  organization catalogue when another space has it installed, and is deleted
+  when it lived only there — and deletes the space with its runs, files and
+  sessions. `GET /api/spaces` items carry `personal`, the switcher pins
+  "Mon espace" above the team spaces, a personal space's settings hide the
+  Members tab and lock the visibility and default-role controls, and the
+  organization's Spaces page lists orphaned ones with **Convertir en espace
+  d'équipe** / **Supprimer maintenant**. `POST /api/end-users` joins
+  `POST /api/api-keys` and the OIDC client registration in refusing a personal
+  space (409 `personal_space_takes_no_end_users`): it holds no identity that
+  outlives the one member it belongs to. Migration `0064` is shape-only and
+  needs no backfill to be correct; provisioning the spaces of members who
+  already exist is `scripts/migration/0015-personal-spaces-backfill.sql`, run
+  AFTER the deploy is validated — nothing is degraded while it has not run, and
+  nothing counts spaces for a quota today, so the count it prints matters only
+  to an operator with a per-space ceiling of their own. **This one is a one-way
+  deploy**, and from the FIRST BOOT of the new build rather than from `0015`:
+  personal spaces exist from the first request served, and an older build's
+  resolver reads one as an ordinary `private` space — handing every organization
+  owner and admin `admin` inside it, the one thing the feature refuses. Roll
+  forward, or restore the coordinated backup; the runbook
+  (`scripts/migration/README.md` → "Personal spaces & sharing rollout") states
+  the per-file rollback truth.
+
+- **`DELETE /api/spaces/{id}` now refuses a space with runs in progress** —
+  409 `space_has_active_runs` while any run in it is `pending` or `running`, for
+  every actor including the offboarding sweeper (which logs and retries on the
+  next pass). The delete cascade-drops `runs`/`run_logs`, so performing it under
+  a live container tore the rows out from under it. Same rule as organization
+  deletion, and now literally the same predicate.
+
+- **A package now has a home space, and it alone decides who may write it.**
+  `packages.home_space_id` names the space whose `<type>:write` authorizes
+  editing, publishing, restoring, renaming and deleting a package; the other
+  spaces it is installed in consume it and get no say. `NULL` means the
+  organization catalogue — owners and admins on a session. The home is asked, and
+  nothing else: the mutation routes no longer also require the permission in the
+  space the request comes from, so an author edits their own package while
+  browsing a space where they only read. The routes acting on the _installation_
+  — install, uninstall, configure, per-space settings — keep their current-space
+  guard, because that is what they are about. The home is set from the space a
+  package is created, imported or forked in, is exposed as `home_space_id` on
+  package reads and on `GET /api/library`, and is moved by the new
+  `PATCH /api/packages/{scope}/{name}`, which requires that permission in both
+  the old and the new home (an unreachable destination answers 404). It is a
+  read grant too, everywhere: a package is readable from the spaces it is
+  installed in **and** from its home, so a draft installed nowhere — or one
+  installed only where its author cannot go — stays visible to them, on the
+  detail, in the library and in the file explorer. Running a package is
+  unchanged: that still needs an installation in the space it runs in. This
+  replaces the rule requiring the permission in _every_ space where a package
+  was installed, which cost an author the edit of their own package the moment
+  someone installed it into a space the author cannot read. A space that
+  homes a package can no longer be deleted: `DELETE /api/spaces/{id}` answers
+  409 `space_homes_packages` and names them, so moving them stays the caller's
+  act — the package page's actions menu carries a **Move to a space…** dialog for
+  exactly that, listing the spaces where the caller may author this type.
+  Migration **0063** adds the column and is shape-only: every existing row
+  starts with no home and is therefore admin-only until the operator runs
+  `scripts/migration/0014-packages-home-space-backfill.sql`, which belongs
+  between the migrations and bringing the new version up — stop, migrate,
+  run 0014, start — so nothing serves traffic while non-owner authors and API
+  keys are locked out. Rolling 0063 back is safe before 0014 and needs an
+  `UPDATE packages SET home_space_id = NULL` first afterwards, because the
+  column's `ON DELETE RESTRICT` then refuses to delete a space that homes a
+  package and an older build has no route that clears a home. The combined
+  runbook for 0063-0065 and both scripts is `scripts/migration/README.md` →
+  "Personal spaces & sharing rollout".
+
 - **Two-layer RBAC — an org role, and a role per space.** Organization roles
   gain **`guest`**: an org identity with no implicit reach into any space, for
   outside collaborators. Every space now carries a **visibility** (`open`,
@@ -173,6 +341,18 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   green).
 
 ### Changed
+
+- **A package read no longer publishes its home space's id to callers who
+  cannot see that space.** `home_space_id` on `AgentDetail`, `OrgPackageItem`,
+  `OrgPackageItemDetail` and `GET /api/library` is now the home's id **only when
+  the caller reaches that space**, and `null` otherwise — so a package homed in a
+  member's personal space and installed in a team space no longer hands
+  everyone in that team the id of a private workspace. Each of those four shapes
+  gains **`home_writable: boolean`**, the server's own verdict on whether this
+  caller may write the package (the exact predicate the write routes enforce).
+  Read `home_writable`, never the id, to decide whether to offer an edit: the
+  dashboard now does exactly that, and its client-side derivation of write
+  authority is gone.
 
 - **`runs:read` now means the runs you launched, and nothing else.** Your manual
   runs and the runs of your own schedules — not a colleague's, not an

@@ -63,6 +63,19 @@ function versionRestoreResponseSchema(detailRef: string) {
   };
 }
 
+/**
+ * The authority sentence EVERY mutation of an EXISTING package carries — five
+ * verbs (draft update, delete, version create, version restore, version delete)
+ * times four types, twenty descriptions off ONE definition. Same reason
+ * `PACKAGE_HOME_PROPERTIES` (`../schemas.ts`) is one object rather than four
+ * copies: the rule is single (`packages.home_space_id`, RBAC spec §6.9) and
+ * hand-copied prose drifts the moment it changes. It answered nothing at all
+ * before — a reader could not tell from these descriptions that the space in
+ * `X-Space-Id` is not what authorizes them.
+ */
+const PACKAGE_MUTATION_AUTHORITY =
+  " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.";
+
 export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
@@ -695,6 +708,9 @@ export const packagesPaths = {
                     used_by_agents: 2,
                     auto_installed: false,
                     forked_from: null,
+                    home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                    home_writable: true,
+                    home_shareable: true,
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
                   },
@@ -845,7 +861,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden.",
+        "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -905,7 +922,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore a skill version into the draft",
       description:
-        "Restore a previously published version into the skill draft. Does not create a new version.",
+        "Restore a previously published version into the skill draft. Does not create a new version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -988,7 +1006,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a skill version",
       description:
-        "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version.",
+        "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1004,6 +1023,10 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          $ref: "#/components/responses/VersionInUse",
+          description: "The version is pinned by an installation (version_in_use).",
+        },
       },
     },
   },
@@ -1039,7 +1062,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Update a skill",
       description:
-        "Update a skill in the organization packages. Built-in skills cannot be modified.",
+        "Update a skill in the organization packages. Built-in skills cannot be modified." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1092,7 +1116,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete a skill",
       description:
-        "Delete a skill from the organization packages. Built-in skills cannot be deleted.",
+        "Delete a skill from the organization packages. Built-in skills cannot be deleted." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1210,7 +1235,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Get agent detail",
       description:
-        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
+        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `home_space_id`, `home_writable`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1222,7 +1247,7 @@ export const packagesPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
+            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, else the draft. Explicit `draft` always reads the working copy. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
         },
       ],
       responses: {
@@ -1238,13 +1263,16 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
     },
     put: {
       operationId: "updateAgent",
       tags: ["Packages"],
       summary: "Update a user agent",
-      description: "Update manifest and content of a user agent with optimistic locking.",
+      description:
+        "Update manifest and content of a user agent with optimistic locking." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1297,7 +1325,8 @@ export const packagesPaths = {
       operationId: "deleteAgent",
       tags: ["Packages"],
       summary: "Delete a user agent",
-      description: "Delete a user agent. Built-in agents cannot be deleted.",
+      description:
+        "Delete a user agent. Built-in agents cannot be deleted." + PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1398,7 +1427,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create an agent version from draft",
       description:
-        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs.",
+        "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1453,7 +1483,9 @@ export const packagesPaths = {
       operationId: "restoreAgentVersion",
       tags: ["Packages"],
       summary: "Restore an agent version into the draft",
-      description: "Restore a published version into the draft. Requires no runs in progress.",
+      description:
+        "Restore a published version into the draft. Requires no runs in progress." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1519,7 +1551,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an agent version",
       description:
-        "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress.",
+        "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1537,13 +1570,241 @@ export const packagesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Agent has runs in progress. RFC 9457 problem+json with `code` of `agent_in_use`.",
+            "Agent has runs in progress (`agent_in_use`) or the version is pinned by an installation (`version_in_use`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
+      },
+    },
+  },
+  "/api/packages/{scope}/{name}": {
+    patch: {
+      operationId: "movePackageHome",
+      tags: ["Packages"],
+      summary: "Move a package to another home space",
+      description:
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. This route touches nothing else: the draft is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["home_space_id"],
+              properties: {
+                home_space_id: {
+                  type: ["string", "null"],
+                  description:
+                    "Destination space id (`spc_…`), or `null` for the organization catalog.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The package resource, with its new `home_space_id`.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                oneOf: [
+                  { $ref: "#/components/schemas/AgentDetail" },
+                  { $ref: "#/components/schemas/OrgPackageItemDetail" },
+                ],
+                description:
+                  "The moved package resource — same shape as its GET detail (`AgentDetail` for agents, otherwise `OrgPackageItemDetail`). No follow-up GET needed.",
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/packages/{scope}/{name}/shares": {
+    get: {
+      operationId: "listPackageShares",
+      tags: ["Packages"],
+      summary: "List the spaces a package is shared with",
+      description:
+        "The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space (organization owner or admin when the package has none); a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "The package's shares, oldest first.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/PackageShare" },
+                  },
+                  hasMore: {
+                    type: "boolean",
+                    description: "Always false — a package's audience is not paginated.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+    post: {
+      operationId: "sharePackage",
+      tags: ["Packages"],
+      summary: "Share a package with a person or a space",
+      description:
+        "Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST …/shares/accept`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. Idempotent: sharing the same pair twice answers 200 with the same entry.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["target"],
+              properties: { target: { $ref: "#/components/schemas/ShareTarget" } },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The share, new or already present.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PackageShare" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The target space is the package's own home (`share_target_is_home`). RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/packages/{scope}/{name}/shares/accept": {
+    post: {
+      operationId: "acceptPackageShare",
+      tags: ["Packages"],
+      summary: "Add a shared package to your own space",
+      description:
+        "Install a package that was shared with you into your OWN personal space, pinned to the `latest` published version. Deliberately requires neither the `share` permission nor the package type's install grant: the space's owner consented by calling this, and a `guest` holds only the `operator` preset in their own space. The package must have a share row for that space, otherwise 404 — an offer the caller never received is indistinguishable from a package that does not exist. Idempotent in the useful direction: calling it again RE-PINS the installation to `latest`, which is how the owner takes a version the author has since published. API keys, end-users and role previews have no personal space and answer 404.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Installed (or re-pinned) in the caller's personal space.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "package_id", "version_id"],
+                properties: {
+                  object: { type: "string", enum: ["space_package"] },
+                  package_id: { type: "string" },
+                  version_id: {
+                    type: "integer",
+                    description: "The pinned version's id — the `latest` dist-tag at accept time.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The package has no published version to pin (`package_has_no_version`). A shared package is always installed at a pin, so there is nothing to install until its author publishes. RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
+      },
+    },
+  },
+  "/api/packages/{scope}/{name}/shares/{target}": {
+    delete: {
+      operationId: "revokePackageShare",
+      tags: ["Packages"],
+      summary: "Withdraw a package share",
+      description:
+        "Remove the offer AND the installation it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "target",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description:
+            "The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. The two are told apart by the space-id shape. There is no third spelling: the id of another member's personal space is never on the wire, so it cannot be the handle here.",
+        },
+      ],
+      responses: {
+        "204": { description: "Share (and any installation behind it) removed." },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -1802,7 +2063,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden.",
+        "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1858,7 +2120,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore an integration package version into the draft",
       description:
-        "Restore a previously published version into the integration package draft. Does not create a new version.",
+        "Restore a previously published version into the integration package draft. Does not create a new version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1936,7 +2199,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an integration package version",
       description:
-        "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version.",
+        "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1952,6 +2216,10 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          $ref: "#/components/responses/VersionInUse",
+          description: "The version is pinned by an installation (version_in_use).",
+        },
       },
     },
   },
@@ -1987,7 +2255,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Update an integration package",
       description:
-        "Update an integration package in the organization packages. Built-in integration packages cannot be modified.",
+        "Update an integration package in the organization packages. Built-in integration packages cannot be modified." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2036,7 +2305,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an integration package",
       description:
-        "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted.",
+        "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2229,7 +2499,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Create a version from draft",
       description:
-        "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden.",
+        "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2285,7 +2556,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Restore an MCP-server package version into the draft",
       description:
-        "Restore a previously published version into the MCP-server package draft. Does not create a new version.",
+        "Restore a previously published version into the MCP-server package draft. Does not create a new version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2363,7 +2635,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an MCP-server package version",
       description:
-        "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version.",
+        "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2379,6 +2652,10 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          $ref: "#/components/responses/VersionInUse",
+          description: "The version is pinned by an installation (version_in_use).",
+        },
       },
     },
   },
@@ -2414,7 +2691,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Update an MCP-server package",
       description:
-        "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified.",
+        "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2463,7 +2741,8 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Delete an MCP-server package",
       description:
-        "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted.",
+        "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted." +
+        PACKAGE_MUTATION_AUTHORITY,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

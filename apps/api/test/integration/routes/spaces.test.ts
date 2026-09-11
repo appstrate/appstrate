@@ -11,10 +11,13 @@ import {
   seedPackage,
   seedInstalledPackage,
   seedOrgModel,
+  seedRun,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
-import { assertDbMissing } from "../../helpers/assertions.ts";
-import { spaces, spacePackages, auditEvents } from "@appstrate/db/schema";
+import { assertDbHas, assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
+import { spaces, spacePackages, auditEvents, packages, runs } from "@appstrate/db/schema";
+import { insertShadowPackage } from "../../../src/services/inline-run.ts";
+import type { AgentManifest } from "../../../src/types/index.ts";
 
 const app = getTestApp();
 
@@ -162,6 +165,114 @@ describe("Spaces API", () => {
       const listBody = (await listRes.json()) as any;
       const found = listBody.data.find((a: { id: string }) => a.id === created.id);
       expect(found).toBeUndefined();
+    });
+
+    // `packages.home_space_id` is `ON DELETE RESTRICT`: a homed package cannot
+    // follow its space out, and nothing may re-home it behind the caller's back
+    // (RBAC spec §6.9). The delete therefore has to refuse, name the packages,
+    // and leave the space standing.
+    describe("a space that homes packages", () => {
+      let doomed: string;
+
+      beforeEach(async () => {
+        doomed = (await seedSpace({ orgId: ctx.orgId, name: "Homes Things" })).id;
+      });
+
+      const del = () =>
+        app.request(`/api/spaces/${doomed}`, { method: "DELETE", headers: authHeaders(ctx) });
+
+      it("refuses with 409 and names them", async () => {
+        await seedPackage({ id: "@testorg/homed", orgId: ctx.orgId, homeSpaceId: doomed });
+
+        const body = await expectProblem(await del(), 409, { code: "space_homes_packages" });
+        expect(body.detail).toContain("@testorg/homed");
+        await assertDbHas(spaces, eq(spaces.id, doomed));
+      });
+
+      it("succeeds once the package has moved home", async () => {
+        await seedPackage({ id: "@testorg/homed", orgId: ctx.orgId, homeSpaceId: doomed });
+        await seedInstalledPackage(doomed, "@testorg/homed");
+
+        const moved = await app.request("/api/packages/@testorg/homed", {
+          method: "PATCH",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ home_space_id: ctx.defaultSpaceId }),
+        });
+        expect(moved.status, await moved.clone().text()).toBe(200);
+
+        expect((await del()).status).toBe(204);
+        await assertDbMissing(spaces, eq(spaces.id, doomed));
+      });
+
+      it("an inline run's shadow row carries no home", async () => {
+        // A shadow package is minted by every inline run and hard-deleted only
+        // by the compaction sweeper. Homing it would make one run enough to
+        // wedge its space forever, so shadows carry no home at all — which is
+        // what makes the delete below succeed, not a filter on the 409 query.
+        const shadowId = await insertShadowPackage({
+          orgId: ctx.orgId,
+          createdBy: ctx.user.id,
+          manifest: {
+            name: "@inline/shadow",
+            version: "0.1.0",
+            type: "agent",
+            description: "d",
+          } as unknown as AgentManifest,
+          prompt: "hi",
+        });
+        await seedInstalledPackage(doomed, shadowId);
+
+        expect((await getDbRow(packages, eq(packages.id, shadowId))).homeSpaceId).toBeNull();
+        expect((await del()).status).toBe(204);
+        await assertDbMissing(spaces, eq(spaces.id, doomed));
+      });
+    });
+
+    // The delete cascade-drops `runs`/`run_logs`, so performing it while a run
+    // is executing rips the rows out from under a live container — the same
+    // rule organization deletion has, from the same predicate
+    // (`countInProgressRuns`).
+    describe("a space with runs in progress", () => {
+      let doomed: string;
+
+      const del = () =>
+        app.request(`/api/spaces/${doomed}`, { method: "DELETE", headers: authHeaders(ctx) });
+
+      beforeEach(async () => {
+        doomed = (await seedSpace({ orgId: ctx.orgId, name: "Busy" })).id;
+        await seedPackage({
+          id: "@testorg/busy",
+          orgId: ctx.orgId,
+          type: "agent",
+          homeSpaceId: ctx.defaultSpaceId,
+        });
+      });
+
+      for (const status of ["pending", "running"] as const) {
+        it(`refuses with 409 while a run is ${status}`, async () => {
+          await seedRun({
+            orgId: ctx.orgId,
+            spaceId: doomed,
+            packageId: "@testorg/busy",
+            status,
+          });
+          await expectProblem(await del(), 409, { code: "space_has_active_runs" });
+          await assertDbHas(spaces, eq(spaces.id, doomed));
+        });
+      }
+
+      it("succeeds once the run has settled", async () => {
+        const run = await seedRun({
+          orgId: ctx.orgId,
+          spaceId: doomed,
+          packageId: "@testorg/busy",
+          status: "running",
+        });
+        await expectProblem(await del(), 409, { code: "space_has_active_runs" });
+        await db.update(runs).set({ status: "success" }).where(eq(runs.id, run.id));
+        expect((await del()).status).toBe(204);
+        await assertDbMissing(spaces, eq(spaces.id, doomed));
+      });
     });
   });
 

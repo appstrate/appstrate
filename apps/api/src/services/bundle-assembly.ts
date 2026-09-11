@@ -27,8 +27,9 @@ import { DraftPackageCatalog } from "./run-launcher/draft-package-catalog.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { resolveVersion } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";
-import { packageVersions, spacePackages } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
+import { packageVersions } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+import { getInstalledPackageVersion } from "./space-packages.ts";
 import { ApiError, notFound } from "../lib/errors.ts";
 import { formatPackageIdentity } from "@appstrate/afps-runtime/bundle";
 import type { LoadedPackage } from "../types/index.ts";
@@ -102,13 +103,8 @@ export async function resolveExportVersion(
   }
 
   // Installed version pin
-  const [installed] = await db
-    .select({ version: packageVersions.version })
-    .from(spacePackages)
-    .innerJoin(packageVersions, eq(packageVersions.id, spacePackages.versionId))
-    .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)))
-    .limit(1);
-  if (installed) return installed.version;
+  const installed = await getInstalledPackageVersion(scope, packageId);
+  if (installed) return installed;
 
   // Fall back to "latest"
   const latestId = await resolveVersion(packageId, "latest");

@@ -39,6 +39,8 @@ export async function forkPackage(
   orgId: string,
   orgSlug: string,
   sourcePackageId: string,
+  /** The destination space — the fork's home, whatever the source's was. */
+  homeSpaceId: string,
   userId?: string,
   customName?: string,
 ): Promise<ForkResult | ForkError> {
@@ -60,7 +62,15 @@ export async function forkPackage(
   const cfg = CONFIG_BY_TYPE[raw.type as PackageType];
   if (!cfg) return { code: "UNKNOWN_TYPE", type: raw.type };
 
-  return forkWithConfig(orgId, orgSlug, sourcePackageId, customName ?? parsed.name, cfg, userId);
+  return forkWithConfig(
+    orgId,
+    orgSlug,
+    sourcePackageId,
+    customName ?? parsed.name,
+    cfg,
+    homeSpaceId,
+    userId,
+  );
 }
 
 async function forkWithConfig(
@@ -69,6 +79,7 @@ async function forkWithConfig(
   sourcePackageId: string,
   sourceName: string,
   cfg: PackageTypeConfig,
+  homeSpaceId: string,
   userId?: string,
 ): Promise<ForkResult | ForkError> {
   // Resolve latest published version of the source
@@ -213,6 +224,7 @@ async function forkWithConfig(
         typeof versionManifest.description === "string" ? versionManifest.description : undefined,
       content,
       createdBy: userId,
+      homeSpaceId,
     },
     cfg,
     updatedManifest,

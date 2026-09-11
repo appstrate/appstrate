@@ -836,7 +836,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         version: {
           type: "string",
           description:
-            "Agent version selector (kind:agent). Omit for the latest published version; pass " +
+            "Agent version selector (kind:agent). Omit for the installed version pin, else latest published; pass " +
             "`draft` to run the working copy of a draft-only agent.",
         },
         input: {
