@@ -125,8 +125,9 @@ describe("env", () => {
     it("bounds the replay window so it can never starve the forward batch", () => {
       // A pass reads `replaySpan + BATCH_SIZE` capped at the platform's 1000-row
       // ceiling, so a window above 500 could leave a maxed-out batch with less
-      // forward capacity than replay. Capping at 500 keeps forward progress
-      // structural rather than dependent on operator discipline.
+      // forward capacity than replay. The 500 cap is a FLOOR on forward
+      // capacity, not the whole guarantee — what makes it exactly BATCH_SIZE is
+      // the cross-field rule covered by the test above.
       const parse = (value: string): boolean => {
         process.env.EE_RECONCILIATION_REPLAY_WINDOW = value;
         _resetEeEnvForTests();
