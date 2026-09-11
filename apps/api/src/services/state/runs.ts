@@ -1894,7 +1894,15 @@ export async function listOrphanRunIds(): Promise<string[]> {
 
 /** Default / max batch sizes for the cursor ledger read (plain clamp, internal service). */
 const LLM_USAGE_LIST_DEFAULT_LIMIT = 500;
-const LLM_USAGE_LIST_MAX_LIMIT = 1000;
+/**
+ * The ceiling {@link listLlmUsage} clamps to, and the number the `usage.list`
+ * module service therefore honours. Exported because `@appstrate/module-ee`
+ * sizes its reconciliation knobs against it (`LEDGER_LIST_MAX_LIMIT`) and
+ * refuses to boot above it; `test/unit/ledger-list-cap-parity.test.ts` holds
+ * the two to the same value so a change here cannot silently truncate the
+ * module's forward slice.
+ */
+export const LLM_USAGE_LIST_MAX_LIMIT = 1000;
 
 /** Terminal run statuses as a SQL value list, for the `settled` predicate. */
 const terminalRunStatusSqlList = sql.join(

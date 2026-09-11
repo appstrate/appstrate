@@ -331,3 +331,7 @@ export default eeModule;
 
 export { QuotaExceededError };
 export { emailOverrides };
+// The platform's `usage.list` ceiling this module sizes both reconciliation
+// knobs against. On the public entry so the platform can assert the two agree
+// without reaching into the package.
+export { LEDGER_LIST_MAX_LIMIT } from "./env.ts";
