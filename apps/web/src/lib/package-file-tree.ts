@@ -283,11 +283,11 @@ function typeAhead(rows: readonly TreeRow[], index: number, key: string): TreeFo
  * that drops the selected file falls back silently, and no re-render can
  * clobber a selection the user made.
  */
-export function pickActiveEntry(
-  entries: readonly PackageFileEntry[],
+export function pickActiveEntry<T extends PackageFileEntry>(
+  entries: readonly T[],
   selectedPath: string | null,
   primaryFileName: string,
-): PackageFileEntry | null {
+): T | null {
   return (
     (selectedPath === null ? undefined : entries.find((e) => e.path === selectedPath)) ??
     entries.find((e) => e.path === primaryFileName) ??
