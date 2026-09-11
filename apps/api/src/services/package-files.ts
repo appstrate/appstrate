@@ -35,7 +35,6 @@ import {
   PackageFileWriteError,
 } from "@appstrate/core/package-file-operations";
 import {
-  decodeSkillMarkdown,
   checkCompanionFiles,
   companionFilesFromRecord,
 } from "@appstrate/afps-shared/companion-files";
