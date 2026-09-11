@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
@@ -18,7 +19,7 @@ export function useCurrentOrgId(): string | null {
 async function fetchOrgs(viewAs?: string) {
   const { data } = await client.GET(
     "/api/orgs",
-    viewAs ? { params: { header: { "X-View-As": viewAs } } } : {},
+    viewAs ? { params: { header: { [VIEW_AS_HEADER]: viewAs } } } : {},
   );
   return data?.data ?? [];
 }
