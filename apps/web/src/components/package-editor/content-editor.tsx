@@ -31,9 +31,16 @@ interface ContentEditorProps {
   /** Monaco language id — `languageForPath` for a file, a literal for a fixed one. */
   language: string;
   height?: string;
+  readOnly?: boolean;
 }
 
-export function ContentEditor({ value, onChange, language, height = "500px" }: ContentEditorProps) {
+export function ContentEditor({
+  value,
+  onChange,
+  language,
+  height = "500px",
+  readOnly = false,
+}: ContentEditorProps) {
   const { resolvedTheme } = useTheme();
   const handleMount: OnMount = useCallback((editor) => {
     editor.focus();
@@ -49,6 +56,7 @@ export function ContentEditor({ value, onChange, language, height = "500px" }: C
         onChange={(v) => onChange(v ?? "")}
         onMount={handleMount}
         options={{
+          readOnly,
           minimap: { enabled: false },
           wordWrap: language === "markdown" ? "on" : "off",
           fontSize: 13,

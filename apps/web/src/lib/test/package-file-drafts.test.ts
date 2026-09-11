@@ -1,174 +1,93 @@
 // SPDX-License-Identifier: Apache-2.0
-
-/**
- * The buffered half of the draft file editor.
- *
- * This is the whole of what the editor computes on its own — everything else it
- * does is "send these operations and adopt the tree that comes back" — and it
- * is the half that can lose an author's unsent work, so it is pinned here
- * rather than left to a rendered test the DOM-less runner cannot perform.
- */
-
 import { describe, it, expect } from "bun:test";
 import {
-  conflictedDrafts,
-  draftWriteOperations,
-  dropDraftText,
-  hasDraftTexts,
-  renameDraftText,
-  setDraftText,
-  type DraftTexts,
-} from "../package-file-drafts.ts";
-import type { PackageFileEntry } from "../package-file-tree.ts";
+  projectDraftFiles,
+  stageFileOperations,
+  packageUpdateBody,
+  uploadedFileOperation,
+} from "../package-file-drafts";
+import type { PackageFileEntry } from "../package-file-tree";
+const entries: PackageFileEntry[] = [
+  { path: "SKILL.md", size: 4, media_kind: "text", inline: "body" },
+  { path: "notes.md", size: 8, media_kind: "text" },
+];
 
-/** One buffered edit: `text` typed on top of `base`. */
-const draft = (text: string, base = "original") => ({ text, base });
-
-/** An index entry carrying its full text, as the route inlines it. */
-const entry = (path: string, inline: string | undefined): PackageFileEntry => ({
-  path,
-  size: inline?.length ?? 0,
-  media_kind: "text",
-  ...(inline === undefined ? {} : { inline }),
-});
-
-describe("setDraftText", () => {
-  it("records text that differs from what the server sent, with the bytes it was typed on", () => {
-    expect(setDraftText({}, "SKILL.md", "edited", "original")).toEqual({
-      "SKILL.md": { text: "edited", base: "original" },
-    });
-  });
-
-  it("pins `base` on the FIRST keystroke and keeps it through every later one", () => {
-    // `base` answers "which bytes was this typed on top of". Refreshing it on
-    // each keystroke would answer "which bytes are there now" — which is always
-    // the current ones, so no overwrite could ever be detected.
-    const first = setDraftText({}, "SKILL.md", "e", "original");
-    const second = setDraftText(first, "SKILL.md", "ed", "original");
-    expect(second["SKILL.md"]).toEqual({ text: "ed", base: "original" });
-  });
-
-  it("DROPS the entry when the author lands back on the server's text", () => {
-    // Typing a character and undoing it is not an unsaved change: keeping the
-    // entry would fire the navigation blocker and rewrite untouched bytes.
-    const drafts = setDraftText(
-      { "SKILL.md": draft("edited") },
-      "SKILL.md",
-      "original",
-      "original",
+describe("package draft operations", () => {
+  it("coalesces typing without crossing a rename", () => {
+    const operations = stageFileOperations(
+      [],
+      [
+        { op: "write", path: "notes.md", text: "a" },
+        { op: "write", path: "notes.md", text: "ab" },
+        { op: "move", from: "notes.md", to: "other.md" },
+        { op: "write", path: "other.md", text: "abc" },
+      ],
     );
-    expect(drafts).toEqual({});
-  });
-
-  it("leaves the other buffered files alone", () => {
-    const before: DraftTexts = { "a.md": draft("A") };
-    expect(setDraftText(before, "b.md", "B", "")).toEqual({
-      "a.md": draft("A"),
-      "b.md": { text: "B", base: "" },
-    });
-    expect(before).toEqual({ "a.md": draft("A") });
-  });
-
-  it("treats the empty string as a real edit of a non-empty file", () => {
-    expect(setDraftText({}, "a.md", "", "was here")).toEqual({
-      "a.md": { text: "", base: "was here" },
-    });
-  });
-});
-
-describe("dropDraftText", () => {
-  it("forgets the buffered text of a deleted file", () => {
-    expect(dropDraftText({ "a.md": draft("A"), "b.md": draft("B") }, "a.md")).toEqual({
-      "b.md": draft("B"),
-    });
-  });
-
-  it("returns the same map when there was nothing buffered", () => {
-    const before: DraftTexts = { "a.md": draft("A") };
-    expect(dropDraftText(before, "b.md")).toBe(before);
-  });
-
-  it("does not mutate its input", () => {
-    const before: DraftTexts = { "a.md": draft("A") };
-    dropDraftText(before, "a.md");
-    expect(before).toEqual({ "a.md": draft("A") });
-  });
-});
-
-describe("renameDraftText", () => {
-  it("carries unsent text to the new path", () => {
-    // Without this the next save would write the author's edits back to a path
-    // the rename emptied, and the route would answer 200 for CREATING it.
-    expect(renameDraftText({ "old.md": draft("typed") }, "old.md", "new.md")).toEqual({
-      "new.md": draft("typed"),
-    });
-  });
-
-  it("returns the same map when the renamed file had nothing buffered", () => {
-    const before: DraftTexts = { "other.md": draft("O") };
-    expect(renameDraftText(before, "old.md", "new.md")).toBe(before);
-  });
-
-  it("keeps a buffered empty string, which is not the same as no buffer", () => {
-    expect(renameDraftText({ "old.md": draft("") }, "old.md", "new.md")).toEqual({
-      "new.md": draft(""),
-    });
-  });
-});
-
-describe("draftWriteOperations", () => {
-  it("turns the buffer into one write operation per path", () => {
+    expect(operations).toHaveLength(3);
     expect(
-      draftWriteOperations({ "SKILL.md": draft("body"), "docs/a.md": draft("notes") }),
-    ).toEqual([
-      { op: "write", path: "SKILL.md", text: "body" },
-      { op: "write", path: "docs/a.md", text: "notes" },
-    ]);
+      projectDraftFiles(entries, operations, "skill").find((file) => file.path === "other.md")
+        ?.inline,
+    ).toBe("abc");
+    expect(entries[1]?.path).toBe("notes.md");
   });
-
-  it("emits nothing for an empty buffer — the flush then sends no request", () => {
-    expect(draftWriteOperations({})).toEqual([]);
+  it("keeps the original fetch path of an unmodified renamed file", () => {
+    expect(
+      projectDraftFiles(
+        entries,
+        [{ op: "move", from: "notes.md", to: "renamed.md" }],
+        "skill",
+      ).find((file) => file.path === "renamed.md"),
+    ).toMatchObject({ path: "renamed.md", sourcePath: "notes.md" });
   });
-});
-
-describe("hasDraftTexts", () => {
-  it("reports whether the editor holds anything unsaved", () => {
-    expect(hasDraftTexts({})).toBe(false);
-    expect(hasDraftTexts({ "a.md": draft("") })).toBe(true);
+  it("supports create, rename and delete before saving", () => {
+    const files = projectDraftFiles(
+      entries,
+      [
+        { op: "write", path: "new.txt", text: "new" },
+        { op: "move", from: "new.txt", to: "moved.txt" },
+        { op: "delete", path: "notes.md" },
+      ],
+      "skill",
+    );
+    expect(files.map((file) => file.path)).toEqual(["SKILL.md", "moved.txt"]);
+    expect(files[1]?.inline).toBe("new");
   });
-});
-
-describe("conflictedDrafts", () => {
-  it("names a file whose server text moved under the buffer", () => {
-    // The scenario the 412 recovery opens: the author typed on E1, a colleague
-    // wrote E2, the reload adopted E2's validator. Saving now overwrites them.
-    const drafts: DraftTexts = { "SKILL.md": draft("mine", "theirs-before") };
-    expect([...conflictedDrafts(drafts, [entry("SKILL.md", "theirs-after")])]).toEqual([
-      "SKILL.md",
-    ]);
+  it("sends manifest and files under the original token in one payload", () => {
+    expect(
+      packageUpdateBody({
+        manifest: { description: "mine" },
+        lock_version: 7,
+        operations: [{ op: "delete", path: "notes.md" }],
+      }),
+    ).toEqual({
+      manifest: { description: "mine" },
+      lock_version: 7,
+      operations: [{ op: "delete", path: "notes.md" }],
+    });
   });
-
-  it("says nothing about a file nobody else touched", () => {
-    const drafts: DraftTexts = { "SKILL.md": draft("mine", "original") };
-    expect(conflictedDrafts(drafts, [entry("SKILL.md", "original")]).size).toBe(0);
+  it("omits an empty operation list", () => {
+    expect(packageUpdateBody({ manifest: {}, lock_version: 2, operations: [] })).toEqual({
+      manifest: {},
+      lock_version: 2,
+    });
   });
-
-  it("treats an unknown server text as NOT conflicted", () => {
-    // A file the index carries no `inline` for — past the preview budget, or
-    // binary. Calling every large file conflicted would cry wolf on every save;
-    // the route's own `If-Match` still guards those.
-    const drafts: DraftTexts = { "big.md": draft("mine", "original") };
-    expect(conflictedDrafts(drafts, [entry("big.md", undefined)]).size).toBe(0);
+  it("round-trips uploaded binary bytes", async () => {
+    const operation = await uploadedFileOperation(
+      "asset.bin",
+      new Blob([new Uint8Array([0, 255, 128])]),
+    );
+    expect(operation).toEqual({ op: "write", path: "asset.bin", bytes_base64: "AP+A" });
+    expect(
+      projectDraftFiles(entries, [operation], "skill").find((file) => file.path === "asset.bin"),
+    ).toMatchObject({ size: 3, media_kind: "binary" });
   });
-
-  it("says nothing about a path the tree no longer holds", () => {
-    // Deleted or renamed elsewhere: the buffered text lands as a new file, and
-    // there is nothing of anyone's to overwrite.
-    const drafts: DraftTexts = { "gone.md": draft("mine", "original") };
-    expect(conflictedDrafts(drafts, [entry("other.md", "x")]).size).toBe(0);
-  });
-
-  it("reports nothing when nothing is buffered", () => {
-    expect(conflictedDrafts({}, [entry("SKILL.md", "anything")]).size).toBe(0);
+  it("permits deleting optional integration documentation", () => {
+    expect(
+      projectDraftFiles(
+        [{ path: "INTEGRATION.md", size: 1, media_kind: "text", inline: "x" }],
+        [{ op: "delete", path: "INTEGRATION.md" }],
+        "integration",
+      ),
+    ).toEqual([]);
   });
 });

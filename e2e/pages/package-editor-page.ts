@@ -13,15 +13,16 @@ import { expect, type Locator, type Page } from "@playwright/test";
  * Tree rows show a file's LEAF name, not its path (`scripts/run.py` is a
  * `scripts` row with a `run.py` row under it), so `fileRow` matches on the leaf.
  */
-export class SkillEditorPage {
+export class PackageEditorPage {
   constructor(
     private page: Page,
     private scope: string,
     private name: string,
+    private type = "skills",
   ) {}
 
   async goto() {
-    await this.page.goto(`/skills/${this.scope}/${this.name}/edit`);
+    await this.page.goto(`/${this.type}/${this.scope}/${this.name}/edit`);
   }
 
   /** Open *Fichiers* and wait for the tree to render. */
@@ -56,7 +57,7 @@ export class SkillEditorPage {
     await this.dialog.getByRole("button", { name: "Créer", exact: true }).click();
   }
 
-  /** Rename through the row's *Renommer* button. Immediate — no save. */
+  /** Rename through the row's *Renommer* button. Staged until Save. */
   async renameFile(from: string, to: string) {
     await this.fileRow(from).getByRole("button", { name: "Renommer" }).click();
     const input = this.dialog.getByLabel("Chemin du fichier");
@@ -65,7 +66,7 @@ export class SkillEditorPage {
     await expect(this.dialog).toHaveCount(0);
   }
 
-  /** Delete through the row's *Supprimer* button and confirm. Immediate — no save. */
+  /** Delete through the row's *Supprimer* button and confirm. Staged until Save. */
   async deleteFile(path: string) {
     await this.fileRow(path).getByRole("button", { name: "Supprimer" }).click();
     await this.dialog.getByRole("button", { name: "Supprimer" }).click();

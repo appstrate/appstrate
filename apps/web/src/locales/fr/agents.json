@@ -474,10 +474,7 @@
   "files.errorExists": "Ce package contient déjà un fichier à ce chemin.",
   "files.errorConflictPath": "Ce chemin est déjà un dossier du package, ou se trouve sous un fichier existant.",
   "files.errorTooLarge": "Fichier trop volumineux : {{limit}} au maximum par fichier. Importez le package en ZIP pour des fichiers plus gros.",
-  "files.errorConflict": "Le package a été modifié ailleurs. L'arborescence a été rechargée ; les fichiers modifiés des deux côtés sont signalés.",
-  "files.conflictBanner": "Ce fichier a été modifié ailleurs pendant votre édition. Votre version est affichée ; Enregistrer l'écrira par-dessus.",
-  "files.conflictDiscard": "Voir la version du serveur",
-  "files.conflictedRow": "Modifié ailleurs pendant votre édition",
+  "files.errorConflict": "Ce package a été modifié ailleurs. Vos changements sont conservés. Copiez-les avant de recharger le package pour repartir de sa version actuelle.",
   "files.errorGeneric": "L'enregistrement des fichiers a échoué.",
   "api.title": "Lancer cet agent via l'API",
   "api.noKey": "Aucune clé API trouvée.",
@@ -536,5 +533,7 @@
   "manifest.userConfig": "Configuration utilisateur",
   "manifest.required": "Requis",
   "manifest.sensitive": "Sensible",
-  "manifest.toolsPolicy": "Politique des outils"
+  "manifest.toolsPolicy": "Politique des outils",
+  "files.pendingHint": "Les modifications des fichiers seront appliquées avec le manifeste en cliquant sur Enregistrer.",
+  "package.actions": "Actions du package"
 }

@@ -46,6 +46,7 @@ export function usePackageFile(
   packageId: string,
   version: string | undefined,
   entry: PackageFileEntry,
+  fresh = false,
 ): { text: string | undefined; isLoading: boolean; isError: boolean } {
   const scope = useOrgScope();
   // Only text files within the preview ceiling are ever fetched — a binary or
@@ -71,7 +72,10 @@ export function usePackageFile(
       },
       parseAs: "text",
     },
-    { enabled: scope.enabled && needsFetch },
+    {
+      enabled: scope.enabled && needsFetch,
+      ...(fresh ? { staleTime: 0, gcTime: 0, refetchOnMount: "always" as const } : {}),
+    },
   );
 
   // `parseAs: "text"` yields a string; the spec types the body as a Blob because
@@ -79,12 +83,14 @@ export function usePackageFile(
   // reaches `parseAs` at all — the route sets `Content-Length: "0"` and
   // openapi-fetch returns `data: undefined` on the success path — so "read an
   // empty file" is read off the query state, not off `data`.
-  const fetched = packageFileText(query);
+  // An authoring pane must not seed uncontrolled Monaco from a stale cache.
+  const fetched = fresh && !query.isFetchedAfterMount ? undefined : packageFileText(query);
 
   return {
     text: entry.inline ?? (needsFetch ? fetched : undefined),
     // `isPending` stays true on a disabled query — gate it on actually fetching.
-    isLoading: needsFetch && query.isPending,
+    isLoading:
+      needsFetch && (query.isPending || (fresh && !query.isFetchedAfterMount && !query.isError)),
     isError: needsFetch && query.isError,
   };
 }

@@ -9,24 +9,27 @@ import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
 // Only agent + skill have an editor route (see app.tsx).
-type EditablePackageType = "agent" | "skill" | "integration";
+type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
 
 const emojiMap: Record<EditablePackageType, string> = {
   agent: "⚡",
   skill: "🧠",
   integration: "🧩",
+  "mcp-server": "🔌",
 };
 
 const breadcrumbNewKeys: Record<EditablePackageType, string> = {
   agent: "editor.breadcrumbNew",
   skill: "editor.breadcrumbNewSkill",
   integration: "editor.breadcrumbNewIntegration",
+  "mcp-server": "editor.breadcrumbEdit",
 };
 
 const listLabelKeys: Record<EditablePackageType, { key: string; ns?: string }> = {
   agent: { key: "detail.breadcrumb" },
   skill: { key: "packages.type.skills", ns: "settings" },
   integration: { key: "packages.type.integrations", ns: "settings" },
+  "mcp-server": { key: "packages.type.mcp-servers", ns: "settings" },
 };
 
 interface EditorTab {
@@ -108,7 +111,9 @@ export function EditorShell({
         </TabsList>
       </Tabs>
 
-      {children}
+      <div inert={isPending} aria-busy={isPending}>
+        {children}
+      </div>
 
       {!hideSubmitBar && (
         <div className="border-border mt-6 flex justify-end gap-2 border-t pt-4">

@@ -343,7 +343,7 @@ export function useDeleteAllMemories(packageId: string) {
 
 // --- Package (skill/tool) create/update mutations ---
 
-export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
+export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
@@ -358,6 +358,8 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
     }): Promise<{ id: string }> => {
       // 201 → the created package resource, bare (issue #657).
       switch (type) {
+        case "mcp-server":
+          throw new Error("MCP servers are created by importing their bundle");
         case "agent": {
           const { data } = await client.POST("/api/packages/agents", {
             // The editor builds the manifest as a plain `Record<string,
@@ -397,17 +399,13 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
 
 export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
-      /**
-       * Omitted by an editor that authors its files elsewhere (the skill
-       * editor's `PATCH .../files`): the route then carries the stored draft
-       * content forward untouched.
-       */
+      /** Legacy API content field; the editor sends ordered file operations. */
       content?: string;
+      operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
       lock_version: number;
     }): Promise<{ id: string; lock_version: number }> => {
       const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
@@ -436,7 +434,6 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
         void invalidateIntegrationQueries(qc);
       }
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      navigate(packageDetailPath(type, packageId));
     },
     onError: onMutationError,
   });

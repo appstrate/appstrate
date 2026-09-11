@@ -11,6 +11,7 @@
  * here rather than restated at either call site.
  */
 
+import { PackageFileWriteError } from "@appstrate/core/package-file-operations";
 import { describe, it, expect } from "bun:test";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../../api/errors.ts";
@@ -70,7 +71,13 @@ describe("packageFilesErrorKey", () => {
   const refusal = (code: string, status: number) => new ApiError(code, "detail", status);
 
   it("names the concurrency loss, which is the one refusal with a recovery", () => {
-    expect(packageFilesErrorKey(refusal("precondition_failed", 412))).toBe("files.errorConflict");
+    expect(packageFilesErrorKey(refusal("conflict", 409))).toBe("files.errorConflict");
+  });
+
+  it("translates the shared local path errors", () => {
+    expect(
+      packageFilesErrorKey(new PackageFileWriteError("path_conflict", "file", "English message")),
+    ).toBe("files.errorConflictPath");
   });
 
   it("keys on the machine-readable code, never on the status", () => {
@@ -92,7 +99,6 @@ describe("packageFilesErrorKey", () => {
     // The skill editor's banner asks this first and the frontmatter translator
     // second; a blanket verdict here would swallow the specific message.
     expect(packageFilesErrorKey(refusal("validation_failed", 400))).toBeNull();
-    expect(packageFilesErrorKey(refusal("conflict", 409))).toBeNull();
   });
 
   it("claims nothing for a failure that never reached the route at all", () => {

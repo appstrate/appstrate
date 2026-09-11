@@ -8,45 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **A skill is a directory now, and the editor writes it.** The skill editor's
-  `SKILL.md` tab becomes **Fichiers**: an editable tree on the left, an editor
-  or a binary card on the right. New file, import, rename, delete and replace
-  land as they happen; typing is buffered and flushed by _Enregistrer_ as one
-  batch, alongside the manifest. Until now a file other than `SKILL.md` could
-  only reach a package by re-importing the whole archive, and no route could
-  rename or delete one at all — the ancillary scripts, references and assets a
-  skill is made of were write-once.
-
-  The write path behind it is **`PATCH /api/packages/{scope}/{name}/files`**,
-  one atomic batch of `write` / `delete` / `move` operations applied in order
-  against the whole draft tree, answering the same index the `GET` returns. It
-  is a **conditional write**: `If-Match` carrying the index `ETag` is
-  **required** (`428` without it, `412` when the tree moved since that read), so
-  two tabs editing one package get a message instead of one silently erasing
-  the other. `*` is accepted for scripted callers that mean "overwrite whatever
-  is there".
-
-  What it refuses. `manifest.json` is not writable, movable or deletable here —
-  the manifest is authored through the package `PUT` and validated there.
-  `SKILL.md` (`prompt.md` for an agent) can be written but never moved or
-  deleted, and the result still has to pass the frontmatter gate every other
-  write path runs. A `move` never overwrites: an occupied destination is
-  refused rather than silently taking the target's place. A file may not shadow
-  a directory nor a directory a file, nor carry a name that another entry of the
-  tree collapses onto once it is written to a case-insensitive or
-  Unicode-normalizing filesystem (`skill.md` beside `SKILL.md`, an NFD `é`
-  beside its NFC twin) — that is one file on the Mac `skills sync` materializes
-  onto, and the loser is silently dropped. Archive-unsafe paths (`..`, `.`, an
-  empty segment, a backslash, a `C:/` prefix, `__MACOSX/`) are rejected rather
-  than dropped. Authorization is the package `PUT`'s, in full: a draft tree is
-  one object behind every installation of the package, so writing it requires
-  the type's `write` permission in **every** space where it is installed.
-  Ceilings:
-  200 operations per request, 1 MiB per written file, and a resulting tree of at
-  most 50 MB and 10 000 entries — a bigger binary still goes in by importing a
-  ZIP. Enabled for **agents and skills only**; integrations and MCP servers
-  carry an executable bundle whose invariants the archive parser owns, and a
-  `PATCH` on one is refused.
+- **One file editor for agents, skills, integrations and MCP servers.** The
+  Files tab stages creation, text editing, upload, replacement, rename and
+  deletion until Save. Manifest and files are saved through the existing
+  package `PUT`, using one `lock_version`; a stale draft is refused in full
+  and local changes remain available. Controls lock during saving.
+  Required content files remain protected, and executable file edits validate
+  their bundle references. Path checks and file operations are shared by the
+  browser and API. Draft saves, restores and imports serialize through the
+  same persistence function. Limits: 200 operations, 1 MiB per written file,
+  50 MB and 10,000 entries per resulting tree; larger files can be imported
+  in an archive.
 
 - **Two-layer RBAC — an org role, and a role per space.** Organization roles
   gain **`guest`**: an org identity with no implicit reach into any space, for

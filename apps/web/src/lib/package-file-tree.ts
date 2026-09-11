@@ -11,10 +11,14 @@
  */
 
 import {
-  PACKAGE_CONTENT_FILE,
   PACKAGE_FILE_INLINE_MAX_BYTES,
   PACKAGE_MANIFEST_FILE,
 } from "@appstrate/core/package-files";
+import {
+  isProtectedPackageFile,
+  applyFileTreeOperations,
+  PackageFileWriteError,
+} from "@appstrate/core/package-file-operations";
 import { isSafeArchivePath } from "@appstrate/core/zip";
 import type { PackageType } from "@appstrate/core/validation";
 import type { components } from "../api/schema";
@@ -367,7 +371,7 @@ export function languageForPath(path: string): string {
  * file the editor opens on — while `manifest.json` is not.
  */
 export function isPinnedEntry(type: PackageType, path: string): boolean {
-  return path === PACKAGE_MANIFEST_FILE || path === PACKAGE_CONTENT_FILE[type];
+  return isProtectedPackageFile(type, path);
 }
 
 /**
@@ -395,15 +399,18 @@ export function validateNewPath(
   if (!isSafeArchivePath(path)) return "invalid";
   if (path === PACKAGE_MANIFEST_FILE) return "reserved";
 
-  for (const entry of entries) {
-    if (entry.path === path) return "exists";
-    // `path` names a directory that `entry` sits in — `docs` under an existing
-    // `docs/a.md`.
-    if (entry.path.startsWith(`${path}/`)) return "conflict";
-    // The reverse: an ancestor of `path` is already a file — `docs/a.md` under
-    // an existing `docs`.
-    if (path.startsWith(`${entry.path}/`)) return "conflict";
+  if (entries.some((entry) => entry.path === path)) return "exists";
+  try {
+    applyFileTreeOperations(
+      Object.fromEntries(entries.map((entry) => [entry.path, entry])),
+      [{ op: "write", path, value: { path, size: 0, media_kind: "text" } }],
+      "skill",
+    );
+  } catch (error) {
+    if (error instanceof PackageFileWriteError) return "conflict";
+    throw error;
   }
+
   return null;
 }
 

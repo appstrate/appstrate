@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PackageFileWriteError } from "@appstrate/core/package-file-operations";
 import { PACKAGE_CONTENT_FILE, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../api/errors";
@@ -68,11 +69,11 @@ export function companionDisplayFile(type: PackageType): DisplayFile | undefined
  * with.
  */
 export function packageFilesErrorKey(error: unknown): string | null {
-  if (!(error instanceof ApiError)) return null;
+  if (!(error instanceof ApiError) && !(error instanceof PackageFileWriteError)) return null;
   switch (error.code) {
     // The tree moved under this editor: the fix is to re-read it, and the
     // buffered edits are kept so the author can save them again.
-    case "precondition_failed":
+    case "conflict":
       return "files.errorConflict";
     case "invalid_path":
       return "files.errorInvalidPath";
