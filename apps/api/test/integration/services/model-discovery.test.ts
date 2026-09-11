@@ -141,6 +141,12 @@ const served = (...modelIds: string[]): ListServedModelsResult => ({
   models: modelIds.map((id) => ({ id, hints: {} })),
   truncated: false,
 });
+/** The same listing, cut short by a cap: what is missing is unseen, not unserved. */
+const servedTruncated = (...modelIds: string[]): ListServedModelsResult => ({
+  ok: true,
+  models: modelIds.map((id) => ({ id, hints: {} })),
+  truncated: true,
+});
 const AUTH_FAILED: ListServedModelsResult = {
   ok: false,
   error: "AUTH_FAILED",
@@ -255,6 +261,44 @@ describe("discoverAvailableModels", () => {
     );
 
     expect(result.outcome).toBe("nothing_verified");
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured"]);
+  });
+
+  it("keeps the previous list when a cap cut the listing short", async () => {
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([served("m-featured", "m-extra")]).deps,
+    );
+
+    const result = await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([servedTruncated("m-featured")]).deps,
+    );
+
+    expect(result.outcome).toBe("nothing_verified");
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
+  });
+
+  it("drops a candidate the provider stopped serving when the listing is complete", async () => {
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([served("m-featured", "m-extra")]).deps,
+    );
+
+    const result = await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([served("m-featured")]).deps,
+    );
+
+    expect(result.outcome).toBe("ok");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured"]);
   });
