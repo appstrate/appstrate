@@ -93,11 +93,7 @@ export function PackageFilesEditor({
       ? { ...entry, inline: JSON.stringify(manifest, null, 2) }
       : entry,
   );
-  const current = pickActiveEntry(
-    entries,
-    selected,
-    primaryDisplayFile(type).name,
-  ) as DraftFile | null;
+  const current = pickActiveEntry(entries, selected, primaryDisplayFile(type).name);
   const stage = (added: PackageFileWriteOperation[], select?: string) => {
     try {
       const next = stageFileOperations(operations, added);
