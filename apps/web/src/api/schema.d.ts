@@ -6400,7 +6400,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description Same Idempotency-Key used with a different request body */
+        /** @description Same Idempotency-Key used with a different method, URL or body */
         IdempotencyConflict: {
             headers: {
                 "Request-Id": components["headers"]["RequestId"];
@@ -6412,7 +6412,7 @@ export interface components {
                  *       "type": "https://docs.appstrate.dev/errors/idempotency-conflict",
                  *       "title": "Idempotency Conflict",
                  *       "status": 422,
-                 *       "detail": "This Idempotency-Key was already used with a different request body. Use a new key for different requests.",
+                 *       "detail": "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
                  *       "code": "idempotency_conflict",
                  *       "requestId": "req_abc123"
                  *     }
@@ -6436,7 +6436,7 @@ export interface components {
         AppstrateUser: string;
         /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
         AppstrateVersion: string;
-        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
         /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
         ConnectOffers: "1";
@@ -7430,7 +7430,7 @@ export interface operations {
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
@@ -7612,7 +7612,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Same Idempotency-Key used with a different request body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`) */
+            /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or the versioned bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`) */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -10259,7 +10259,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -14764,7 +14764,7 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -18887,7 +18887,7 @@ export interface operations {
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
@@ -19055,7 +19055,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Same Idempotency-Key used with a different request body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`) */
+            /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), or a pinned dependency's bundle cannot be assembled from stored artifacts: a dependency pin resolves to no published version (`dependency_unresolved`), the stored archive or manifest is malformed or exceeds limits (`bundle_invalid`), or the bundle fails the signature policy (`bundle_signature_invalid`) */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -19162,7 +19162,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -21656,7 +21656,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;

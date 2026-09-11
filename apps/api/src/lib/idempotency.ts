@@ -5,7 +5,7 @@
  *
  * Pattern: Stripe `Idempotency-Key` header. Cache key format:
  * `idem:{orgId}:{spaceId}:{key}`.
- * TTL: 24 hours. Body hash SHA-256 for conflict detection.
+ * TTL: 24 hours. Request hash SHA-256 for conflict detection.
  *
  * The space id is part of the key so the SAME `Idempotency-Key` used by
  * two different spaces in one org never collides — without it, space A's
@@ -24,14 +24,14 @@ interface CachedResult {
   statusCode: number;
   headers: Record<string, string>;
   body: string;
-  bodyHash: string;
+  requestHash: string;
 }
 
 type LockResult =
   | { status: "acquired" }
   | { status: "processing" }
   | { status: "cached"; result: CachedResult }
-  | { status: "body_mismatch" };
+  | { status: "request_mismatch" };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,9 +44,10 @@ function cacheKey(orgId: string, spaceId: string | undefined, key: string): stri
   return `idem:${orgId}:${spaceId ?? "_org"}:${key}`;
 }
 
-export function computeBodyHash(body: string): string {
+export function computeRequestHash(request: Request, body: string): string {
+  const url = new URL(request.url);
   const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(body);
+  hasher.update(JSON.stringify([request.method, url.pathname, url.search, body]));
   return hasher.digest("hex");
 }
 
@@ -58,10 +59,10 @@ export async function acquireIdempotencyLock(
   orgId: string,
   spaceId: string | undefined,
   key: string,
-  bodyHash: string,
+  requestHash: string,
 ): Promise<LockResult> {
   const ck = cacheKey(orgId, spaceId, key);
-  const processingValue = JSON.stringify({ status: "processing", bodyHash });
+  const processingValue = JSON.stringify({ status: "processing", requestHash });
   const cache = await getCache();
 
   // Atomic SET NX with TTL
@@ -81,15 +82,10 @@ export async function acquireIdempotencyLock(
   }
 
   const parsed = JSON.parse(existing);
-  if (parsed.status === "processing") {
-    // Body hash mismatch while still processing — reject per Stripe pattern (422)
-    if (parsed.bodyHash !== bodyHash) return { status: "body_mismatch" };
-    return { status: "processing" };
-  }
-  // Completed result — verify body hash matches
-  const cached = parsed as CachedResult;
-  if (cached.bodyHash !== bodyHash) return { status: "body_mismatch" };
-  return { status: "cached", result: cached };
+  // Missing identity is a conflict too: never replay or execute an unbound entry.
+  if (parsed.requestHash !== requestHash) return { status: "request_mismatch" };
+  if (parsed.status === "processing") return { status: "processing" };
+  return { status: "cached", result: parsed as CachedResult };
 }
 
 export async function storeIdempotencyResult(

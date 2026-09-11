@@ -207,6 +207,22 @@ function closedSetQuery<T extends string>(
 
 // --- Router ---
 
+async function replayRun(c: Context<AppEnv>, response: Response): Promise<Response> {
+  if (response.status !== 201) return response;
+  const { id } = z.object({ id: z.string() }).parse(await response.json());
+  const run = await getRunFull(
+    getSpaceScope(c),
+    id,
+    getActor(c),
+    runVisibilityFilter(c),
+    !agentReadIsSummary(c),
+  );
+  if (!run || (c.get("package") && run.packageId !== c.get("package").id)) {
+    throw notFound("Run not found");
+  }
+  return c.json(run, 201, { "Idempotent-Replayed": "true" });
+}
+
 export function createRunsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -214,9 +230,9 @@ export function createRunsRouter() {
   router.post(
     `/agents/${SCOPED_PACKAGE_ROUTE}/run`,
     rateLimit(20),
-    idempotency(),
     requirePermission("agents", "run"),
     requireAgent(),
+    idempotency(replayRun),
     async (c) => {
       const agent = c.get("package");
       const orgId = c.get("orgId");
@@ -677,8 +693,8 @@ export function createRunsRouter() {
     // each time the middleware is constructed. We read it at route-build
     // time; changes to the env require a reboot.
     rateLimit(getInlineRunLimits().rate_per_min),
-    idempotency(),
     requirePermission("agents", "run"),
+    idempotency(replayRun),
     async (c) => {
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");

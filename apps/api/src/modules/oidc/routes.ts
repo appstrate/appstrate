@@ -490,8 +490,8 @@ export function createOidcRouter() {
   router.post(
     "/api/oauth/clients",
     rateLimit(10),
-    idempotency(),
     requireModulePermission("oauth-clients", "write"),
+    idempotency(),
     async (c) => {
       const orgId = c.get("orgId");
       const data = await readJsonBody(c, createOAuthClientSchema);
@@ -668,7 +668,6 @@ export function createOidcRouter() {
     return next();
   };
 
-  router.use("/api/spaces/:id/smtp-config", pinnedSpaceScopeGuard, enterParamSpace);
   router.use("/api/spaces/:id/smtp-config/*", pinnedSpaceScopeGuard, enterParamSpace);
   router.use("/api/spaces/:id/social-providers/*", pinnedSpaceScopeGuard, enterParamSpace);
 

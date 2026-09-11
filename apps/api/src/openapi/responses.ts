@@ -402,7 +402,7 @@ export const responses = {
     },
   },
   IdempotencyConflict: {
-    description: "Same Idempotency-Key used with a different request body",
+    description: "Same Idempotency-Key used with a different method, URL or body",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
@@ -412,7 +412,7 @@ export const responses = {
           title: "Idempotency Conflict",
           status: 422,
           detail:
-            "This Idempotency-Key was already used with a different request body. Use a new key for different requests.",
+            "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
           code: "idempotency_conflict",
           requestId: "req_abc123",
         },

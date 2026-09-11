@@ -182,8 +182,8 @@ export function createRunsRemoteRouter() {
   router.post(
     "/runs/remote",
     rateLimit(getPlatformRunLimits().per_org_global_rate_per_min),
-    idempotency(),
     requirePermission("agents", "run"),
+    idempotency(),
     async (c) => {
       const body = await readJsonBody(c, CreateRemoteRunBodySchema);
 

@@ -15,7 +15,7 @@ import {
   acquireIdempotencyLock,
   storeIdempotencyResult,
   releaseIdempotencyLock,
-  computeBodyHash,
+  computeRequestHash,
 } from "../lib/idempotency.ts";
 
 const MAX_KEY_LENGTH = 255;
@@ -55,7 +55,9 @@ export function isIdempotencyAware(handler: unknown): boolean {
  * Note: control characters in headers are rejected at the HTTP layer (Request constructor),
  * so we only need to validate length here.
  */
-export function idempotency() {
+export function idempotency(
+  replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>,
+) {
   const middleware = async (c: Context<AppEnv>, next: Next) => {
     const key = c.req.header("Idempotency-Key");
     if (!key) return next();
@@ -75,16 +77,16 @@ export function idempotency() {
     // cannot replay a cached response across two different spaces.
     const spaceId = c.get("spaceId");
     const rawBody = await c.req.text();
-    const bodyHash = computeBodyHash(rawBody);
+    const requestHash = computeRequestHash(c.req.raw, rawBody);
 
-    const lockResult = await acquireIdempotencyLock(orgId, spaceId, key, bodyHash);
+    const lockResult = await acquireIdempotencyLock(orgId, spaceId, key, requestHash);
 
-    if (lockResult.status === "body_mismatch") {
+    if (lockResult.status === "request_mismatch") {
       throw new ApiError({
         status: 422,
         code: "idempotency_conflict",
         title: "Idempotency Conflict",
-        detail: "This idempotency key was already used with a different request body.",
+        detail: "This idempotency key was already used with a different method, URL or body.",
         param: "Idempotency-Key",
       });
     }
@@ -100,14 +102,17 @@ export function idempotency() {
     }
 
     if (lockResult.status === "cached") {
-      // Replay the cached response (body hash already verified in acquireIdempotencyLock)
+      // Replay the cached response (request hash already verified in acquireIdempotencyLock)
       const cached = lockResult.result;
       const headers = new Headers(cached.headers);
       headers.set("Idempotent-Replayed", "true");
-      return new Response(cached.body, {
+      const response = new Response(cached.body, {
         status: cached.statusCode,
         headers,
       });
+      // Authorization belongs before this middleware; resource projections may
+      // also depend on the caller's current rights, without launching again.
+      return replay ? replay(c, response) : response;
     }
 
     // Lock acquired — execute the request.
@@ -156,7 +161,7 @@ export function idempotency() {
       statusCode,
       headers: resHeaders,
       body: resBody,
-      bodyHash,
+      requestHash,
     });
   };
 
