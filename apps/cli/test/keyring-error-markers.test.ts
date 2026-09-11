@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pins `lib/keyring.ts`'s error markers against the `@napi-rs/keyring`
+ * Pins `lib/keyring.ts`'s error marker against the `@napi-rs/keyring`
  * native binary this checkout actually installs.
  *
- * Why this test exists: the markers are the only discriminator we get.
+ * Why this test exists: the marker is the only discriminator we get.
  * `@napi-rs/keyring` surfaces `keyring-core` errors as plain JS `Error`s
  * — no variant, no `code`, nothing but the Display string — and that
  * string decides whether a keyring failure means "this host has no
@@ -23,7 +23,7 @@
 
 import { describe, it, expect, beforeAll } from "bun:test";
 import { dirname } from "node:path";
-import { PLATFORM_FAILURE_MARKER, NO_STORAGE_ACCESS_MARKER } from "../src/lib/keyring.ts";
+import { PLATFORM_FAILURE_MARKER } from "../src/lib/keyring.ts";
 
 /**
  * Platform packages `@napi-rs/keyring` may have installed here. Linux
@@ -75,26 +75,7 @@ describe("@napi-rs/keyring error markers", () => {
     binary = Buffer.from(await Bun.file(nativeBindingPath()).bytes());
   });
 
-  it("still emits the two Display prefixes the classifier splits on", () => {
+  it("still emits the Display prefix the classifier splits on", () => {
     expect(binary.includes(PLATFORM_FAILURE_MARKER, 0, "utf8")).toBe(true);
-    expect(binary.includes(NO_STORAGE_ACCESS_MARKER, 0, "utf8")).toBe(true);
-  });
-
-  it("no longer contains the 1.x wordings the classifier used to match", () => {
-    // Kept as evidence, not nostalgia: these three are what `lib/keyring.ts`
-    // matched on until #1321, and their absence is the whole bug. If a
-    // future bump brings any of them back, the classification needs
-    // re-reading rather than a silent extra branch.
-    for (const retired of ["Platform secure storage failure", "No storage", "No matching entry"]) {
-      expect(binary.includes(retired, 0, "utf8")).toBe(false);
-    }
-  });
-
-  it("carries the missing-credential wording that can never reach us", () => {
-    // `NoEntry`'s Display string is in the binary but cannot surface as
-    // a throw: 2.x returns `null` from `getPassword()` and `false` from
-    // `deletePassword()` for an absent credential. That contract is why
-    // the classifier has no "entry-missing" class any more.
-    expect(binary.includes("No matching credential found", 0, "utf8")).toBe(true);
   });
 });

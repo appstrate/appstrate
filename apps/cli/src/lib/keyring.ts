@@ -125,14 +125,6 @@ function fallbackPath(): string {
  */
 export const PLATFORM_FAILURE_MARKER = "Platform failure: ";
 
-/**
- * Display prefix of `keyring-core`'s `NoStorageAccess` variant — the
- * store exists and answered, but refused us: locked Keychain on a
- * headless SSH session, a gnome-keyring that will not unlock, a user
- * who denied access. See {@link classifyKeyringError}.
- */
-export const NO_STORAGE_ACCESS_MARKER = "Couldn't access platform storage: ";
-
 /** De-dupe stderr output across calls within the same process. */
 let _backendWarningEmitted = false;
 
@@ -141,7 +133,7 @@ let _backendWarningEmitted = false;
  *
  * `@napi-rs/keyring` 2.x surfaces `keyring-core` errors as plain JS
  * `Error`s, so the variant survives only as its Display prefix — the
- * prefix IS the discriminator, and the two we care about are pinned
+ * prefix IS the discriminator, and the one we split on is pinned
  * against the shipped native binary by
  * `test/keyring-error-markers.test.ts`, which fails on the next bump
  * that reworded them (the failure this classification had already
@@ -151,10 +143,14 @@ let _backendWarningEmitted = false;
  *     protection on this host to downgrade FROM, so the 0600 file
  *     store is the only option: fall back silently. This is the whole
  *     reason the file store exists.
- *   • `store-locked` (everything else, chiefly `NoStorageAccess`) —
- *     the machine IS configured to protect secrets and merely won't
- *     serve us right now. Writing plaintext here would be a real
- *     downgrade, so the write path refuses unless the operator opts in.
+ *   • `store-locked` (everything else, chiefly `NoStorageAccess`, whose
+ *     Display prefix is `Couldn't access platform storage: `) — the
+ *     store exists and answered, but refused us: locked Keychain on a
+ *     headless SSH session, a gnome-keyring that will not unlock, a
+ *     user who denied access. The machine IS configured to protect
+ *     secrets and merely won't serve us right now. Writing plaintext
+ *     here would be a real downgrade, so the write path refuses unless
+ *     the operator opts in.
  *
  * Unknown wording therefore lands on the conservative side: refuse and
  * say why, never a silent plaintext write.
