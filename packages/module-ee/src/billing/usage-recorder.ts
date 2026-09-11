@@ -413,11 +413,8 @@ export async function billLedgerRows(
   // `unattributed` bucket grows without bound, so a float column's absolute
   // error would grow with it.)
   //
-  // WIDTH: `cost_credits` is `bigint` and both casts below are `::bigint`. The
-  // cumulative grows without bound on the durable `unattributed` bucket, and an
-  // `integer out of range` raised here would abort the CALLER's transaction —
-  // one org's overflowing row would stop the sweep for every tenant. See the
-  // column's note in drizzle/schema.ts. The RETURNING delta comes back as a
+  // WIDTH: `cost_credits` is `bigint`, so both casts below are `::bigint` — see
+  // the column's note in drizzle/schema.ts. The RETURNING delta comes back as a
   // string (postgres.js renders int8 as text), hence the `Number()` below.
   //
   // ROUNDING INVARIANT: exactly ONE rounding rule — half away from zero — is

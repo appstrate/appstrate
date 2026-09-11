@@ -1,18 +1,3 @@
--- Widen the cumulative credit total so it cannot overflow mid-sweep.
---
---   ee_usage_records.cost_credits — integer => bigint.
---
--- `cost_credits` is CUMULATIVE per usage context, and the `unattributed` bucket
--- is one row per org that never resets, so an `integer` ceiling of 2 147 483 647
--- credits (~$2.15M) is reachable. The sweep writes it as
--- `round((cost_usd + delta) * 1000)` and derives the org debit from a RETURNING
--- expression over the same column, both INSIDE the transaction that claims the
--- ledger rows: an `integer out of range` there rolls the whole pass back, so a
--- single overflowing row stops billing for EVERY tenant on every tick.
---
--- Cheap now, an incident later: int4 => int8 is a table rewrite, and this widens
--- a column while every value in it still fits in four bytes.
---
--- No DML: the USING conversion is implicit and lossless (every int4 is an int8).
--- Re-runnable — re-applying the same type is a no-op.
+-- Widen `ee_usage_records.cost_credits` from integer to bigint — see the column
+-- note in drizzle/schema.ts. No DML; re-applying the same type is a no-op.
 ALTER TABLE "ee_usage_records" ALTER COLUMN "cost_credits" SET DATA TYPE bigint;
