@@ -187,13 +187,20 @@ function sniffHints(entry: Record<string, unknown>): ServedModelHints {
   return hints;
 }
 
+/** One page of a listing, and whether {@link MAX_SERVED_MODELS} cut it short. */
+export interface ParsedServedModels {
+  models: ServedModel[];
+  capped: boolean;
+}
+
 /**
  * `null` = no listing at all (not "serves nothing"). Strict on the container,
  * lenient inside: an entry with no usable id is skipped. Response order,
  * deduped on id (first wins), capped at {@link MAX_SERVED_MODELS} — one page's
- * worth; `listServedModels` holds the same cap across a paginated listing.
+ * worth; `listServedModels` holds the same cap across a paginated listing and
+ * carries `capped` into its own `truncated` verdict.
  */
-export function parseServedModels(apiShape: string, body: unknown): ServedModel[] | null {
+export function parseServedModels(apiShape: string, body: unknown): ParsedServedModels | null {
   const { key, field, prefix } = listingShape(apiShape);
   const container = readRecord(body);
   if (container === null) return null;
@@ -202,6 +209,7 @@ export function parseServedModels(apiShape: string, body: unknown): ServedModel[
 
   const models: ServedModel[] = [];
   const seen = new Set<string>();
+  let capped = false;
   for (const entry of entries) {
     const record = readRecord(entry);
     if (record === null) continue;
@@ -209,11 +217,14 @@ export function parseServedModels(apiShape: string, body: unknown): ServedModel[
     if (typeof raw !== "string") continue;
     const id = prefix && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
     if (id.length === 0 || seen.has(id)) continue;
+    if (models.length === MAX_SERVED_MODELS) {
+      capped = true;
+      break;
+    }
     seen.add(id);
     models.push({ id, hints: sniffHints(record) });
-    if (models.length === MAX_SERVED_MODELS) break;
   }
-  return models;
+  return { models, capped };
 }
 
 interface ListingConfig {
@@ -340,14 +351,15 @@ export async function listServedModels(config: ListingConfig): Promise<ListServe
       };
     }
 
-    for (const model of parsed) {
+    for (const model of parsed.models) {
+      if (seen.has(model.id)) continue;
       if (models.length === MAX_SERVED_MODELS) {
         return truncatedListing(config, models, "model cap reached");
       }
-      if (seen.has(model.id)) continue;
       seen.add(model.id);
       models.push(model);
     }
+    if (parsed.capped) return truncatedListing(config, models, "model cap reached");
 
     const next = nextPage(config.apiShape, fetched.body);
     if (!next.more) return { ok: true, models, truncated: false };
