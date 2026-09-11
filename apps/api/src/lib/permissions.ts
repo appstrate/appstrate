@@ -464,26 +464,6 @@ export function callerPermissions(c: Context<AppEnv>): ReadonlySet<string> {
 }
 
 /**
- * Does the CREDENTIAL this request arrived on admit `permission` at all?
- *
- * The ceiling question, not the grant question {@link callerPermissions}
- * answers. An API key's scope list and a token's scope claim cap whatever
- * their creator holds ({@link effectivePermissions}); a cookie session carries
- * no ceiling and admits everything its role does.
- *
- * It exists for the one authorization in the platform that is NOT a role grant
- * and therefore never passes through that intersection: a file's own creator
- * manages their file (`keep` / `delete`) without holding `files:delete`. That
- * ownership right must still not outreach the credential the request arrived
- * on — a key minted with `agents:run` does not inherit its creator's files
- * (RBAC spec §7.1).
- */
-export function credentialAdmits(c: Context<AppEnv>, permission: Permission): boolean {
-  const ceiling = c.get("scopeCeiling");
-  return ceiling === undefined || ceiling.has(permission);
-}
-
-/**
  * Org-level grants of `role` as an org LISTING shows them, sorted. No space
  * half: the space slice is answered per space by `GET /api/spaces`.
  */
