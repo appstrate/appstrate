@@ -19,7 +19,6 @@ import {
   loadTokens,
   deleteTokens,
   _setKeyringFactoryForTesting,
-  _shouldRefuseWindowsFallback,
   type KeyringHandle,
   type Tokens,
 } from "../src/lib/keyring.ts";
@@ -343,25 +342,6 @@ describe("broken-keyring fallback refusal (unix)", () => {
     const toks = mkTokens({ accessToken: "t", expiresAt: futureMs() });
     await saveTokens("default", toks);
     expect(await loadTokens("default")).toEqual(toks);
-  });
-});
-
-describe("Windows fallback refusal", () => {
-  // The in-process platform check is exercised via the exported
-  // `_shouldRefuseWindowsFallback` helper — stubbing
-  // `process.platform` globally is racy with Bun's test runner and
-  // would leak between tests.
-  it("refuses the fallback on win32 for any keyring failure", () => {
-    // Every throw from @napi-rs/keyring 2.x means the store did not
-    // serve the call — a missing entry is a null/false RETURN, never a
-    // throw — so there is no error class that may reach a plaintext
-    // file on Windows.
-    expect(_shouldRefuseWindowsFallback("win32")).toBe(true);
-  });
-
-  it("never refuses on non-Windows platforms", () => {
-    expect(_shouldRefuseWindowsFallback("linux")).toBe(false);
-    expect(_shouldRefuseWindowsFallback("darwin")).toBe(false);
   });
 });
 

@@ -185,13 +185,7 @@ function classifyKeyringError(err: unknown): "store-unavailable" | "store-locked
  * the operation (a missing entry is a `null`/`false` return, not a
  * throw), so on Windows the refusal is unconditional — there is no
  * error class that would legitimately reach the file store here.
- * Export kept under the `_`-prefix convention for unit testability —
- * the real `process.platform` can't be faked cleanly in bun:test.
  */
-export function _shouldRefuseWindowsFallback(platform: string): boolean {
-  return platform === "win32";
-}
-
 function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): never {
   const cause = getErrorMessage(err);
   throw new Error(
@@ -262,7 +256,7 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
     _keyringFactory(profile).setPassword(payload);
     return;
   } catch (err) {
-    if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("write", err);
+    if (process.platform === "win32") refuseWindowsFallback("write", err);
     // The write path is the only one that can DOWNGRADE storage: it is
     // where a plaintext file would come into existence. `store-locked`
     // means the host does protect secrets, so refuse unless the
@@ -336,7 +330,7 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
       return parsed;
     }
   } catch (err) {
-    if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("read", err);
+    if (process.platform === "win32") refuseWindowsFallback("read", err);
     // A host with no working store (`store-unavailable`) is the
     // expected fallback trigger — the credentials only ever lived in
     // the file. A locked store is refused on unix unless the user opts
@@ -392,7 +386,7 @@ export async function deleteTokens(profile: string): Promise<void> {
   // the single source of truth there.
   if (process.platform !== "win32") await deleteFromFile(profile);
   if (keyringError === undefined) return;
-  if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("delete", keyringError);
+  if (process.platform === "win32") refuseWindowsFallback("delete", keyringError);
   // A host with no working store never held a keyring entry for this
   // profile — the file store we just cleared was the only copy.
   if (classifyKeyringError(keyringError) === "store-unavailable") return;
