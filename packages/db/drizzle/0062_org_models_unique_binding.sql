@@ -29,4 +29,4 @@
 -- ROLLBACK: `DROP INDEX "uq_org_models_unaliased_binding";`. A previous
 -- build is happy without it — it simply stops refusing duplicates again.
 
-CREATE UNIQUE INDEX "uq_org_models_unaliased_binding" ON "org_models" USING btree ("org_id","credential_id","model_id") WHERE "org_models"."aliased" = false;
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_org_models_unaliased_binding" ON "org_models" USING btree ("org_id","credential_id","model_id") WHERE "org_models"."aliased" = false;

@@ -82,8 +82,8 @@ Apply all of it during the same maintenance window with application traffic stop
 
    Moving the rows off `viewer` by hand instead of running `0008` collapses the two releases into one, and costs those users their space access until it is restored: `guest` reaches nothing without an explicit `space_members` row, which is precisely what `0008` writes. Only worth it for a handful of accounts, and the restore belongs in this window, not in a follow-up.
 
-4. Apply pending Drizzle migrations — `0056_space_roles.sql`, `0057_oauth_provider_1_7_3.sql`, `0058_organization_deletion_reservation.sql`, and `0059_drop_org_viewer.sql` when step 3 said four zeros.
-5. Run `0008-org-viewer-to-guest.sql` before starting the new application. It snapshots memberships, pending viewer invitations and legacy OAuth viewer signup clients into explicit viewer grants, preserving any existing explicit role choices. Reruns do not add later spaces: a run that commits records itself in `drizzle.migration_scripts`, and every later run skips step 4 outright — naming the OAuth signup clients whose empty snapshot its predicate still matches, and which it would otherwise have widened. Re-running step 4 on purpose means deleting that row by hand.
+4. Apply pending Drizzle migrations — `0056_space_roles.sql`, `0057_oauth_provider_1_7_3.sql`, `0058_organization_deletion_reservation.sql`, `0059_drop_org_viewer.sql` when step 3 said four zeros, then `0060_runner_preset.sql`, `0061_oauth_fk_indexes.sql` and `0062_org_models_unique_binding.sql`.
+5. Run `0008-org-viewer-to-guest.sql` before starting the new application. It snapshots memberships, pending viewer invitations and legacy OAuth viewer signup clients into explicit viewer grants, preserving any existing explicit role choices. Reruns do not add later spaces: a run that commits records itself in `drizzle.migration_scripts`, and every later run skips `0008`'s own step 4 (the OAuth signup snapshot) outright — naming the OAuth signup clients whose empty snapshot its predicate still matches, and which it would otherwise have widened. Re-running `0008`'s step 4 on purpose means deleting that row by hand.
 6. Run `0012-org-invitation-history-viewer-to-guest.sql` straight after it. `0008` restricts itself to `status = 'pending'` invitations, because only those owe a `space_assignments` snapshot; `0012` maps the accepted, expired and cancelled ones — pure history — to `guest`, which `0059` needs since it cannot cast them.
 7. Check zero remaining org-member viewers, zero pending viewer invitations and zero OAuth `signup_role = 'viewer'`. `0008` additionally aborts if any captured membership, invitation or OAuth signup space is missing. Inspect the legacy OAuth snapshots against the rehearsal's pre-migration client/space inventory.
 8. Start the new application. Rolling back only the application is unsupported: the older build omits the now-required chat-session space. Roll forward or restore the coordinated backup.
@@ -177,8 +177,8 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
    moves.
 
 3. Check `duplicate_bindings_after` prints 0 and all four `dangling_*` counts
-   print 0, then apply the drizzle batch including
-   `0062_org_models_unique_binding.sql`.
+   print 0, then apply the drizzle batch (step 4 of the RBAC rollout above,
+   which is where this release's batch is enumerated).
 
 4. From this release on, `POST /api/models` answers `409 model_already_added`
    (carrying `existing_model_id`) instead of minting a second row, and

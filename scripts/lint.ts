@@ -280,26 +280,13 @@ async function main(): Promise<number> {
   // It goes before `Bun.argv.slice(2)` so that a caller who genuinely wants a
   // budget (`bun run lint --max-warnings 20`) still wins: eslint takes the last
   // occurrence.
-  // `node_modules/.bin/eslint` is a NODE script, so a cold whole-repo lint runs
-  // under node's default old-space limit of ~4 GB — and the type-aware block in
+  //
+  // `node_modules/.bin/eslint` is a NODE script, so the lint runs under node's
+  // default old-space limit of ~4 GB — and the type-aware block in
   // `eslint.config.mjs` builds one TypeScript program per tsconfig it reaches,
-  // which is where essentially all of that memory goes.
-  //
-  // That limit had already been reached. Measured 2026-09-10, cold
-  // (`.eslintcache` deleted before each run), exit code captured:
-  //
-  //   this config, before the type-aware block covered `apps/cli` +
-  //   `runtime-pi`               exit 0
-  //   ... with those two trees    exit 1  FATAL ERROR: Reached heap limit,
-  //                                       at 4078 MB — 2/2 runs
-  //   ... same, with this flag    exit 0  (5.2 GB peak RSS)
-  //
-  // So the ceiling was one type program away, and the next widening of that
-  // block — by anyone, for any tree — would have hit it first and reported a
-  // V8 stack trace instead of a lint result. `--max-old-space-size` is what
-  // buys the margin back. 8 GB is chosen against CI's 16 GB runner (half of
-  // it, ~3 GB above today's observed peak), not against today's number, so the
-  // gate does not need re-tuning the next time a package lands.
+  // which exhausts it. 8 GB is chosen against CI's 16 GB runner rather than
+  // against today's peak, so the gate does not need re-tuning the next time a
+  // package lands.
   //
   // `NODE_OPTIONS` rather than an argv flag: the flag has to reach node
   // itself, and the child here is the eslint shim, not node. An existing

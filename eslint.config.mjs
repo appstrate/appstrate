@@ -827,71 +827,16 @@ export default tseslint.config(
     // If this ever needs to get cheaper, narrow `files` before dropping a rule:
     // the cost is the type program, not the rule count.
     //
-    // ─── Why `apps/cli`, `runtime-pi` and `scripts` were added ───────────
+    // ─── Scope ──────────────────────────────────────────────────────────
     //
-    // The first version of this block covered `apps/api/src` and
-    // `packages/*/src` only, which left out three trees that are backend code
-    // by every criterion the rationale above uses — while the rationale's own
-    // headline example, "an un-awaited promise in a run orchestrator", names a
-    // layer that lives in `runtime-pi/`. Run over those trees (2026-09-10) the
-    // three rules found 8 violations, four of them defects:
+    // `apps/cli/src`, `runtime-pi` and `scripts` are backend code by every
+    // criterion above — `runtime-pi` is where the rationale's own headline
+    // example, a run orchestrator, actually lives, and `scripts/migration/**`
+    // mutates PRODUCTION data, where a call that returns before its writes
+    // land reports a move that did not happen.
     //
-    //   apps/cli/src   `download.ts` wrote to a default `FileSink` with the
-    //                  write un-awaited — a byte-for-byte twin of the
-    //                  `storage-fs.ts` defect this block's first run caught,
-    //                  in the copy that happened to be out of scope. Same two
-    //                  consequences: the whole artifact resident in memory,
-    //                  and a mid-write failure escaping the surrounding `try`
-    //                  as an unhandled rejection with the partial file left on
-    //                  disk.
-    //   runtime-pi     the sidecar's TCP connection handler dropped the
-    //                  promise of an `async` callback whose awaits (SSRF/DNS
-    //                  resolution, ClientHello reads) are not inside a `try` —
-    //                  one rejection there kills the sidecar process, and with
-    //                  it the run it proxies for. Plus a floating `FileSink`
-    //                  write in `provision.ts` and a dead truthiness test on a
-    //                  promise in `entrypoint.ts`.
-    //   scripts        no defect today (three `server.stop()` calls in a
-    //                  dev-only OAuth helper, one `Promise.all` over a
-    //                  null-mixed iterable). It is in scope for what it
-    //                  PREVENTS: `scripts/migration/**` mutates PRODUCTION
-    //                  data, which is the sharpest possible form of this
-    //                  block's first rationale — a migration that returns
-    //                  before its writes land reports a move that did not
-    //                  happen.
-    //
-    // ─── What this cost, and the ceiling it hit on the way ───────────────
-    //
-    // Widening this block is what discovered that the gate had no memory
-    // headroom left. `scripts/lint.ts` spawns `node_modules/.bin/eslint`,
-    // which is a NODE script, so the lint ran under node's default ~4 GB
-    // old-space — and this block's type programs are essentially all of that.
-    // Cold (`.eslintcache` deleted before each run), exit code captured:
-    //
-    //   before this change            exit 0
-    //   with the three trees added    exit 1  FATAL: Reached heap limit,
-    //                                         4078 MB — 2/2 runs
-    //
-    // The ceiling was ONE type program away, for any tree, for anyone. The
-    // fix belongs to the gate rather than to this block, so it lives in
-    // `scripts/lint.ts` (`--max-old-space-size`, see the note there) and the
-    // real cost of the three trees is only measurable once it is applied.
-    // Same conditions, cold, with that headroom in place:
-    //
-    //                                   user CPU   peak RSS   exit
-    //   before this change               81.0 s    3.69 GB     0
-    //   + apps/cli + runtime-pi          97.2 s    5.20 GB     0
-    //   + scripts/**                     96.3 s    4.35 GB     0 (once fixed)
-    //
-    // So the three trees together cost about +20% CPU on a COLD lint, and
-    // `scripts/**` — the one that looked expensive, since its tsconfig pulls
-    // `../apps/api/src/modules/*/index.ts` into a second program — costs
-    // nothing measurable on top of the other two. Wall clock is deliberately
-    // not quoted: the machine was running many parallel jobs and its wall
-    // numbers moved by 40% between identical runs, while user CPU did not.
-    //
-    // Warm stays warm: `--cache --cache-strategy content` rebuilds a type
-    // program only for the files that actually changed.
+    // Type programs for these trees are what exhausts node's default heap,
+    // which is why `scripts/lint.ts` raises it — see the note there.
     //
     // Test trees stay out for the reason given above, and `apps/web/src` stays
     // out because it has its own type-aware block: these three rules over JSX
