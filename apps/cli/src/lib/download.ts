@@ -77,7 +77,7 @@ const PROGRESS_THROTTLE_MS = 250;
  * ~one watermark. Same value, and the same reason, as core's streaming upload
  * (`packages/core/src/storage-fs.ts`).
  */
-const SINK_FLUSH_BYTES = 1024 * 1024;
+const STREAM_FLUSH_BYTES = 1024 * 1024;
 
 /** Reason tags carried on the AbortController so the catch can explain itself. */
 const STALL = Symbol("stall");
@@ -161,7 +161,7 @@ export async function streamDownload(
       throw new Error(`GET ${url} → empty response body`);
     }
 
-    sink = Bun.file(destPath).writer({ highWaterMark: SINK_FLUSH_BYTES });
+    sink = Bun.file(destPath).writer({ highWaterMark: STREAM_FLUSH_BYTES });
     const reader = res.body.getReader();
     armStall();
     try {
@@ -173,7 +173,7 @@ export async function streamDownload(
         hasher.update(bytes);
         // AWAITED: `FileSink.write` returns `number | Promise<number>`, and
         // returns the promise exactly when the sink has to drain — which is
-        // what `SINK_FLUSH_BYTES` above makes happen. Un-awaited it dropped
+        // what `STREAM_FLUSH_BYTES` above makes happen. Un-awaited it dropped
         // both the backpressure and the rollback: a mid-write failure left the
         // `catch` below untriggered and escaped as an unhandled rejection
         // (fatal in Bun), so the partial file at `destPath` was never unlinked.
