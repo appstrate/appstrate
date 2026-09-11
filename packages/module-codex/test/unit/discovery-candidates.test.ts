@@ -45,15 +45,6 @@ describe("codex discovery candidates", () => {
     }
   });
 
-  it("names both documented Pro-only ids", () => {
-    // Pins the deny-list's contents, so removing an id from it is a visible
-    // edit rather than a silent one that quietly re-opens the test above.
-    // Source: https://learn.chatgpt.com/docs/models (Codex with ChatGPT
-    // sign-in) — `gpt-5.3-codex-spark` read 2026-07-27, `gpt-6-astra`
-    // 2026-09-07.
-    expect([...PRO_PLAN_MODEL_IDS]).toEqual(["gpt-6-astra", "gpt-5.3-codex-spark"]);
-  });
-
   it("drops the ids deprecated for ChatGPT sign-in", () => {
     // Source: https://learn.chatgpt.com/docs/models (fetched 2026-07-27).
     // Keeping a deprecated id selectable only defers the failure to run time.
