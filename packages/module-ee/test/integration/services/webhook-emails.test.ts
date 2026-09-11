@@ -163,12 +163,53 @@ describe("webhook billing emails", () => {
         },
       });
 
+      setSubscriptionResponse(JSON.parse(body).data.object);
       await handleWebhook(body, signature);
       await new Promise((r) => setTimeout(r, 100));
 
       expect(sentEmails).toHaveLength(1);
       expect(sentEmails[0]!.subject).toContain("annulation");
     });
+  });
+
+  it("keeps a delayed upgrade notification historical after a later downgrade", async () => {
+    await seedBillingAccount({
+      orgId,
+      planId: "starter",
+      stripeSubscriptionId: "sub_history",
+      subscriptionStatus: "active",
+    });
+    const upgraded = {
+      id: "sub_history",
+      status: "active" as const,
+      cancel_at_period_end: false,
+      metadata: { orgId, planId: "starter" },
+      items: {
+        data: [
+          {
+            price: { id: "price_pro_test" },
+            current_period_end: Math.floor(Date.now() / 1000) + 86400,
+          },
+        ],
+      },
+    };
+    setSubscriptionResponse({
+      ...upgraded,
+      items: { data: [{ ...upgraded.items.data[0], price: { id: "price_starter_test" } }] },
+    });
+    const { body, signature } = signedEvent({
+      id: "evt_delayed_upgrade",
+      type: "customer.subscription.updated",
+      data: {
+        object: upgraded,
+        previous_attributes: { items: { data: [{ price: { id: "price_starter_test" } }] } },
+      },
+    });
+    await handleWebhook(body, signature);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0]!.html).toContain("Pro");
+    expect(sentEmails[0]!.html).toContain("Starter");
   });
 
   describe("customer.subscription.deleted", () => {

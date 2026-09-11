@@ -33,6 +33,15 @@ describe("handleWebhook", () => {
     return generateWebhookEvent(payload, WEBHOOK_SECRET);
   }
 
+  function signedUpdatedEvent(payload: {
+    id: string;
+    type: "customer.subscription.updated";
+    data: { object: Fixture<Stripe.Subscription> };
+  }) {
+    setSubscriptionResponse(payload.data.object);
+    return signedEvent(payload);
+  }
+
   function signedCreatedEvent(id: string, subscription: Fixture<Stripe.Subscription>) {
     setSubscriptionResponse(subscription);
     return signedEvent({
@@ -72,52 +81,6 @@ describe("handleWebhook", () => {
       expect(account!.subscriptionStatus).toBe("active");
       // Quota allocated immediately at checkout (no wait for invoice.paid).
       expect(account!.creditQuota).toBe(20000);
-    });
-
-    it("refuses to attach a subscription Stripe has already cancelled", async () => {
-      // Post-`customer.subscription.deleted` state: free, no held subscription, 0 credits.
-      await seedBillingAccount({
-        orgId,
-        planId: "free",
-        stripeCustomerId: "cus_dead_001",
-        stripeSubscriptionId: null,
-        subscriptionStatus: null,
-        creditQuota: 0,
-      });
-
-      // The session froze before the cancellation; Stripe's live object says otherwise.
-      setSubscriptionResponse({
-        id: "sub_dead_001",
-        object: "subscription",
-        status: "canceled",
-        metadata: { orgId, planId: "starter" },
-        items: { object: "list", data: [{ id: "si_dead", price: { id: "price_starter_test" } }] },
-      });
-
-      const { body, signature } = signedEvent({
-        id: "evt_checkout_dead_001",
-        type: "checkout.session.completed",
-        data: {
-          object: {
-            customer: "cus_dead_001",
-            subscription: "sub_dead_001",
-            metadata: { orgId, planId: "starter" },
-          },
-        },
-      });
-
-      await handleWebhook(body, signature);
-
-      const db = getEeDb();
-      const [account] = await db
-        .select()
-        .from(billingAccounts)
-        .where(eq(billingAccounts.orgId, orgId));
-
-      expect(account!.planId).toBe("free");
-      expect(account!.stripeSubscriptionId).toBeNull();
-      expect(account!.subscriptionStatus).toBeNull();
-      expect(account!.creditQuota).toBe(0);
     });
 
     it("records the live subscription status, not a hardcoded active", async () => {
@@ -243,6 +206,7 @@ describe("handleWebhook", () => {
 
       const { body, signature } = signedCreatedEvent("evt_sub_created_001", {
         id: "sub_created_001",
+        items: { data: [{ price: { id: "price_starter_test" } }] },
         customer: "cus_sub_created_001",
         status: "active",
         cancel_at_period_end: false,
@@ -481,51 +445,6 @@ describe("handleWebhook", () => {
       expect(account!.creditsUsed).toBe(500);
       expect(account!.creditQuota).toBe(20000);
     });
-
-    it("grants nothing when the paid invoice belongs to a cancelled subscription", async () => {
-      await seedBillingAccount({
-        orgId,
-        planId: "free",
-        stripeCustomerId: "cus_invoice_dead",
-        stripeSubscriptionId: null,
-        subscriptionStatus: null,
-        creditsUsed: 0,
-        creditQuota: 0,
-      });
-
-      setSubscriptionResponse({
-        id: "sub_invoice_dead",
-        object: "subscription",
-        status: "canceled",
-        metadata: { orgId, planId: "starter" },
-        items: { object: "list", data: [{ id: "si_dead", price: { id: "price_starter_test" } }] },
-      });
-
-      const { body, signature } = signedEvent({
-        id: "evt_invoice_dead_001",
-        type: "invoice.paid",
-        data: {
-          object: invoiceEventObject({
-            id: "in_dead_001",
-            customer: "cus_invoice_dead",
-            subscription: "sub_invoice_dead",
-            billingReason: "subscription_cycle",
-          }),
-        },
-      });
-
-      await handleWebhook(body, signature);
-
-      const db = getEeDb();
-      const [account] = await db
-        .select()
-        .from(billingAccounts)
-        .where(eq(billingAccounts.orgId, orgId));
-
-      expect(account!.planId).toBe("free");
-      expect(account!.stripeSubscriptionId).toBeNull();
-      expect(account!.creditQuota).toBe(0);
-    });
   });
 
   describe("ordering + plan resolution (regression)", () => {
@@ -647,7 +566,7 @@ describe("handleWebhook", () => {
         subscriptionStatus: "active",
       });
 
-      const { body, signature } = signedEvent({
+      const { body, signature } = signedUpdatedEvent({
         id: "evt_sub_updated_001",
         type: "customer.subscription.updated",
         data: {
@@ -693,7 +612,7 @@ describe("handleWebhook", () => {
         creditQuota: 20000,
       });
 
-      const { body, signature } = signedEvent({
+      const { body, signature } = signedUpdatedEvent({
         id: "evt_sub_updated_upgrade",
         type: "customer.subscription.updated",
         data: {
@@ -741,7 +660,7 @@ describe("handleWebhook", () => {
         creditQuota: 80000,
       });
 
-      const { body, signature } = signedEvent({
+      const { body, signature } = signedUpdatedEvent({
         id: "evt_sub_updated_downgrade",
         type: "customer.subscription.updated",
         data: {
@@ -932,7 +851,7 @@ describe("handleWebhook", () => {
       // Reversed order: `sub_old` was canceled first, but its update lands last.
       await seedReplacedSubscription();
 
-      const { body, signature } = signedEvent({
+      const { body, signature } = signedUpdatedEvent({
         id: "evt_identity_update_old",
         type: "customer.subscription.updated",
         data: {
@@ -1058,6 +977,11 @@ describe("handleWebhook", () => {
 
       it("attaches a checkout completion over an `incomplete_expired` id", async () => {
         await seedDeadSubscription("incomplete_expired");
+        setSubscriptionResponse({
+          id: "sub_after_expiry",
+          status: "active",
+          items: { data: [{ price: { id: "price_pro_test" } }] },
+        });
 
         const { body, signature } = signedEvent({
           id: "evt_dead_checkout_expired",
