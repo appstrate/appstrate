@@ -360,8 +360,7 @@ describe("migration chain upgrades", () => {
     );
     expect(Number(kept!.cost_credits)).toBe(2_000_000_000);
 
-    // The point of the widening: a cumulative past 2 147 483 647 credits now
-    // accumulates instead of aborting the sweep transaction that writes it.
+    // Past the int4 ceiling — see the `cost_credits` note in `drizzle/schema.ts`.
     await db.execute(
       sql.raw(
         `UPDATE ee_usage_records

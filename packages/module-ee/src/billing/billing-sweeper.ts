@@ -50,15 +50,9 @@ import { getPlatformServices } from "../platform.ts";
  *     Revenue that the plain cursor would have dropped in silence;
  *   - N consecutive failing ticks escalate from `warn` to `error`.
  *
- * These deliberately do NOT go through `@appstrate/core/telemetry`: that façade
- * exposes a fixed set of platform recorders (run duration, container spawn, LLM
- * latency) with no generic counter/gauge for billing. The shape of the façade is
- * the whole reason, and it is the only reason left: this module is a workspace
- * package, so it resolves the very same `@appstrate/core` instance the platform
- * does and the installed telemetry provider IS the one it would see. A billing
- * counter added to the façade would therefore work from here; until the module
- * contract carries one, structured
- * pino logs are the honest transport.
+ * These ride structured pino logs, not `@appstrate/core/telemetry`: that façade
+ * exposes a fixed set of platform recorders with no generic counter or gauge a
+ * billing counter could use.
  *
  * Pause METERING: set `EE_RECONCILIATION_INTERVAL_SECONDS=0`. The timer keeps
  * running at {@link MAINTENANCE_INTERVAL_SECONDS} — see {@link runMaintenance}.
