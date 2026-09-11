@@ -24,6 +24,10 @@
 --   package_schedules.model_id_override   a schedule's per-fire override
 --   llm_usage.model                  the preset the caller asked for
 --
+-- All four are `text` and `org_models.id` is `uuid`, so every comparison
+-- against the temp table casts: PostgreSQL has no implicit `text = uuid`.
+-- The assignments do not — uuid -> text is an accepted coercion.
+--
 -- The ledger is repointed too, and deliberately: `llm_usage.model` is what
 -- per-model spend reporting groups by, so leaving the losers behind would keep
 -- the split this whole change exists to end. It is not a billing rewrite —
@@ -75,22 +79,22 @@ SELECT count(*) AS rows_to_delete FROM org_models_dedupe;
 UPDATE organizations o
 SET default_model_id = d.keeper_id, updated_at = now()
 FROM org_models_dedupe d
-WHERE o.default_model_id = d.loser_id;
+WHERE o.default_model_id = d.loser_id::text;
 
 UPDATE space_packages p
 SET model_id = d.keeper_id
 FROM org_models_dedupe d
-WHERE p.model_id = d.loser_id;
+WHERE p.model_id = d.loser_id::text;
 
 UPDATE package_schedules s
 SET model_id_override = d.keeper_id
 FROM org_models_dedupe d
-WHERE s.model_id_override = d.loser_id;
+WHERE s.model_id_override = d.loser_id::text;
 
 UPDATE llm_usage u
 SET model = d.keeper_id
 FROM org_models_dedupe d
-WHERE u.model = d.loser_id;
+WHERE u.model = d.loser_id::text;
 
 -- ═══ DELETE the losers ═══
 DELETE FROM org_models m
@@ -109,12 +113,12 @@ FROM (
 
 SELECT
   (SELECT count(*) FROM organizations o
-     JOIN org_models_dedupe d ON o.default_model_id = d.loser_id) AS dangling_org_defaults,
+     JOIN org_models_dedupe d ON o.default_model_id = d.loser_id::text) AS dangling_org_defaults,
   (SELECT count(*) FROM space_packages p
-     JOIN org_models_dedupe d ON p.model_id = d.loser_id) AS dangling_agent_pins,
+     JOIN org_models_dedupe d ON p.model_id = d.loser_id::text) AS dangling_agent_pins,
   (SELECT count(*) FROM package_schedules s
-     JOIN org_models_dedupe d ON s.model_id_override = d.loser_id) AS dangling_schedule_overrides,
+     JOIN org_models_dedupe d ON s.model_id_override = d.loser_id::text) AS dangling_schedule_overrides,
   (SELECT count(*) FROM llm_usage u
-     JOIN org_models_dedupe d ON u.model = d.loser_id) AS dangling_ledger_rows;
+     JOIN org_models_dedupe d ON u.model = d.loser_id::text) AS dangling_ledger_rows;
 
 COMMIT;
