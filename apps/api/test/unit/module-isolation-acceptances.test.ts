@@ -215,8 +215,7 @@ describe("importSpecifiers", () => {
   it("does not read an import QUOTED inside a string literal", () => {
     // A quote inside a literal cannot open a specifier — the whole literal is
     // one token. Without that, every file that talks ABOUT an import reads as
-    // performing one, and the commercial-dependency scan (which covers the test
-    // trees, where such fixtures live) reported this very file five times.
+    // performing one.
     const source = [
       "const fixture = 'import \"@appstrate/module-ee\";';",
       'const other = "void import(`@appstrate/module-chat`)";',

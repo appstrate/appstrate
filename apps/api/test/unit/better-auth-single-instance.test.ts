@@ -1,26 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Regression for #1347 (and the bug #1295 fixed by hand): `@better-auth/core`
- * must resolve to ONE copy for every consumer in `apps/api`'s import graph.
+ * `@better-auth/core` must resolve to ONE copy for every consumer in
+ * `apps/api`'s import graph.
  *
  * `oauth2/verify.mjs` marks insufficient-scope errors in a module-level
  * WeakSet, so `createInsufficientScopeError` (minted through `better-auth`)
  * and `isInsufficientScopeError` (read by `@better-auth/oauth-provider` when
  * building the step-up challenge) are only the same marker while both come
- * from the same copy. #1295 was that invariant broken: `apps/api` pinned
- * `jose ^6.2.12` while better-auth's transitive `jose` sat at 6.2.7, so bun
- * materialised two peer instances of `@better-auth/core@1.7.3` and the MCP 403
- * silently lost its `WWW-Authenticate` header.
+ * from the same copy; a split silently drops the MCP 403's
+ * `WWW-Authenticate` header — the behaviour covered in
+ * `src/modules/mcp/test/integration/mcp.test.ts`.
  *
- * The behavioural half is covered by
- * `src/modules/mcp/test/integration/mcp.test.ts` ("403s an authenticated
- * caller lacking `mcp:read` with an `insufficient_scope` step-up challenge").
- * What was unguarded — and is what this asserts — is the resolution itself,
- * which depends on the peer graph rather than on any line of our code: it can
- * split again on the next dependency bump, silently, with the code unchanged.
- * `jose` is pinned in the root `overrides` (next to `zod`, which is why zod
- * never split) so the peers cannot skew; this test is what notices if they do.
+ * The resolution depends on the peer graph, not on any line of our code: a
+ * skewed `jose` peer splits it with the code unchanged, which is why `jose`
+ * sits in the root `overrides` beside `zod`. This test notices a split.
  */
 
 import { describe, it, expect } from "bun:test";
