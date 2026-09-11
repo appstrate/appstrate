@@ -468,7 +468,6 @@
   "files.replace": "Remplacer",
   "files.pathLabel": "Chemin du fichier",
   "files.pathPlaceholder": "scripts/run.py",
-  "files.pinnedHint": "Ni renommable ni supprimable",
   "files.errorInvalidPath": "Chemin inutilisable : ni segment vide, ni « . », ni « .. », ni antislash, ni lettre de lecteur, ni barre oblique au début ou à la fin.",
   "files.errorReserved": "manifest.json s'écrit dans l'onglet JSON, pas dans l'arborescence.",
   "files.errorExists": "Ce package contient déjà un fichier à ce chemin.",

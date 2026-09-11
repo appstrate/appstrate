@@ -468,7 +468,6 @@
   "files.replace": "Replace",
   "files.pathLabel": "File path",
   "files.pathPlaceholder": "scripts/run.py",
-  "files.pinnedHint": "Cannot be renamed or deleted",
   "files.errorInvalidPath": "Unusable path: no empty segment, no “.” or “..”, no backslash, no drive letter, no leading or trailing slash.",
   "files.errorReserved": "manifest.json is authored on the JSON tab, not in the file tree.",
   "files.errorExists": "This package already holds a file at that path.",

@@ -10,9 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - New subpath `@appstrate/core/package-file-operations`: `applyFileTreeOperations`,
-  `isProtectedPackageFile`, `PackageFileWriteError` and their types. The browser
-  and API share ordered file operations, required-entry protection and canonical
-  path collision checks, including file/directory ancestors.
+  `isProtectedPackageFile`, `PackageFileWriteError`, `PackageFileWriteErrorCode`
+  and `FileTreeOperation`. The browser and API share ordered file operations,
+  required-entry protection and canonical path collision checks, including
+  file/directory ancestors.
 
 - New export `PACKAGE_MANIFEST_FILE` (`@appstrate/core/package-files`): the archive entry that carries a package's manifest, `"manifest.json"`. Not a display label — it is the name two enforcement points refuse, the draft-write route (`reserved_entry`: the manifest is a projection of `packages.draft_manifest`, authored through the package `PUT`) and the editor's own path validator. Declaring it once is what keeps the client from offering a path the server rejects.
 
