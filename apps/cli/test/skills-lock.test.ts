@@ -20,7 +20,6 @@ import {
   resolveTryLock,
   SyncLockBusyError,
   withSyncLock,
-  type LockAttempt,
 } from "../src/lib/skills-sync/lock.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
@@ -156,11 +155,6 @@ describe("the flock binding", () => {
     expect(attempt.status).toBe("unsupported");
     expect(attempt).toMatchObject({ reason: expect.stringContaining("errno") });
   });
-
-  it("reports Windows unsupported without reaching for libc", () => {
-    const attempt = resolveTryLock("win32")(1);
-    expect(attempt).toEqual({ status: "unsupported", reason: "Windows has no flock(2)" });
-  });
 });
 
 describe("withSyncLock without a working flock", () => {
@@ -186,23 +180,6 @@ describe("withSyncLock without a working flock", () => {
         tryLock: () => ({ status: "unsupported", reason: "flock(2) failed with errno 95" }),
       }),
     ).resolves.toBe("ran");
-  });
-
-  it("retries a signal-interrupted attempt instead of polling", async () => {
-    const attempts: LockAttempt[] = [
-      { status: "interrupted" },
-      { status: "interrupted" },
-      { status: "acquired" },
-    ];
-    // pollMs is long enough that a wait between attempts would blow the
-    // deadline; only an immediate retry gets to "acquired".
-    const result = await withSyncLock(async () => "ran", {
-      timeoutMs: 5_000,
-      pollMs: 60_000,
-      tryLock: () => attempts.shift() ?? { status: "acquired" },
-    });
-    expect(result).toBe("ran");
-    expect(attempts).toHaveLength(0);
   });
 });
 

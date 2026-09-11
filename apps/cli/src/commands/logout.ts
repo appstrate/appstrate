@@ -39,15 +39,23 @@ export async function logoutCommand(
   intro(`Appstrate logout — profile "${profileName}"`, io);
 
   let hadTokens = false;
+  let credentialsCleared = false;
+  // A keyring that kept its copy is remembered, never swallowed: every cleanup
+  // step below still runs, and the command ends non-zero. A logout that leaves
+  // a usable token in the store is not a completed logout, and a script
+  // chaining on `appstrate logout` has to be able to tell the difference.
+  let keyringRefusal: unknown;
+  // Marked cleared once the profile is gone, keyring throw or not: the local
+  // sign-out has happened, and a second attempt would only throw again.
   const clearCredentials = async (): Promise<void> => {
     await _awaitRefreshQuiesce(profileName);
     try {
       await deleteTokens(profileName);
     } finally {
       await deleteProfile(profileName);
+      credentialsCleared = true;
     }
   };
-  let credentialsCleared = false;
   try {
     await withSyncLock(
       async () => {
@@ -67,8 +75,15 @@ export async function logoutCommand(
             `warning: could not revoke refresh token server-side (${formatError(err)}); continuing with local cleanup.\n`,
           );
         } finally {
-          await clearCredentials();
-          credentialsCleared = true;
+          // A keyring that will not release its copy is reported on its own
+          // terms; the local sign-out is done and the skills still need taking
+          // off the disk.
+          try {
+            await clearCredentials();
+          } catch (err) {
+            keyringRefusal = err;
+            io.stderr.write(`warning: ${formatError(err)}\n`);
+          }
         }
         const cleanup = await cleanupProfileSkills(profileName);
         if (cleanup.pluginReset)
@@ -92,4 +107,9 @@ export async function logoutCommand(
     if (!credentialsCleared) await clearCredentials();
   }
   outro(hadTokens ? `Signed out of "${profileName}".` : "Already signed out.", io);
+  // Reported already, above, on its own terms — so this is the `io.exit` shape
+  // `skills.ts` and `whoami.ts` use rather than a throw: the whole report stays
+  // on screen and the process still ends non-zero. Rethrowing would render the
+  // same multi-line remediation a second time through `exitWithError`.
+  if (keyringRefusal !== undefined) io.exit(1);
 }

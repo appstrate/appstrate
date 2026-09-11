@@ -1243,16 +1243,20 @@ async function snapshot(root: string): Promise<Record<string, string>> {
  * therefore not be a skill source. */
 const MEMBER = { access: "member" as const, permissions: ["skills:read"] };
 
-/**
- * Answer `GET /api/spaces` with a problem detail, serving everything else — the
- * shape the platform sends when it refuses the listing outright.
- */
-function failSpaceListing(status: number): void {
+/** Answer `GET /api/spaces` with `respond()`, serving every other path as before. */
+function interceptSpaceListing(respond: () => Response): void {
   const serve = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     new URL(String(input)).pathname === "/api/spaces"
-      ? Response.json({ status, title: "Forbidden", code: "forbidden" }, { status })
+      ? respond()
       : serve(input, init)) as unknown as typeof fetch;
+}
+
+/** The problem detail the platform sends when it refuses the listing outright. */
+function failSpaceListing(status: number): void {
+  interceptSpaceListing(() =>
+    Response.json({ status, title: "Forbidden", code: "forbidden" }, { status }),
+  );
 }
 
 describe("skills sync — multiple spaces", () => {
@@ -1279,11 +1283,9 @@ describe("skills sync — multiple spaces", () => {
     // removal of every installed skill (issue #1320).
     createSkillServer(ONE_SKILL).install();
     await skillsSyncCommand({}, createMemoryIO().io);
-    const serve = globalThis.fetch;
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
-      new URL(String(input)).pathname === "/api/spaces"
-        ? Response.json({ data: [{ id: "spc_1", name: "Active", isDefault: true }] })
-        : serve(input, init)) as unknown as typeof fetch;
+    interceptSpaceListing(() =>
+      Response.json({ data: [{ id: "spc_1", name: "Active", isDefault: true }] }),
+    );
     const { io, stderr } = createMemoryIO();
 
     await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
@@ -1310,6 +1312,21 @@ describe("skills sync — multiple spaces", () => {
 
     expect(stderr()).toContain("no longer grants this profile access to its spaces");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
+  });
+
+  it("fails a typed --space instead of deleting every skill on a revocation", async () => {
+    // The flag was typed just now, so a revocation that makes it unhonourable
+    // has to say so: applied as the removal plan it wiped the tree and exited 0,
+    // never acknowledging the space the user named.
+    createSkillServer(ONE_SKILL).install();
+    await skillsSyncCommand({}, createMemoryIO().io);
+    failSpaceListing(403);
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsSyncCommand({ space: ["spc_1"] }, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain("no longer grants this profile access to them");
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
   });
 
   it("keeps every skill when the space listing fails for anything but a revocation", async () => {

@@ -35,10 +35,7 @@ import { DEFAULT_IO, type CommandIO } from "../io.ts";
 
 /** The outcome of one non-blocking attempt at the lock. */
 export type LockAttempt =
-  | { status: "acquired" }
-  | { status: "busy" }
-  | { status: "interrupted" }
-  | { status: "unsupported"; reason: string };
+  { status: "acquired" } | { status: "busy" } | { status: "unsupported"; reason: string };
 
 /** Takes an open descriptor, tries once, never blocks, never throws. */
 export type TryLock = (fd: number) => LockAttempt;
@@ -69,7 +66,6 @@ const EWOULDBLOCK_LINUX = 11;
 
 const ACQUIRED: LockAttempt = { status: "acquired" };
 const BUSY: LockAttempt = { status: "busy" };
-const INTERRUPTED: LockAttempt = { status: "interrupted" };
 
 export class SyncLockBusyError extends Error {
   constructor() {
@@ -112,10 +108,7 @@ export async function withSyncLock<T>(
         return await body();
       }
       if (Date.now() >= deadline) throw new SyncLockBusyError();
-      // A signal-interrupted call retries at once; a live holder is waited out.
-      if (attempt.status === "busy") {
-        await new Promise((resolve) => setTimeout(resolve, pollMs));
-      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
   } finally {
     // Closing the descriptor releases the lock — the same thing the kernel
@@ -130,11 +123,9 @@ function sharedTryLock(): TryLock {
   return (cachedTryLock ??= resolveTryLock());
 }
 
-/**
- * Binds `flock(2)`, or reports why it cannot be had. Exported for the tests
- * that exercise a platform this machine is not.
- */
-export function resolveTryLock(platform: NodeJS.Platform = process.platform): TryLock {
+/** Binds `flock(2)`, or reports why it cannot be had. */
+export function resolveTryLock(): TryLock {
+  const platform = process.platform;
   if (platform === "win32") return unsupported("Windows has no flock(2)");
 
   /** glibc first; the musl spellings cover a Bun built for Alpine. */
@@ -174,8 +165,9 @@ function bindFlock(library: string, platform: NodeJS.Platform): TryLock {
     if (flock(fd, LOCK_EX | LOCK_NB) === 0) return ACQUIRED;
     // Read straight away: errno holds until the next libc call on this thread.
     const errno = read.i32(errnoAt());
-    if (errno === wouldBlock) return BUSY;
-    if (errno === EINTR) return INTERRUPTED;
+    // A signal-interrupted call is busy too: waiting out the poll interval is
+    // the right answer to both, and the only one that yields the event loop.
+    if (errno === wouldBlock || errno === EINTR) return BUSY;
     return { status: "unsupported", reason: `flock(2) failed with errno ${errno}` };
   };
 }

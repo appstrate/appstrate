@@ -125,14 +125,6 @@ function fallbackPath(): string {
  */
 export const PLATFORM_FAILURE_MARKER = "Platform failure: ";
 
-/**
- * Display prefix of `keyring-core`'s `NoStorageAccess` variant — the
- * store exists and answered, but refused us: locked Keychain on a
- * headless SSH session, a gnome-keyring that will not unlock, a user
- * who denied access. See {@link classifyKeyringError}.
- */
-export const NO_STORAGE_ACCESS_MARKER = "Couldn't access platform storage: ";
-
 /** De-dupe stderr output across calls within the same process. */
 let _backendWarningEmitted = false;
 
@@ -141,7 +133,7 @@ let _backendWarningEmitted = false;
  *
  * `@napi-rs/keyring` 2.x surfaces `keyring-core` errors as plain JS
  * `Error`s, so the variant survives only as its Display prefix — the
- * prefix IS the discriminator, and the two we care about are pinned
+ * prefix IS the discriminator, and the one we split on is pinned
  * against the shipped native binary by
  * `test/keyring-error-markers.test.ts`, which fails on the next bump
  * that reworded them (the failure this classification had already
@@ -151,10 +143,14 @@ let _backendWarningEmitted = false;
  *     protection on this host to downgrade FROM, so the 0600 file
  *     store is the only option: fall back silently. This is the whole
  *     reason the file store exists.
- *   • `store-locked` (everything else, chiefly `NoStorageAccess`) —
- *     the machine IS configured to protect secrets and merely won't
- *     serve us right now. Writing plaintext here would be a real
- *     downgrade, so the write path refuses unless the operator opts in.
+ *   • `store-locked` (everything else, chiefly `NoStorageAccess`, whose
+ *     Display prefix is `Couldn't access platform storage: `) — the
+ *     store exists and answered, but refused us: locked Keychain on a
+ *     headless SSH session, a gnome-keyring that will not unlock, a
+ *     user who denied access. The machine IS configured to protect
+ *     secrets and merely won't serve us right now. Writing plaintext
+ *     here would be a real downgrade, so the write path refuses unless
+ *     the operator opts in.
  *
  * Unknown wording therefore lands on the conservative side: refuse and
  * say why, never a silent plaintext write.
@@ -185,13 +181,7 @@ function classifyKeyringError(err: unknown): "store-unavailable" | "store-locked
  * the operation (a missing entry is a `null`/`false` return, not a
  * throw), so on Windows the refusal is unconditional — there is no
  * error class that would legitimately reach the file store here.
- * Export kept under the `_`-prefix convention for unit testability —
- * the real `process.platform` can't be faked cleanly in bun:test.
  */
-export function _shouldRefuseWindowsFallback(platform: string): boolean {
-  return platform === "win32";
-}
-
 function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): never {
   const cause = getErrorMessage(err);
   throw new Error(
@@ -216,6 +206,15 @@ function refuseWindowsFallback(op: "read" | "write" | "delete", err: unknown): n
  * — a bearer token in `~/.config/appstrate/credentials.json` equals
  * full account takeover for anyone with read access to the file.
  */
+/** Per-OS unlock instructions, shared by every keyring refusal message. */
+const KEYRING_UNLOCK_HINT =
+  `    • macOS: run the CLI from a Terminal attached to a logged-in\n` +
+  `      GUI session (Keychain needs loginwindow). Under SSH, run\n` +
+  `      \`security unlock-keychain\` first or re-attach via tmux from\n` +
+  `      a GUI terminal.\n` +
+  `    • Linux: ensure gnome-keyring / kwallet is running and unlocked\n` +
+  `      (check with \`secret-tool store …\`).`;
+
 function refuseBrokenKeyring(op: "read" | "write", err: unknown): never {
   const cause = getErrorMessage(err);
   throw new Error(
@@ -225,12 +224,8 @@ function refuseBrokenKeyring(op: "read" | "write", err: unknown): never {
       `  machine is configured to protect secrets via the keyring — a\n` +
       `  plaintext credentials.json would be a silent downgrade.\n\n` +
       `  Fixes (pick one):\n` +
-      `    • macOS: run the CLI from a Terminal attached to a logged-in\n` +
-      `      GUI session (Keychain needs loginwindow). Under SSH, run\n` +
-      `      \`security unlock-keychain\` first or re-attach via tmux from\n` +
-      `      a GUI terminal.\n` +
-      `    • Linux: ensure gnome-keyring / kwallet is running and unlocked\n` +
-      `      (check with \`secret-tool store …\`).\n` +
+      KEYRING_UNLOCK_HINT +
+      `\n` +
       `    • Explicitly accept plaintext storage with:\n` +
       `        APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1 appstrate login\n` +
       `      Only do this if you understand the tokens will be written\n` +
@@ -238,12 +233,15 @@ function refuseBrokenKeyring(op: "read" | "write", err: unknown): never {
   );
 }
 
-function warnBackendOnce(op: "read" | "write", err: unknown): void {
+function warnBackendOnce(op: "read" | "write" | "delete", err: unknown): void {
   if (_backendWarningEmitted) return;
   _backendWarningEmitted = true;
-  const msg = getErrorMessage(err);
+  const outcome =
+    op === "delete"
+      ? "the credentials file was cleared; a copy may remain in the keyring"
+      : "falling back to ~/.config/appstrate/credentials.json (0600)";
   process.stderr.write(
-    `[appstrate] OS keyring ${op} failed (${msg}) — falling back to ~/.config/appstrate/credentials.json (0600). ` +
+    `[appstrate] OS keyring ${op} failed (${getErrorMessage(err)}) — ${outcome}. ` +
       `If this was unexpected, fix the keyring backend to restore secure storage.\n`,
   );
 }
@@ -254,7 +252,7 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
     _keyringFactory(profile).setPassword(payload);
     return;
   } catch (err) {
-    if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("write", err);
+    if (process.platform === "win32") refuseWindowsFallback("write", err);
     // The write path is the only one that can DOWNGRADE storage: it is
     // where a plaintext file would come into existence. `store-locked`
     // means the host does protect secrets, so refuse unless the
@@ -328,7 +326,7 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
       return parsed;
     }
   } catch (err) {
-    if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("read", err);
+    if (process.platform === "win32") refuseWindowsFallback("read", err);
     // A host with no working store (`store-unavailable`) is the
     // expected fallback trigger — the credentials only ever lived in
     // the file. A locked store is refused on unix unless the user opts
@@ -365,12 +363,13 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
 /**
  * Remove a profile's tokens from BOTH stores.
  *
- * Deletion never refuses: refusing to delete is the one failure mode
- * that GUARANTEES the outcome we are protecting against — a live
- * plaintext refresh token left in `credentials.json` after the user
- * ran `logout` and was told nothing (issue #1321). So the file store is
- * always cleared first, and only then is a keyring failure reported,
- * loudly, because a copy of the credential may survive there.
+ * Deletion never withholds the local cleanup: leaving a live plaintext
+ * refresh token in `credentials.json` after the user ran `logout` is
+ * the outcome we are protecting against (issue #1321). So the file
+ * store is always cleared first, and only then is a keyring failure
+ * reported — loudly, because a copy of the credential may survive
+ * there, unless the operator opted into plaintext storage and so never
+ * had a keyring entry to remove.
  */
 export async function deleteTokens(profile: string): Promise<void> {
   let keyringError: unknown;
@@ -383,21 +382,29 @@ export async function deleteTokens(profile: string): Promise<void> {
   // the single source of truth there.
   if (process.platform !== "win32") await deleteFromFile(profile);
   if (keyringError === undefined) return;
-  if (_shouldRefuseWindowsFallback(process.platform)) refuseWindowsFallback("delete", keyringError);
+  if (process.platform === "win32") refuseWindowsFallback("delete", keyringError);
   // A host with no working store never held a keyring entry for this
   // profile — the file store we just cleared was the only copy.
   if (classifyKeyringError(keyringError) === "store-unavailable") return;
+  // An operator who opted into plaintext storage never had a keyring entry to
+  // remove, so a locked store is not a failure for them.
+  if (plaintextFallbackAllowed()) {
+    warnBackendOnce("delete", keyringError);
+    return;
+  }
   throw new Error(
     `Signed out of profile "${profile}" locally, but the OS keyring entry could not be removed.\n` +
       `  Cause: ${getErrorMessage(keyringError)}\n` +
       `  The credentials file was cleared; a copy of the token may remain in\n` +
       `  the keyring until the store is reachable again.\n\n` +
       `  Fixes:\n` +
-      `    • Unlock the keyring (macOS: \`security unlock-keychain\`; Linux:\n` +
-      `      start / unlock gnome-keyring) and re-run \`appstrate logout\n` +
-      `      --profile ${profile}\`.\n` +
+      KEYRING_UNLOCK_HINT +
+      `\n      Then re-run \`appstrate logout --profile ${profile}\`.\n` +
       `    • Or delete the "${SERVICE_NAME}" entry for "${profile}" with your\n` +
-      `      platform's credential manager.`,
+      `      platform's credential manager.\n` +
+      `    • Or accept that the keyring copy survives until the store is\n` +
+      `      reachable again:\n` +
+      `        APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1 appstrate logout --profile ${profile}`,
   );
 }
 

@@ -639,9 +639,17 @@ async function selectedSpaces(
   report: Report,
 ): Promise<string[]> {
   const spaces = await reachableSpaces(profileName, profile, report);
-  // The organization revoked this profile: no space supplies skills any more,
-  // so the ordinary removal plan takes every one of them off the disk.
-  if (!spaces) return [];
+  if (!spaces) {
+    // Typed just now, so it gets immediate feedback rather than a silent drop —
+    // the same rule the explicit branch below applies to an unusable space.
+    if (explicit)
+      throw new Error(
+        "Cannot select spaces: this organization no longer grants this profile access to them. Run: appstrate org switch",
+      );
+    // Otherwise the revocation stands on its own: no space supplies skills any
+    // more, so the ordinary removal plan takes every one of them off the disk.
+    return [];
+  }
   // Skill sources no longer depend on the pin, so a pin that died would sync
   // clean and leave `.mcp.json` naming a space the server will refuse. Nothing
   // else notices any more: say it here, where the space list is already in hand.
