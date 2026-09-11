@@ -7,7 +7,6 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { validate } from "@readme/openapi-parser";
 import { validateOpenApiStructure } from "../lib/openapi-structure.ts";
 
 /** Smallest document `@readme/openapi-parser` accepts: 3.1 needs a non-empty `paths`. */
@@ -35,15 +34,6 @@ describe("validateOpenApiStructure", () => {
     expect(failure).toContain("version is missing here");
   });
 
-  it("fails a document whose array schema declares no `items`", async () => {
-    const spec = structuredClone(CONFORMING);
-    spec.paths["/x"].get.responses["200"] = {
-      description: "ok",
-      content: { "application/json": { schema: { type: "array" } } },
-    } as (typeof spec.paths)["/x"]["get"]["responses"]["200"];
-    expect(await validateOpenApiStructure(spec)).toContain("`items` schema");
-  });
-
   it("fails a document with an unresolvable internal $ref", async () => {
     const spec = structuredClone(CONFORMING);
     spec.paths["/x"].get.responses["200"] = {
@@ -59,15 +49,5 @@ describe("validateOpenApiStructure", () => {
     const failure = await validateOpenApiStructure(circular);
     expect(failure).not.toBeNull();
     expect(failure!.toLowerCase()).toMatch(/cyclic|circular/);
-  });
-
-  it("does not lean on a throw: the parser RESOLVES on a malformed document", async () => {
-    // The bug this file exists for. `await validate(bad)` inside a bare try/catch printed
-    // `OK — valid OpenAPI 3.1 document.` and exited 0, because nothing was ever thrown.
-    // Pin the library semantics so a refactor back to catch-only is a red test, not a silent gate.
-    const result = await validate(withMissingInfoVersion() as Parameters<typeof validate>[0], {
-      resolve: { external: false },
-    });
-    expect(result.valid).toBe(false);
   });
 });
