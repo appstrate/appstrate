@@ -287,7 +287,11 @@ function presetRole(preset: LabPreset): Role {
   };
 }
 
-/** The five presets, then one org bundle: the roles page shows both kinds. */
+/**
+ * The five presets, then one org bundle: the roles page shows both kinds. The
+ * bundle names a way of working, not a trade — a role cannot aim at particular
+ * agents; the space it is granted in decides which agents those are.
+ */
 export const roles: Json200<"/api/roles", "get"> = {
   object: "list",
   hasMore: false,
@@ -296,10 +300,10 @@ export const roles: Json200<"/api/roles", "get"> = {
     {
       object: "role",
       kind: "custom",
-      id: "role_lab_accounting",
-      key: "accounting",
-      name: "Comptabilité",
-      description: "Lance les agents comptables et relit tous leurs runs, sans les modifier.",
+      id: "role_lab_supervisor",
+      key: "supervisor",
+      name: "Superviseur",
+      description: "Lance les agents et relit tous les runs de l'espace, sans rien modifier.",
       permissions: [
         "agents:read",
         "agents:run",
@@ -396,7 +400,7 @@ export const spaceMembers: SpaceMember[] = [
     email: "julie@cabinet-martin.fr",
     org_role: "guest",
     source: "explicit",
-    role: { kind: "custom", key: "accounting", name: "Comptabilité" },
+    role: { kind: "custom", key: "supervisor", name: "Superviseur" },
     createdAt: ago(3_000),
   },
 ];

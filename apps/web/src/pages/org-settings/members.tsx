@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -19,6 +20,7 @@ import { SettingsPageActions } from "../../components/settings/settings-page-act
 import { PageActionsMenu } from "../../components/page-actions-menu";
 import { InvitationsTable } from "../../components/invitations-table";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
+import { OrgRolesGuideModal } from "../../components/org-roles-guide";
 import { useMemberColumns } from "./member-columns";
 import { useState } from "react";
 import {
@@ -36,6 +38,8 @@ export function OrgSettingsMembersPage() {
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
   const invite = useModalParam("invite");
+  const rolesGuide = useModalParam("roles-guide");
+  const location = useLocation();
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
@@ -141,6 +145,22 @@ export function OrgSettingsMembersPage() {
           />
         </Modal>
       )}
+
+      {/* The one question this page raises and cannot answer from a row:
+          what does a role let someone do? The answer is a guide with its own
+          address, reached from the sentence that raises it rather than from
+          a second button beside the title's single Actions trigger. */}
+      <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
+        {t("orgSettings.rolesIntro")}{" "}
+        <Link
+          to="?roles-guide=1"
+          state={location.state}
+          className="text-primary underline underline-offset-4"
+        >
+          {t("orgRolesGuide.link")}
+        </Link>
+      </p>
+      <OrgRolesGuideModal open={rolesGuide.value !== null} onClose={rolesGuide.close} />
 
       {/* No `empty` prop on purpose: this page has TWO lists and one shared
           empty state below, for when neither members nor invitations exist. A

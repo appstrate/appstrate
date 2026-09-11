@@ -2,17 +2,17 @@
 
 import { useForm } from "react-hook-form";
 import { useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Eye, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
+import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 import { ApiError } from "../../api/client";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
@@ -40,7 +40,16 @@ import { ViewAsDialog } from "../../components/view-as-dialog";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { useRoleColumns } from "./role-columns";
+import { RoleMatrix } from "./role-matrix";
+import { DetailTabsList, DetailTabsTrigger } from "../../components/agent-detail/agent-local-tabs";
+import {
+  groupPermissionsByResource,
+  permissionLabel,
+  permissionResourceLabel,
+} from "../../lib/permission-labels";
 import { rolesPageDeeds } from "./rbac-deeds";
+
+type RoleView = "list" | "matrix";
 
 export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -53,6 +62,20 @@ export function OrgSettingsRolesPage() {
   // Both modals have an address: `?role=<key>` (or `new`) and `?view-as`.
   const roleParam = useModalParam("role");
   const viewAsParam = useModalParam("view-as");
+  // The view is a place too: `?view=matrix` opens the comparison directly,
+  // and Back returns to the list.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view: RoleView = searchParams.get("view") === "matrix" ? "matrix" : "list";
+  const setView = (next: RoleView) =>
+    setSearchParams(
+      (prev) => {
+        const out = new URLSearchParams(prev);
+        if (next === "matrix") out.set("view", "matrix");
+        else out.delete("view");
+        return out;
+      },
+      { state: location.state },
+    );
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -162,39 +185,56 @@ export function OrgSettingsRolesPage() {
         </Alert>
       )}
 
-      <SettingsGroup title={t("roles.presetsSection")}>
-        <DataTable
-          label={t("roles.presetsSection")}
-          columns={presetColumns}
-          rows={presets}
-          rowKey={(role) => role.key}
-          rowHref={roleHref}
-          rowState={() => location.state}
-          rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
-          {...tableState}
-        />
-      </SettingsGroup>
-
-      <SettingsGroup title={t("roles.customSection")}>
-        <DataTable
-          label={t("roles.customSection")}
-          columns={customColumns}
-          rows={custom}
-          rowKey={(role) => role.id ?? role.key}
-          rowHref={roleHref}
-          rowState={() => location.state}
-          rowLabel={(role) => role.name}
-          {...tableState}
-          empty={
-            <EmptyState
-              message={t("roles.empty")}
-              hint={t("roles.emptyHint")}
-              icon={ShieldCheck}
-              compact
+      <Tabs value={view} onValueChange={(next) => setView(next as RoleView)}>
+        <DetailTabsList className="mb-6" aria-label={t("roles.viewsLabel")}>
+          <DetailTabsTrigger value="list">{t("roles.viewList")}</DetailTabsTrigger>
+          <DetailTabsTrigger value="matrix">{t("roles.viewMatrix")}</DetailTabsTrigger>
+        </DetailTabsList>
+        <TabsContent value="list" className="mt-0">
+          <SettingsGroup title={t("roles.presetsSection")}>
+            <DataTable
+              label={t("roles.presetsSection")}
+              columns={presetColumns}
+              rows={presets}
+              rowKey={(role) => role.key}
+              rowHref={roleHref}
+              rowState={() => location.state}
+              rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
+              {...tableState}
             />
-          }
-        />
-      </SettingsGroup>
+          </SettingsGroup>
+
+          <SettingsGroup title={t("roles.customSection")}>
+            <DataTable
+              label={t("roles.customSection")}
+              columns={customColumns}
+              rows={custom}
+              rowKey={(role) => role.id ?? role.key}
+              rowHref={roleHref}
+              rowState={() => location.state}
+              rowLabel={(role) => role.name}
+              {...tableState}
+              empty={
+                <EmptyState
+                  message={t("roles.empty")}
+                  hint={t("roles.emptyHint")}
+                  icon={ShieldCheck}
+                  compact
+                />
+              }
+            />
+          </SettingsGroup>
+        </TabsContent>
+        <TabsContent value="matrix" className="mt-0">
+          {isLoading ? (
+            <LoadingState />
+          ) : error ? (
+            <ErrorState message={getErrorMessage(error)} />
+          ) : (
+            <RoleMatrix roles={roles ?? []} />
+          )}
+        </TabsContent>
+      </Tabs>
 
       {requested === "new" && canWrite && (
         <RoleFormModal key="new" role={null} onClose={roleParam.close} />
@@ -221,18 +261,6 @@ export function OrgSettingsRolesPage() {
   );
 }
 
-/** Permissions under their resource, both in the catalog's order. */
-function groupPermissions(permissions: readonly string[]): [string, string[]][] {
-  const groups = new Map<string, string[]>();
-  for (const permission of [...permissions].sort()) {
-    const [resource, action] = permission.split(":");
-    const actions = groups.get(resource!) ?? [];
-    actions.push(action ?? permission);
-    groups.set(resource!, actions);
-  }
-  return [...groups.entries()];
-}
-
 /** A role you may not edit, read in place: what it is for, and what it grants. */
 function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -257,22 +285,25 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
             {t("roles.permissionCount", { count: role.permissions.length })}
           </div>
           <dl className="divide-border divide-y rounded-lg border">
-            {groupPermissions(role.permissions).map(([resource, actions]) => (
-              <div key={resource} className="flex items-start justify-between gap-4 px-3 py-2">
-                <dt className="font-mono text-xs">{resource}</dt>
-                <dd className="flex flex-wrap justify-end gap-1">
-                  {actions.map((action) => (
-                    <Badge
-                      key={action}
-                      variant="secondary"
-                      className="px-1.5 py-0 font-mono text-[0.65rem]"
-                    >
-                      {action}
-                    </Badge>
-                  ))}
-                </dd>
-              </div>
-            ))}
+            {groupPermissionsByResource([...role.permissions].sort()).map(
+              ([resource, permissions]) => (
+                <div
+                  key={resource}
+                  className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4"
+                >
+                  <dt className="text-sm font-medium">{permissionResourceLabel(resource, t)}</dt>
+                  <dd>
+                    <ul className="text-muted-foreground space-y-0.5 text-sm">
+                      {permissions.map((permission) => (
+                        <li key={permission} title={permission}>
+                          {permissionLabel(permission, t)}
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              ),
+            )}
           </dl>
         </div>
       </div>
