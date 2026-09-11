@@ -134,13 +134,11 @@ export function toViewAsPersona(
  * Start — or replace — a preview.
  *
  * `orgs` is the org listing ALREADY answered for this persona (`fetchOrgsAs`),
- * a parameter rather than something this function goes and gets, because the
- * two have to land in the same tick. Every `can()` gate reads `permissions` off
- * the current org row (`usePermissions`), `["orgs"]` is the one query the cache
- * reset spares, and React Query keeps serving the previous value for the whole
- * of a background refetch — and forever if that refetch fails. A persona
- * committed on its own therefore presents the previewer's own authority as the
- * persona's: org-level admin menus under a "Lecteur" banner (#1322). Loading
+ * passed in rather than fetched here because the two must land in the same tick:
+ * `["orgs"]` is the one query the cache reset spares, every `can()` gate reads
+ * `permissions` off that row, and React Query keeps serving the previous value
+ * through a background refetch — and forever if it fails. Committing the persona
+ * alone would present the previewer's own authority as the persona's; loading
  * first also means a load that fails starts no preview at all.
  */
 export function enterViewAs(persona: ViewAsPersona, orgs: Organization[]): void {
@@ -154,12 +152,8 @@ export function exitViewAs(reason?: string): void {
   if (!viewAsStore.getState().persona) return;
   viewAsStore.getState().commit(null, reason ?? null);
   removeOrgScopedQueries(queryClient);
-  // Not loaded first, unlike entering: leaving RESTORES authority, so the row
-  // left behind under-states what the caller may do rather than over-stating
-  // it, and exit must succeed with no network at all (sign-out, org switch, a
-  // persona the server just refused). Invalidated rather than merely
-  // refetched: a refetch that fails leaves the row marked stale, so the next
-  // observer to mount tries again instead of keeping it forever.
+  // Invalidated, not refetched: a failed refetch would leave the persona's
+  // reduced row serving the caller for good. Exit must need no network.
   void queryClient.invalidateQueries({ queryKey: orgKeys.all });
 }
 

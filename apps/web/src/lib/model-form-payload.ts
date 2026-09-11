@@ -241,21 +241,16 @@ function describedCapabilities(row: ModelPickRow): ModelCapabilityOverrides {
 }
 
 /**
- * How much of a picked row ships depends on WHO described it, not just on
- * which listing it came from. `search`: everything, cost included — the search
- * IS the billing rate. `catalog`: the id only, the vendored catalog answers
- * for the rest. `discover`: the endpoint's own words only.
+ * How much of a picked row ships depends on WHO described it, not just which
+ * listing it came from. `search`: everything, cost included — the search IS
+ * the billing rate. `catalog`: the id only, the vendored catalog answers for
+ * the rest. `discover`: the endpoint's own words only.
  *
  * A discovered row the endpoint said nothing about was described by a catalog
- * entry carrying the same id — the platform scans every vendor's catalog, so
- * that entry may well belong to a different vendor, and it describes THAT
- * vendor's hosted deployment, not the operator's. Pinning it would write a
- * window a self-hosted server may serve at a fraction of, permanently: the
- * read path only ever re-resolves a provider's OWN catalog, so no refresh can
- * correct a value picked up from a foreign one. An unknown limit is inert, a
- * wrong one truncates or breaks every run. The label is catalog-only by
- * construction (no listing publishes one), so it goes the same way — the
- * server derives one from the id.
+ * entry that may belong to a DIFFERENT vendor, describing that vendor's hosted
+ * deployment. Pinning it writes a window the operator's server may not serve,
+ * permanently — the read path only re-resolves a provider's OWN catalog, so no
+ * refresh can correct it. An unknown limit is inert; a wrong one breaks runs.
  */
 function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
   if (row.origin === "search") {
