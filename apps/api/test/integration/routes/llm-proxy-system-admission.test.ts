@@ -17,7 +17,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { llmUsage } from "@appstrate/db/schema";
+import { llmUsage, organizations, runs } from "@appstrate/db/schema";
 import type {
   AppstrateModule,
   BeforeUsageParams,
@@ -36,6 +36,7 @@ import {
   seedRun,
 } from "../../helpers/seed.ts";
 import { updateRun } from "../../../src/services/state/runs.ts";
+import { reserveOrgDeletion } from "../../../src/services/organizations.ts";
 import {
   getSystemModels,
   initSystemModelProviderKeys,
@@ -51,8 +52,9 @@ function fakeInitCtx(): ModuleInitContext {
   return {
     redisUrl: null,
     appUrl: "http://localhost:3000",
-    getSendMail: async () => () => {},
-    getOrgAdminEmails: async () => [],
+    getSendMail: async () => async () => {},
+    getOrgOwnerEmails: async () => [],
+    getOrgMembers: async () => [],
     getOrgName: async () => null,
     services: {} as ModuleInitContext["services"],
   };
@@ -81,7 +83,7 @@ async function buildHarness(): Promise<Harness> {
   const ctx = await createTestContext({ orgSlug: "system-proxy-admission" });
   const key = await seedApiKey({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     createdBy: ctx.user.id,
     scopes: ["llm-proxy:call"],
   });
@@ -96,7 +98,7 @@ async function buildHarness(): Promise<Harness> {
   const run = await seedRun({
     packageId: pkg.id,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: "remote",
   });
@@ -145,7 +147,7 @@ function headers(h: Harness, withRun = true): Record<string, string> {
   return {
     authorization: `Bearer ${h.apiKey}`,
     "x-org-id": h.ctx.orgId,
-    "x-application-id": h.ctx.defaultAppId,
+    "x-space-id": h.ctx.defaultSpaceId,
     "content-type": "application/json",
     ...(withRun ? { "x-run-id": h.runId } : {}),
   };
@@ -241,7 +243,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     // The bypass: an org past its quota (every new run/turn rejected) stamps
     // `X-Run-Id` of a still-alive platform-origin, system-model run onto raw
     // proxy calls. `assertRunAttributable` only binds an API-key principal to
-    // org + application, so ANY key of the app can borrow ANY live run — and
+    // org + space, so ANY key of the space can borrow ANY live run — and
     // the proxy used to skip admission entirely for that run shape, buying
     // unbounded platform-paid spend until the borrowed run expired.
     //
@@ -255,7 +257,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     const platformRun = await seedRun({
       packageId: "@system/proxy-agent",
       orgId: h.ctx.orgId,
-      applicationId: h.ctx.defaultAppId,
+      spaceId: h.ctx.defaultSpaceId,
       status: "running",
       runOrigin: "platform",
       modelSource: "system",
@@ -319,7 +321,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     const byokRun = await seedRun({
       packageId: "@system/proxy-agent",
       orgId: h.ctx.orgId,
-      applicationId: h.ctx.defaultAppId,
+      spaceId: h.ctx.defaultSpaceId,
       status: "running",
       runOrigin: "platform",
       modelSource: "org",
@@ -327,7 +329,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     const unresolvedRun = await seedRun({
       packageId: "@system/proxy-agent",
       orgId: h.ctx.orgId,
-      applicationId: h.ctx.defaultAppId,
+      spaceId: h.ctx.defaultSpaceId,
       status: "running",
       runOrigin: "platform",
       modelSource: null,
@@ -426,7 +428,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
       headers: {
         authorization: `Bearer ${loopback}`,
         "x-org-id": h.ctx.orgId,
-        "x-application-id": h.ctx.defaultAppId,
+        "x-space-id": h.ctx.defaultSpaceId,
         "content-type": "application/json",
       },
       body: JSON.stringify({
@@ -551,6 +553,71 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("refuses a chat turn's proxy call once the org's deletion is reserved", async () => {
+    // Every `llm_usage` row written from here on is cascade-deleted with the org,
+    // including rows an admission hook has already read past. Refused at THIS
+    // seam too: a chat turn is not a `runs` row, so the deletability count never
+    // saw it.
+    const h = await buildHarness();
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
+    // The reservation refuses while runs are in progress; this call references none.
+    await db.update(runs).set({ status: "success" }).where(eq(runs.id, h.runId));
+    await reserveOrgDeletion(h.ctx.orgId);
+
+    let upstreamHit = false;
+    globalThis.fetch = (async () => {
+      upstreamHit = true;
+      return completionResponse();
+    }) as unknown as typeof fetch;
+
+    const loopback = mintLoopbackToken(
+      {
+        userId: h.ctx.user.id,
+        email: h.ctx.user.email ?? "u@test",
+        name: h.ctx.user.name ?? "U",
+        orgId: h.ctx.orgId,
+        orgRole: "owner",
+      },
+      { chatSessionId: "chs_reserved" },
+    );
+    const chatHeaders = {
+      authorization: `Bearer ${loopback}`,
+      "x-org-id": h.ctx.orgId,
+      "x-space-id": h.ctx.defaultSpaceId,
+      "content-type": "application/json",
+    };
+    const body = JSON.stringify({
+      model: SYSTEM_PRESET,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: chatHeaders,
+      body,
+    });
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code?: string }).code).toBe("org_deleting");
+    expect(upstreamHit).toBe(false);
+    expect(calls).toHaveLength(0);
+
+    // Control: the same call, the same headers, an org that is not reserved.
+    await db
+      .update(organizations)
+      .set({ deletingAt: null })
+      .where(eq(organizations.id, h.ctx.orgId));
+    const allowed = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: chatHeaders,
+      body,
+    });
+    expect(allowed.status).toBe(200);
+    expect(upstreamHit).toBe(true);
+  });
+
   it("refuses an unattributed raw system call while leaving BYOK semantics untouched", async () => {
     const h = await buildHarness();
     await loadModulesFromInstances([gateModule(null, [])], fakeInitCtx());
@@ -580,7 +647,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
   it("refuses to reuse a terminal run as a system-model billing context", async () => {
     const h = await buildHarness();
     await loadModulesFromInstances([gateModule(null, [])], fakeInitCtx());
-    await updateRun({ orgId: h.ctx.orgId, applicationId: h.ctx.defaultAppId }, h.runId, {
+    await updateRun({ orgId: h.ctx.orgId, spaceId: h.ctx.defaultSpaceId }, h.runId, {
       status: "success",
     });
 

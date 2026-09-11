@@ -1,0 +1,283 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The response-side `model` rewrite (real→alias) for non-stream JSON AND
+ * streaming SSE (OpenAI top-level + Anthropic `message_start` nesting), plus the
+ * synthetic-error substitution the same stream performs. The hard invariant on
+ * the rewrite: a model id mentioned inside generated content is NEVER clobbered
+ * (match by value at known paths, not a blind string replace).
+ *
+ * These tests live HERE, next to the implementation, rather than in the
+ * sidecar suite they were written in. Since #1202 the sidecar TERMINATES the
+ * `pi-messages` dialect and re-originates against the backing instead of
+ * proxying, so it calls neither `swapResponseModelJson` nor
+ * `createSseModelSwapStream`; the one production reader left is the platform
+ * gateway (`apps/api/src/services/llm-proxy/metering.ts`). A suite parked in a
+ * package that no longer exercises the code is a suite nobody thinks to run
+ * when the code changes.
+ */
+
+import { describe, it, expect } from "bun:test";
+import {
+  swapResponseModelJson,
+  createSseModelSwapStream,
+  ALIAS_CLIENT_API_SHAPE,
+} from "../src/model-swap.ts";
+
+/**
+ * `clientApiShape` is the canonical client dialect, not a vendor protocol.
+ * The fixture this was moved from spelled it `openai-completions`, which
+ * `isAliasClientShape` rejects and `parseModelSwapEnv` refuses at boot — a
+ * descriptor that could never exist in production, kept alive only because
+ * these tests never validate the one they build.
+ */
+const swap = {
+  alias: "appstrate-medium",
+  real: "deepseek-chat",
+  clientApiShape: ALIAS_CLIENT_API_SHAPE,
+  backingApiShape: "openai-completions" as const,
+};
+
+async function pipeSse(input: string): Promise<string> {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(input));
+      controller.close();
+    },
+  }).pipeThrough(createSseModelSwapStream(swap));
+  let out = "";
+  const reader = stream.getReader();
+  const dec = new TextDecoder();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    out += dec.decode(value, { stream: true });
+  }
+  out += dec.decode();
+  return out;
+}
+
+// Feed an SSE payload split at an arbitrary byte offset across two chunks.
+async function pipeSseSplit(input: string, at: number): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes.slice(0, at));
+      controller.enqueue(bytes.slice(at));
+      controller.close();
+    },
+  }).pipeThrough(createSseModelSwapStream(swap));
+  let out = "";
+  const reader = stream.getReader();
+  const dec = new TextDecoder();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    out += dec.decode(value, { stream: true });
+  }
+  out += dec.decode();
+  return out;
+}
+
+describe("swapResponseModelJson (real→alias)", () => {
+  it("rewrites OpenAI top-level model", () => {
+    const out = swapResponseModelJson(
+      JSON.stringify({ id: "x", model: "deepseek-chat", choices: [] }),
+      swap,
+    );
+    expect(JSON.parse(out).model).toBe("appstrate-medium");
+  });
+
+  it("rewrites Anthropic top-level Message model", () => {
+    const out = swapResponseModelJson(
+      JSON.stringify({ type: "message", model: "deepseek-chat", content: [] }),
+      swap,
+    );
+    expect(JSON.parse(out).model).toBe("appstrate-medium");
+  });
+
+  it("also rewrites a nested response.model in a JSON body (defensive; live nesting is the SSE path)", () => {
+    const out = swapResponseModelJson(
+      JSON.stringify({ id: "resp_1", object: "response", response: { model: "deepseek-chat" } }),
+      swap,
+    );
+    expect(JSON.parse(out).response.model).toBe("appstrate-medium");
+  });
+
+  it("does NOT clobber the real id when it appears inside content text", () => {
+    const out = swapResponseModelJson(
+      JSON.stringify({
+        model: "deepseek-chat",
+        choices: [{ message: { content: "I am deepseek-chat under the hood" } }],
+      }),
+      swap,
+    );
+    const parsed = JSON.parse(out);
+    expect(parsed.model).toBe("appstrate-medium");
+    // The mention inside content survives verbatim — only the field was swapped.
+    expect(parsed.choices[0].message.content).toBe("I am deepseek-chat under the hood");
+  });
+});
+
+describe("createSseModelSwapStream (real→alias, streaming)", () => {
+  it("rewrites model in OpenAI chunks and passes [DONE] through", async () => {
+    const input =
+      `data: {"object":"chat.completion.chunk","model":"deepseek-chat","choices":[]}\n\n` +
+      `data: {"object":"chat.completion.chunk","model":"deepseek-chat","choices":[{"delta":{"content":"hi"}}]}\n\n` +
+      `data: [DONE]\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out.match(/"model":"appstrate-medium"/g)?.length).toBe(2);
+    expect(out).toContain("data: [DONE]");
+  });
+
+  it("rewrites the nested model in an Anthropic message_start event", async () => {
+    const input =
+      `event: message_start\n` +
+      `data: {"type":"message_start","message":{"id":"m","model":"deepseek-chat","content":[]}}\n\n` +
+      `event: content_block_delta\n` +
+      `data: {"type":"content_block_delta","delta":{"text":"hello"}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("event: message_start");
+    expect(out).toContain("content_block_delta");
+  });
+
+  it("rewrites the nested response.model in OpenAI Responses streaming events", async () => {
+    // The Responses API (codex / openai-responses) streams snapshots where the
+    // model id sits at `response.model`, not top-level — must be swapped too.
+    const input =
+      `event: response.created\n` +
+      `data: {"type":"response.created","response":{"id":"resp_1","model":"deepseek-chat"}}\n\n` +
+      `event: response.output_text.delta\n` +
+      `data: {"type":"response.output_text.delta","delta":"hi"}\n\n` +
+      `event: response.completed\n` +
+      `data: {"type":"response.completed","response":{"id":"resp_1","model":"deepseek-chat"}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out.match(/"model":"appstrate-medium"/g)?.length).toBe(2);
+    expect(out).toContain("event: response.created");
+    expect(out).toContain("response.output_text.delta");
+  });
+
+  it("rewrites correctly when a frame is split across chunk boundaries", async () => {
+    const input = `data: {"object":"chat.completion.chunk","model":"deepseek-chat","choices":[]}\n\n`;
+    // Split right in the middle of the JSON payload.
+    const out = await pipeSseSplit(input, 40);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain(`"model":"appstrate-medium"`);
+  });
+
+  it("does not clobber the real id mentioned inside a content delta", async () => {
+    const input = `data: {"choices":[{"delta":{"content":"deepseek-chat is great"}}]}\n\n`;
+    const out = await pipeSse(input);
+    // No model field here → the delta text is left exactly as-is.
+    expect(out).toContain("deepseek-chat is great");
+  });
+
+  it("preserves a multi-byte UTF-8 char split across the chunk boundary", async () => {
+    // Content holds an emoji + accented text; split the byte stream mid-codepoint
+    // to prove the streaming TextDecoder reassembles it (claimed but unproven).
+    const input = `data: {"model":"deepseek-chat","choices":[{"delta":{"content":"héllo 🚀 wörld"}}]}\n\n`;
+    const bytes = new TextEncoder().encode(input);
+    // The emoji starts a few bytes in; split inside its 4-byte sequence.
+    const emojiByteIdx = bytes.indexOf(0xf0); // first byte of 🚀 (U+1F680)
+    expect(emojiByteIdx).toBeGreaterThan(0);
+    const out = await pipeSseSplit(input, emojiByteIdx + 2);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("héllo 🚀 wörld");
+  });
+
+  it("rewrites a final frame that lacks a trailing newline (flush path)", async () => {
+    // No trailing "\n\n" — the frame only reaches the client via flush().
+    const input = `data: {"object":"chat.completion.chunk","model":"deepseek-chat","choices":[]}`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).toContain(`"model":"appstrate-medium"`);
+  });
+
+  it("matches the model by EXACT value, not substring (real=gpt-4 ≠ gpt-4o)", async () => {
+    const narrow = {
+      alias: "appstrate-small",
+      real: "gpt-4",
+      clientApiShape: ALIAS_CLIENT_API_SHAPE,
+      backingApiShape: "openai-completions" as const,
+    };
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(`data: {"model":"gpt-4o","choices":[]}\n\n`));
+        controller.close();
+      },
+    }).pipeThrough(createSseModelSwapStream(narrow));
+    let out = "";
+    const reader = stream.getReader();
+    const dec = new TextDecoder();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      out += dec.decode(value, { stream: true });
+    }
+    out += dec.decode();
+    // gpt-4o is a different model — must NOT be rewritten to the alias.
+    expect(out).toContain(`"model":"gpt-4o"`);
+    expect(out).not.toContain("appstrate-small");
+  });
+
+  it("replaces an Anthropic error frame with the synthetic envelope", async () => {
+    const input = `data: {"type":"error","error":{"type":"overloaded_error","message":"model deepseek-chat is overloaded"}}\n\n`;
+    const out = await pipeSse(input);
+    // Nothing from the upstream frame survives — not the id, not the prose.
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).not.toContain("overloaded");
+    expect(out).toContain("appstrate-medium");
+    expect(out).toContain("upstream_error");
+  });
+
+  it("replaces an OpenAI-family standalone error frame with the synthetic envelope", async () => {
+    const input = `data: {"error":{"message":"deepseek-chat quota exceeded","code":429}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek-chat");
+    expect(out).not.toContain("quota");
+    expect(out).toContain("appstrate-medium");
+    expect(out).toContain("upstream_error");
+  });
+
+  it("replaces an OpenAI Responses terminal-failure frame (nested response.error)", async () => {
+    // `response.failed` / `response.incomplete` nest the error one level down —
+    // the prose there names the backing just like a top-level error frame.
+    const input =
+      `event: response.failed\n` +
+      `data: {"type":"response.failed","response":{"model":"deepseek-chat","error":{"code":"server_error","message":"deepseek-chat unavailable at api.deepseek.com"}}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).not.toContain("deepseek");
+    expect(out).toContain("appstrate-medium");
+    expect(out).toContain("upstream_error");
+  });
+
+  it("does NOT replace a response snapshot whose error is null (success case)", async () => {
+    const input = `data: {"type":"response.completed","response":{"model":"deepseek-chat","error":null,"usage":{"total_tokens":5}}}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("total_tokens");
+    expect(out).not.toContain("upstream_error");
+  });
+
+  it("keeps content-delta prose intact — only the model field is rewritten", async () => {
+    const input = `data: {"model":"deepseek-chat","choices":[{"delta":{"content":"I am deepseek-chat"}}]}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).toContain("I am deepseek-chat");
+  });
+
+  it("does NOT replace a hybrid frame carrying both an error object and choices content", async () => {
+    // A frame with generated content is never replaced wholesale — the
+    // `choices` guard keeps it on the exact-field rewrite path.
+    const input = `data: {"model":"deepseek-chat","error":{"message":"partial failure"},"choices":[{"delta":{"content":"kept text"}}]}\n\n`;
+    const out = await pipeSse(input);
+    expect(out).toContain("kept text");
+    expect(out).toContain(`"model":"appstrate-medium"`);
+    expect(out).not.toContain("upstream_error");
+  });
+});

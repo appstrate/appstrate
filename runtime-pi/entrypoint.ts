@@ -39,8 +39,7 @@ import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   prepareBundleForPi,
   buildRuntimeToolExtensions,
-  buildPublishDocumentExtension,
-  deriveProviderFromApi,
+  buildPublishFileExtension,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -48,23 +47,21 @@ import {
   type PiRunner,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
-import {
-  BUNDLE_FORMAT_VERSION,
-  bundleIntegrity,
-  computeRecordEntries,
-  readBundleFromFile,
-  recordIntegrity,
-  serializeRecord,
-  parsePackageIdentity,
-  type Bundle,
-  type PackageIdentity,
-} from "@appstrate/afps-runtime/bundle";
+import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
+import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import { readBundleFromFile, parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
-import { parseRuntimeEnv, RuntimeEnvError, scrubSinkEnv } from "./env.ts";
+import {
+  buildPiModelFromEnv,
+  parseRuntimeEnv,
+  RuntimeEnvError,
+  scrubSinkEnv,
+  HEARTBEAT_INTERVAL_MS,
+  MCP_CONNECT_DEADLINE_MS,
+} from "./env.ts";
 import { createRuntimePiRunner } from "./pi-runner.ts";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import {
@@ -72,49 +69,9 @@ import {
   drainAndEmitInto,
   type RuntimeEventDrainer,
 } from "@appstrate/core/runtime-event-drain";
-import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
-import { createRunDocumentUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
+import { provisionWorkspace, provisionFiles, type ProvisionDeps } from "./provision.ts";
+import { createRunFileUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
-
-/**
- * Synthesise a Bundle the runner can consume when no `.afps` ships
- * with the run. The platform pre-installs files into the workspace
- * directly in that case, so the bundle's content is never re-read —
- * but PiRunner.run() still wants a Bundle to satisfy the AFPS
- * Runner contract.
- */
-function buildInContainerBundle(prompt: string): Bundle {
-  const encoder = new TextEncoder();
-  const manifestBytes = encoder.encode(
-    JSON.stringify({ name: "@appstrate/in-container", version: "0.0.0", type: "agent" }),
-  );
-  const promptBytes = encoder.encode(prompt);
-  const files = new Map<string, Uint8Array>([
-    ["manifest.json", manifestBytes],
-    ["prompt.md", promptBytes],
-  ]);
-  const recordBody = serializeRecord(computeRecordEntries(files));
-  const integrity = recordIntegrity(recordBody);
-  const identity = "@appstrate/in-container@0.0.0" as PackageIdentity;
-  return {
-    bundleFormatVersion: BUNDLE_FORMAT_VERSION,
-    root: identity,
-    packages: new Map([
-      [
-        identity,
-        {
-          identity,
-          manifest: { name: "@appstrate/in-container", version: "0.0.0", type: "agent" },
-          files,
-          integrity,
-        },
-      ],
-    ]),
-    integrity: bundleIntegrity(
-      new Map([[identity, { path: "packages/@appstrate/in-container/0.0.0/", integrity }]]),
-    ),
-  };
-}
 
 /**
  * One pino-shaped JSON line on stdout — the shape every structured diagnostic
@@ -183,7 +140,8 @@ try {
 // SUCCEEDS, before anything else runs, so a degraded-but-valid configuration is
 // visible at the top of the run's log. The fatal channel above is untouched:
 // these are conditions the run can legitimately proceed under (today: no
-// `MODEL_COST`, i.e. every cost this run reports will be 0).
+// `MODEL_COST`, i.e. this run reports no cost of its own and the platform
+// prices it server-side).
 for (const warning of env.warnings) {
   logLine("warn", "runtime_env_warning", { warning });
 }
@@ -228,23 +186,23 @@ const sink = new HttpSink({
 const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
 const bridgedSink = bridge.sink;
 
-// --- 0b. Document publishing (run → platform) ---
+// --- 0b. File publishing (run → platform) ---
 // Server `${sha256}:${name}` identities and canonical source-path → sha256
-// identities this run has published, shared by the `publish_document` tool and
+// identities this run has published, shared by the `publish_file` tool and
 // the end-of-run outputs sweep. The source identity prevents an unchanged file
 // published under a display-name override from being swept again, while the
 // server identity still allows two distinct files with identical bytes but
 // different names. The uploader streams a workspace file to
-// POST /api/runs/:id/documents, signed with the same run HMAC as the workspace
+// POST /api/runs/:id/files, signed with the same run HMAC as the workspace
 // provisioning fetches.
-const publishedDocumentKeys = new Set<string>();
-const publishedDocumentSourceHashes = new Map<string, string>();
-const uploadRunDocument = createRunDocumentUploader({
+const publishedFileKeys = new Set<string>();
+const publishedFileSourceHashes = new Map<string, string>();
+const uploadRunFile = createRunFileUploader({
   sinkUrl: env.sink.url,
   sinkSecret: env.sink.secret,
   workspace: env.workspaceDir,
-  publishedKeys: publishedDocumentKeys,
-  publishedSourceHashes: publishedDocumentSourceHashes,
+  publishedKeys: publishedFileKeys,
+  publishedSourceHashes: publishedFileSourceHashes,
 });
 
 /**
@@ -328,12 +286,14 @@ const BOOT_REPORT_DEADLINE_MS = 60_000;
  * when integration health can't be confirmed (the platform contract — an
  * integration that didn't launch as declared fails the run, every tier).
  *
- * No auth header: the agent container holds no run token by design (the
- * sidecar is the only party that can call back to the platform), so the
- * endpoint mirrors `/mcp`'s network-isolation posture.
+ * Authenticated like every other sidecar call, with the run's
+ * `SIDECAR_AUTH_HEADER` token. Still no RUN token: the agent remains unable to
+ * call the PLATFORM back — this header only says "I am the agent container" to
+ * the sidecar that already knows the answer.
  */
 async function fetchIntegrationBootReport(
   sidecarUrl: string,
+  authToken: string,
 ): Promise<{ report: IntegrationBootReport } | { error: string }> {
   const url = `${sidecarUrl.replace(/\/$/, "")}/integrations/boot-report`;
   let lastError = "unknown error";
@@ -341,7 +301,10 @@ async function fetchIntegrationBootReport(
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), BOOT_REPORT_DEADLINE_MS);
     try {
-      const res = await fetch(url, { signal: ac.signal });
+      const res = await fetch(url, {
+        signal: ac.signal,
+        headers: { [SIDECAR_AUTH_HEADER]: authToken },
+      });
       if (res.ok) return { report: (await res.json()) as IntegrationBootReport };
       lastError = `HTTP ${res.status}`;
     } catch (err) {
@@ -431,10 +394,10 @@ const piSdkWarmup = loadPiCodingAgentSdk()
 const provisionStart = performance.now();
 
 // Self-provision the workspace before anything reads it: the AFPS bundle
-// (fatal on any miss — see provisionWorkspace) and the input documents
-// (streamed per-file to `documents/<name>`; absent is fine). Run in parallel —
-// they write disjoint paths (bundle → workspace root, documents →
-// `documents/`), share no state, and neither is read until after both resolve,
+// (fatal on any miss — see provisionWorkspace) and the input files
+// (streamed per-file to `files/<name>`; absent is fine). Run in parallel —
+// they write disjoint paths (bundle → workspace root, files →
+// `files/`), share no state, and neither is read until after both resolve,
 // so overlapping their fetches shaves cold-start latency. On failure either
 // one calls `die()` (process.exit), so the first fault wins and the other is
 // abandoned with the process.
@@ -444,79 +407,93 @@ const provisionDeps: ProvisionDeps = {
   workspace: WORKSPACE,
   die,
 };
-await Promise.all([provisionWorkspace(provisionDeps), provisionDocuments(provisionDeps)]);
+await Promise.all([provisionWorkspace(provisionDeps), provisionFiles(provisionDeps)]);
 
+// The bundle is unconditionally present here: `provisionWorkspace` above either
+// wrote `agent-package.afps` into the workspace or called `die()` (process.exit)
+// — a 404 included. So there is no "no package shipped with this run" branch to
+// take; PR #549 replaced that delivery model (the platform used to pre-install
+// files into the workspace directly) with self-provisioning. A read failure is
+// therefore a genuine defect — a truncated or corrupt upload — and gets the same
+// fail-loud treatment as a missing one, with a breadcrumb naming the cause
+// rather than an unhandled rejection.
 const packagePath = path.join(WORKSPACE, "agent-package.afps");
-const hasPackage = await exists(packagePath);
 
 const [, bundle] = await Promise.all([
   initGitWorkspace(),
-  hasPackage ? readBundleFromFile(packagePath) : Promise.resolve(null),
+  readBundleFromFile(packagePath).catch((err: unknown) =>
+    die(`Failed to read the provisioned agent package: ${getErrorMessage(err)}`),
+  ),
 ]);
 
 phaseTimings.provisioningMs = Math.round(performance.now() - provisionStart);
-await progress(
-  hasPackage ? "workspace initialized · agent package read" : "workspace initialized",
-  { provisioningMs: phaseTimings.provisioningMs },
-);
+await progress("workspace initialized · agent package read", {
+  provisioningMs: phaseTimings.provisioningMs,
+});
 
 // --- 2b. Phase B: materialise .pi/ layout + dynamic-import tools ---
 
 const bundlePrepareStart = performance.now();
 
-if (bundle) {
-  try {
-    await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
+try {
+  await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
 
-    // Fail-loud safety net (issue #549): verify every skill the bundle
-    // carries actually landed under `.pi/skills/<id>`. Before agent
-    // self-provisioning, a dropped bundle degraded silently — the agent
-    // booted onto an empty workspace and only an easily-missed log line
-    // hinted at it. Now a skill that the bundle declares but that did not
-    // materialise surfaces as an `appstrate.error` breadcrumb, so the
-    // regression cannot hide again.
-    const missingSkills: string[] = [];
-    for (const [identity, pkg] of bundle.packages) {
-      if (identity === bundle.root) continue;
-      if ((pkg.manifest as { type?: unknown }).type !== "skill") continue;
-      const parsed = parsePackageIdentity(identity);
-      if (!parsed) continue;
-      if (!(await exists(path.join(WORKSPACE, ".pi", "skills", parsed.packageId)))) {
-        missingSkills.push(parsed.packageId);
-      }
+  // Fail-loud safety net (issue #549): verify every skill the bundle
+  // carries actually landed under `.pi/skills/<id>`. Before agent
+  // self-provisioning, a dropped bundle degraded silently — the agent
+  // booted onto an empty workspace and only an easily-missed log line
+  // hinted at it. Now a skill that the bundle declares but that did not
+  // materialise surfaces as an `appstrate.error` breadcrumb, so the
+  // regression cannot hide again.
+  const missingSkills: string[] = [];
+  for (const [identity, pkg] of bundle.packages) {
+    if (identity === bundle.root) continue;
+    if ((pkg.manifest as { type?: unknown }).type !== "skill") continue;
+    const parsed = parsePackageIdentity(identity);
+    if (!parsed) continue;
+    if (!(await exists(path.join(WORKSPACE, ".pi", "skills", parsed.packageId)))) {
+      missingSkills.push(parsed.packageId);
     }
-    if (missingSkills.length > 0) {
-      await emitError(
-        `Skill(s) declared by the agent did not materialise: ${missingSkills.join(", ")}`,
-        { missingSkills },
-      );
-    }
-
-    // Fire-and-forget cleanup of the original AFPS; no longer needed once the
-    // Pi SDK is up. (prepareBundleForPi is skills-only — no scratch dir.)
-    void fs.unlink(packagePath).catch(() => {});
-  } catch (err) {
-    await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);
   }
+  if (missingSkills.length > 0) {
+    await emitError(
+      `Skill(s) declared by the agent did not materialise: ${missingSkills.join(", ")}`,
+      { missingSkills },
+    );
+  }
+
+  // Fire-and-forget cleanup of the original AFPS; no longer needed once the
+  // Pi SDK is up. (prepareBundleForPi is skills-only — no scratch dir.)
+  void fs.unlink(packagePath).catch(() => {});
+} catch (err) {
+  await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);
 }
 
 phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart);
-await progress(
-  `bundle loaded (${extensionFactories.length} extension${extensionFactories.length === 1 ? "" : "s"})`,
-  {
-    bundleLoaded: bundle !== null,
-    extensions: extensionFactories.length,
-    bundlePrepareMs: phaseTimings.bundlePrepareMs,
-  },
-);
+// No extension count here: `extensionFactories` is still empty at this point —
+// nothing is pushed into it until Phase C/D, ~125 lines below — so the count
+// was structurally always 0 and the breadcrumb was reporting the declaration,
+// not the load. The honest total is emitted on `runtime ready`.
+await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs });
 
 // The agent's selected runtime tools (`manifest.runtime_tools`), read once from
 // the root package manifest. Reused by the no-sidecar extension registration,
-// the `publish_document` gate, and the PiRunner's terminal-tool decision.
-const declaredRuntimeTools: string[] = bundle
-  ? ((bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-      ?.runtime_tools ?? [])
-  : [];
+// the `publish_file` gate, and the PiRunner's terminal-tool decision.
+//
+// Canonicalized here too. The platform already strips ids it cannot build
+// from the bundle (`buildAgentPackage`), so this is a second line of defence
+// at the trust boundary rather than the only one — and the gates below are
+// exact string matches, so an unrecognised id reaching them silently
+// unregisters the publish tool. The version skew that would deliver one (a NEW
+// image against an OLDER platform) is refused at boot by the image-trio tag
+// rule, except where that rule is blind: a floating tag rebuilt on one side, a
+// digest-pinned ref, and a platform with no build identity. Filtering once, at
+// the single read, costs a function call and does not depend on which of those
+// is true.
+const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
+  (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: unknown[] } | undefined)
+    ?.runtime_tools ?? [],
+).ids;
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
@@ -529,6 +506,10 @@ const declaredRuntimeTools: string[] = bundle
 // in 2d below.
 
 const sidecarUrl = env.sidecarUrl;
+// Non-null wherever `sidecarUrl` is: `parseRuntimeEnv` makes a sidecar-backed
+// run without it a FATAL env issue, so the branches below that use both are
+// reached only when both were supplied.
+const sidecarAuthToken = env.sidecarAuthToken ?? "";
 
 // Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
 // executes each runtime tool ONCE and journals its canonical events; the Pi
@@ -539,7 +520,7 @@ const sidecarUrl = env.sidecarUrl;
 const runtimeDrainer: RuntimeEventDrainer | undefined = sidecarUrl
   ? createRuntimeEventDrainer({
       url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
-      headers: { Host: "sidecar" },
+      headers: { Host: "sidecar", [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
       logger: {
         warn: (msg, data) => logLine("warn", msg, data),
         error: (msg, data) => logLine("error", msg, data),
@@ -562,23 +543,23 @@ if (sidecarUrl) {
       // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
       // still wiring its listener and the Docker DNS alias is propagating.
       // AWS-style full jitter (50ms → 1s) absorbs the race without
-      // pessimising the warm-path; the default 60s deadline covers
-      // worst-case cold container pulls (#406 acceptance criteria: 20–45s
-      // boots are routine). Operators on slow registries can widen via
-      // `APPSTRATE_MCP_CONNECT_DEADLINE_MS`.
-      // The sidecar's /mcp endpoint gates inbound requests by the per-run
-      // Docker network + Host-header check (`validateMcpHostHeader`); it does
-      // NOT verify a bearer token, so the agent connects unauthenticated. (An
-      // earlier RUN_TOKEN-as-bearer path was wired but never validated — dropped.)
+      // pessimising the warm-path; the fixed 60s deadline covers worst-case
+      // cold container pulls (#406 acceptance criteria: 20–45s boots are
+      // routine). It is not operator-tunable — see `MCP_CONNECT_DEADLINE_MS`.
+      // The sidecar's /mcp endpoint gates inbound requests on the run's
+      // `SIDECAR_AUTH_HEADER` token (denied by default) plus the Host-header
+      // DNS-rebinding check (`validateMcpHostHeader`). The token is NOT the run
+      // token — that one never enters this container.
       mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
         clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
+        extraHeaders: { [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
         // #779 annex — operator-tunable per-call tool timeout (absent →
         // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
         // honoured sidecar-side, so both legs of an integration tool call
         // share one budget.
         ...(env.mcpToolTimeoutMs !== undefined ? { defaultTimeoutMs: env.mcpToolTimeoutMs } : {}),
         retry: {
-          deadlineMs: env.mcpConnectDeadlineMs,
+          deadlineMs: MCP_CONNECT_DEADLINE_MS,
           baseMs: 50,
           capMs: 1_000,
           onRetry: ({ url, attempt, delayMs, errorCode, error }) => {
@@ -642,7 +623,7 @@ if (sidecarUrl) {
   // integration failed to start OR came up with nothing callable — the
   // platform contract, every tier. A run that can't even confirm integration
   // health aborts too.
-  const bootResult = await fetchIntegrationBootReport(sidecarUrl);
+  const bootResult = await fetchIntegrationBootReport(sidecarUrl, sidecarAuthToken);
   if ("error" in bootResult) {
     await die(`Could not verify integration boot status: ${bootResult.error}`);
   } else {
@@ -664,12 +645,19 @@ if (sidecarUrl) {
   }
 
   // --- 2d. Zero-knowledge enforcement ---
-  // The sidecar URL is a runtime implementation detail. Now that the
-  // MCP client owns the only path to the sidecar, remove the env var
-  // so the Pi bash extension cannot leak it via `echo $SIDECAR_URL` or
-  // similar. Safe: no downstream consumer in this process reads
-  // SIDECAR_URL past this point.
+  // The sidecar URL and the token that opens it are runtime implementation
+  // details. Now that the MCP client, the runtime-event drainer and the Pi
+  // model record each hold their own copy, remove BOTH env vars so the Pi bash
+  // extension cannot leak them via `echo $SIDECAR_URL` / `env | grep SIDECAR`.
+  //
+  // The token goes with the URL rather than surviving it, and that is the whole
+  // point: together they are the capability to spend the org's provider
+  // credential through `/llm/*`, and the agent loop runs model-chosen shell
+  // commands over attacker-influenced input. Nothing downstream in this process
+  // re-reads either from the environment — pi-ai reads `Model.headers` off the
+  // model object built above, not `process.env`.
   delete process.env.SIDECAR_URL;
+  delete process.env.SIDECAR_AUTH_TOKEN;
 } else {
   // No sidecar attached (skip-sidecar: no integrations + static API key).
   // The platform runtime tools (output/log/note/pin) the agent
@@ -696,17 +684,17 @@ if (sidecarUrl) {
   );
 }
 
-// --- 2e. publish_document runtime tool (opt-in via manifest.runtime_tools) ---
+// --- 2e. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
 // Unlike the four pure event-emitter runtime tools (served by the sidecar over
-// MCP, or registered in-process on the no-sidecar path), `publish_document`
+// MCP, or registered in-process on the no-sidecar path), `publish_file`
 // performs an HTTP upload back to the platform — so it is ALWAYS registered
-// in-process here (the sidecar has no path to the documents route), gated on
+// in-process here (the sidecar has no path to the files route), gated on
 // the agent selecting it. It carries the run's HMAC signer via the injected
-// `uploadRunDocument`; its `document.published` event rides the bridged sink.
-if (declaredRuntimeTools.includes("publish_document")) {
+// `uploadRunFile`; its `file.published` event rides the bridged sink.
+if (declaredRuntimeTools.includes("publish_file")) {
   extensionFactories.push(
-    buildPublishDocumentExtension({
-      uploader: uploadRunDocument,
+    buildPublishFileExtension({
+      uploader: uploadRunFile,
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);
       },
@@ -716,25 +704,9 @@ if (declaredRuntimeTools.includes("publish_document")) {
 
 // --- 3. Model + system prompt from env ---
 
-const api = env.modelApi;
-const modelId = env.modelId;
 const systemPrompt = env.agentPrompt;
 
-const model: Model<Api> = {
-  id: modelId,
-  name: modelId,
-  api: api as Api,
-  // Pi SDK AuthStorage key, derived from the api shape. The runner reads
-  // this field directly to register + resolve the API key.
-  provider: deriveProviderFromApi(api),
-  baseUrl: env.modelBaseUrl ?? "",
-  reasoning: env.modelReasoning,
-  ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
-  input: [...env.modelInput],
-  cost: env.modelCost,
-  contextWindow: env.modelContextWindow,
-  maxTokens: env.modelMaxTokens,
-};
+const model: Model<Api> = buildPiModelFromEnv(env);
 
 // --- 4. Build ExecutionContext from env ---
 
@@ -742,19 +714,12 @@ const context: ExecutionContext = {
   runId: AGENT_RUN_ID,
   input: env.agentInput,
   memories: [],
-  config: {},
   // When the platform forwarded a budget, the runner enforces it itself
   // (watchdog from the run-loop start, boot excluded) and finalizes a
   // first-class `timeout` terminal — instead of waiting for the platform's
   // safety-net container kill, which can only surface a generic abort.
   ...(env.timeoutSeconds !== undefined ? { timeoutSeconds: env.timeoutSeconds } : {}),
 };
-
-// --- 5. Resolve bundle for PiRunner (fallback to synthetic when no .afps) ---
-// PiRunner needs a Bundle; when no agent-package.afps was present, the
-// platform pre-installed files directly so we hand it a minimal stub
-// (built via the same helper used in Phase C).
-const runnerBundle: Bundle = bundle ?? buildInContainerBundle(systemPrompt);
 
 // --- 6. Signal runtime readiness ---
 //
@@ -793,7 +758,7 @@ if (piSdkWarmup && (await piSdkWarmup) === null) {
 }
 
 await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
-  bundleLoaded: bundle !== null,
+  bundleLoaded: true,
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
   phaseTimings,
@@ -810,7 +775,7 @@ await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
 const heartbeat = startSinkHeartbeat({
   url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
   runSecret: env.sink.secret,
-  intervalMs: env.heartbeatIntervalMs,
+  intervalMs: HEARTBEAT_INTERVAL_MS,
   onError: (err) => {
     // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
     // container log forwarding captures it without polluting the event
@@ -837,6 +802,9 @@ function buildPiRunner(): PiRunner {
   return createRuntimePiRunner({
     sidecarUrl,
     model,
+    // No rates reached this container (unpriced model, or a withheld alias
+    // rate card). Report no cost rather than a placeholder $0.
+    ...(env.modelCost === undefined ? { unpriced: true } : {}),
     apiKey: env.modelApiKey,
     systemPrompt,
     ...(env.modelTemperature !== undefined ? { temperature: env.modelTemperature } : {}),
@@ -850,33 +818,33 @@ function buildPiRunner(): PiRunner {
 }
 
 /** Compiled fallback when the platform did not forward its effective cap. */
-const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_FILE_MAX_BYTES = 100 * 1024 * 1024;
 
 /**
  * Client-side per-file bound for the outputs sweep — the platform's EFFECTIVE
- * `DOCUMENT_MAX_FILE_BYTES` (forwarded by the run-launcher), falling back to the
+ * `FILE_MAX_BYTES` (forwarded by the run-launcher), falling back to the
  * compiled 100 MiB default when absent/unparseable. The server is the
  * authoritative gate (it cuts an over-cap stream mid-flight); this just avoids
  * streaming a file that is certain to be rejected. Reading the forwarded value
  * keeps the two in lockstep — an operator who raises the platform cap no longer
  * sees large deliverables silently skipped here.
  */
-function resolveDocumentMaxFileBytes(): number {
-  const raw = process.env.DOCUMENT_MAX_FILE_BYTES;
+function resolveMaxFileBytes(): number {
+  const raw = process.env.FILE_MAX_BYTES;
   if (raw !== undefined && raw !== "") {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
-  return DEFAULT_DOCUMENT_MAX_FILE_BYTES;
+  return DEFAULT_FILE_MAX_BYTES;
 }
 
-const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveDocumentMaxFileBytes();
+const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveMaxFileBytes();
 
 /**
  * Auto-publish everything under `workspace/outputs/` that was not already
  * published explicitly. Runs at finalize time, BEFORE the finalize event is
- * posted, so the swept documents surface as run events. Best-effort — per-file
- * failures never block finalize (regardless of whether the `publish_document`
+ * posted, so the swept files surface as run events. Best-effort — per-file
+ * failures never block finalize (regardless of whether the `publish_file`
  * tool was enabled), but they are COLLECTED into the returned {@link SweepResult}
  * so the caller can stamp a terminal artifacts summary onto the finalize
  * payload. Returns `null` only when the scan itself faulted (never on a per-file
@@ -884,10 +852,10 @@ const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveDocumentMaxFileBytes();
  */
 async function runOutputsSweep(): Promise<SweepResult | null> {
   return sweepOutputs({
-    uploader: uploadRunDocument,
+    uploader: uploadRunFile,
     workspace: WORKSPACE,
-    publishedKeys: publishedDocumentKeys,
-    publishedSourceHashes: publishedDocumentSourceHashes,
+    publishedKeys: publishedFileKeys,
+    publishedSourceHashes: publishedFileSourceHashes,
     maxFileBytes: OUTPUTS_SWEEP_MAX_FILE_BYTES,
     emit: (event) => {
       void bridgedSink.handle(event as RunEvent);
@@ -908,7 +876,7 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
 //      failure, so we drain-until-empty + bounded retry through the SAME bridged
 //      sink the per-call drains use.
 //   2. The outputs sweep — auto-publish `workspace/outputs/` deliverables so
-//      their `document.published` events ride the run stream before it closes.
+//      their `file.published` events ride the run stream before it closes.
 // PiRunner owns its finalize, so wrapping the sink is the only injection point
 // that runs BEFORE the stdout-bridge merges its aggregate into the finalize POST.
 const piEventSink: typeof bridgedSink = {
@@ -950,7 +918,7 @@ try {
   const runner = buildPiRunner();
 
   await runner.run({
-    bundle: runnerBundle,
+    bundle,
     context,
     eventSink: piEventSink,
     signal: runAbort.signal,

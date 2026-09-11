@@ -4,9 +4,9 @@ import { useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type components, type paths } from "../api/client";
-import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
+import { useOrgOnlyScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (GET /api/library response). */
 type LibraryResponse =
@@ -14,31 +14,22 @@ type LibraryResponse =
 
 export type LibraryPackageItem = components["schemas"]["LibraryPackageList"][number];
 
-export type LibraryApp = LibraryResponse["applications"][number];
-
-/**
- * Org context for the library query. The header is a spec-declared param
- * passed explicitly (instead of relying on the client middleware alone) so it
- * is part of the React Query key — switching org refetches instead of serving
- * another org's cached library.
- */
-function useLibraryScope() {
-  const orgId = useCurrentOrgId();
-  return {
-    enabled: !!orgId,
-    init: { params: { header: { "X-Org-Id": orgId ?? undefined } } },
-  };
-}
+export type LibrarySpace = LibraryResponse["spaces"][number];
 
 export function useLibrary() {
-  const scope = useLibraryScope();
-  return $api.useQuery("get", "/api/library", scope.init, { enabled: scope.enabled });
+  const scope = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/library",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled },
+  );
 }
 
 function updateLibraryCache(
   prev: LibraryResponse | undefined,
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   action: "install" | "uninstall",
 ): LibraryResponse | undefined {
   if (!prev) return prev;
@@ -49,8 +40,8 @@ function updateLibraryCache(
         ...pkg,
         installed_in:
           action === "install"
-            ? [...pkg.installed_in, applicationId]
-            : pkg.installed_in.filter((id) => id !== applicationId),
+            ? [...pkg.installed_in, spaceId]
+            : pkg.installed_in.filter((id) => id !== spaceId),
       };
     });
   return {
@@ -66,11 +57,11 @@ function updateLibraryCache(
 
 /**
  * Derive install state for a single package from the library cache.
- * Returns which app names have it installed and whether the current app does.
+ * Returns which space names have it installed and whether the current space does.
  */
 export function usePackageInstallState(packageId: string) {
   const { data: libraryData } = useLibrary();
-  const currentAppId = useCurrentApplicationId();
+  const currentSpaceId = useCurrentSpaceId();
 
   return useMemo(() => {
     const libraryPkg = libraryData
@@ -79,34 +70,36 @@ export function usePackageInstallState(packageId: string) {
           .find((p) => p.id === packageId)
       : undefined;
 
-    const installedAppNames =
+    const installedSpaceNames =
       libraryPkg && libraryData
-        ? libraryData.applications
+        ? libraryData.spaces
             .filter((a) => libraryPkg.installed_in.includes(a.id))
             .map((a) => a.name)
         : [];
 
-    const isInstalledInCurrentApp = !!(
-      currentAppId && libraryPkg?.installed_in.includes(currentAppId)
+    const isInstalledInCurrentSpace = !!(
+      currentSpaceId && libraryPkg?.installed_in.includes(currentSpaceId)
     );
 
-    return { installedAppNames, isInstalledInCurrentApp };
-  }, [libraryData, packageId, currentAppId]);
+    return { installedSpaceNames, isInstalledInCurrentSpace };
+  }, [libraryData, packageId, currentSpaceId]);
 }
 
 export function useTogglePackageInstall() {
   const qc = useQueryClient();
-  const scope = useLibraryScope();
+  const scope = useOrgOnlyScope();
   // Exact key of the useLibrary query (same init) for the optimistic update.
-  const libraryKey = $api.queryOptions("get", "/api/library", scope.init).queryKey;
+  const libraryKey = $api.queryOptions("get", "/api/library", {
+    params: { header: scope.header },
+  }).queryKey;
 
   return useMutation({
     mutationFn: async ({
-      applicationId,
+      spaceId,
       packageId,
       installed,
     }: {
-      applicationId: string;
+      spaceId: string;
       packageId: string;
       installed: boolean;
     }) => {
@@ -116,23 +109,23 @@ export function useTogglePackageInstall() {
         // the `/` separating scope from name.
         const parsed = parseScopedName(packageId);
         if (!parsed) throw new Error(`Invalid packageId: ${packageId}`);
-        await client.DELETE("/api/applications/{applicationId}/packages/{scope}/{name}", {
+        await client.DELETE("/api/spaces/{spaceId}/packages/{scope}/{name}", {
           params: {
-            path: { applicationId, scope: `@${parsed.scope}`, name: parsed.name },
+            path: { spaceId, scope: `@${parsed.scope}`, name: parsed.name },
           },
         });
         return;
       }
-      await client.POST("/api/applications/{applicationId}/packages", {
-        params: { path: { applicationId } },
+      await client.POST("/api/spaces/{spaceId}/packages", {
+        params: { path: { spaceId } },
         body: { packageId },
       });
     },
-    onMutate: async ({ applicationId, packageId, installed }) => {
+    onMutate: async ({ spaceId, packageId, installed }) => {
       await qc.cancelQueries({ queryKey: libraryKey });
       const prev = qc.getQueryData<LibraryResponse>(libraryKey);
       qc.setQueryData<LibraryResponse>(libraryKey, (old) =>
-        updateLibraryCache(old, packageId, applicationId, installed ? "uninstall" : "install"),
+        updateLibraryCache(old, packageId, spaceId, installed ? "uninstall" : "install"),
       );
       return { prev };
     },

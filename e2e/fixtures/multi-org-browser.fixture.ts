@@ -42,7 +42,7 @@ export const test = base.extend<MultiOrgBrowserFixtures>({
       createApiClient(request, {
         cookie: auth.cookie,
         orgId: orgA.orgId,
-        applicationId: orgA.defaultAppId,
+        spaceId: orgA.defaultSpaceId,
       }),
     );
   },
@@ -52,13 +52,13 @@ export const test = base.extend<MultiOrgBrowserFixtures>({
       createApiClient(request, {
         cookie: auth.cookie,
         orgId: orgB.orgId,
-        applicationId: orgB.defaultAppId,
+        spaceId: orgB.defaultSpaceId,
       }),
     );
   },
 
   async authedPage({ browser, auth, orgA }, use) {
-    const context = await createAuthedContext(browser, auth, orgA.orgId, orgA.defaultAppId);
+    const context = await createAuthedContext(browser, auth, orgA.orgId, orgA.defaultSpaceId);
     const page = await context.newPage();
     await use(page);
     await context.close();

@@ -82,15 +82,17 @@ const MAX_CONSECUTIVE_RECORD_POLL_FAILURES = 20;
 
 // `RunStatus` and `TerminalRunStatus` are imported from `@appstrate/shared-types`
 // (themselves derived from the Drizzle pgEnum in `packages/db`) — single source
-// of truth across server, CLI, and dashboard.
-export type { RunStatus, TerminalRunStatus };
+// of truth across server, CLI, and dashboard. They used to be re-exported from
+// here as well; nothing ever imported them from this module (both consumers,
+// `run.ts` and the test suite, take them from `@appstrate/shared-types`
+// directly), so the re-export was a second name for the same type and is gone.
 
 /** Subset of the `runs` row returned by `GET /api/runs/:id`. */
 export interface RemoteRunRecord {
   id: string;
   status: RunStatus;
   packageId: string;
-  applicationId: string;
+  spaceId: string;
   orgId: string;
   input?: unknown;
   result?: unknown;
@@ -168,8 +170,8 @@ export interface RunRemoteOptions {
   instance: string;
   /** Bearer token (`ask_…` or OIDC JWT). */
   bearerToken: string;
-  /** Application id (`X-Application-Id`). */
-  applicationId: string;
+  /** Space id (`X-Space-Id`). */
+  spaceId: string;
   /** Organization id (`X-Org-Id`). Required for cookie/JWT auth contexts. */
   orgId?: string | undefined;
 
@@ -182,8 +184,6 @@ export interface RunRemoteOptions {
 
   /** Run input — forwarded to the trigger body. */
   input: Record<string, unknown>;
-  /** Run config override — forwarded to the trigger body (deep-merged server-side). */
-  config: Record<string, unknown>;
   /** Model id override (or `null` to clear). */
   modelId?: string | null;
   /** Proxy id override (or `"none"` to disable). */
@@ -309,10 +309,16 @@ export async function runRemote(
   // `appstrate.remote.triggered` line emitted just above is the lone
   // exception — it carries the runId + instance for debugging, has no
   // local-mode counterpart, and lands before any RunEvents do.
+  // Both writers are forwarded. `writeStderr` matters for the human sink's
+  // one stderr line (the `⚠` advisory on `appstrate.error`): leaving it unset
+  // would silently fall back to the sink's own `process.stderr.write` default,
+  // so a caller that injected `writeStderr` would still get that line on the
+  // global stream — the very leak this seam exists to close (issue #1180).
   const consoleSink: EventSink = createConsoleSink({
     json: opts.json,
     verbosity: opts.verbosity ?? "normal",
     writeStdout,
+    writeStderr,
   });
 
   // ─── 2. Signal wiring ──────────────────────────────────────────────
@@ -529,7 +535,7 @@ interface HttpDeps {
 function platformHeaders(opts: RunRemoteOptions, extra: Record<string, string> = {}): Headers {
   const h = new Headers({
     Authorization: `Bearer ${opts.bearerToken}`,
-    "X-Application-Id": opts.applicationId,
+    "X-Space-Id": opts.spaceId,
     Accept: "application/json",
     ...extra,
   });
@@ -557,7 +563,6 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
 
   const body: Record<string, unknown> = {
     input: opts.input,
-    config: opts.config,
   };
   if (opts.modelId != null) body.modelId = opts.modelId;
   if (opts.proxyId != null) body.proxyId = opts.proxyId;
@@ -599,7 +604,14 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
       body: detail,
       hint:
         res.status === 401 || res.status === 403
-          ? "Verify --api-key / `appstrate login` is current and has agents:run permission."
+          ? // Both scopes, because `--remote` is launch-then-poll: the trigger
+            // needs `agents:run`, and `pollRun` / `fetchLogs` below read
+            // `/api/runs/{id}` and `/api/runs/{id}/logs`, which enforce
+            // `runs:read`. A key narrowed to `agents:run` alone starts the run
+            // and then 403s on every poll — the run bills, the caller never
+            // sees the result — so naming only the first scope here sent
+            // operators to mint exactly the credential that breaks.
+            "Verify --api-key / `appstrate login` is current and has agents:run + runs:read permissions."
           : res.status === 404
             ? `Agent ${opts.scope}/${opts.name} not found on ${opts.instance}.`
             : undefined,

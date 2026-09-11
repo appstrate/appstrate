@@ -67,12 +67,11 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
   // same name, so a host the platform-side checks just exempted (internal model
   // endpoint, allowlisted remote MCP server) isn't re-blocked in-run by the
   // sidecar's own literal/fail-closed gates. Empty/unset ⇒ nothing exempted.
-  // Raw process.env read (with the legacy alias), NOT getEnv(): this also runs
-  // inside the standalone firecracker runner daemon, which does not carry the
-  // platform's required env vars (BETTER_AUTH_SECRET, …), so getEnv()'s
-  // fail-fast validation would crash sidecar creation there.
-  const egressAllowHosts =
-    process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS;
+  // Raw process.env read, NOT getEnv(): this also runs inside the standalone
+  // firecracker runner daemon, which does not carry the platform's required env
+  // vars (BETTER_AUTH_SECRET, …), so getEnv()'s fail-fast validation would
+  // crash sidecar creation there.
+  const egressAllowHosts = process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
   if (egressAllowHosts) env.EGRESS_ALLOW_INTERNAL_HOSTS = egressAllowHosts;
   applySpecToSidecarEnv(params.spec, env);
   return env;
@@ -87,6 +86,10 @@ export function applySpecToSidecarEnv(
   spec: SidecarLaunchSpec,
   target: Record<string, string>,
 ): void {
+  // The agent↔sidecar secret. Same value the launcher put in the agent
+  // container's own `SIDECAR_AUTH_TOKEN`; the sidecar compares the two.
+  // Absent on a connect-run, which never serves the agent surface.
+  if (spec.sidecarAuthToken) target.SIDECAR_AUTH_TOKEN = spec.sidecarAuthToken;
   if (spec.proxyUrl) target.PROXY_URL = spec.proxyUrl;
   if (spec.modelContextWindow != null) {
     target.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);

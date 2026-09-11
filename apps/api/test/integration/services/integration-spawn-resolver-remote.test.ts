@@ -71,14 +71,14 @@ describe("resolveIntegrationSpawns — remote source", () => {
       source: "local",
       draftManifest: manifest(withRemote),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     // An api_key connection so resolveDeliveries finds a row and the resolver
     // proceeds to the source-discriminant block.
     await db.insert(integrationConnections).values({
       integrationId: INTEG,
       authKey: "primary",
       accountId: "default",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-123" } }),
@@ -100,7 +100,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
     await seed(true);
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -119,7 +119,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
     await seed(false);
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -170,7 +170,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       integrationId: LOCAL,
       authKey: "primary",
       accountId: "default",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-123" } }),
@@ -196,12 +196,12 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       source: "local",
       draftManifest: localManifest(MISSING_SERVER),
     });
-    await seedInstalledPackage(ctx.defaultAppId, LOCAL);
+    await seedInstalledPackage(ctx.defaultSpaceId, LOCAL);
     await seedConnection();
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: localAgent(),
     });
@@ -234,12 +234,12 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       draftManifest: serverManifest,
     });
     await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
-    await seedInstalledPackage(ctx.defaultAppId, LOCAL);
+    await seedInstalledPackage(ctx.defaultSpaceId, LOCAL);
     await seedConnection();
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: localAgent(),
     });

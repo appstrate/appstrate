@@ -42,7 +42,7 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     const run = await seedRun({
       packageId: "@delorg/zombie",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
       agentScope: "@delorg",
       agentName: "Zombie Agent",
@@ -109,7 +109,7 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     await seedRun({
       packageId: "@delorg/busy",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
 
@@ -133,7 +133,7 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     await seedRun({
       packageId: "@delorg/ghost",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
       agentScope: "@delorg",
       agentName: "Ghost Agent",
@@ -177,14 +177,14 @@ describe("DELETE /api/packages/agents/:scope/:name — observability preservatio
     const keepRun = await seedRun({
       packageId: "@delorg/keep",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
       completedAt: new Date(),
     });
     const dropRun = await seedRun({
       packageId: "@delorg/drop",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
       completedAt: new Date(),
     });

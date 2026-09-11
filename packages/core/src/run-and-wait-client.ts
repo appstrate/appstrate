@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isFileProducedByRun } from "./file-uri.ts";
+import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
 
 /**
@@ -31,8 +33,8 @@ const RUN_GET_WAIT_MAX_SECONDS = 55;
  * surface — nothing else caps how much of `runs.result` reaches a chat context.
  *
  * The pointer is the RUN, not a copy of it. An earlier revision spilled the full
- * payload into a dedicated `agent_output` document so the truncated result could
- * carry a `document://` URI. That duplicated bytes already durable in
+ * payload into a dedicated `agent_output` file so the truncated result could
+ * carry an `appfile://` URI. That duplicated bytes already durable in
  * `runs.result` and already readable through `getRun`, and locating the copy BY
  * NAME opened an impersonation hole (an agent publishing a decoy under the same
  * name) that then needed its own publish-boundary refusal to close. Pointing at
@@ -56,8 +58,8 @@ export interface RunAndWaitStep {
   isError?: boolean;
 }
 
-/** A published run document, projected for the tool result the model reads. */
-export interface RunAndWaitDocument {
+/** A published run file, projected for the tool result the model reads. */
+export interface RunAndWaitFile {
   id: string;
   uri: string;
   name: string;
@@ -74,6 +76,26 @@ export interface RunAndWaitLaunch {
 
 export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string, string]>;
 
+/**
+ * Request header asking the run-kickoff routes to mint a hosted-connect session
+ * for every actor-actionable item of a `missing_integration_connection` 412 and
+ * return it as `connect_url` on that item (RFC 6750 / Arcade.dev pattern: the
+ * error carries the remedy, so nothing has to be called to obtain it).
+ *
+ * A minted `connect_url` is a bearer capability that creates a connection AS
+ * the calling actor. Set this header ONLY from a caller that either renders the
+ * connect card itself (the chat) or hands the link straight to the human who is
+ * that actor — the external MCP `run_and_wait` tool qualifies, because the model
+ * driving it already receives a `connect_url` from `initiateIntegrationConnect`
+ * on that very same path, so this is not a new exposure class. Never set it from
+ * a caller that logs its responses, persists them, or forwards them to a third
+ * party; the dashboard, the CLI, the GitHub Action, the scheduler and dry-run
+ * validation all leave it unset and keep driving the connect kickoff themselves.
+ *
+ * Sent on the LAUNCH request only; the poll loop never carries it.
+ */
+export const RUN_CONNECT_OFFERS_HEADER = "X-Appstrate-Connect-Offers";
+
 export interface RunAndWaitClientOptions {
   origin: string;
   headers: RunAndWaitHeaders;
@@ -81,6 +103,12 @@ export interface RunAndWaitClientOptions {
   signal?: AbortSignal;
   maxMs?: number;
   backoffMs?: number;
+  /**
+   * Opt into {@link RUN_CONNECT_OFFERS_HEADER} on the launch request. Read the
+   * header's note before setting it: it decides whether a live connect link
+   * reaches this caller's error payload.
+   */
+  connectOffers?: boolean;
 }
 
 export interface RunAndWaitLaunchResult {
@@ -95,10 +123,19 @@ export interface RunAndWaitFailureResult {
   step: RunAndWaitStep;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
+/**
+ * `asRecordOrNull`, adapted to the `undefined` this file's optional-argument
+ * shapes use.
+ *
+ * The predicate is NOT re-implemented here: `safe-json.ts` is a
+ * zero-dependency sibling in this package and already owns it. Nor is it named
+ * `asRecord` any more — that name is ALSO exported by `safe-json.ts`, where it
+ * returns `{}` for a non-object, i.e. a TRUTHY value. Two same-named helpers in
+ * one package with opposite falsiness is a reading hazard on a file whose whole
+ * job is deciding what reaches a launch body.
+ */
+function asRecordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return asRecordOrNull(value) ?? undefined;
 }
 
 function asString(value: unknown): string | undefined {
@@ -150,7 +187,7 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
   if (!hasOwn("version")) defaults.version = "1.0.0";
   if (!hasOwn("dependencies")) defaults.dependencies = {};
   if (!hasOwn("runtime_tools")) {
-    defaults.runtime_tools = ["log", "output", "publish_document"];
+    defaults.runtime_tools = ["log", "output", "publish_file"];
     if (!hasOwn("output")) {
       defaults.output = {
         schema: { type: "object", properties: {}, additionalProperties: true },
@@ -162,12 +199,120 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
 }
 
 /**
- * The tool's `context_documents` argument, when the model actually supplied
- * entries. Shape/scheme validation stays server-side (the inline route answers
- * with a field-precise 400) — here we only decide whether to forward it.
+ * Every top-level argument the `run_and_wait` tool declares.
+ *
+ * THE reason this list exists as data: the launch body is built from an
+ * ALLOWLIST, and the MCP transport does not validate tool arguments. So an
+ * argument the dispatch below does not read is not "rejected", it is
+ * INVISIBLE — it never reaches the route, the route cannot answer with its
+ * field-precise 400, the launch 201s, and the run executes without it. The
+ * model reads a normal success and reports work it did on an input the run
+ * never had. That failure mode has no other place to be caught.
+ *
+ * Kept in step with the descriptor's `inputSchema.properties` by
+ * `run-and-wait-argument-parity.test.ts`, which reads both and compares them —
+ * a name added to one side and not the other is a silent drop again.
  */
-function asNonEmptyArray(value: unknown): unknown[] | undefined {
-  return Array.isArray(value) && value.length > 0 ? value : undefined;
+const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
+  "kind",
+  "scope",
+  "name",
+  "version",
+  "input",
+  "manifest",
+  "prompt",
+  "connection_overrides",
+  "context_files",
+]);
+
+/**
+ * Refuse any argument the tool does not declare.
+ *
+ * Generic on purpose: one membership test covers every near-miss
+ * (`context_file`, `contextFiles`, `files`, …) rather than a hand-listed set
+ * that lets the rest through to the silent drop this exists to prevent.
+ */
+function unknownArgumentsError(args: Record<string, unknown>): string | undefined {
+  const unknown = Object.keys(args).filter(
+    (k) => !RUN_AND_WAIT_ARGUMENT_NAMES.has(k) && args[k] !== undefined,
+  );
+  if (unknown.length === 0) return undefined;
+
+  return (
+    `Unknown argument${unknown.length > 1 ? "s" : ""} ${unknown.map((k) => `\`${k}\``).join(", ")}. ` +
+    `This tool accepts only: ${[...RUN_AND_WAIT_ARGUMENT_NAMES].map((k) => `\`${k}\``).join(", ")}. ` +
+    "An unrecognised argument is not applied, so it is refused here rather than ignored."
+  );
+}
+
+/**
+ * The tool's `input` argument — the run's input values.
+ *
+ * Refused when present but not a plain object, for the reason
+ * {@link RUN_AND_WAIT_ARGUMENT_NAMES} states: both dispatch branches guard the
+ * assignment with an object test, so a JSON-encoded string or a bare array —
+ * the two shapes a model actually produces, and the two the MCP transport
+ * cannot reject — were dropped silently. The agent branch made it worse: with
+ * `input` dropped the launch body is empty, and an empty body is sent as NO
+ * body, which the route accepts as "no input". The run then executes on the
+ * agent's stored defaults and answers 201.
+ */
+function inputArgument(args: Record<string, unknown>): {
+  input?: Record<string, unknown>;
+  error?: string;
+} {
+  const value = args.input;
+  if (value === undefined || value === null) return {};
+  const record = asRecordOrUndefined(value);
+  if (!record) {
+    return {
+      error:
+        "`input` must be a JSON object mapping each input field to its value " +
+        '(`{"field": "value"}`)' +
+        (typeof value === "string"
+          ? " — pass the object itself, not a JSON-encoded string."
+          : ".") +
+        " Omit the argument entirely when the run needs no input.",
+    };
+  }
+  return { input: record };
+}
+
+/**
+ * The tool's file argument (fan-in by reference), checked for a shape the
+ * launch body can carry.
+ *
+ * Any undeclared name is refused upstream by {@link unknownArgumentsError} —
+ * nothing is read, canonicalized or relayed here.
+ *
+ * What is left is the wrong-typed value. The MCP transport does not validate
+ * tool arguments, so a single URI passed bare, or a JSON-encoded array, used to
+ * be dropped on the floor: the launch succeeded, the run started with nothing
+ * mounted, and no layer said a file was discarded. It is refused instead — the
+ * same treatment {@link connectionOverridesArgument} and {@link inputArgument}
+ * give the same mistake, for the same reason.
+ *
+ * An empty array is not a mistake — it carries nothing to mount and forwards
+ * nothing, as before.
+ */
+function contextFilesArgument(args: Record<string, unknown>): {
+  uris?: unknown[];
+  error?: string;
+} {
+  const value = args.context_files;
+  if (value === undefined || value === null) return {};
+  if (!Array.isArray(value)) {
+    return {
+      error:
+        "`context_files` must be a JSON array of appfile:// URIs (e.g. " +
+        '`["appfile://file_abc123"]`)' +
+        (typeof value === "string"
+          ? " — pass the array itself, not a single URI and not a JSON-encoded string."
+          : ".") +
+        " Omit the argument entirely when the run needs no file.",
+    };
+  }
+  return value.length > 0 ? { uris: value } : {};
 }
 
 /**
@@ -198,7 +343,7 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
         "object itself — do not JSON-encode it.",
     };
   }
-  const overrides = asRecord(args.connection_overrides);
+  const overrides = asRecordOrUndefined(args.connection_overrides);
   if (!overrides && present) {
     return {
       error:
@@ -218,7 +363,7 @@ export function isRunAndWaitTerminalStatus(status: unknown): boolean {
  * Project a run record onto the documented run_and_wait payload —
  * `{ id, packageId, status, done, result?, error? }` (the exact shape the tool
  * description promises). The full run resource also carries operational fields
- * (cost, token usage, timestamps, config echo) the model has no use for: the
+ * (cost, token usage, timestamps) the model has no use for: the
  * chat UI already renders live progress and metrics from the run's SSE stream,
  * and a model that sees a cost or a duration tends to quote it back at the
  * user. A caller that genuinely needs the full resource reads `getRun`.
@@ -259,7 +404,7 @@ function serializedResultBytes(value: unknown): Uint8Array | null {
  *
  * No copy is made and no pointer can be missing: the full payload is already in
  * `runs.result`, durable before this ever runs, and `getRun` returns it. That is
- * what makes truncation unconditional here — the earlier spill-document design
+ * what makes truncation unconditional here — the earlier spill-file design
  * had to fall back to NOT truncating whenever its best-effort write failed,
  * which meant the guard silently stopped guarding exactly when a result was
  * large enough to be a problem.
@@ -382,9 +527,22 @@ export async function launchRunAndWait(
   const signal = opts.signal;
   throwIfAborted(signal);
 
-  const args = asRecord(rawArgs) ?? {};
+  const args = asRecordOrUndefined(rawArgs) ?? {};
   const kind = asString(args.kind);
+  // Launch-only: `waitForRunAndWaitCompletion` polls with `opts.headers`, so the
+  // opt-in cannot leak onto a request that has no 412 to enrich.
   const headers = jsonHeaders(opts.headers);
+  if (opts.connectOffers) headers.set(RUN_CONNECT_OFFERS_HEADER, "1");
+
+  const unknownArgs = unknownArgumentsError(args);
+  if (unknownArgs) {
+    return { ok: false, step: { payload: { error: unknownArgs }, isError: true } };
+  }
+
+  const inputArg = inputArgument(args);
+  if (inputArg.error) {
+    return { ok: false, step: { payload: { error: inputArg.error }, isError: true } };
+  }
 
   const connectionOverrides = connectionOverridesArgument(args);
   if (connectionOverrides.error) {
@@ -394,23 +552,31 @@ export async function launchRunAndWait(
     };
   }
 
+  const contextFilesArg = contextFilesArgument(args);
+  if (contextFilesArg.error) {
+    return {
+      ok: false,
+      step: { payload: { error: contextFilesArg.error }, isError: true },
+    };
+  }
+
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
-  const contextDocuments = asNonEmptyArray(args.context_documents);
+  const contextFiles = contextFilesArg.uris;
   if (kind === "agent") {
-    // `context_documents` works by synthesizing an input field on the manifest,
+    // `context_files` works by synthesizing an input field on the manifest,
     // which only an inline run owns. A published agent's `input.schema` is a
     // versioned contract the platform must not rewrite — reject explicitly
     // rather than dropping the argument, which would mount nothing and leave
-    // the model believing the documents were delivered.
-    if (contextDocuments) {
+    // the model believing the files were delivered.
+    if (contextFiles) {
       return {
         ok: false,
         step: {
           payload: {
             error:
-              "`context_documents` is only supported for kind:'inline'. To give a published " +
-              "agent a document, pass its document:// URI through one of the file fields " +
+              "`context_files` is only supported for kind:'inline'. To give a published " +
+              "agent a file, pass its appfile:// URI through one of the file fields " +
               'declared in the agent\'s own input schema (`format:"uri"` + `contentMediaType`), ' +
               "via the `input` argument.",
           },
@@ -448,11 +614,10 @@ export async function launchRunAndWait(
     }
     launchPath = `/api/agents/${encodedId}/run` + (qs.size > 0 ? `?${qs.toString()}` : "");
     launchBody = {};
-    if (asRecord(args.input)) launchBody.input = args.input;
-    if (asRecord(args.config)) launchBody.config = args.config;
+    if (inputArg.input) launchBody.input = inputArg.input;
     if (Object.keys(launchBody).length === 0) launchBody = undefined;
   } else if (kind === "inline") {
-    const manifest = asRecord(args.manifest);
+    const manifest = asRecordOrUndefined(args.manifest);
     if (!manifest) {
       return {
         ok: false,
@@ -499,11 +664,12 @@ export async function launchRunAndWait(
     }
     launchPath = "/api/runs/inline";
     launchBody = { manifest: materialized.manifest, prompt };
-    if (asRecord(args.input)) launchBody.input = args.input;
-    if (asRecord(args.config)) launchBody.config = args.config;
-    // Fan-in by reference: forwarded verbatim; the route resolves each URI
-    // through the document ACL and declares the reserved input field itself.
-    if (contextDocuments) launchBody.context_documents = contextDocuments;
+    if (inputArg.input) launchBody.input = inputArg.input;
+    // Fan-in by reference: entries forwarded verbatim; the route resolves each
+    // URI through the file ACL and declares the reserved input field itself.
+    // One spelling reaches the wire because `unknownArgumentsError` accepts
+    // only one — nothing is canonicalized here.
+    if (contextFiles) launchBody.context_files = contextFiles;
   } else {
     return {
       ok: false,
@@ -530,7 +696,7 @@ export async function launchRunAndWait(
     };
   }
 
-  const launchRecord = asRecord(launched);
+  const launchRecord = asRecordOrUndefined(launched);
   const runId = asString(launchRecord?.id);
   if (!launchRecord || !runId) {
     return {
@@ -596,7 +762,7 @@ export async function waitForRunAndWaitCompletion(
       return { payload: { status: waitRes.status, body: run }, isError: true };
     }
 
-    const runRecord = asRecord(run);
+    const runRecord = asRecordOrUndefined(run);
     lastRun = runRecord;
     if (isRunAndWaitTerminalStatus(runRecord?.status)) {
       return { payload: projectRunAndWaitPayload(runRecord, true) };
@@ -633,34 +799,58 @@ export async function* runAndWaitSteps(
 }
 
 /**
- * List the agent-output documents a run published, projected to the `{ id, uri,
+ * How many produced-file rows one read asks for. `GET /api/files` clamps
+ * `limit` to 100 and answers `hasMore` rather than a cursor, so this is also
+ * the ceiling — a run that published more needs paging, not a bigger number.
+ */
+const RUN_PRODUCED_FILES_PAGE_LIMIT = 100;
+
+/**
+ * The `GET /api/files` request path for "the files THIS run produced" — the
+ * origin-relative half, so a browser caller can pass it to `fetch` verbatim and
+ * a server caller can hand it to {@link apiUrl}.
+ *
+ * A builder rather than a literal because two independent callers issue the
+ * exact same request and must keep issuing the SAME one: {@link fetchRunFiles}
+ * below (the `run_and_wait` tool result the model reads) and the chat module's
+ * run card (`module-chat/src/ui/use-run-log-stream.ts`), which reconciles its
+ * log-derived file chips against this authoritative list once the run goes
+ * terminal. Two hand-built copies of the query string is how one of them
+ * quietly starts reading a different set than the other.
+ *
+ * `purpose=agent_output` narrows but does not decide: the route answers the
+ * run's whole CONTAINER, so a file chained in from an earlier run arrives
+ * carrying that purpose. Both callers filter on `run_id` themselves.
+ */
+export function runProducedFilesPath(runId: string): string {
+  return `/api/files?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=${RUN_PRODUCED_FILES_PAGE_LIMIT}`;
+}
+
+/**
+ * List the agent-output files a run published, projected to the `{ id, uri,
  * name, mime, size }` shape the tool result embeds. Best-effort: any failure
- * (network, non-2xx, malformed body) yields an empty list — a missing document
+ * (network, non-2xx, malformed body) yields an empty list — a missing file
  * list must never turn a successful run into a tool error.
  *
- * `GET /api/documents?run_id=…` answers the run's whole document CONTAINER —
- * the documents it produced PLUS the ones mounted as its input (a chained
- * `document://` from an earlier run keeps `purpose: 'agent_output'`, so the
- * purpose filter alone does not exclude it). This list is the run's OUTPUT, so
- * rows are kept only when their own `run_id` is this run.
+ * `GET /api/files?run_id=…` answers the run's whole file CONTAINER — the files
+ * it produced PLUS the ones mounted as its input. Which rows are this run's
+ * OUTPUT is {@link isFileProducedByRun}, the same predicate the run page and
+ * the chat's run card read.
  */
-export async function fetchRunDocuments(
+export async function fetchRunFiles(
   runId: string,
   opts: RunAndWaitClientOptions,
-): Promise<RunAndWaitDocument[]> {
+): Promise<RunAndWaitFile[]> {
   try {
-    const url = apiUrl(
-      opts.origin,
-      `/api/documents?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=100`,
-    );
+    const url = apiUrl(opts.origin, runProducedFilesPath(runId));
     const res = await opts.fetch(url, { method: "GET", headers: new Headers(opts.headers) });
     if (!res.ok) return [];
-    const data = asRecord(await readJsonResponse(res))?.data;
+    const data = asRecordOrUndefined(await readJsonResponse(res))?.data;
     if (!Array.isArray(data)) return [];
-    const out: RunAndWaitDocument[] = [];
+    const out: RunAndWaitFile[] = [];
     for (const raw of data) {
-      const r = asRecord(raw);
-      if (asString(r?.run_id) !== runId) continue;
+      const r = asRecordOrUndefined(raw);
+      if (!r || !isFileProducedByRun(r, runId)) continue;
       const id = asString(r?.id);
       const uri = asString(r?.uri);
       const name = asString(r?.name);
@@ -681,27 +871,27 @@ export async function fetchRunDocuments(
 
 /**
  * Like {@link runAndWaitSteps}, but enriches the FINAL (terminal) step with the
- * run's published `documents` so the model sees `{ uri, name, … }` it can chain
+ * run's published `files` so the model sees `{ uri, name, … }` it can chain
  * into a follow-up run (D6). The extra fetch runs only once the run is terminal
  * and only when a run id exists; a run that published nothing keeps the payload
- * document-free. Used by the chat's `run_and_wait` tool.
+ * file-free. Used by the chat's `run_and_wait` tool.
  *
  * Truncation ({@link truncateRunAndWaitPayload}) is applied on the same terminal
- * step but is INDEPENDENT of the document list — an oversized result is cut back
+ * step but is INDEPENDENT of the file list — an oversized result is cut back
  * whether or not the run published anything.
  */
-export async function* runAndWaitStepsWithDocuments(
+export async function* runAndWaitStepsWithFiles(
   rawArgs: unknown,
   opts: RunAndWaitClientOptions,
 ): AsyncGenerator<RunAndWaitStep> {
   for await (const step of runAndWaitSteps(rawArgs, opts)) {
     const runId = asString(step.payload.id);
     if (step.payload.done === true && runId) {
-      const documents = await fetchRunDocuments(runId, opts);
+      const files = await fetchRunFiles(runId, opts);
       const payload = truncateRunAndWaitPayload(step.payload);
       yield {
         ...step,
-        payload: documents.length > 0 ? { ...payload, documents } : payload,
+        payload: files.length > 0 ? { ...payload, files } : payload,
       };
       continue;
     }

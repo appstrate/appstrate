@@ -136,13 +136,12 @@ export const estimateTokens: TokenEstimator = (text) => {
  * Decision returned by {@link TokenBudget.decide} and
  * {@link TokenBudget.tryReserve}.
  *
- * The reason union is intentionally narrow: only the three states the
- * tracker itself can produce. Fallback states triggered by the caller
- * (no blob store configured, blob store full, …) are surfaced through
- * a wider union in the agent-facing `_meta` payload — they are not
- * decisions the budget can make.
+ * The reason union is intentionally narrow: only the states the tracker
+ * itself can produce. Fallback states triggered by the caller (no blob
+ * store configured, blob store full, …) are not decisions the budget
+ * can make; the caller logs those itself.
  */
-export interface BudgetDecision {
+interface BudgetDecision {
   /**
    * - `inline`  — agent receives the full content as a `text` block.
    * - `spill`   — agent receives a `resource_link`; bytes are stashed
@@ -166,10 +165,7 @@ export interface BudgetDecision {
    *   before Pi SDK's turn-boundary compaction fires.
    */
   reason:
-    | "under_inline_cap"
-    | "exceeds_inline_cap"
-    | "exceeds_run_budget"
-    | "exceeds_context_window";
+    "under_inline_cap" | "exceeds_inline_cap" | "exceeds_run_budget" | "exceeds_context_window";
   /** Estimated tokens for *this* response. */
   estimatedTokens: number;
   /** Cumulative tokens consumed by tool outputs so far in this run. */
@@ -180,7 +176,7 @@ export interface BudgetDecision {
   inlineCapTokens: number;
 }
 
-export interface TokenBudgetOptions {
+interface TokenBudgetOptions {
   /**
    * Per-call cap. Anything strictly above this spills, regardless of
    * how much budget is left.

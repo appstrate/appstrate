@@ -102,7 +102,7 @@ function payload(
   };
 }
 
-function plan(headerName: string, value: string, prefix = "Bearer"): HttpDeliveryPlan {
+function plan(headerName: string, value: string, prefix = "Bearer "): HttpDeliveryPlan {
   return { headerName, headerPrefix: prefix, value, allowServerOverride: false };
 }
 

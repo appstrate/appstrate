@@ -218,6 +218,13 @@ describe("exchangeAuthorizationCode — error classification", () => {
     expect(err).toBeInstanceOf(OAuthCallbackError);
     expect((err as OAuthCallbackError).kind).toBe("transient");
     expect((err as OAuthCallbackError).message).toContain("non-JSON");
+    // Delete-to-fail: without `{ cause }` the message above is all anyone
+    // gets, and an empty 200, a gateway HTML page and truncated JSON are the
+    // same sentence. `response.json()` has consumed the stream by then, so the
+    // `body` parameter built for this cannot be filled in — the SyntaxError is
+    // the only surviving evidence of what the provider actually sent.
+    expect((err as OAuthCallbackError).cause).toBeInstanceOf(SyntaxError);
+    expect((err as OAuthCallbackError).status).toBe(200);
   });
 
   it("does not concatenate the raw IdP error body into the thrown message", async () => {

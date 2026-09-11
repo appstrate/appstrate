@@ -23,7 +23,7 @@
  *     `paths[path][method].responses[status].content["application/json"].schema`.
  */
 
-export type ResponseTypeEntry = {
+type ResponseTypeEntry = {
   /** Named component schema under `components.schemas`. Mutually exclusive with path/method/status. */
   specSchemaName?: string;
   /** Inline response: spec path (e.g. "/api/agents/{scope}/{name}/proxy"). */
@@ -104,14 +104,30 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
   },
   { specSchemaName: "ApiKeyInfo", sharedTypeName: "ApiKeyInfo", description: "ApiKeyInfo" },
   {
-    specSchemaName: "ApplicationObject",
-    sharedTypeName: "ApplicationInfo",
-    description: "ApplicationObject ↔ ApplicationInfo",
+    specSchemaName: "SpaceObject",
+    sharedTypeName: "SpaceInfo",
+    description: "SpaceObject ↔ SpaceInfo",
   },
   {
-    specSchemaName: "ApplicationPackage",
+    specSchemaName: "SpaceMemberObject",
+    sharedTypeName: "SpaceMember",
+    description: "SpaceMemberObject ↔ SpaceMember",
+  },
+  {
+    specSchemaName: "SpacePackage",
     sharedTypeName: "InstalledPackage",
-    description: "ApplicationPackage ↔ InstalledPackage",
+    description: "SpacePackage ↔ InstalledPackage",
+  },
+  // Inline run-config response — the CLI's only source for the per-space model /
+  // generation / proxy / version pin / stored input layer. Unregistered, the
+  // shared-type was free to mark `generation` and `input` optional while the
+  // spec required them, which is exactly the drift this step exists to catch.
+  {
+    path: "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config",
+    method: "get",
+    status: "200",
+    sharedTypeName: "ResolvedRunConfig",
+    description: "GET .../run-config 200 ↔ ResolvedRunConfig",
   },
   {
     specSchemaName: "IntegrationPin",
@@ -157,6 +173,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "OrgInvitationInfo ↔ OrgInvitation",
   },
   {
+    specSchemaName: "SpaceAssignment",
+    sharedTypeName: "SpaceAssignment",
+    description: "SpaceAssignment ↔ SpaceAssignment (org_invitations.space_assignments entry)",
+  },
+  {
     specSchemaName: "OrgMember",
     sharedTypeName: "OrganizationMember",
     description: "OrgMember ↔ OrganizationMember",
@@ -192,10 +213,20 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // at runtime), no hand-written shared-type.
   AgentManifest: "AFPS manifest standard; validated by AJV, not a shared-type",
   AgentSkillRef: "AFPS dependency sub-object embedded in AgentDetail.dependencies",
+  AgentInputSettings:
+    "Request+response body of PUT /agents/{scope}/{name}/input-settings; the SPA reads the same two fields off AgentDetail.input, which IS registered",
   FileConstraintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   UIHintsMap: "AFPS schema-wrapper sub-schema (structural map)",
   // Error + auth/credential wire with no SPA shared-type consumer.
   ProblemDetail: "RFC 9457 error envelope; never read through a shared-type",
+  RoleObject:
+    "space-role listing wire (presets from code + `space_roles` rows projected onto one shape); the roles page consumes the generated spec type",
+  RoleVocabularyGroup:
+    "permission-picker payload derived from the live catalog (`spaceLevelVocabulary`); no persisted row and no shared-type",
+  SpaceMemberAssignment:
+    "bare write acknowledgement of POST/PATCH /spaces/{id}/members echoing the assignment; the page re-reads SpaceMemberObject, which IS registered",
+  SpaceMemberRemoval:
+    "single-field acknowledgement of DELETE /spaces/{id}/members/{userId}; the page re-reads SpaceMemberObject, which IS registered",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
   ModelGenerationSettings:
     "embedded request/response value object; canonical runtime type lives in @appstrate/core",
@@ -228,6 +259,21 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
+  // @appstrate/module-ee billing wire DTOs. The module keeps a Drizzle schema
+  // of its own (packages/module-ee/drizzle/schema.ts), so none of these has a
+  // shared-type in this repo at all; the dashboard consumes the generated spec
+  // type.
+  EeBillingAccount: "module-ee billing wire DTO; the row lives in a table of the module's own",
+  EeBillingPlan: "module-ee plan catalog wire DTO, built from `config.ts`; no persisted row",
+  EeBillingUpgradePlan:
+    "module-ee EeBillingPlan narrowed to the plans checkout accepts; an allOf intersection, no persisted row",
+  EeCheckoutPlanId:
+    "module-ee checkout plan-id enum shared by the request body and `upgrades[].id`",
+  EeBillingManager:
+    "module-ee billing-manager wire DTO; the row lives in a table of the module's own",
+  EeBillingManagerList: "module-ee list envelope around EeBillingManager",
+  EeBillingContact:
+    "module-ee billing-contact wire DTO; the row lives in a table of the module's own",
   // File-explorer wire DTOs. Derived from ZIP entries, not from any table, so
   // there is no Drizzle shared-type to compare against; the canonical TS shape
   // lives in apps/api/src/services/package-files.ts and the SPA reads the
@@ -241,6 +287,14 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
  * or inline `path`. Each listed field is a deliberate, reviewed exception:
  * the shared-type marks it required but the spec intentionally leaves it
  * optional. Keep every entry justified with a comment.
+ *
+ * This register and {@link KNOWN_REVERSE_DRIFT} are both checked for LIVENESS
+ * on every run: a key that resolves to no `responseTypeRegistry` entry, and a
+ * field that suppressed no finding, each fail verify-openapi. An entry whose
+ * drift is gone stops recording a divergence and starts pre-approving whatever
+ * lands at that name next — the same argument `GRANDFATHERED` makes in
+ * `scripts/verify-no-migration-dml.ts`, applied one notch tighter because these
+ * two describe files that are still edited.
  */
 export const KNOWN_DRIFT: Record<string, string[]> = {
   // OrganizationMember requires `orgId`, but the OrgMember response schema does
@@ -248,3 +302,30 @@ export const KNOWN_DRIFT: Record<string, string[]> = {
   // resource / the route's :orgId path param.
   OrgMember: ["orgId"],
 };
+
+/**
+ * The mirror register: fields the spec marks **required** while the shared-type
+ * marks them **optional**, keyed the same way as {@link KNOWN_DRIFT}.
+ *
+ * This direction is harmless on the wire — the server sends the field either
+ * way — which is why it went unnoticed for so long. It is not harmless in the
+ * type, because an optional member is a standing invitation to write a
+ * `?? fallback` branch for a case the server cannot produce. `ResolvedRunConfig`
+ * carried exactly that: `generation?` and `input?` annotated "Optional for
+ * compatibility with older servers", against a spec that required both and a
+ * CLI that has no version negotiation to make the tolerance mean anything.
+ *
+ * An entry here is one of exactly two things, and it must say which:
+ *   1. a legitimate asymmetry — a consumer is RIGHT to treat a guaranteed field
+ *      as absent-able, for a stated structural reason; or
+ *   2. a real finding this PR did not fix, with the fix named and the reason it
+ *      was deferred.
+ * Recording (2) as if it were (1) would make this register the same kind of
+ * inaccurate claim the check exists to catch, so the distinction is the point.
+ *
+ * A field the type does not declare at all is not drift and needs no entry: the
+ * check fires only on a member the type says may be absent — `x?: T` or
+ * `x: T | undefined`, which it reads as the same fact. A `| null` member is not
+ * one of those: it guarantees the key and only permits an empty value.
+ */
+export const KNOWN_REVERSE_DRIFT: Record<string, string[]> = {};

@@ -8,7 +8,7 @@
  * `oidc_pending_client` cookie. A signed cookie proves the SERVER minted the
  * value, but not that it belongs to THIS transaction: the caller fully
  * controls whether their browser presents it (strip it → the resolver sees
- * "no OIDC flow" and mints a full `platform`-realm user for an application
+ * "no OIDC flow" and mints a full `platform`-realm user for a space
  * signup), and the single global cookie at `Path=/` is clobbered by a
  * concurrent flow in a second tab. The fix is to derive the client from a
  * binding keyed by the transaction identifier that Better Auth itself
@@ -20,13 +20,12 @@
  *      At the callback, `parseState()` consumes that row (single-use,
  *      10-min TTL, cookie double-check) and publishes the parsed data in
  *      BA's request-scoped OAuth state (`getOAuthState()` from
- *      `better-auth/api`, verified in better-auth 1.7.0-beta.4:
- *      `dist/oauth2/state.mjs` line 49 `setOAuthState(parsedData)`;
- *      `dist/api/to-auth-endpoints.mjs` line 189 wraps every endpoint in
- *      `runWithRequestState`). When the transaction's `callbackURL` resumes
- *      our OAuth authorize endpoint, its `client_id` is the client this
- *      social sign-in was initiated for — the browser cannot rewrite it
- *      after initiation.
+ *      `better-auth/api`: `setOAuthState(parsedData)` in
+ *      `dist/oauth2/state.mjs`, set inside the `runWithRequestState` scope
+ *      that `dist/api/to-auth-endpoints.mjs` wraps every endpoint in). When
+ *      the transaction's `callbackURL` resumes our OAuth authorize endpoint,
+ *      its `client_id` is the client this social sign-in was initiated for —
+ *      the browser cannot rewrite it after initiation.
  *
  *   2. Magic-link verify (`/magic-link/verify`): the emailed link's
  *      single-use `token` is the transaction identifier. At issuance time
@@ -85,18 +84,18 @@ const MAGIC_LINK_BINDING_PREFIX = "oidc-pending-client:";
 /**
  * Magic-link tokens live 15 minutes (`expiresIn` in `packages/db/src/auth.ts`).
  * The binding must strictly outlive the token so a still-valid link can never
- * dangle without its binding (which would downgrade an application signup to
+ * dangle without its binding (which would downgrade a space signup to
  * the cookie fallback).
  */
 const MAGIC_LINK_BINDING_TTL_MS = 16 * 60 * 1000;
 
-export interface TransactionContext {
+interface TransactionContext {
   headers: Headers | null;
   path?: string | null;
   query?: Record<string, unknown> | null;
 }
 
-export type PendingClientBinding =
+type PendingClientBinding =
   | { kind: "bound"; clientId: string; source: "oauth-state" | "magic-link" | "cookie" }
   | { kind: "invalid" }
   | { kind: "none" };
@@ -131,12 +130,13 @@ export async function resolvePendingClientBinding(
   if (token) {
     const boundClientId = await findMagicLinkClientBinding(token);
     if (boundClientId) return { kind: "bound", clientId: boundClientId, source: "magic-link" };
-    // No server-side binding: either a direct (non-OIDC) call against BA's
-    // public `/sign-in/magic-link` endpoint, or a link issued before this
-    // mechanism deployed (links live ≤15 min). Fall through to the cookie
-    // so in-flight links keep working across a deploy; a stripped cookie
-    // then resolves to `none` — the same posture a direct BA magic-link
-    // signup legitimately gets (platform rules + platform signup gates).
+    // No server-side binding → a direct (non-OIDC) call against BA's public
+    // `/sign-in/magic-link` endpoint. Do NOT fall back to the ambient cookie,
+    // for the same reason the social leg above does not: a concurrent OIDC tab
+    // must not leak its client into this unrelated transaction. Platform rules
+    // + platform signup gates, which is what a direct BA magic-link signup
+    // legitimately gets.
+    return { kind: "none" };
   }
 
   // ── 3. Cookie: authoritative on the server-driven register path (re-minted
@@ -164,7 +164,7 @@ async function readOAuthCallbackState(): Promise<{ callbackURL: string } | null>
   }
 }
 
-export type CallbackURLAnalysis =
+type CallbackURLAnalysis =
   { kind: "oidc"; clientId: string } | { kind: "invalid" } | { kind: "not-oidc" };
 
 /**

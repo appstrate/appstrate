@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import js from "@eslint/js";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
@@ -19,6 +21,218 @@ const API_BARREL_BAN = {
   message:
     "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
 };
+// Every TypeScript file in the repo, minus the top-level `ignores` block below
+// (`**/dist`, `**/node_modules`, `.claude/`, the generated OpenAPI types).
+//
+// This is deliberately a SUPERSET, not a roster. The roster it replaces —
+// `**/src/**`, `**/test/**`, `**/scripts/**`, `e2e/**`, `runtime-pi/**`, `*.ts`
+// — read as exhaustive and was not: five tracked `.ts` files matched none of
+// its six globs, so `eslint .` reported nothing about them and only naming one
+// explicitly revealed `File ignored because no matching configuration was
+// supplied`. They were not marginal files — `apps/web/vite.config.ts` builds
+// the SPA that ships in the Docker image, `packages/afps-runtime/bin/afps.ts`
+// is a manifest `bin` entry, `packages/db/drizzle.config.ts` drives
+// `db:generate`, and `examples/custom-skill/skill.ts` is published example
+// code. A directory roster cannot survive the next config file somebody drops
+// at a workspace root; a superset can.
+//
+// The two blocks that use it (the general TS config and the Zod 4 guard) held
+// byte-identical copies of that roster, which is the other half of the same
+// problem — widening one and not the other is a silent asymmetry. One constant,
+// no drift.
+//
+// A superset of the working tree is NOT a superset the gate can run on,
+// though, and that is the other half of this change: a `files` glob is matched
+// against whatever `eslint <path>` walks, so `eslint .` under this config also
+// picks up untracked, non-gitignored scratch files. Measured: an untracked
+// `zz-probe/p.ts` holding `export const a: any = 1;` failed `bun run lint` →
+// `bun run check` → `.husky/pre-push`. So the entrypoint is now
+// `scripts/lint.ts`, which hands eslint the `git ls-files` list — the same
+// tracked-content rule `scripts/lint-manifest-casing.ts` and
+// `scripts/verify-compose-defaults.ts` already state. This file stays a
+// superset; the script decides which files it is applied to.
+//
+// `//#lint`'s turbo `inputs` mirror that scope so the CACHE KEY matches it;
+// a file eslint covers but turbo does not hash gets its findings once and then
+// replayed away forever.
+const ALL_TS = ["**/*.{ts,tsx}"];
+
+// The plain-JavaScript half, and it is not hypothetical bookkeeping: measured
+// 2026-08-25, `git ls-files -- '*.js' '*.jsx' '*.mjs' '*.cjs'` returns exactly
+// ONE path — `eslint.config.mjs`, the file that defines every rule this repo
+// gates on — and before the block that uses this glob existed, that file was
+// checked by nothing. `eslint --print-config eslint.config.mjs` reported 358
+// rules, 0 of them enabled, against 451/70 for `apps/api/src/index.ts`.
+//
+// The reason is worth stating because `scripts/lint.ts` used to state the
+// opposite: ESLint's `defaultConfig` gives `.js`/`.mjs`/`.cjs` their globbing
+// and `sourceType`, and ZERO rules. Every rule below is scoped to `ALL_TS`. So
+// "eslint's own defaults cover them" was true about parsing and false about
+// linting, which is the only half a gate cares about.
+const ALL_JS = ["**/*.{js,jsx,mjs,cjs}"];
+
+// Zod 4 string-format bans (single source of truth). Declared here because the
+// CLI and test blocks below re-declare `no-restricted-syntax` for subsets of
+// the same files — flat config replaces (not merges) a rule's options across
+// blocks, so a later block that forgot these would silently switch the Zod
+// guard off for `apps/cli/src/**` and `apps/cli/test/**`.
+const ZOD4_STRING_FORMAT_BANS = [
+  {
+    selector:
+      "CallExpression[callee.property.name='email'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.email() instead of z.string().email().",
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='url'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.url() instead of z.string().url().",
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='uuid'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.uuid() instead of z.string().uuid().",
+  },
+];
+
+// Global-stream capture, banned in CLI tests. Two shapes are matched:
+// assigning over `process.stdout.write` / `process.stderr.write` /
+// `process.exit`, and `spyOn`-ing the two stream writes (which reaches the
+// same global through a different door — the rule would be theatre without
+// it). All three assignment selectors match through casts: the pattern this
+// replaces wrote `(process as unknown as { exit: … }).exit = original`, so
+// anchoring on `left.object.name === 'process'` would miss the exact code that
+// caused the bug. They anchor on a `process` Identifier *descendant* of the
+// assignment target instead, which the cast cannot hide.
+//
+// NOT covered, and deliberately so — each would need a selector broad enough
+// to fire on innocent code, or type information ESLint's AST pass does not
+// have. They are documented so nobody reads a green lint as proof of absence:
+//   - aliasing:            `const p = process; p.stdout.write = fn`
+//   - computed access:     `process["stdout"].write = fn`
+//   - destructuring:       `const { stdout } = process; stdout.write = fn`
+//   - defineProperty:      `Object.defineProperty(process, "exit", …)`
+//   - a cast on the spy target: `spyOn(process.stdout as any, "write")`
+// `spyOn(process, "exit")` is also intentionally allowed: install.test.ts uses
+// it with a `finally` restore for the installer's terminal paths, which is a
+// different problem from capturing output.
+const globalIoBan = (target, selector) => ({
+  selector,
+  message: `CLI tests must not take over the global ${target} (by assignment or \`spyOn\`). \`bun test\` runs every package in one process, so a global capture buffer also collects what other suites, libraries and the runner write — the assertion then fails non-deterministically and names an innocent test (issue #1180). Pass the command an injected CommandIO instead: createMemoryIO() from test/helpers/memory-io.ts.`,
+});
+
+// Message for both halves of the `process.*.write` ban below (stdout and
+// stderr). Declared once so the two selectors can never disagree about what
+// the rule is for.
+const PROCESS_STREAM_MESSAGE =
+  "Write through the command's `CommandIO` (`io.stdout.write` / `io.stderr.write`), never " +
+  "`process.stdout.write` / `process.stderr.write`. The process-global streams are invisible " +
+  "to an injected sink, so the output cannot be asserted on without capturing globals — the " +
+  "coupling issue #1180 is about. If this command genuinely owns a different output contract " +
+  "(a run's passthrough, a pre-sink host command), add it to this block's `ignores` with the " +
+  "reason, next to the ones already there.";
+
+const CLACK_FUNNEL_MESSAGE =
+  "Render through a `lib/ui.ts` wrapper (intro / outro / note / logInfo / logWarn / spinner / withSpinner / select / confirm / askText / cancel / exitWithError), never `clack.*` directly. Only `ui.ts` hands clack an `output`, so a direct call writes to the process-global stdout and is invisible to an injected CommandIO — the coupling issue #1180 is about. `clack.spinner()` additionally leaks its paint interval when the body throws; use `withSpinner`, or `spinner()` + a `finally` for a conditional start.";
+
+// `@clack/prompts` funnel (issue #1180). Every byte the CLI renders through
+// clack must go through a `lib/ui.ts` wrapper, because that is the only layer
+// that hands clack an `output` — the seam a test injects a `CommandIO` into
+// instead of swapping the process-global streams. A direct `clack.note(...)` /
+// `clack.intro(...)` / `clack.log.warn(...)` writes to the real stdout by name
+// and is invisible to any injected sink.
+//
+// The original form of this rule banned `clack.spinner` alone, which was the
+// acute case: a spinner paints from a `setInterval` that only `stop()` clears,
+// so a `start()` whose body throws leaks a writer for the rest of the process —
+// invisible in the shipped CLI (the error exits it), fatal under `bun test`,
+// where one process runs every suite and the frames land in someone else's
+// capture. `withSpinner` owns the start/stop pair. The other 29 call sites had
+// the same destination problem without the leak, and a guard naming one of
+// thirty reads as coverage it does not have.
+//
+// Two selectors: `clack.x(...)` and `clack.log.x(...)` (`clack.log` is a
+// namespace object, so the direct-member selector cannot see through it).
+// `clack.isCancel(...)` is allow-listed — it is a type predicate over a
+// returned symbol, renders nothing, and has no sink to route through.
+// Bare MEMBER REFERENCES (`typeof clack.select`, `deps.note ?? clack.note`)
+// are deliberately out of scope: `commands/install.ts` uses them as the
+// production default of its own prompt-DI seams, and a call through such a
+// local is not a call on `clack`.
+const CLACK_FUNNEL_BANS = [
+  {
+    selector: "CallExpression[callee.object.name='clack']:not([callee.property.name='isCancel'])",
+    message: CLACK_FUNNEL_MESSAGE,
+  },
+  {
+    selector: "CallExpression[callee.object.object.name='clack']",
+    message: CLACK_FUNNEL_MESSAGE,
+  },
+];
+
+// The third door out of the command sink, and the most direct one. `2d71e0297`
+// was titled "put every command's output behind the sink, AND ENFORCE IT" and
+// enforced `console.*` (via no-console) and `clack.*` (above) — leaving the
+// literal `process.stdout.write("…")` a new command could reach for, which
+// passes `bun run check` untouched and is invisible to an injected CommandIO
+// exactly like the other two.
+const PROCESS_STREAM_BANS = [
+  {
+    selector:
+      "CallExpression[callee.property.name='write'][callee.object.object.name='process'][callee.object.property.name='stdout']",
+    message: PROCESS_STREAM_MESSAGE,
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='write'][callee.object.object.name='process'][callee.object.property.name='stderr']",
+    message: PROCESS_STREAM_MESSAGE,
+  },
+];
+
+// Who may call `clack.*` directly. `lib/ui.ts` is the funnel itself;
+// `lib/io.ts` owns `DEFAULT_IO.cancel`, which is wired to `clack.cancel` there
+// on purpose so the dependency arrow stays `ui.ts → io.ts` and never the
+// reverse.
+//
+// `commands/install.ts` is on this list TEMPORARILY: it predates the sink and
+// still carries `deps.select ?? clack.select` prompt-DI seams as the production
+// defaults of its own installer prompts. It comes off the moment those seams
+// are replaced by `lib/ui.ts` wrappers over an injected `CommandIO` — that one
+// change is the whole condition, nothing else about the file matters here.
+const CLACK_FUNNEL_EXEMPT = [
+  "apps/cli/src/lib/ui.ts",
+  "apps/cli/src/lib/io.ts",
+  "apps/cli/src/commands/install.ts",
+];
+
+// Who owns a different output contract than the command sink. This list lives
+// HERE rather than only in `lib/io.ts`'s docstring — a list a linter cannot
+// read is documentation, not a rule. Each entry's reason is spelled out in that
+// docstring: `run.ts` + `run/**` stream a run's own stdout/stderr through,
+// `runner.ts` and `lifecycle.ts` are host-level commands that run before any
+// command sink exists, `install.ts` predates the sink and keeps its own
+// prompt-DI seams, and `cli.ts` is the top-level error handler that must still
+// print when everything else has failed.
+//
+// It is a superset of `CLACK_FUNNEL_EXEMPT` and must not be confused with it:
+// owning your own stream contract says nothing about rendering prompts and
+// spinners outside `lib/ui.ts`, which is why the two config objects below
+// exist.
+const PROCESS_STREAM_EXEMPT = [
+  "apps/cli/src/lib/ui.ts",
+  "apps/cli/src/lib/io.ts",
+  "apps/cli/src/cli.ts",
+  "apps/cli/src/commands/run.ts",
+  "apps/cli/src/commands/run/**/*.ts",
+  "apps/cli/src/commands/runner.ts",
+  "apps/cli/src/commands/lifecycle.ts",
+  "apps/cli/src/commands/install.ts",
+  // `lib/keyring.ts` emits ONE lifetime warning when the OS keyring is
+  // unavailable, from a module with no command context and therefore no sink to
+  // inject. The one exemption the io.ts docstring did not account for; named
+  // here so it is a decision rather than an oversight.
+  "apps/cli/src/lib/keyring.ts",
+];
+
 const AUTH_CLIENT_BAN = {
   // Matches "../lib/auth-client", "../../lib/auth-client" and
   // "@/lib/auth-client". Only hooks/use-auth.ts (the seam) may import it.
@@ -38,8 +252,28 @@ export default tseslint.config(
     ],
   },
   {
+    // The general TS config. `scripts/**/*.ts` and the root-level `*.ts` config
+    // files (knip.config.ts, commitlint.config.ts) are in here deliberately, and
+    // on the SAME rule set as application source rather than a relaxed one:
+    //   - They are ordinary TypeScript run by Bun, not a different dialect, and
+    //     several of them (verify-openapi, detect-breaking-changes,
+    //     check-consumer-versions, verify-module-contract) ARE the CI gates —
+    //     a gate that is itself unchecked is the weakest link in the chain.
+    //   - Before this, `turbo.json` claimed `scripts/**/*.ts` and `knip.config.ts`
+    //     as `//#lint` inputs while eslint answered "File ignored because no
+    //     matching configuration was supplied" for every one of them: the gate
+    //     was honest in intent and inert in fact.
+    //   - `ALL_TS` deliberately DOES pull in nested config files —
+    //     `apps/web/vite.config.ts`, `packages/db/drizzle.config.ts` and the
+    //     rest are the files this widening exists for. What keeps that from
+    //     also meaning "somebody's untracked scratch file" is the entrypoint,
+    //     not this glob: `scripts/lint.ts` runs eslint over `git ls-files`.
+    // Note on `console.*`: `no-console` is NOT set here. It is enabled in its
+    // own block below, over application source only — deliberately not over
+    // `scripts/**` or `**/test/**`, which this block does cover. See that block
+    // for why.
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
+    files: ALL_TS,
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.node,
@@ -49,32 +283,234 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
-      "preserve-caught-error": "off",
+      // `preserve-caught-error`. On, and deliberately so: rethrowing a new
+      // error while dropping the caught one destroys the only record of what
+      // actually failed — the driver's message, the errno, the provider's
+      // response body — and leaves the operator a hand-written summary of a
+      // failure nobody can now inspect. That is precisely the information
+      // PR #1161 (failure legibility) exists to preserve, so the `"off"` this
+      // replaces was undoing a release's worth of work one `catch` at a time,
+      // and was the only rule in this file suppressed without a reason.
+      //
+      // Measured 2026-08-27 at the moment of flipping it on: 20 violations
+      // across `apps/api`, `apps/cli`, `packages/core` and
+      // `packages/module-chat`, all fixed in the same commit — 19 by threading
+      // the caught error through as `cause`, one exempted inline in
+      // `apps/api/src/services/llm-usage-retry.ts` (see the prose there).
+      //
+      // Known limit, so nobody reads a clean run as more than it is: the rule
+      // only inspects `throw new <builtin Error>`. It says nothing about
+      // `throw new ApiError(...)` / `PackageZipError` / `ResolverError` and the
+      // ~27 other custom error classes this repo throws from `catch` blocks.
+      // Re-measured 2026-08-27 with a TypeScript AST walk over `git ls-files`
+      // (not a regex — prettier wraps these across lines): 75 such throws
+      // carried no `cause`, across 31 classes. 13 were fixed in the follow-up,
+      // leaving 62.
+      //
+      // And that limit is NOT closable with a lint rule. The obvious selector
+      // is expressible —
+      //   CatchClause ThrowStatement > NewExpression:not(:has(Property[key.name="cause"]))
+      // — but it fires on all 62, and most of them are correct: they inline
+      // `getErrorMessage(err)` into the message, or log it a line earlier, so
+      // the information IS preserved, just not as a `cause`. Narrowing it to
+      // the sites that lose the error outright needs "the throw expression
+      // does not reference the identifier bound by the enclosing catch", and
+      // esquery cannot compare a value in one node against a binding in an
+      // ancestor — the gap is 62 findings vs the 20 that measurement actually
+      // singles out. The strict alternative, "a bindingless `catch` that
+      // throws", is precise but measures the wrong thing: 21 sites match it and
+      // 19 throw a BUILTIN error, i.e. code this very rule already inspects and
+      // passes. A rule firing 60 times on correct code gets suppressed, and a
+      // suppressed rule is worse than none — so the obligation is carried at
+      // the CLASS instead: every custom error reachable from a `catch` takes an
+      // `options?: ErrorOptions` parameter whose docstring says why, which the
+      // editor shows at the construction site.
+      "preserve-caught-error": "error",
+    },
+  },
+  {
+    // The plain-JS block. See `ALL_JS` above for the measurement that motivates
+    // it: without this object, `eslint.config.mjs` — the source of every rule
+    // in this repo — parsed cleanly under zero rules, so `no-undef`,
+    // `no-unused-vars` and `no-dupe-keys` had nothing to say about the file
+    // that decides what they say about everything else.
+    //
+    // `js.configs.recommended` and nothing more. The TypeScript rules above
+    // cannot apply (no TS parser, and `tseslint.configs.recommended` scopes
+    // itself to TS anyway), and the repo conventions the other blocks enforce
+    // — the `console.*` ban, the Zod 4 form bans, the Pi-SDK import guard —
+    // are all about application source, which is TypeScript here by policy.
+    //
+    // `.jsx` is in the glob although zero tracked files match it today. That is
+    // deliberate: `scripts/lint.ts` hands eslint every tracked `.jsx`, and a
+    // file matched by NO config object is skipped with a warning rather than
+    // linted. Covering the extension means the day one appears it is linted,
+    // not tolerated.
+    extends: [js.configs.recommended],
+    files: ALL_JS,
+    languageOptions: {
+      // `"latest"`, not a pinned year. The value here was copied from the TS
+      // block above, where it is inert — `@typescript-eslint/parser` ignores
+      // `ecmaVersion` and parses whatever TypeScript accepts. Espree does not:
+      // it uses this to decide the DIALECT, so a pinned `2020` reported valid
+      // modern JavaScript as broken syntax. Measured 2026-08-25 by appending
+      // `let zzA; zzA ??= 2;` to this very file:
+      // `665:7  error  Parsing error: Unexpected token =`. Logical assignment
+      // (ES2021), class fields (ES2022) and top-level await would each fail the
+      // gate here with a syntax error rather than a rule finding. `"latest"`
+      // tracks the espree the repo has installed, which is the same thing bun
+      // and every runtime in this repo already accept.
+      ecmaVersion: "latest",
+      globals: globals.node,
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+  },
+  {
+    // `console.*` ban — application source only (CLAUDE.md: "No `console.*`:
+    // use `@appstrate/core/logger`", and in `apps/cli` the `CommandIO` sink in
+    // `src/lib/io.ts`). Until now that rule was enforced by review alone:
+    // `no-console` is not part of `js.configs.recommended` and was set nowhere
+    // in this file, so the convention had no gate behind it.
+    //
+    // Why application source and not everything eslint covers:
+    //   - `scripts/**` (and the root `*.ts` config files) are report-printing
+    //     CLI utilities — `verify-openapi`, `detect-breaking-changes`,
+    //     `setup`, `check-consumer-versions`. Printing a report to the
+    //     developer's terminal IS their output contract; there is no logger to
+    //     route through and no sink to inject. They are covered by the general
+    //     block above for every other rule, and simply not matched here.
+    //   - `**/test/**` prints diagnostics on failure (the OpenAPI response
+    //     validators dump their error list before asserting). A test's console
+    //     line goes to the person reading the failure, not to a log pipeline.
+    //   - `apps/web` and `packages/ui` are in scope: a stray `console.log`
+    //     shipped to the browser bundle is exactly the thing worth catching.
+    //
+    // Two carve-outs inside the scope, both for directories that live under
+    // `src/` but are not source:
+    //   - `src/**/scripts/**` — dev tooling parked beside the module it
+    //     exercises rather than in the root `scripts/` directory
+    //     (`apps/api/src/modules/firecracker/scripts/dev/smoke.ts` prints its
+    //     `==> boot microVM` / `SMOKE PASS` progress). Same class as
+    //     `scripts/**`, same reason, so it gets the same treatment instead of
+    //     20 inline disables.
+    //   - `src/**/test/**` — a module's tests live inside its `src` tree
+    //     (`apps/api/src/modules/*/test/**`), and they are tests like any
+    //     other.
+    //
+    // `runtime-pi/**` (the agent image entrypoint + sidecar) has no `src/`
+    // segment, so it used to match none of the general blocks and was linted
+    // for the Pi-SDK import guard and nothing else — over the credential-proxy
+    // and MITM surface. It is in scope now: the general block above lists it
+    // explicitly, which also gives it the TypeScript parser espree lacks, and
+    // this block covers it for `no-console`. The migration cost was 10
+    // findings, all style, none a defect.
+    files: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}", "runtime-pi/**/*.ts"],
+    ignores: ["**/src/**/scripts/**", "**/src/**/test/**", "runtime-pi/**/test/**"],
+    rules: {
+      "no-console": "error",
     },
   },
   {
     // Zod 4 regression guard: string formats are top-level functions
     // (z.email(), z.url(), z.uuid()) — the Zod 3 method forms are deprecated
     // and must not creep back in.
-    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
+    // Scripts and root config files are in scope too: they parse manifests and
+    // API payloads with Zod like everything else. This block stays ABOVE the
+    // `**/test/**` and `apps/cli/src/**` blocks that re-declare
+    // `no-restricted-syntax`, so those still win (with the bans re-spread) for
+    // the files they cover — including `scripts/test/**`.
+    files: ALL_TS,
+    rules: {
+      "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
+    },
+  },
+  {
+    // Both CLI output guards (issue #1180) — the clack funnel and the
+    // `process.*.write` ban — over every `apps/cli/src` file exempt from
+    // neither.
+    //
+    // They are two config objects rather than one, and the split is the whole
+    // point: in flat config `ignores` removes a file from the ENTIRE config
+    // object, never from a single entry of a single rule. The one object this
+    // replaces carried both bans behind the union of the two exemption lists,
+    // so all nine `process.*.write` carve-outs were exempt from the clack
+    // funnel too — `commands/runner.ts` had its eight direct
+    // `clack.select`/`clack.spinner` calls funnelled through `lib/ui.ts` in
+    // `d67de45ca`, with nothing left to stop them coming back under a green
+    // check.
+    //
+    // Re-declares `no-restricted-syntax` for a subset of the Zod block above,
+    // which fully REPLACES its options here — hence the explicit spread. The
+    // same replacement is why the two objects match DISJOINT file sets: both
+    // set this one rule id, so a file matched by both would keep only the later
+    // object's selectors, which is exactly the hole being closed.
+    files: ["apps/cli/src/**/*.ts"],
+    // Exempt from either ban. `CLACK_FUNNEL_EXEMPT` is a subset of
+    // `PROCESS_STREAM_EXEMPT` today; both are spread so it stays correct if
+    // that ever stops being true, and a duplicated glob costs nothing.
+    ignores: [...CLACK_FUNNEL_EXEMPT, ...PROCESS_STREAM_EXEMPT],
     rules: {
       "no-restricted-syntax": [
         "error",
-        {
-          selector:
-            "CallExpression[callee.property.name='email'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.email() instead of z.string().email().",
-        },
-        {
-          selector:
-            "CallExpression[callee.property.name='url'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.url() instead of z.string().url().",
-        },
-        {
-          selector:
-            "CallExpression[callee.property.name='uuid'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.uuid() instead of z.string().uuid().",
-        },
+        ...ZOD4_STRING_FORMAT_BANS,
+        ...CLACK_FUNNEL_BANS,
+        ...PROCESS_STREAM_BANS,
+      ],
+    },
+  },
+  {
+    // The clack funnel alone, for the files that own their own stream contract
+    // but are not allowed to render prompts and spinners outside `lib/ui.ts`.
+    // Derived from the two lists rather than restated, so an entry added to
+    // either one lands in exactly one of these two objects and cannot fall
+    // through both.
+    files: PROCESS_STREAM_EXEMPT.filter((file) => !CLACK_FUNNEL_EXEMPT.includes(file)),
+    rules: {
+      "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS, ...CLACK_FUNNEL_BANS],
+    },
+  },
+  {
+    // Global-stream capture guard (issue #1180): tests used to assert on output
+    // by swapping the *global* `process.stdout.write` / `process.stderr.write`
+    // / `process.exit` for the duration of a call. The whole repo runs in one
+    // `bun test` process, so that buffer is not owned by the test writing to it
+    // — `expect(captured).toBe("")` was a coin flip that blamed whichever
+    // command happened to be running, and a reader that parses its capture
+    // (the sidecar's JSON log lines) got a hard `SyntaxError` instead.
+    //
+    // Every package, not just `apps/cli`: they share the one process, so a
+    // global capture anywhere is a capture of everything. Inject a sink the
+    // test owns — `createMemoryIO()` (apps/cli/test/helpers/memory-io.ts) for
+    // CLI commands, `_setLogSinkForTesting()` for the sidecar logger.
+    //
+    // This re-declares `no-restricted-syntax` for a subset of the block above,
+    // which fully REPLACES its options here — hence the explicit spread of the
+    // Zod 4 bans, so they keep firing in `**/test/**` too.
+    files: ["**/test/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...ZOD4_STRING_FORMAT_BANS,
+        globalIoBan(
+          "process.stdout.write",
+          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[property.name='stdout'] Identifier[name='process']",
+        ),
+        globalIoBan(
+          "process.stderr.write",
+          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[property.name='stderr'] Identifier[name='process']",
+        ),
+        globalIoBan(
+          "process.exit",
+          "AssignmentExpression > MemberExpression.left[property.name='exit'] Identifier[name='process']",
+        ),
+        globalIoBan(
+          "process.stdout.write",
+          "CallExpression[callee.name='spyOn'][arguments.0.object.name='process'][arguments.0.property.name='stdout'][arguments.1.value='write']",
+        ),
+        globalIoBan(
+          "process.stderr.write",
+          "CallExpression[callee.name='spyOn'][arguments.0.object.name='process'][arguments.0.property.name='stderr'][arguments.1.value='write']",
+        ),
       ],
     },
   },
@@ -139,6 +575,17 @@ export default tseslint.config(
       "packages/runner-pi/src/pi-sdk.ts",
       "apps/cli/src/lib/pi-sdk.ts",
       "runtime-pi/pi-sdk.ts",
+      // Tests may reach the vendor directly. The guard protects the PRODUCTION
+      // import graph — routing a test probe through a barrel instead put the
+      // vendor's 2.1 MB provider catalog on the container's boot path (see the
+      // note in `packages/runner-pi/src/pi-sdk.ts`). `packages/*/test/**` was
+      // never in `files`; only runtime-pi's own tests needed exempting.
+      "runtime-pi/**/test/**/*.ts",
+      // The sidecar image is built from `runtime-pi/sidecar/*.ts` alone, so it
+      // cannot reach the agent's barrel one directory up — it needs its own.
+      // It carries pi-ai to RE-ORIGINATE an aliased run's inference call
+      // against the real backing (`pi-messages-backend.ts`).
+      "runtime-pi/sidecar/pi-sdk.ts",
     ],
     languageOptions: {
       parser: tseslint.parser,
@@ -253,8 +700,9 @@ export default tseslint.config(
   {
     // Type-aware guard (web only): flag `x as T` assertions that don't change
     // the type — these are pure noise that also hide where a value's real type
-    // silently drifted from what the cast claims. Scoped to the SPA so the
-    // type-checked program stays cheap. Only this one type-aware rule is on.
+    // silently drifted from what the cast claims. This rule is web-only because
+    // it is a cast-hygiene rule and the SPA is where the casts are; the backend
+    // gets a different set of type-aware rules in the block below.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: {
@@ -264,6 +712,96 @@ export default tseslint.config(
     },
     rules: {
       "@typescript-eslint/no-unnecessary-type-assertion": "error",
+    },
+  },
+  {
+    // Type-aware async correctness (backend). Three rules, and each one names a
+    // failure this codebase can actually have:
+    //
+    //  - `no-floating-promises`  an un-awaited promise in a run orchestrator is
+    //    a run reported finished before its work is done, and a rejection that
+    //    reaches the process as an unhandled rejection rather than a log line.
+    //  - `no-misused-promises`   an `async` function handed to something that
+    //    expects a void return (Hono middleware, a Redis/BullMQ listener, an
+    //    event handler) has its rejection dropped on the floor by the caller.
+    //  - `await-thenable`        an `await` on a non-promise is almost always a
+    //    missing call or a type that changed under the caller.
+    //
+    // Nothing else in the repo covers this: `bun test` executes tests without
+    // typechecking them, and `tsc` does not model promise handling. The first
+    // run found 18 violations in product code — 14 under `apps/api/src`, 4
+    // under `packages/*/src` — and four were defects rather than style:
+    // `findAvailablePort` returned a port whose probe server was still bound
+    // (the EADDRINUSE-at-sidecar-boot it exists to prevent); `writer.write()`
+    // was un-awaited in core's streaming upload, dropping both backpressure and
+    // the rollback path; core's MCP bun-probe guarded an async pipe write with
+    // a sync `try`; and the local queue's own catch block could take the
+    // process down with an unhandled rejection.
+    //
+    // ─── Scope, and what it costs ────────────────────────────────────────
+    //
+    // `bun scripts/lint.ts`, wall clock, this machine, 2026-09-08. The three
+    // scopes first, cold (`.eslintcache` deleted before every run), 3 runs each:
+    //
+    //                                       cold                    warm
+    //   no type-aware backend rules   23.5 / 23.5 / 24.2 s         ~2.1 s
+    //   + apps/api/src                35.2 / 38.5 / 41.1 s         ~2.1 s
+    //   + packages/*/src (this block) 51.9 / 54.5 / 54.8 s         ~2.1 s
+    //
+    // then re-measured PAIRED — one baseline-config run and one this-config run
+    // back to back, both cold. That is the only comparison that survives a
+    // machine whose background load moved between the table above and these:
+    //
+    //   pair 1   28.7 s  ->  69.2 s
+    //   pair 2   25.4 s  ->  59.0 s
+    //
+    // So: a cold lint costs about 2.3x, +30 to +40 s, and a warm one is
+    // unchanged — `--cache --cache-strategy content` rebuilds the type program
+    // only for the files that actually changed. Cold is CI and a fresh clone;
+    // the pre-push path is warm, and CI's `check` job budget is
+    // `timeout-minutes: 10`.
+    //
+    // `packages/*/src` is in scope rather than `apps/api/src` alone because the
+    // second half of that cost bought four more findings, two of them
+    // unhandled-rejection paths in `@appstrate/core` — which is PUBLISHED, so a
+    // dropped rejection there ships to every consumer. `packages/*/src` is a
+    // discovered superset (a new package is covered the day it lands), not a
+    // roster of the packages that happened to look async today.
+    //
+    // ─── Why test code is excluded ───────────────────────────────────────
+    //
+    // Not a cost decision — `await-thenable` is UNSOUND over `bun:test`.
+    // `bun-types/test.d.ts` declares `rejects: Matchers<unknown>` (line 929)
+    // whose matchers return `void` (`toThrow(expected?: unknown): void`, line
+    // 1415), while at runtime `expect(p).rejects.toThrow()` returns a promise
+    // that MUST be awaited or the assertion floats and the test passes
+    // regardless. Measured 2026-09-08 with the test trees in scope: 77
+    // `await-thenable` hits, 75 of them exactly that shape — every one a
+    // correct `await` the rule would have had us delete.
+    //
+    // The other two rules could run over tests, and were left off: the whole
+    // population there was six `server.stop(true)` / cache-invalidation calls
+    // in `afterAll` teardown, which is not worth a second block whose only
+    // difference is which of the three rules it carries.
+    //
+    // `**/test/**` is the repo's test glob (see the two blocks above);
+    // `**/*.test.ts` catches the one test file that does not live under one —
+    // `packages/core/src/model-generation.test.ts`.
+    //
+    // If this ever needs to get cheaper, narrow `files` before dropping a rule:
+    // the cost is the type program, not the rule count.
+    files: ["apps/api/src/**/*.ts", "packages/*/src/**/*.ts"],
+    ignores: ["**/test/**", "**/*.test.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+      "@typescript-eslint/await-thenable": "error",
     },
   },
   eslintConfigPrettier,

@@ -49,7 +49,7 @@ export function makeRun(overrides: Partial<EnrichedRun> = {}): EnrichedRun {
     started_at: STARTED_AT,
     duration: 4200,
     error: null,
-    document_counts: { input: 2, output: 1 },
+    file_counts: { input: 2, output: 1 },
     proxy_label: "eu-proxy",
     user_name: "Alice",
     package_ephemeral: true,

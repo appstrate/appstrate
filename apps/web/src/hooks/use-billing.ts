@@ -1,124 +1,120 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
-import { ApiError } from "../api/errors";
-import { getCurrentOrgId } from "../stores/org-store";
-import { getCurrentApplicationId } from "../stores/app-store";
-import { useCurrentOrgId } from "./use-org";
-import { billingKeys } from "../lib/query-keys";
-
 /**
- * The `/api/billing/*` routes are contributed at runtime by the private
- * cloud module — they are deliberately ABSENT from the OSS OpenAPI spec
- * (Apache-2.0 core carries no billing vocabulary), so the typed client
- * cannot express them. This file-local fetch mirrors the typed client's
- * middleware (org/app headers, credentials, RFC 9457 → ApiError) and is the
- * single sanctioned untyped call site in the SPA.
+ * Billing hooks, backed by the `/api/billing*` routes `@appstrate/module-ee`
+ * contributes to the platform OpenAPI spec. They are absent from a build that
+ * does not load the module, which is what `features.billing` gates on — the
+ * types are always there, the routes are not.
  */
-async function cloudApi<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const orgId = getCurrentOrgId();
-  if (orgId) headers["X-Org-Id"] = orgId;
-  const applicationId = getCurrentApplicationId();
-  if (applicationId) headers["X-Application-Id"] = applicationId;
 
-  const res = await fetch(`/api${path}`, {
-    ...options,
-    credentials: "include",
-    headers: { ...headers, ...options.headers },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }));
-    if (body.code) {
-      throw new ApiError(
-        body.code,
-        body.detail || `API Error: ${res.status}`,
-        res.status,
-        body.errors,
-        body.requestId,
-      );
-    }
-    throw new Error(body.detail || `API Error: ${res.status}`);
-  }
-  const text = await res.text();
-  return (text ? JSON.parse(text) : undefined) as T;
-}
+import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
+import { $api, type components } from "../api/client";
+import { useOrgOnlyScope } from "./use-org-scope";
 
-export const PLAN_ICONS: Record<string, LucideIcon> = {
+/** One plan of the catalog: price, credit quota, and storage entitlement. */
+export type BillingPlanDetail = components["schemas"]["EeBillingPlan"];
+
+// Keyed on the catalog ids the spec enumerates, not on `string`: a plan added
+// to `EeBillingPlan.id` without an icon or a description key fails to compile
+// here instead of rendering a generic card at runtime.
+export const PLAN_ICONS: Record<BillingPlanDetail["id"], LucideIcon> = {
   free: Sparkles,
   starter: Zap,
   pro: Crown,
 };
 
 /** i18n key suffix for each plan description */
-export const PLAN_DESCRIPTION_KEYS: Record<string, string> = {
+export const PLAN_DESCRIPTION_KEYS: Record<BillingPlanDetail["id"], string> = {
   free: "onboarding.planFreeDescription",
   starter: "onboarding.planStarterDescription",
   pro: "onboarding.planProDescription",
 };
 
-export interface BillingPlan {
-  id: string;
-  name: string;
-}
-
-export interface BillingPlanDetail {
-  id: string;
-  name: string;
-  price: number;
-  credit_quota: number;
-  /**
-   * Durable-document storage the plan grants, in bytes. Optional: a cloud
-   * module older than the release that added it omits the field, and a plan
-   * card must still render — the storage line is dropped rather than showing
-   * "0 B" for a plan that actually grants capacity.
-   */
-  document_storage_bytes?: number;
-}
-
-export interface BillingInfo {
-  plan: BillingPlan;
-  plans: BillingPlanDetail[];
-  usage_percent: number;
-  credits_used: number;
-  credit_quota: number;
-  period_end: string | null;
-  status:
-    "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceling" | "canceled" | "none";
-  upgrades: BillingPlanDetail[];
-}
+/**
+ * A plan id `POST /api/billing/checkout` accepts — a strict subset of the
+ * catalog's, because `free` has no Stripe price. The same component backs the
+ * request body and `upgrades[].id`, so the two cannot drift.
+ */
+export type CheckoutPlanId = components["schemas"]["EeCheckoutPlanId"];
 
 export function useBilling(options?: { enabled?: boolean }) {
-  const orgId = useCurrentOrgId();
-  const enabled = (options?.enabled ?? true) && !!orgId;
-  return useQuery({
-    queryKey: billingKeys.forOrg(orgId),
-    queryFn: () => cloudApi<BillingInfo>("/billing"),
-    enabled,
-    staleTime: 60_000,
-  });
+  const { enabled, header } = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/billing",
+    { params: { header } },
+    { enabled: (options?.enabled ?? true) && enabled, staleTime: 60_000 },
+  );
+}
+
+/** Exact key of {@link useBilling} — what a plan change invalidates. */
+export function useBillingKey() {
+  const { header } = useOrgOnlyScope();
+  return $api.queryOptions("get", "/api/billing", { params: { header } }).queryKey;
 }
 
 export function useCheckout() {
-  return useMutation({
-    mutationFn: async ({ planId, returnUrl }: { planId: string; returnUrl?: string }) => {
-      const res = await cloudApi<{ url: string }>("/billing/checkout", {
-        method: "POST",
-        body: JSON.stringify({ plan_id: planId, ...(returnUrl && { return_url: returnUrl }) }),
-      });
-      return res.url;
-    },
-  });
+  return $api.useMutation("post", "/api/billing/checkout");
+}
+
+export function useChangePlan() {
+  return $api.useMutation("post", "/api/billing/plan");
 }
 
 export function usePortal() {
-  return useMutation({
-    mutationFn: async () => {
-      const res = await cloudApi<{ url: string }>("/billing/portal", {
-        method: "POST",
-      });
-      return res.url;
-    },
-  });
+  return $api.useMutation("post", "/api/billing/portal");
+}
+
+/**
+ * The two admin surfaces below are gated on `billing:manage` — the exact
+ * permission the module's routes require, so a caller who can only READ billing
+ * never fires a request the server would answer with 403.
+ */
+
+/** The org users granted `billing:*` without being owners or admins. */
+export function useBillingManagers(options?: { enabled?: boolean }) {
+  const { enabled, header } = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/billing/managers",
+    { params: { header } },
+    { enabled: (options?.enabled ?? true) && enabled },
+  );
+}
+
+/**
+ * Exact key of {@link useBillingManagers} — the entry a save writes its own
+ * answer into before invalidating, so the list never blinks back to the stale
+ * value between the response and the refetch.
+ */
+export function useBillingManagersKey() {
+  const { header } = useOrgOnlyScope();
+  return $api.queryOptions("get", "/api/billing/managers", { params: { header } }).queryKey;
+}
+
+/** Replace the whole manager set — the route is a `PUT` of the complete list. */
+export function useReplaceBillingManagers() {
+  return $api.useMutation("put", "/api/billing/managers");
+}
+
+/** Where invoices, receipts and payment alerts go. */
+export function useBillingContact(options?: { enabled?: boolean }) {
+  const { enabled, header } = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/billing/contact",
+    { params: { header } },
+    { enabled: (options?.enabled ?? true) && enabled },
+  );
+}
+
+/** Exact key of {@link useBillingContact}, for the same reason. */
+export function useBillingContactKey() {
+  const { header } = useOrgOnlyScope();
+  return $api.queryOptions("get", "/api/billing/contact", { params: { header } }).queryKey;
+}
+
+/** Merge-patch the contact; `billing_email: null` clears it. */
+export function useUpdateBillingContact() {
+  return $api.useMutation("patch", "/api/billing/contact");
 }

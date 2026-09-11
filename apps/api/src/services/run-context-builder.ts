@@ -10,13 +10,13 @@ import {
   listPinnedSlots,
   scopeFromActor,
 } from "./state/package-persistence.ts";
-import { getPackageConfig } from "./application-packages.ts";
+import { getInstalledPackageSettings } from "./space-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
-import { extractManifestSchemas } from "../lib/manifest-utils.ts";
+import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { appendRunLog } from "./state/runs.ts";
 import type { OrgScope } from "../lib/scope.ts";
@@ -86,11 +86,10 @@ export async function buildRunContext(params: {
   runId: string;
   agent: LoadedPackage;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
-  config?: Record<string, unknown>;
   modelId?: string | null;
   /** Persisted agent defaults; undefined asks this service to load them. */
   generationConfig?: ModelGenerationSettings | null;
@@ -143,11 +142,10 @@ export async function buildRunContext(params: {
    */
   droppedIntegrations: DroppedIntegration[];
 }> {
-  const { runId, agent, orgId, applicationId, actor, input, files } = params;
+  const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
-  // Skip getPackageConfig when all values are already provided by the caller (from preflight)
-  const skipConfigFetch =
-    params.config !== undefined &&
+  // Skip getInstalledPackageSettings when all values are already provided by the caller (from preflight)
+  const skipSettingsFetch =
     params.modelId !== undefined &&
     params.proxyId !== undefined &&
     params.generationConfig !== undefined;
@@ -157,7 +155,7 @@ export async function buildRunContext(params: {
   // live credentials). Kicked off FIRST: its inputs are all available at
   // entry and it is the slowest independent chain (storage fetch +
   // credential decrypt + possible OAuth refresh), so it runs concurrently
-  // with the config/checkpoint/bundle and model/proxy resolution below
+  // with the settings/checkpoint/bundle and model/proxy resolution below
   // instead of serializing after them. A per-integration failure does NOT
   // fail the run — "run with what you have" is a supported product mode (the
   // agent-page picker models unconnected integrations explicitly) — but it is
@@ -168,7 +166,7 @@ export async function buildRunContext(params: {
   // from `integrations_configuration[id]` (§4.4).
   const integrationSpawnsPromise = resolveIntegrationSpawns({
     orgId,
-    applicationId,
+    spaceId,
     actor,
     agentManifest: agent.manifest as Record<string, unknown>,
     resolvedConnections: params.resolvedConnections ?? null,
@@ -181,10 +179,10 @@ export async function buildRunContext(params: {
 
   // Step 1: load all independent data in parallel
   const persistenceScope = scopeFromActor(actor);
-  const [configFull, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
+  const [spaceSettings, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
     await Promise.all([
-      skipConfigFetch ? null : getPackageConfig(applicationId, agent.id),
-      getCheckpoint(agent.id, applicationId, persistenceScope),
+      skipSettingsFetch ? null : getInstalledPackageSettings(spaceId, agent.id),
+      getCheckpoint(agent.id, spaceId, persistenceScope),
       buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
       params.overrideVersionLabel
         ? null
@@ -196,16 +194,15 @@ export async function buildRunContext(params: {
       // `## Pinned Slots` section so cross-run state under custom keys is
       // visible to the agent. Honors the documented contract: `pin({key, ...})`
       // with any key produces a slot rendered in this prompt on every run.
-      listPinnedSlots(agent.id, applicationId, persistenceScope),
+      listPinnedSlots(agent.id, spaceId, persistenceScope),
     ]);
 
-  const config = params.config ?? configFull?.config ?? {};
   const agentPackage = agentPackageResult.zip;
   const { bundle } = agentPackageResult;
 
   // Step 2: resolve model and proxy with cascade
-  const effectiveModelId = params.modelId ?? configFull?.modelId ?? null;
-  const effectiveProxyId = params.proxyId ?? configFull?.proxyId ?? null;
+  const effectiveModelId = params.modelId ?? spaceSettings?.modelId ?? null;
+  const effectiveProxyId = params.proxyId ?? spaceSettings?.proxyId ?? null;
 
   const [proxyResult, modelResult] = await Promise.all([
     resolveProxy(orgId, agent.id, effectiveProxyId),
@@ -238,7 +235,7 @@ export async function buildRunContext(params: {
   // otherwise read as "free".
   const modelCost = modelResult.cost ?? null;
   const generationDefaults = reconcileModelGenerationSettings(
-    params.generationConfig ?? configFull?.generationConfig ?? {},
+    params.generationConfig ?? spaceSettings?.generationConfig ?? {},
     modelResult.generation,
   );
   const generationConfig = resolveModelGenerationSettings({
@@ -278,7 +275,6 @@ export async function buildRunContext(params: {
     memories: [],
     ...(previousCheckpoint !== null ? { checkpoint: previousCheckpoint } : {}),
     ...(Object.keys(pinnedSlots).length > 0 ? { pinnedSlots } : {}),
-    config,
     ...(params.traceparent ? { traceparent: params.traceparent } : {}),
   };
 
@@ -287,7 +283,17 @@ export async function buildRunContext(params: {
 
   // AFPS: snake_case. The editor writes `runtime_tools`; reading the wrong key
   // here would silently drop every author's runtime-tool selection.
-  const manifestRuntimeTools = (agent.manifest as { runtime_tools?: unknown }).runtime_tools;
+  //
+  // Read it off the BUNDLE root manifest, not `agent.manifest`: the stored
+  // manifest may name an id the platform no longer builds, and
+  // `buildAgentPackage` strips those on the way into the bundle. That bundle
+  // is the exact byte stream the container loads and gates its tool
+  // registration on, so deriving the plan from the same bytes is what keeps
+  // the platform-side plan and the container-side gate from disagreeing about
+  // which tools the agent has.
+  const bundleRootManifest = bundle.packages.get(bundle.root)?.manifest as
+    { runtime_tools?: unknown } | undefined;
+  const manifestRuntimeTools = bundleRootManifest?.runtime_tools;
   const runtimeTools = Array.isArray(manifestRuntimeTools)
     ? manifestRuntimeTools.filter((t): t is string => typeof t === "string")
     : undefined;
@@ -301,7 +307,7 @@ export async function buildRunContext(params: {
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: agent.prompt,
-    outputSchema: extractManifestSchemas(agent.manifest).output,
+    outputSchema: extractManifestOutputSchema(agent.manifest),
     ...(runtimeTools && runtimeTools.length > 0 ? { runtimeTools } : {}),
     llmConfig: modelResult,
     generationConfig,

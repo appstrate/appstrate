@@ -114,7 +114,7 @@ interface SignJWTArgs {
   asResponse?: boolean;
 }
 
-export interface OidcAuthApi {
+interface OidcAuthApi {
   signInEmail(args: SignInEmailArgs): Promise<Response | unknown>;
   signUpEmail(args: SignUpEmailArgs): Promise<Response | unknown>;
   signInMagicLink(args: SignInMagicLinkArgs): Promise<Response | unknown>;

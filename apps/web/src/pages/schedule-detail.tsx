@@ -29,7 +29,7 @@ import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useAgents } from "../hooks/use-packages";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import {
   ChevronDown,
   Pencil,
@@ -44,7 +44,7 @@ import {
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
@@ -85,7 +85,7 @@ export function ScheduleDetailPage() {
           actions={
             <>
               <LiveScheduleStatusBadge schedule={schedule} />
-              {isAdmin && (
+              {can("schedules:write") && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5">
@@ -102,15 +102,19 @@ export function ScheduleDetailPage() {
                       {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
                       {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onSelect={() => setConfirmOpen(true)}
-                      disabled={deleteSchedule.isPending}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 size={14} />
-                      {t("schedule.delete")}
-                    </DropdownMenuItem>
+                    {can("schedules:delete") && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onSelect={() => setConfirmOpen(true)}
+                          disabled={deleteSchedule.isPending}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 size={14} />
+                          {t("schedule.delete")}
+                        </DropdownMenuItem>
+                      </>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}

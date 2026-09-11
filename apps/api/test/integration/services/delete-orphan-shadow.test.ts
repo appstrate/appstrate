@@ -72,7 +72,7 @@ describe("deleteOrphanShadowPackage", () => {
     const run = await seedRun({
       packageId: shadowId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
 

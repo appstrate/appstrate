@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { $api, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { useCurrentOrgId } from "./use-org";
 
 export type AgentDiagnostics =
@@ -12,7 +12,7 @@ export type AgentDiagnostic = AgentDiagnostics["diagnostics"][number];
 
 export function useAgentDiagnostics(agentPackageId: string | undefined, version?: string) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const path = agentPackageId ? splitPackageRef(agentPackageId) : { scope: "", name: "" };
 
   return useQuery(
@@ -25,11 +25,11 @@ export function useAgentDiagnostics(agentPackageId: string | undefined, version?
           ...(version ? { query: { version } } : {}),
           header: {
             "X-Org-Id": orgId ?? undefined,
-            "X-Application-Id": applicationId ?? undefined,
+            "X-Application-Id": spaceId ?? undefined,
           },
         },
       },
-      { enabled: Boolean(orgId && applicationId && agentPackageId) },
+      { enabled: Boolean(orgId && spaceId && agentPackageId) },
     ),
   );
 }

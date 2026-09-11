@@ -38,6 +38,8 @@ export function useModelColumns({
   onEdit,
   onDelete,
   onSetDefault,
+  canWrite,
+  canDelete,
 }: {
   registry: ProviderRegistryEntry[] | undefined;
   testingIds: ReadonlySet<string>;
@@ -47,6 +49,9 @@ export function useModelColumns({
   onEdit: (m: OrgModelInfo) => void;
   onDelete: (m: OrgModelInfo) => void;
   onSetDefault: (m: OrgModelInfo) => void;
+  /** Resolved once by the page: a row action absent here 403s if clicked. */
+  canWrite: boolean;
+  canDelete: boolean;
 }): DataColumn<OrgModelInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -105,7 +110,7 @@ export function useModelColumns({
     {
       id: "status",
       header: t("models.col.status"),
-      width: "minmax(210px,1fr)",
+      width: "minmax(96px,1fr)",
       tier: 2,
       cell: (m) => (
         <div className="relative z-10 min-w-0">
@@ -135,7 +140,7 @@ export function useModelColumns({
       id: "default",
       header: t("models.col.default"),
       width: "96px",
-      tier: 2,
+      tier: 3,
       cell: (m) =>
         m.is_default ? (
           <Badge variant="success">{t("models.default")}</Badge>
@@ -152,7 +157,7 @@ export function useModelColumns({
         const isTesting = testingIds.has(m.id);
         const isSettingDefault = settingDefaultId === m.id;
         const isCustom = m.source !== "built-in";
-        const canEdit = isCustom && !m.aliased;
+        const canEdit = isCustom && !m.aliased && canWrite;
         return (
           <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
             <TableRowActions
@@ -175,7 +180,7 @@ export function useModelColumns({
                   {t("models.setDefault")}
                 </DropdownMenuItem>
               )}
-              {isCustom && (
+              {isCustom && canDelete && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -205,6 +210,8 @@ export function useCredentialColumns({
   onDelete,
   onRename,
   onConnectOAuth,
+  canWrite,
+  canDelete,
 }: {
   registry: ProviderRegistryEntry[] | undefined;
   testingIds: ReadonlySet<string>;
@@ -214,6 +221,9 @@ export function useCredentialColumns({
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => void;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
+  /** Resolved once by the page: a row action absent here 403s if clicked. */
+  canWrite: boolean;
+  canDelete: boolean;
 }): DataColumn<ModelProviderCredentialInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
   const isOauth = (pk: ModelProviderCredentialInfo) => pk.authMode === "oauth2";
@@ -317,9 +327,9 @@ export function useCredentialColumns({
           <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
             <TableRowActions
               primary={
-                isCustomKey
+                isCustomKey && canWrite
                   ? { label: t("credentials.edit"), onSelect: () => onEdit(pk) }
-                  : canReconnect
+                  : canReconnect && canWrite
                     ? {
                         label: t("credentials.oauth.reconnect"),
                         onSelect: () => onConnectOAuth(pk),
@@ -340,13 +350,15 @@ export function useCredentialColumns({
                   <DropdownMenuSeparator />
                 </>
               )}
-              <DropdownMenuItem
-                onSelect={() => onDelete(pk)}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 />
-                {oauth ? t("credentials.oauth.disconnect") : t("credentials.delete")}
-              </DropdownMenuItem>
+              {canDelete && (
+                <DropdownMenuItem
+                  onSelect={() => onDelete(pk)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 />
+                  {oauth ? t("credentials.oauth.disconnect") : t("credentials.delete")}
+                </DropdownMenuItem>
+              )}
             </TableRowActions>
           </div>
         );

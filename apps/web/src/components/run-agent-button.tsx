@@ -63,7 +63,7 @@ export function RunAgentButton({
   connectionWarning = false,
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
-  const { isMember } = usePermissions();
+  const { can } = usePermissions();
   // The inline run button is an editor affordance: absent a pinned historical
   // version (current/editor view → `version` undefined), it runs the working
   // copy. That intent is made EXPLICIT here as `draft` — the transport hook no
@@ -150,7 +150,7 @@ export function RunAgentButton({
   const isPending = isFetching || runAgent.isPending;
   const isDisabled = disabled || isPending;
 
-  if (!isMember) return null;
+  if (!can("agents:run")) return null;
 
   // Non-blocking warning dot — surfaced when integration connections aren't
   // ready, but the button stays clickable (recovery via MissingConnectionsModal).

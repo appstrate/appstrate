@@ -6,6 +6,7 @@ import { renderRegisterPage } from "../../pages/register.ts";
 import { renderConsentPage } from "../../pages/consent.ts";
 import { renderMagicLinkPage } from "../../pages/magic-link.ts";
 import { renderForgotPasswordPage } from "../../pages/forgot-password.ts";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { renderResetPasswordPage, renderInvalidTokenPage } from "../../pages/reset-password.ts";
 import { PLATFORM_DEFAULT_BRANDING } from "../../services/branding.ts";
 
@@ -301,6 +302,21 @@ describe("renderResetPasswordPage", () => {
     expect(out).toContain('name="password_confirm"');
     expect(out).toContain('name="token" value="tok_reset_abc"');
     expect(out).toContain('name="_csrf" value="tok_test"');
+  });
+
+  // Both password inputs, not just the first: the confirm field had the min
+  // and neither had the max, and a form whose two fields disagree about the
+  // bound refuses the paste the user just made in the other one.
+  it("stamps both bounds onto both password inputs", () => {
+    const out = renderResetPasswordPage({
+      ...DEFAULT_PROPS,
+      queryString: "?client_id=c1",
+      token: "tok",
+    }).value;
+    const min = (out.match(new RegExp(`minlength="${MIN_PASSWORD_LENGTH}"`, "g")) ?? []).length;
+    const max = (out.match(new RegExp(`maxlength="${MAX_PASSWORD_LENGTH}"`, "g")) ?? []).length;
+    expect(min).toBe(2);
+    expect(max).toBe(2);
   });
 
   it("escapes tokens that contain HTML-unsafe characters", () => {

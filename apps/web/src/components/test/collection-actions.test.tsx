@@ -5,7 +5,7 @@ import { isValidElement, type ComponentProps, type ReactNode } from "react";
 import type { DataColumn } from "../data-table.tsx";
 import { TableRowActions } from "../table-row-actions.tsx";
 import { useDocumentColumns } from "../document-columns.tsx";
-import type { DocumentDto } from "../../hooks/use-documents.ts";
+import type { FileDto } from "../../hooks/use-files.ts";
 import type { IntegrationSummaryWire } from "../../hooks/use-integrations.ts";
 import { documents, integrations } from "../../lab/fixtures.ts";
 import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
@@ -37,8 +37,8 @@ function actionCell<T>(columns: DataColumn<T>[], row: T) {
 }
 
 describe("document row capabilities", () => {
-  const editable = documents.data.find((document) => document.id === "doc_lab_1") as DocumentDto;
-  const restricted = documents.data.find((document) => document.id === "doc_lab_4") as DocumentDto;
+  const editable = documents.data.find((document) => document.id === "doc_lab_1") as FileDto;
+  const restricted = documents.data.find((document) => document.id === "doc_lab_4") as FileDto;
 
   it("keeps Download direct and secondary deeds in the menu", () => {
     let downloaded = "";

@@ -2,7 +2,9 @@
 
 /**
  * `appstrate openapi` — explore the active profile's OpenAPI schema
- * without piping the full spec (~191 endpoints) through stdout.
+ * without piping the full spec through stdout — ~290 endpoints today
+ * (`bun run verify:openapi` prints the live count; the number here is only an
+ * order of magnitude).
  *
  * Three subcommands:
  *
@@ -35,6 +37,7 @@
 import { Command } from "commander";
 import { resolveProfileName, readConfig } from "../lib/config.ts";
 import { formatError } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { fetchOpenApi, type OpenApiDocument } from "../lib/openapi-cache.ts";
 import {
   collectOperations,
@@ -47,13 +50,13 @@ import {
 import { writeFile } from "node:fs/promises";
 import SwaggerParser from "@apidevtools/swagger-parser";
 
-export interface OpenapiCommandBaseOptions {
+interface OpenapiCommandBaseOptions {
   profile?: string;
   noCache?: boolean;
   refresh?: boolean;
 }
 
-export interface OpenapiListOptions extends OpenapiCommandBaseOptions {
+interface OpenapiListOptions extends OpenapiCommandBaseOptions {
   tag?: string;
   method?: string;
   path?: string;
@@ -61,11 +64,11 @@ export interface OpenapiListOptions extends OpenapiCommandBaseOptions {
   json?: boolean;
 }
 
-export interface OpenapiShowOptions extends OpenapiCommandBaseOptions {
+interface OpenapiShowOptions extends OpenapiCommandBaseOptions {
   json?: boolean;
 }
 
-export interface OpenapiExportOptions extends OpenapiCommandBaseOptions {
+interface OpenapiExportOptions extends OpenapiCommandBaseOptions {
   output?: string;
 }
 
@@ -95,7 +98,17 @@ function detectColor(): boolean {
   return Boolean(process.stdout.isTTY);
 }
 
-export async function openapiListCommand(opts: OpenapiListOptions): Promise<void> {
+/**
+ * All three subcommands take a trailing `io` defaulting to `DEFAULT_IO`, so
+ * `registerOpenapiCommand` below (and therefore `cli.ts`) needs no change
+ * while tests get a sink they exclusively own — reassigning the global
+ * streams made every `toBe("")` here an assertion about writes from other
+ * suites running in the same `bun test` process (issue #1180).
+ */
+export async function openapiListCommand(
+  opts: OpenapiListOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   try {
     const doc = await loadSchema(opts);
     const entries = collectOperations(doc);
@@ -106,13 +119,13 @@ export async function openapiListCommand(opts: OpenapiListOptions): Promise<void
       search: opts.search,
     });
     if (opts.json) {
-      process.stdout.write(JSON.stringify(toListJson(filtered), null, 2) + "\n");
+      io.stdout.write(JSON.stringify(toListJson(filtered), null, 2) + "\n");
       return;
     }
-    process.stdout.write(formatList(filtered, detectColor()));
+    io.stdout.write(formatList(filtered, detectColor()));
   } catch (err) {
-    process.stderr.write(formatError(err) + "\n");
-    process.exit(1);
+    io.stderr.write(formatError(err) + "\n");
+    io.exit(1);
   }
 }
 
@@ -120,6 +133,7 @@ export async function openapiShowCommand(
   identifier: string,
   pathArg: string | undefined,
   opts: OpenapiShowOptions,
+  io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   try {
     const doc = await loadSchema(opts);
@@ -128,10 +142,10 @@ export async function openapiShowCommand(
       const hint = pathArg
         ? `No operation matches "${identifier} ${pathArg}".`
         : `No operation matches "${identifier}" (tried operationId, then "METHOD /path").`;
-      process.stderr.write(
+      io.stderr.write(
         `${hint}\nTip: run \`appstrate openapi list\` to see available operations.\n`,
       );
-      process.exit(1);
+      io.exit(1);
       return;
     }
     // Dereference $refs so parameter/request/response schemas are
@@ -189,29 +203,32 @@ export async function openapiShowCommand(
           2,
         );
       }
-      process.stdout.write(serialized + "\n");
+      io.stdout.write(serialized + "\n");
       return;
     }
-    process.stdout.write(formatShow(derefEntry, detectColor()));
+    io.stdout.write(formatShow(derefEntry, detectColor()));
   } catch (err) {
-    process.stderr.write(formatError(err) + "\n");
-    process.exit(1);
+    io.stderr.write(formatError(err) + "\n");
+    io.exit(1);
   }
 }
 
-export async function openapiExportCommand(opts: OpenapiExportOptions): Promise<void> {
+export async function openapiExportCommand(
+  opts: OpenapiExportOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   try {
     const doc = await loadSchema(opts);
     const payload = JSON.stringify(doc, null, 2);
     if (opts.output) {
       await writeFile(opts.output, payload + "\n", { mode: 0o600 });
-      process.stderr.write(`Wrote ${payload.length} bytes to ${opts.output}\n`);
+      io.stderr.write(`Wrote ${payload.length} bytes to ${opts.output}\n`);
       return;
     }
-    process.stdout.write(payload + "\n");
+    io.stdout.write(payload + "\n");
   } catch (err) {
-    process.stderr.write(formatError(err) + "\n");
-    process.exit(1);
+    io.stderr.write(formatError(err) + "\n");
+    io.exit(1);
   }
 }
 

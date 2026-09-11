@@ -41,7 +41,7 @@ async function createSkill(client: ApiClient, id: string): Promise<void> {
       display_name: "Dep Skill",
       description: "Dependency skill for the #666 resolution e2e.",
     },
-    content: "---\nname: dep-skill\n---\n\nSkill body.",
+    content: "---\nname: dep-skill\ndescription: A dep skill.\n---\n\nSkill body.",
   });
   if (res.status() !== 201 && res.status() !== 200) {
     throw new Error(`Create skill failed (${res.status()}): ${await res.text()}`);

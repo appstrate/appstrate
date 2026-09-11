@@ -18,6 +18,12 @@
 
 // --- values ---
 export { Type } from "@earendil-works/pi-ai";
+// No test-only re-export here either. The one that stood here claimed it
+// "costs nothing in the image" because `pi-ai/compat` was already in the
+// entrypoint's bundle graph through the runner's barrel — which was only true
+// BECAUSE that barrel carried the same test-only re-export. Both are gone; the
+// test imports `@earendil-works/pi-ai/compat` directly, which the supply-chain
+// guard now exempts for `runtime-pi/**/test/**`.
 
 // --- types ---
 export type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";

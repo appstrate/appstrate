@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { organizationMembers, orgInvitations, user } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  organizationMembers,
+  orgInvitations,
+  user,
+  spaceMembers,
+} from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -11,7 +17,10 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedInvitation } from "../../helpers/seed.ts";
+import { getAuth } from "@appstrate/db/auth";
+import { db } from "@appstrate/db/client";
+import { updateInvitation } from "../../../src/services/invitations.ts";
+import { seedInvitation, seedSpace } from "../../helpers/seed.ts";
 import { assertDbHas, assertDbCount, getDbRow } from "../../helpers/assertions.ts";
 
 const app = getTestApp();
@@ -22,6 +31,51 @@ describe("Invitations API", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "inviteorg" });
+  });
+
+  it("accepts the assignments and role current when the token is claimed", async () => {
+    const member = await createTestUser();
+    const privateSpace = await seedSpace({ orgId: ctx.orgId, name: "Removed assignment" });
+    const inv = await seedInvitation({
+      orgId: ctx.orgId,
+      email: member.email,
+      invitedBy: ctx.user.id,
+      role: "guest",
+      spaceAssignments: [{ space_id: privateSpace.id, preset_role: "admin" }],
+    });
+    const api: { getSession: (context: { headers: Headers }) => Promise<unknown> } = getAuth().api;
+    const getSession = api.getSession;
+    // The route has read the invitation when it authenticates. Commit the edit
+    // here, before its claim, without timing sleeps or mocked authorization.
+    const sessionRead = spyOn(api, "getSession").mockImplementationOnce(async (...args) => {
+      await updateInvitation(inv.id, ctx.orgId, { role: "member", spaceAssignments: [] });
+      return getSession(...args);
+    });
+    try {
+      const res = await app.request(`/invite/${inv.token}/accept`, {
+        method: "POST",
+        headers: { Cookie: member.cookie },
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ role: "member" });
+      const memberships = await db
+        .select()
+        .from(spaceMembers)
+        .where(eq(spaceMembers.userId, member.id));
+      expect(memberships).toHaveLength(0);
+      const orgMember = await getDbRow(
+        organizationMembers,
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, member.id))!,
+      );
+      expect(orgMember.role).toBe("member");
+      const audit = await getDbRow(
+        auditEvents,
+        and(eq(auditEvents.action, "org.invitation_accepted"), eq(auditEvents.resourceId, inv.id))!,
+      );
+      expect(audit.after).toMatchObject({ role: "member", space_assignments: [] });
+    } finally {
+      sessionRead.mockRestore();
+    }
   });
 
   describe("GET /invite/:token/info (public)", () => {
@@ -108,8 +162,24 @@ describe("Invitations API", () => {
       );
       const row = await getDbRow(orgInvitations, eq(orgInvitations.id, inv.id));
       expect(row?.status).toBe("accepted");
-      expect(row?.acceptedBy).toBe(member.id);
-      expect(row?.acceptedAt).not.toBeNull();
+
+      // Acceptance ATTRIBUTION lives in the audit log, not on the row: the
+      // `accepted_by` / `accepted_at` columns were dropped in migration 0055
+      // on the stated grounds that "who accepted it and when is in the audit
+      // log, which outlives the row" (`schema/organizations.ts`,
+      // `services/invitations.ts`). Nothing asserted that substitute, and for
+      // a while nothing wrote it either — the sibling invitation mutations all
+      // record one. This is the assertion that keeps the claim true.
+      const audit = await getDbRow(
+        auditEvents,
+        and(eq(auditEvents.action, "org.invitation_accepted"), eq(auditEvents.resourceId, inv.id))!,
+      );
+      expect(audit.orgId).toBe(ctx.orgId);
+      expect(audit.resourceType).toBe("invitation");
+      expect(audit.actorType).toBe("user");
+      expect(audit.actorId).toBe(member.id); // WHO
+      expect(audit.createdAt).toBeInstanceOf(Date); // WHEN
+      expect(audit.after).toMatchObject({ email: "existing@test.com", role: "admin" });
     });
 
     it("marks the invitation accepted (and rejects a second accept with 410)", async () => {
@@ -156,13 +226,13 @@ describe("Invitations API", () => {
     it("is idempotent when the user is already a member (keeps their existing role)", async () => {
       const member = await createTestUser({ email: "idempotent@test.com" });
 
-      // Pre-add the user as viewer (simulates double-click / race), then invite
+      // Pre-add the user as guest (simulates double-click / race), then invite
       // them as admin. Accepting must NOT silently downgrade or upgrade an
       // existing membership — the safe default is to keep the current role and
       // simply consume the invitation. (Re-inviting an existing member at a new
       // role is intentionally a no-op on the role to avoid an owner being
-      // demoted by a stray viewer invite.)
-      await addOrgMember(ctx.orgId, member.id, "viewer");
+      // demoted by a stray guest invite.)
+      await addOrgMember(ctx.orgId, member.id, "guest");
 
       const inv = await seedInvitation({
         orgId: ctx.orgId,
@@ -191,7 +261,7 @@ describe("Invitations API", () => {
         organizationMembers,
         and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, member.id))!,
       );
-      expect(memberRow?.role).toBe("viewer");
+      expect(memberRow?.role).toBe("guest");
       const invRow = await getDbRow(orgInvitations, eq(orgInvitations.id, inv.id));
       expect(invRow?.status).toBe("accepted");
     });

@@ -6,6 +6,7 @@ import { setCookie, deleteCookie } from "hono/cookie";
 import type { AppEnv } from "../../src/types/index.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
+import type { Logger } from "@appstrate/core/logger";
 import { z } from "zod";
 import {
   ApiError,
@@ -339,5 +340,152 @@ describe("errorHandler middleware", () => {
     const header = res.headers.get("Request-Id");
     const body = (await res.json()) as any;
     expect(body.requestId).toBe(header);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The cause chain: it must reach the LOG, and it must not reach the BODY.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface LogLine {
+  level: "debug" | "info" | "warn" | "error";
+  msg: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * A `Logger` that records instead of writing.
+ *
+ * Injected via `errorHandler`'s third parameter rather than captured off
+ * `process.stdout`: `bun test` runs every package in one process, so a global
+ * capture buffer also collects what other suites write and fails
+ * non-deterministically (issue #1180, enforced by `no-restricted-syntax`).
+ */
+function recordingLogger(): { lines: LogLine[]; logger: Logger } {
+  const lines: LogLine[] = [];
+  const at =
+    (level: LogLine["level"]) =>
+    (msg: string, data?: Record<string, unknown>): void => {
+      lines.push({ level, msg, data: data ?? {} });
+    };
+  return {
+    lines,
+    logger: { debug: at("debug"), info: at("info"), warn: at("warn"), error: at("error") },
+  };
+}
+
+/** An app whose error handler writes into `sink` instead of stdout. */
+function createAppWithLogger(sink: Logger) {
+  const app = new Hono<AppEnv>();
+  app.onError((err, c) => errorHandler(err, c, sink));
+  app.use("*", requestId());
+  return app;
+}
+
+describe("errorHandler cause chain", () => {
+  it("puts the whole chain in the log and none of it in the response body", async () => {
+    // Delete-to-fail: swap `formatErrorChain(err)` back to `err.message` in the
+    // handler and the first assertion fails. `.stack` does not rescue it —
+    // V8 builds it at construction and never walks `cause`
+    // (packages/core/test/errors.test.ts asserts that directly).
+    const { lines, logger: sink } = recordingLogger();
+    const app = createAppWithLogger(sink);
+    app.get("/test", () => {
+      throw new Error("Could not import the package", {
+        cause: new Error("Failed to decompress ZIP artifact", {
+          cause: new Error("CAUSE_SENTINEL_23505"),
+        }),
+      });
+    });
+
+    const res = await app.request("/test");
+    const bodyText = await res.text();
+
+    const line = lines.find((l) => l.msg === "Unhandled error");
+    expect(line).toBeDefined();
+    expect(line!.level).toBe("error");
+    expect(line!.data.error).toBe(
+      "Could not import the package: Failed to decompress ZIP artifact: CAUSE_SENTINEL_23505",
+    );
+    expect(typeof line!.data.requestId).toBe("string");
+
+    // The control, and the half that is a security property rather than a
+    // convenience: a `cause` routinely holds SQL constraint names and upstream
+    // URLs, and the RFC 9457 body is a public contract.
+    expect(res.status).toBe(500);
+    expect(bodyText).not.toContain("CAUSE_SENTINEL_23505");
+    expect(bodyText).not.toContain("Failed to decompress");
+    expect((JSON.parse(bodyText) as { detail: string }).detail).toBe("An internal error occurred");
+  });
+
+  it("logs an ApiError's cause without putting it in the problem body", async () => {
+    // An ApiError is returned to the client verbatim and never reached the log
+    // at all, so a cause threaded onto one had nowhere to go.
+    const { lines, logger: sink } = recordingLogger();
+    const app = createAppWithLogger(sink);
+    app.get("/test", () => {
+      throw new ApiError({
+        status: 400,
+        code: "delete_failed",
+        title: "Bad Request",
+        detail: "Failed to delete organization",
+        cause: new Error("APIERROR_CAUSE_SENTINEL"),
+      });
+    });
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(400);
+    const bodyText = await res.text();
+
+    const line = lines.find((l) => l.msg === "Request failed");
+    expect(line).toBeDefined();
+    // Error level even though the client sees a 400: the cause is only there
+    // because the server caught something it did not expect.
+    expect(line!.level).toBe("error");
+    expect(line!.data.error).toBe("Failed to delete organization: APIERROR_CAUSE_SENTINEL");
+    expect(line!.data.code).toBe("delete_failed");
+    expect(line!.data.status).toBe(400);
+
+    expect(bodyText).not.toContain("APIERROR_CAUSE_SENTINEL");
+    expect((JSON.parse(bodyText) as { detail: string }).detail).toBe(
+      "Failed to delete organization",
+    );
+  });
+
+  it("emits no log line for an ApiError with no cause", async () => {
+    // Delete-to-fail: drop the `err.cause !== undefined` guard and every
+    // routine 404 starts writing a line. Cheapness on the happy path is the
+    // point — that path is most of the traffic.
+    const { lines, logger: sink } = recordingLogger();
+    const app = createAppWithLogger(sink);
+    app.get("/test", () => {
+      throw notFound("Agent not found");
+    });
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(404);
+    expect(lines).toHaveLength(0);
+  });
+
+  it("terminates on a cyclic cause chain", async () => {
+    // Delete-to-fail: with the cycle guard removed this never returns and the
+    // suite times out. The production symptom is a wedged request worker, not
+    // a malformed log line.
+    const a = new Error("cycle-a");
+    const b = new Error("cycle-b", { cause: a });
+    (a as { cause?: unknown }).cause = b;
+
+    const { lines, logger: sink } = recordingLogger();
+    const app = createAppWithLogger(sink);
+    app.get("/test", () => {
+      throw b;
+    });
+
+    const res = await app.request("/test");
+    expect(res.status).toBe(500);
+    await res.text();
+    expect(lines.find((l) => l.msg === "Unhandled error")!.data.error).toBe(
+      "cycle-b: cycle-a: [circular cause]",
+    );
   });
 });

@@ -5,7 +5,7 @@
  *
  * Polymorphic across two client types:
  *   - `dashboard`: org-scoped OAuth client for dashboard users (org operators)
- *   - `end_user`: application-scoped OAuth client for app end-users
+ *   - `end_user`: space-scoped OAuth client for space end-users
  *
  * The admin CRUD uses `z.discriminatedUnion("clientType", …)` for creation
  * so the request body is statically typed on the discriminant. The
@@ -23,16 +23,19 @@ import { rateLimit, rateLimitByIp } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
 import { requireModulePermission, requireCorePermission } from "@appstrate/core/permissions";
 import { notFound, invalidRequest, forbidden } from "../../lib/errors.ts";
-import { readJsonBody } from "../../lib/request-body.ts";
+import { spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { db } from "@appstrate/db/client";
-import { user, applications } from "@appstrate/db/schema";
-import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
-import { resolvePermissions } from "../../lib/permissions.ts";
-import type { OrgRole } from "../../types/index.ts";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+import { user, spaces } from "@appstrate/db/schema";
+import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
+import { callerOrgRole } from "../../lib/view-as.ts";
+import { requireOrgPathMembership } from "../../middleware/org-path-context.ts";
+import { getOrgSettings } from "../../services/organizations.ts";
 import { listSessionsForOrg, revokeFamilyForOrgAdmin } from "./services/cli-tokens.ts";
 import {
   createClient,
@@ -44,12 +47,13 @@ import {
   rotateClientSecret,
   updateClient,
   OAuthAdminValidationError,
-  SIGNUP_ROLE_ALLOWED,
   type OAuthClientRecord,
 } from "./services/oauth-admin.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import {
   OrgSignupClosedError,
+  OrgSignupConfigurationError,
   resolveOrCreateOrgMembership,
 } from "./services/orgmember-mapping.ts";
 import {
@@ -87,9 +91,9 @@ import { getAppstrateScopes } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
   UnverifiedEmailConflictError,
-  AppSignupClosedError,
+  SpaceSignupClosedError,
   resolveOrCreateEndUser,
-  loadAppById,
+  loadSpaceById,
 } from "./services/enduser-mapping.ts";
 import { getEnv } from "@appstrate/env";
 import { renderLoginPage } from "./pages/login.ts";
@@ -112,6 +116,15 @@ import { getAuth } from "@appstrate/db/auth";
 import { oauthClient, deviceCode } from "@appstrate/db/schema";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * What the login and register pages say when the client's signup policy is
+ * misconfigured. The underlying message is English and names internal ids
+ * (`spc_`, `srl_`), so it is logged rather than rendered — an unauthenticated
+ * visitor must not learn an org's space layout from a login form.
+ */
+const SIGNUP_CONFIGURATION_ERROR_FR =
+  "La configuration d'inscription de cette application est invalide. Contactez votre administrateur.";
 
 /**
  * Decide whether a Better Auth-signed `exp` query param (Unix seconds) marks
@@ -137,77 +150,92 @@ const redirectUriSchema = z
   .url("redirectUris must be valid URLs")
   .refine(isValidRedirectUri, "redirectUri scheme or host is not allowed");
 
-const createOrgClientSchema = z.object({
-  level: z.literal("org"),
-  name: z.string().min(1).max(200),
-  redirectUris: z.array(redirectUriSchema).min(1),
-  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
-  scopes: z.array(z.string().min(1)).optional(),
-  referencedOrgId: z.string().min(1),
-  isFirstParty: z.boolean().optional(),
-  allowSignup: z.boolean().optional(),
-  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
-});
+const createOrgClientSchema = z
+  .object({
+    level: z.literal("org"),
+    name: z.string().min(1).max(200),
+    redirectUris: z.array(redirectUriSchema).min(1),
+    postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
+    scopes: z.array(z.string().min(1)).optional(),
+    referencedOrgId: z.string().min(1),
+    isFirstParty: z.boolean().optional(),
+    allowSignup: z.boolean().optional(),
+    signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
+    signupSpaceAssignments: z.array(spaceAssignmentSchema).optional(),
+  })
+  .strict();
 
-const createApplicationClientSchema = z.object({
-  level: z.literal("application"),
-  name: z.string().min(1).max(200),
-  redirectUris: z.array(redirectUriSchema).min(1),
-  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
-  scopes: z.array(z.string().min(1)).optional(),
-  referencedApplicationId: z.string().min(1),
-  isFirstParty: z.boolean().optional(),
-  // Unified signup opt-in. Secure-by-default → when omitted, the service
-  // stores `false` and fresh end-user sign-ins are rejected until the
-  // admin pre-creates them via the headless API.
-  allowSignup: z.boolean().optional(),
-  // Passed through to the service so we can reject it with a clear 400
-  // (signupRole is only meaningful on org-level clients).
-  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
-});
+const createSpaceClientSchema = z
+  .object({
+    level: z.literal("space"),
+    name: z.string().min(1).max(200),
+    redirectUris: z.array(redirectUriSchema).min(1),
+    postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
+    scopes: z.array(z.string().min(1)).optional(),
+    referencedSpaceId: z.string().min(1),
+    isFirstParty: z.boolean().optional(),
+    // Unified signup opt-in. Secure-by-default → when omitted, the service
+    // stores `false` and fresh end-user sign-ins are rejected until the
+    // admin pre-creates them via the headless API.
+    allowSignup: z.boolean().optional(),
+    // Passed through to the service so we can reject it with a clear 400
+    // (signupRole is only meaningful on org-level clients).
+    signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
+    signupSpaceAssignments: z.array(spaceAssignmentSchema).optional(),
+  })
+  .strict();
 
 export const createOAuthClientSchema = z.discriminatedUnion("level", [
   createOrgClientSchema,
-  createApplicationClientSchema,
+  createSpaceClientSchema,
 ]);
 
-export const smtpConfigUpsertSchema = z.object({
-  host: z.string().min(1).max(253),
-  port: z.number().int().min(1).max(65535),
-  username: z.string().min(1).max(320),
-  pass: z.string().min(1).max(1024),
-  fromAddress: z.email(),
-  // Reject CRLF/quotes to prevent email header injection — value is
-  // concatenated into `"${fromName}" <${fromAddress}>` at send time.
-  fromName: z
-    .string()
-    .max(200)
-    .regex(/^[^"\r\n]*$/, "fromName must not contain quotes or line breaks")
-    .optional(),
-  secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
-});
+export const smtpConfigUpsertSchema = z
+  .object({
+    host: z.string().min(1).max(253),
+    port: z.number().int().min(1).max(65535),
+    username: z.string().min(1).max(320),
+    pass: z.string().min(1).max(1024),
+    fromAddress: z.email(),
+    // Reject CRLF/quotes to prevent email header injection — value is
+    // concatenated into `"${fromName}" <${fromAddress}>` at send time.
+    fromName: z
+      .string()
+      .max(200)
+      .regex(/^[^"\r\n]*$/, "fromName must not contain quotes or line breaks")
+      .optional(),
+    secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
+  })
+  .strict();
 
-const smtpConfigTestSchema = z.object({
-  to: z.email(),
-});
+export const smtpConfigTestSchema = z
+  .object({
+    to: z.email(),
+  })
+  .strict();
 
 const socialProviderIdSchema = z.enum(SOCIAL_PROVIDER_IDS);
 
-export const socialProviderUpsertSchema = z.object({
-  clientId: z.string().min(1).max(512),
-  clientSecret: z.string().min(1).max(2048),
-  scopes: z.array(z.string().min(1).max(128)).max(32).optional(),
-});
+export const socialProviderUpsertSchema = z
+  .object({
+    clientId: z.string().min(1).max(512),
+    clientSecret: z.string().min(1).max(2048),
+    scopes: z.array(z.string().min(1).max(128)).max(32).optional(),
+  })
+  .strict();
 
-export const updateOAuthClientSchema = z.object({
-  redirectUris: z.array(redirectUriSchema).min(1).optional(),
-  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
-  scopes: z.array(z.string().min(1)).optional(),
-  disabled: z.boolean().optional(),
-  isFirstParty: z.boolean().optional(),
-  allowSignup: z.boolean().optional(),
-  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
-});
+export const updateOAuthClientSchema = z
+  .object({
+    redirectUris: z.array(redirectUriSchema).min(1).optional(),
+    postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
+    scopes: z.array(z.string().min(1)).optional(),
+    disabled: z.boolean().optional(),
+    isFirstParty: z.boolean().optional(),
+    allowSignup: z.boolean().optional(),
+    signupRole: z.enum(ASSIGNABLE_ORG_ROLES).optional(),
+    signupSpaceAssignments: z.array(spaceAssignmentSchema).optional(),
+  })
+  .strict();
 
 // ─── Shared page context loader ───────────────────────────────────────────────
 
@@ -219,11 +247,11 @@ interface PageContext {
   smtp: ResolvedSmtpConfig | null;
   /**
    * Per-client social-provider availability, passed verbatim to
-   * `renderSocialButtons` on every OIDC page. For `level=application`
-   * clients, reflects `application_social_providers` rows — buttons appear
+   * `renderSocialButtons` on every OIDC page. For `level=space`
+   * clients, reflects `space_social_providers` rows — buttons appear
    * only when the tenant has configured creds for that provider. For
-   * `level=org` / `level=instance`, falls back to env presence (legacy
-   * shared-OAuth-App behavior for non-app clients).
+   * `level=org` / `level=instance`, reflects env presence — those flows
+   * authenticate against the platform's own shared OAuth App.
    */
   socialProviders: { google: boolean; github: boolean };
 }
@@ -263,9 +291,9 @@ async function loadPageContext(
   if (!record || record.disabled) {
     return c.html(
       renderErrorPage({
-        title: "Application introuvable",
+        title: "Espace introuvable",
         message:
-          "L'application associée à ce lien n'existe plus ou a été désactivée. Contactez l'administrateur de l'application.",
+          "L'espace associé à ce lien n'existe plus ou a été désactivé. Contactez l'administrateur de l'espace.",
       }).value,
       404,
     );
@@ -287,21 +315,23 @@ async function loadPageContext(
       );
     }
   }
-  // Resolve SMTP per-client: `level=application` reads `application_smtp_configs`,
-  // `level=org`/`level=instance` falls back to env SMTP. Null → email features
-  // disabled for this flow (no instance fallback for app-level clients).
+  // Resolve SMTP per-client, split by level the same way social providers are
+  // just below: `level=space` reads `space_smtp_configs`, `level=org` /
+  // `level=instance` read the instance config from env. Null → email features
+  // disabled for this flow; a space-level client does NOT fall through to the
+  // instance transport.
   const smtp = await resolveSmtpForClient(record);
   if (opts.requireSmtp && !smtp) {
     return c.html(renderErrorPage(opts.requireSmtp).value, 404);
   }
-  // Per-client social provider availability. Application-level clients read
-  // from `application_social_providers` (tenant-owned OAuth App). Org and
-  // instance clients keep the legacy env-based fallback — the platform's
-  // shared Google/GitHub OAuth App is the appropriate identity issuer for
-  // dashboard / satellite flows.
+  // Per-client social provider availability, split by client level.
+  // Space-level clients read from `space_social_providers` (tenant-owned OAuth
+  // App). Org and instance clients read env presence — the platform's shared
+  // Google/GitHub OAuth App is the appropriate identity issuer for dashboard /
+  // satellite flows.
   let socialGoogle: boolean;
   let socialGithub: boolean;
-  if (record.level === "application") {
+  if (record.level === "space") {
     const [g, gh] = await Promise.all([
       resolveSocialProviderForClient(record, "google"),
       resolveSocialProviderForClient(record, "github"),
@@ -374,8 +404,8 @@ function isInstanceSmtpEnabled(): boolean {
 
 /**
  * Effective "is signup open" flag for a client's entry pages. Unified
- * across all levels (instance / org / application) per `a2aae3af` — aligns
- * with FusionAuth (per-application `registrationConfiguration.enabled`),
+ * across all levels (instance / org / space) per `a2aae3af` — aligns
+ * with FusionAuth (per-space `registrationConfiguration.enabled`),
  * Auth0 (per-connection `disable_signups`), and Okta (policy-bound SSR):
  * when signup is closed the hosted login UI hides the CTA rather than
  * showing it and rejecting at submit.
@@ -398,7 +428,7 @@ function allowSignupForClient(client: { allowSignup: boolean }): boolean {
 function mapLoginErrorCode(code: string): string {
   switch (code) {
     case "signup_disabled":
-      return "L'inscription n'est pas ouverte sur cette application. Contactez un administrateur pour être ajouté à l'organisation.";
+      return "L'inscription n'est pas ouverte sur cet espace. Contactez un administrateur pour être ajouté à l'organisation.";
     case "new_user_signup_disabled":
       return "Aucun compte n'existe pour cette adresse email. Créez un compte ou utilisez un autre fournisseur de connexion.";
     case "email_not_found":
@@ -432,10 +462,13 @@ function stripErrorFromQueryString(search: string): string {
   return kept.length ? `?${kept.join("&")}` : "";
 }
 
-/** Skipping consent is a trust escalation — only admin/owner may set isFirstParty. */
+/**
+ * Skipping consent is a trust escalation — only admin/owner may set
+ * isFirstParty, and under a role preview only if the PREVIEWED role could.
+ */
 function requireAdminForFirstParty(c: Context<AppEnv>, isFirstParty: boolean | undefined) {
   if (isFirstParty) {
-    const orgRole = c.get("orgRole");
+    const orgRole = callerOrgRole(c);
     if (orgRole !== "owner" && orgRole !== "admin") {
       throw forbidden("Only org admins can set isFirstParty");
     }
@@ -470,14 +503,9 @@ export function createOidcRouter() {
           throw forbidden("Dashboard SSO is disabled for this organization");
         }
       } else {
-        // application-level: the application must belong to the caller's org.
-        const [app] = await db
-          .select({ orgId: applications.orgId })
-          .from(applications)
-          .where(eq(applications.id, data.referencedApplicationId))
-          .limit(1);
-        if (!app || app.orgId !== orgId) {
-          throw forbidden("referencedApplicationId must belong to the current organization");
+        // space-level: the space must belong to the caller's org.
+        if (!(await validateSpaceInOrg(data.referencedSpaceId, orgId))) {
+          throw forbidden("referencedSpaceId must belong to the current organization");
         }
       }
 
@@ -493,8 +521,8 @@ export function createOidcRouter() {
     },
   );
 
-  // Combined list: org-level clients for the org + application-level clients
-  // for every app the org owns. The admin UI renders both in one table.
+  // Combined list: org-level clients for the org + space-level clients
+  // for every space the org owns. The admin UI renders both in one table.
   router.get(
     "/api/oauth/clients",
     rateLimit(300),
@@ -502,9 +530,9 @@ export function createOidcRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const appRows = await db
-        .select({ id: applications.id })
-        .from(applications)
-        .where(eq(applications.orgId, orgId));
+        .select({ id: spaces.id })
+        .from(spaces)
+        .where(eq(spaces.orgId, orgId));
       const clients = await listClientsForOrgAndApps(
         orgId,
         appRows.map((a) => a.id),
@@ -610,43 +638,49 @@ export function createOidcRouter() {
     },
   );
 
-  // ── Admin: per-application SMTP configuration ─────────────────────────────
+  // ── Admin: per-space SMTP configuration ─────────────────────────────
   //
-  // Scoped to applications owned by the caller's org. Per-app SMTP replaces
-  // instance-level env SMTP for `level=application` OIDC flows — without a
+  // Scoped to spaces owned by the caller's org. Per-space SMTP replaces
+  // instance-level env SMTP for `level=space` OIDC flows — without a
   // row, verification emails, magic-link, and reset-password are disabled for
-  // that app's clients. See `services/smtp.ts` for the resolver.
+  // that space's clients. See `services/smtp.ts` for the resolver.
 
-  const assertAppBelongsToOrg = async (c: Context<AppEnv>, applicationId: string) => {
-    const orgId = c.get("orgId");
-    const [app] = await db
-      .select({ orgId: applications.orgId })
-      .from(applications)
-      .where(eq(applications.id, applicationId))
-      .limit(1);
-    if (!app || app.orgId !== orgId) throw notFound("Application not found");
+  /**
+   * Resolve `:id` as a space of the caller's org, or refuse.
+   *
+   * Delegates to the canonical `validateSpaceInOrg` rather than repeating its
+   * SELECT: this copy used to run the query with NO id-shape guard, so a
+   * retired `app_` id — the one input `assertSpaceId` exists to diagnose —
+   * answered a generic 404 instead of naming the un-run `app_` → `spc_`
+   * migration. A well-formed `spc_` id that names no row of this org is still
+   * a 404; a malformed id is now a 400, as it is on every other space-scoped
+   * surface.
+   */
+  const assertSpaceBelongsToOrg = async (c: Context<AppEnv>, spaceId: string) => {
+    const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
+    if (!space) throw notFound("Space not found");
   };
 
   router.get(
-    "/api/applications/:id/smtp-config",
+    "/api/spaces/:id/smtp-config",
     rateLimit(300),
-    requireCorePermission("applications", "read"),
+    requireCorePermission("spaces", "read"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
-      const config = await getSmtpConfig(applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
+      const config = await getSmtpConfig(spaceId);
       if (!config) throw notFound("SMTP configuration not found");
       return c.json(config);
     },
   );
 
   router.put(
-    "/api/applications/:id/smtp-config",
+    "/api/spaces/:id/smtp-config",
     rateLimit(20),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const data = await readJsonBody(c, smtpConfigUpsertSchema);
       // SSRF: block configurations that would make Appstrate bounce
       // email traffic off internal metadata endpoints / loopback relays.
@@ -665,34 +699,34 @@ export function createOidcRouter() {
       if (hostCheck.blocked && hostCheck.reason === "blocked-resolved") {
         throw invalidRequest("host resolves to a private/internal network", "host");
       }
-      const saved = await upsertSmtpConfig(applicationId, data);
+      const saved = await upsertSmtpConfig(spaceId, data);
       return c.json(saved);
     },
   );
 
   router.delete(
-    "/api/applications/:id/smtp-config",
+    "/api/spaces/:id/smtp-config",
     rateLimit(10),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
-      const deleted = await deleteSmtpConfig(applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
+      const deleted = await deleteSmtpConfig(spaceId);
       if (!deleted) throw notFound("SMTP configuration not found");
       return c.body(null, 204);
     },
   );
 
   router.post(
-    "/api/applications/:id/smtp-config/test",
+    "/api/spaces/:id/smtp-config/test",
     rateLimit(5),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const data = await readJsonBody(c, smtpConfigTestSchema);
       try {
-        const result = await sendTestEmail(applicationId, data.to);
+        const result = await sendTestEmail(spaceId, data.to);
         return c.json({ ok: true, messageId: result.messageId });
       } catch (err) {
         const message = getErrorMessage(err);
@@ -707,11 +741,11 @@ export function createOidcRouter() {
     },
   );
 
-  // ── Admin: per-application social auth providers ──────────────────────────
+  // ── Admin: per-space social auth providers ──────────────────────────
   //
-  // Scoped to applications owned by the caller's org. Per-app social auth
+  // Scoped to spaces owned by the caller's org. Per-space social auth
   // replaces the instance env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` pair for
-  // `level=application` OIDC flows — without a row for a given provider, that
+  // `level=space` OIDC flows — without a row for a given provider, that
   // provider's button is hidden on the tenant's login/register pages (no
   // fallback to env creds, same rule as SMTP). See `services/social.ts`
   // for the resolver.
@@ -723,42 +757,42 @@ export function createOidcRouter() {
   };
 
   router.get(
-    "/api/applications/:id/social-providers/:provider",
+    "/api/spaces/:id/social-providers/:provider",
     rateLimit(300),
-    requireCorePermission("applications", "read"),
+    requireCorePermission("spaces", "read"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
-      const config = await getSocialProvider(applicationId, provider);
+      const config = await getSocialProvider(spaceId, provider);
       if (!config) throw notFound("Social provider configuration not found");
       return c.json(config);
     },
   );
 
   router.put(
-    "/api/applications/:id/social-providers/:provider",
+    "/api/spaces/:id/social-providers/:provider",
     rateLimit(20),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
       const data = await readJsonBody(c, socialProviderUpsertSchema);
-      const saved = await upsertSocialProvider(applicationId, provider, data);
+      const saved = await upsertSocialProvider(spaceId, provider, data);
       return c.json(saved);
     },
   );
 
   router.delete(
-    "/api/applications/:id/social-providers/:provider",
+    "/api/spaces/:id/social-providers/:provider",
     rateLimit(10),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
-      const deleted = await deleteSocialProvider(applicationId, provider);
+      const deleted = await deleteSocialProvider(spaceId, provider);
       if (!deleted) throw notFound("Social provider configuration not found");
       return c.body(null, 204);
     },
@@ -803,7 +837,7 @@ export function createOidcRouter() {
       missingClientId: {
         title: "Lien de connexion invalide",
         message:
-          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+          "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
       },
     });
     if (page instanceof Response) return page;
@@ -842,7 +876,7 @@ export function createOidcRouter() {
           renderErrorPage({
             title: "Connexion impossible",
             message:
-              "La page de connexion n'a pas pu être rafraîchie. Veuillez relancer la connexion depuis l'application.",
+              "La page de connexion n'a pas pu être rafraîchie. Veuillez relancer la connexion depuis l'espace.",
             branding: ctx.branding,
           }).value,
           400,
@@ -915,7 +949,7 @@ export function createOidcRouter() {
       missingClientId: {
         title: "Lien de connexion invalide",
         message:
-          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+          "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
       },
     });
     if (page instanceof Response) return page;
@@ -1083,12 +1117,21 @@ export function createOidcRouter() {
             {
               allowSignup: ctx.client.allowSignup,
               signupRole: ctx.client.signupRole,
+              signupSpaceAssignments: ctx.client.signupSpaceAssignments,
             },
           );
         } catch (err) {
+          if (err instanceof OrgSignupConfigurationError) {
+            logger.warn("oidc: org signup configuration invalid", {
+              clientId: ctx.client.clientId,
+              orgId: ctx.client.referencedOrgId,
+              reason: err.message,
+            });
+            return renderError(SIGNUP_CONFIGURATION_ERROR_FR, 403, email);
+          }
           if (err instanceof OrgSignupClosedError) {
             return renderError(
-              "Ce compte n'est pas membre de l'organisation et l'inscription n'est pas ouverte sur cette application. Contactez votre administrateur.",
+              "Ce compte n'est pas membre de l'organisation et l'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur.",
               403,
               email,
             );
@@ -1098,13 +1141,14 @@ export function createOidcRouter() {
       }
     }
 
-    // For application-level clients: proactively resolve-or-create the
+    // For space-level clients: proactively resolve-or-create the
     // end-user row so `UnverifiedEmailConflictError` surfaces as a 409 here
     // rather than as an opaque 500 three redirects deep at token-mint time.
     // Org-level clients skip this — they don't create end_users rows.
     //
     // INTENTIONAL DOUBLE CALL: `resolveOrCreateEndUser` is also invoked
-    // later during token minting in `auth/plugins.ts` (customAccessTokenClaims).
+    // later during token minting by the access-token claim extension in
+    // `auth/plugins.ts`.
     // This is safe by design — the function is idempotent and race-safe:
     // step 1 is a SELECT-only `findLinkedEndUser` lookup that returns the
     // existing row without side effects, so the second call is a no-op for
@@ -1113,10 +1157,10 @@ export function createOidcRouter() {
     //
     // WARNING: if future changes add observable side effects to
     // `resolveOrCreateEndUser` (events, webhooks, audit logs), they will
-    // fire TWICE for application-level logins. Gate any such side effect
+    // fire TWICE for space-level logins. Gate any such side effect
     // on a "newly created" flag returned from the function, or move the
     // proactive check to a side-effect-free probe.
-    if (ctx.client.level === "application" && ctx.client.referencedApplicationId) {
+    if (ctx.client.level === "space" && ctx.client.referencedSpaceId) {
       const [authUserRow] = await db
         .select({
           id: user.id,
@@ -1128,8 +1172,8 @@ export function createOidcRouter() {
         .where(eq(user.email, email))
         .limit(1);
       if (authUserRow) {
-        const app = await loadAppById(ctx.client.referencedApplicationId);
-        if (app) {
+        const space = await loadSpaceById(ctx.client.referencedSpaceId);
+        if (space) {
           try {
             await resolveOrCreateEndUser(
               {
@@ -1138,7 +1182,7 @@ export function createOidcRouter() {
                 name: authUserRow.name ?? null,
                 emailVerified: authUserRow.emailVerified === true,
               },
-              app,
+              space,
               { allowSignup: ctx.client.allowSignup },
             );
           } catch (err) {
@@ -1149,9 +1193,9 @@ export function createOidcRouter() {
                 email,
               );
             }
-            if (err instanceof AppSignupClosedError) {
+            if (err instanceof SpaceSignupClosedError) {
               return renderError(
-                "L'inscription automatique est désactivée pour cette application. Contactez votre administrateur pour qu'il crée votre compte avant votre connexion.",
+                "L'inscription automatique est désactivée pour cet espace. Contactez votre administrateur pour qu'il crée votre compte avant votre connexion.",
                 403,
                 email,
               );
@@ -1180,7 +1224,7 @@ export function createOidcRouter() {
       missingClientId: {
         title: "Lien d'inscription invalide",
         message:
-          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+          "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
       },
     });
     if (page instanceof Response) return page;
@@ -1191,7 +1235,7 @@ export function createOidcRouter() {
         renderErrorPage({
           title: "Inscription fermée",
           message:
-            "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur pour obtenir un accès.",
+            "L'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur pour obtenir un accès.",
           branding: ctx.branding,
         }).value,
         403,
@@ -1219,7 +1263,7 @@ export function createOidcRouter() {
       missingClientId: {
         title: "Lien d'inscription invalide",
         message:
-          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+          "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
       },
     });
     if (page instanceof Response) return page;
@@ -1234,7 +1278,7 @@ export function createOidcRouter() {
         renderErrorPage({
           title: "Inscription fermée",
           message:
-            "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur pour obtenir un accès.",
+            "L'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur pour obtenir un accès.",
           branding: ctx.branding,
         }).value,
         403,
@@ -1279,9 +1323,26 @@ export function createOidcRouter() {
     if (!name || !email || !password) {
       return renderRegError("Tous les champs sont requis.", 400, email ?? undefined, name);
     }
-    if (password.length < 8) {
+    // Same constants `pages/register.ts` stamps into this form's `minlength=` /
+    // `maxlength=`. Both halves of one page read one number: the attribute that
+    // TELLS the user and the branch that ENFORCES it
+    // (`@appstrate/db/password-policy`).
+    if (password.length < MIN_PASSWORD_LENGTH) {
       return renderRegError(
-        "Le mot de passe doit contenir au moins 8 caractères.",
+        `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`,
+        400,
+        email,
+        name,
+      );
+    }
+    // The maximum needs its own branch for the same reason the minimum does:
+    // `maxlength=` is client-side only (a scripted POST bypasses it), and
+    // Better Auth refuses an over-length password without saying so — the
+    // signup below would surface as this page's generic failure instead of the
+    // one sentence that names the bound.
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      return renderRegError(
+        `Le mot de passe ne doit pas dépasser ${MAX_PASSWORD_LENGTH} caractères.`,
         400,
         email,
         name,
@@ -1299,9 +1360,9 @@ export function createOidcRouter() {
     let authResponse: Response;
     try {
       // Wrap the BA call in the per-client SMTP override so every OIDC flow
-      // — application, org, instance — routes its outbound mail through the
+      // — space, org, instance — routes its outbound mail through the
       // same resolver-provided transport. `ctx.smtp` is the resolver's
-      // answer (per-app row for app-level clients, env SMTP for org/instance,
+      // answer (per-space row for space-level clients, env SMTP for org/instance,
       // null when nothing is configured) and supersedes the boot-time
       // transport captured in `@appstrate/db/auth`.
       // CRIT-15: bind the realm resolution + signup guard to the OAuth
@@ -1309,7 +1370,7 @@ export function createOidcRouter() {
       // browser-supplied `oidc_pending_client` cookie. `signUpEmail` triggers
       // `databaseHooks.user.create.before`, where the realm resolver reads the
       // pending client from these headers; a caller who strips or overwrites
-      // their own cookie could otherwise force an application flow to mint a
+      // their own cookie could otherwise force a space flow to mint a
       // full `platform`-realm user. Re-deriving the cookie here makes that
       // impossible for the email-register create path.
       const baHeaders = headersWithAuthoritativePendingClient(
@@ -1366,7 +1427,7 @@ export function createOidcRouter() {
 
     const cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
 
-    // Application-level client with no per-app SMTP, but instance SMTP IS
+    // Space-level client with no per-space SMTP, but instance SMTP IS
     // configured → Better Auth wired `requireEmailVerification=true` +
     // `sendOnSignUp=true` at boot, so the `signUpEmail` call above already
     // dispatched a verification email via the instance transport and withheld
@@ -1378,11 +1439,11 @@ export function createOidcRouter() {
     // auto-link by verified email, `adoptEndUserByEmail` end-user takeover,
     // etc.). Only a real, delivered-and-confirmed verification may flip that
     // flag; leave it false. The verification email was genuinely sent, so
-    // surface the same branded "check your email" interstitial as the per-app
+    // surface the same branded "check your email" interstitial as the per-space
     // SMTP path below — the link resumes the OAuth flow via the pinned
     // `callbackURL`.
     if (
-      ctx.client.level === "application" &&
+      ctx.client.level === "space" &&
       !ctx.features.smtp &&
       cookieCount === 0 &&
       isInstanceSmtpEnabled()
@@ -1415,9 +1476,18 @@ export function createOidcRouter() {
             {
               allowSignup: ctx.client.allowSignup,
               signupRole: ctx.client.signupRole,
+              signupSpaceAssignments: ctx.client.signupSpaceAssignments,
             },
           );
         } catch (err) {
+          if (err instanceof OrgSignupConfigurationError) {
+            logger.warn("oidc: org signup configuration invalid", {
+              clientId: ctx.client.clientId,
+              orgId: ctx.client.referencedOrgId,
+              reason: err.message,
+            });
+            return renderRegError(SIGNUP_CONFIGURATION_ERROR_FR, 403, email, name);
+          }
           if (err instanceof OrgSignupClosedError) {
             // Should not happen — the GET + POST guards checked already.
             logger.warn("oidc: signup closed after signUpEmail succeeded", {
@@ -1425,7 +1495,7 @@ export function createOidcRouter() {
               orgId: ctx.client.referencedOrgId,
             });
             return renderRegError(
-              "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur.",
+              "L'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur.",
               403,
               email,
               name,
@@ -1474,7 +1544,7 @@ export function createOidcRouter() {
   const MAGIC_LINK_MISSING_CLIENT = {
     title: "Lien de connexion invalide",
     message:
-      "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+      "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
   };
 
   router.get("/api/oauth/magic-link", rateLimitByIp(60), async (c) => {
@@ -1486,7 +1556,7 @@ export function createOidcRouter() {
     const { url, ctx } = page;
     // The pending cookie pins the client_id so the BA `beforeSignup` guard
     // (`oidcBeforeSignupGuard`) applies the org-level signup policy at
-    // verify time: creation is allowed for instance/app clients and for
+    // verify time: creation is allowed for instance/space clients and for
     // org-level clients with `allowSignup: true`, and blocked otherwise.
     issuePendingClientCookie(c, ctx.client.clientId);
     const body = renderMagicLinkPage({
@@ -1596,7 +1666,7 @@ export function createOidcRouter() {
   // param — we parse it defensively and fall back to platform defaults on
   // any error. The confirm page is a short transitional surface; a missing
   // brand is acceptable (the user is about to land on the authorize /
-  // application redirect anyway).
+  // space redirect anyway).
 
   async function resolveConfirmBranding(
     callbackURL: string | null,
@@ -1729,7 +1799,7 @@ export function createOidcRouter() {
   };
   const FORGOT_PASSWORD_MISSING_CLIENT = {
     title: "Lien invalide",
-    message: "L'identifiant de l'application est manquant.",
+    message: "L'identifiant de l'espace est manquant.",
   };
 
   router.get("/api/oauth/forgot-password", rateLimitByIp(60), async (c) => {
@@ -1827,7 +1897,7 @@ export function createOidcRouter() {
   };
   const RESET_PASSWORD_MISSING_CLIENT = {
     title: "Lien invalide",
-    message: "L'identifiant de l'application est manquant.",
+    message: "L'identifiant de l'espace est manquant.",
   };
 
   router.get("/api/oauth/reset-password", rateLimitByIp(60), async (c) => {
@@ -1911,8 +1981,25 @@ export function createOidcRouter() {
         status,
       );
 
-    if (password.length < 8) {
-      return renderFormError("Le mot de passe doit contenir au moins 8 caractères.", 400);
+    // Same constants `pages/reset-password.ts` stamps into this form's
+    // `minlength=` / `maxlength=` — see the register handler above for why both
+    // halves of a page have to read the one number.
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return renderFormError(
+        `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`,
+        400,
+      );
+    }
+    // Load-bearing beyond stating the bound: the `!resetResponse.ok` branch
+    // below renders `renderInvalidTokenPage` for EVERY Better Auth refusal, so
+    // an over-length password told the user "this link is invalid or has
+    // expired" and their still-valid reset token looked burned. Refusing here
+    // keeps the token, the form and its error together.
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      return renderFormError(
+        `Le mot de passe ne doit pas dépasser ${MAX_PASSWORD_LENGTH} caractères.`,
+        400,
+      );
     }
     if (password !== passwordConfirm) {
       return renderFormError("Les deux mots de passe ne correspondent pas.", 400);
@@ -1961,7 +2048,7 @@ export function createOidcRouter() {
   const CONSENT_MISSING_CLIENT = {
     title: "Page d'autorisation invalide",
     message:
-      "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+      "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
   };
 
   router.get("/api/oauth/consent", rateLimitByIp(60), async (c) => {
@@ -2098,7 +2185,7 @@ export function createOidcRouter() {
   //   5. `POST /activate/deny`         → symmetric deny.
   //
   // Branding is always the platform default — device flow is instance-
-  // level (the `appstrate-cli` client); application-level device flows are
+  // level (the `appstrate-cli` client); space-level device flows are
   // out of scope for v0.
 
   // Device-flow approve/deny: tightest limit in the OIDC surface because
@@ -2295,7 +2382,7 @@ export function createOidcRouter() {
           branding: PLATFORM_DEFAULT_BRANDING,
           outcome: "denied",
           error:
-            "L'autorisation a échoué. Le code a peut-être expiré, été déjà utilisé ou votre compte n'est pas autorisé pour cette application.",
+            "L'autorisation a échoué. Le code a peut-être expiré, été déjà utilisé ou votre compte n'est pas autorisé pour cet espace.",
         }).value,
         400,
       );
@@ -2487,19 +2574,21 @@ export function createOidcRouter() {
   // `/api/orgs/*` so the X-Org-Id header is unnecessary — the orgId path
   // param IS the org context.
   //
-  // Authorization is the standard module RBAC contract: `ensureOrgMembership`
-  // resolves the caller's role from `org_members`, populates
-  // `c.var.permissions` via `resolvePermissions(role)`, and then
-  // `requireModulePermission("cli-sessions", "read"|"delete")` enforces
-  // membership in that Set — same fail-closed primitive as every other
-  // module-owned route in the file. The `cli-sessions` resource is
-  // declared by the OIDC module's `permissionsContribution()` and granted
-  // to `owner`/`admin` only.
+  // Authorization is the standard module RBAC contract, and this module
+  // derives NONE of it. `orgPathContext` (`middleware/org-path-context.ts`) is
+  // mounted once at the app root for the whole `/api/orgs/:orgId*` family and
+  // has already written `orgRole` / `permissions` — ceiling-applied, so a
+  // scoped credential keeps its scope. `requireOrgPathMembership` turns
+  // non-membership into this family's 403, and
+  // `requireModulePermission("cli-sessions", "read"|"delete")` enforces the
+  // string — same fail-closed primitive as every other module-owned route in
+  // the file. The `cli-sessions` resource is declared by the OIDC module's
+  // `permissionsContribution()` and granted to `owner`/`admin` only.
 
   router.get(
     "/api/orgs/:orgId/cli-sessions",
     rateLimit(120),
-    ensureOrgMembership(),
+    requireOrgPathMembership,
     requireModulePermission("cli-sessions", "read"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
@@ -2511,7 +2600,7 @@ export function createOidcRouter() {
   router.delete(
     "/api/orgs/:orgId/cli-sessions/:familyId",
     rateLimit(30),
-    ensureOrgMembership(),
+    requireOrgPathMembership,
     requireModulePermission("cli-sessions", "delete"),
     async (c) => {
       const orgId = c.req.param("orgId")!;
@@ -2536,35 +2625,6 @@ export function createOidcRouter() {
   );
 
   return router;
-}
-
-/**
- * Resolve the caller's membership in `:orgId` from the path param, then
- * stamp `orgId` / `orgRole` / `permissions` on the Hono context so the
- * standard `requireModulePermission` / `requireCorePermission` guards
- * downstream see a fully-populated authz state. Used by org-scoped
- * module routes mounted directly under `/api/orgs/:orgId/...` — those
- * paths skip core's `requireOrgContext` middleware (per `skipOrgContext`
- * in `auth-pipeline.ts`) because the org id lives in the URL, not in
- * the `X-Org-Id` header.
- *
- * Throws 403 when the caller is not a member of the org. Does NOT
- * itself enforce a role floor — that is the responsibility of the
- * `requireModulePermission(...)` guard chained after it.
- */
-function ensureOrgMembership() {
-  return async (c: Context<AppEnv>, next: () => Promise<void>) => {
-    const orgId = c.req.param("orgId");
-    if (!orgId) throw notFound("orgId path param required");
-    const userId = c.get("user").id;
-    const member = await getOrgMember(orgId, userId);
-    if (!member) throw forbidden("Not a member of this organization");
-    const role = member.role as OrgRole;
-    c.set("orgId", orgId);
-    c.set("orgRole", role);
-    c.set("permissions", resolvePermissions(role));
-    return next();
-  };
 }
 
 function prefersHtml(acceptHeader: string | undefined | null): boolean {

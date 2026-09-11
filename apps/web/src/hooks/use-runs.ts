@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { runsKeys, runKeys } from "../lib/query-keys";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
@@ -16,11 +16,11 @@ type RunLogEntry = components["schemas"]["RunLog"];
 
 export function useRuns(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync patches this cache
     // in place (setQueryData) on SSE run_update events.
-    queryKey: runsKeys.forAgent(orgId, applicationId, packageId),
+    queryKey: runsKeys.forAgent(orgId, spaceId, packageId),
     queryFn: async (): Promise<EnrichedRun[]> => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
@@ -28,17 +28,17 @@ export function useRuns(packageId: string | undefined) {
       });
       return data?.data ?? [];
     },
-    enabled: !!packageId && !!applicationId,
+    enabled: !!packageId && !!spaceId,
   });
 }
 
 export function useRun(runId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync and run-detail patch
     // this cache in place (setQueryData) on SSE events.
-    queryKey: runKeys.detail(orgId, applicationId, runId),
+    queryKey: runKeys.detail(orgId, spaceId, runId),
     queryFn: async (): Promise<EnrichedRun> => {
       const { data } = await client.GET("/api/runs/{id}", {
         params: { path: { id: runId! } },
@@ -46,17 +46,17 @@ export function useRun(runId: string | undefined) {
       // Non-2xx throws via the client middleware, so `data` is defined here.
       return data!;
     },
-    enabled: !!runId && !!applicationId,
+    enabled: !!runId && !!spaceId,
   });
 }
 
 export function useRunLogs(runId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Key pinned to the legacy shape: run-detail appends live SSE log frames
     // into this cache (setQueryData).
-    queryKey: runKeys.logs(orgId, applicationId, runId),
+    queryKey: runKeys.logs(orgId, spaceId, runId),
     // The endpoint pages at 1000 rows (ASC by id) and signals continuation
     // via the envelope's `hasMore` + a `since=<lastId>` cursor. Page through
     // until exhausted so runs longer than one page keep their tail (final
@@ -77,6 +77,6 @@ export function useRunLogs(runId: string | undefined) {
       }
       return logs;
     },
-    enabled: !!runId && !!applicationId,
+    enabled: !!runId && !!spaceId,
   });
 }

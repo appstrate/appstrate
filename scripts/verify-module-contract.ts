@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Verify the module contract (`@appstrate/core/module`) stays minimal — no
  * dead members, no single-owner business extension points smuggled into a
@@ -43,9 +45,9 @@
  * consumer repo over the GitHub API, so it also works where the sibling repos
  * are not checked out) and the module loader's boot gate at runtime (#973).
  *
- * Private repos absent in CI (cloud) never cause failure: the ledger records
- * their expected ownership, and the scanner only *adds* drift when a present
- * module declares a member the ledger did not expect.
+ * A module root absent from the checkout never causes failure: the ledger
+ * records its expected ownership, and the scanner only *adds* drift when a
+ * present module declares a member the ledger did not expect.
  *
  * Override via env: `MODULE_CONTRACT_POLICY=warn|fail|off` — a dev/CI knob on
  * THIS script, not to be confused with the runtime boot gate
@@ -60,15 +62,16 @@ import type {
 } from "@appstrate/core/module";
 import { Glob } from "bun";
 import { resolve, dirname } from "node:path";
+import { readGatePolicy } from "./lib/policy-env.ts";
 
 // Default-secure (`fail`). The `MODULE_CONTRACT_POLICY` downgrade exists for
 // local iteration only — under CI it is ignored so a green pipeline can never
-// be bought with `MODULE_CONTRACT_POLICY=off`.
-const POLICY = process.env.CI
-  ? "fail"
-  : ((process.env.MODULE_CONTRACT_POLICY ?? "fail") as "warn" | "fail" | "off");
+// be bought with `MODULE_CONTRACT_POLICY=off`. `readGatePolicy` additionally
+// REJECTS an unrecognised value instead of casting it: the exit at the bottom
+// of this file is `problems.length > 0 && POLICY === "fail"`, so a typo used to
+// print every finding and still exit 0.
+const POLICY = readGatePolicy("MODULE_CONTRACT_POLICY");
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
-const WORKSPACE = resolve(ROOT, "..");
 
 /**
  * The ONLY members allowed to carry `kind: "lifecycle"` (universal plumbing,
@@ -94,7 +97,7 @@ type EventMember = keyof ModuleEvents;
 /** Capabilities the platform injects — what a module CONSUMES, not declares. */
 type ServiceMember = keyof PlatformServices;
 
-type Tenant = "oss" | "cloud";
+type Tenant = "oss" | "ee";
 type Classification = "extension" | "seam" | "lifecycle";
 
 interface LedgerEntry {
@@ -128,29 +131,48 @@ const MODULE_TENANT: Record<string, Tenant> = {
   "module-claude-code": "oss",
   "module-chat": "oss",
   "module-observability": "oss",
-  cloud: "cloud",
+  "module-ee": "ee",
 };
 
 /**
  * Module source roots to scan. A module's contract members are frequently
- * split across files (cloud declares `openApiPaths` in `openapi.ts`, oidc
+ * split across files (module-ee declares `openApiPaths` in `openapi.ts`, oidc
  * declares `events`/`hooks` in sub-modules re-exported into the literal), so
- * we scan the whole tree, not just `index.ts`. Paths relative to the
- * workspace root; absent roots (private repos in CI) are skipped silently.
+ * we scan the whole tree, not just `index.ts`. Paths are relative to the
+ * repository root — every module now lives in it — and an absent root is
+ * skipped silently.
  */
 const DECLARER_ROOTS: Record<string, string> = {
-  oidc: "appstrate/apps/api/src/modules/oidc",
-  webhooks: "appstrate/apps/api/src/modules/webhooks",
-  mcp: "appstrate/apps/api/src/modules/mcp",
-  "core-providers": "appstrate/apps/api/src/modules/core-providers",
-  firecracker: "appstrate/apps/api/src/modules/firecracker",
-  "agent-map": "appstrate/apps/api/src/modules/agent-map",
-  "module-codex": "appstrate/packages/module-codex/src",
-  "module-claude-code": "appstrate/packages/module-claude-code/src",
-  "module-chat": "appstrate/packages/module-chat/src",
-  "module-observability": "appstrate/packages/module-observability/src",
-  cloud: "cloud/src",
+  oidc: "apps/api/src/modules/oidc",
+  webhooks: "apps/api/src/modules/webhooks",
+  mcp: "apps/api/src/modules/mcp",
+  "core-providers": "apps/api/src/modules/core-providers",
+  firecracker: "apps/api/src/modules/firecracker",
+  "module-codex": "packages/module-codex/src",
+  "module-claude-code": "packages/module-claude-code/src",
+  "module-chat": "packages/module-chat/src",
+  "module-observability": "packages/module-observability/src",
+  "module-ee": "packages/module-ee/src",
+  "agent-map": "apps/api/src/modules/agent-map",
 };
+
+// The two module tables are one roster written twice, and the compiler cannot
+// tie them: `Record<string, …>` accepts any key. A module present in one and
+// absent from the other reads as a clean run — an owner missing from
+// DECLARER_ROOTS is never scanned, and one missing from MODULE_TENANT is
+// classified by whatever the lookup falls back to.
+{
+  const roots = Object.keys(DECLARER_ROOTS).sort();
+  const tenants = Object.keys(MODULE_TENANT).sort();
+  if (roots.join() !== tenants.join()) {
+    throw new Error(
+      `MODULE_TENANT and DECLARER_ROOTS name different modules: ` +
+        `only in MODULE_TENANT [${tenants.filter((m) => !roots.includes(m)).join(", ")}], ` +
+        `only in DECLARER_ROOTS [${roots.filter((m) => !tenants.includes(m)).join(", ")}]. ` +
+        `Every known module belongs in both.`,
+    );
+  }
+}
 
 const LEDGER: Record<ContractMember, LedgerEntry> = {
   // ── lifecycle — exempt ──────────────────────────────────────────────────
@@ -159,22 +181,24 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   // ── extension — generic, must have >= 2 owners ──────────────────────────
   createRouter: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-chat", "agent-map"],
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat", "agent-map"],
   },
-  publicPaths: { kind: "extension", owners: ["oidc", "cloud"] },
+  publicPaths: { kind: "extension", owners: ["oidc", "mcp", "module-ee"] },
   permissionsContribution: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-chat"],
-    justification: "RBAC — the open-core boundary; cloud cannot migrate it into core (#488).",
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+    justification: "RBAC — the open-core boundary; module-ee cannot migrate it into core (#488).",
   },
   hooks: {
     kind: "extension",
-    owners: ["oidc", "cloud", "module-codex", "module-claude-code"],
+    owners: ["oidc", "module-ee", "module-codex", "module-claude-code"],
   },
-  events: { kind: "extension", owners: ["webhooks", "cloud"] },
+  events: { kind: "extension", owners: ["webhooks", "mcp", "module-ee", "module-chat"] },
+  // `agent-map` joins the feature-flag owners: the visual map ships its own
+  // flag, and this branch is where it lands.
   features: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-chat", "agent-map"],
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat", "agent-map"],
   },
   modelProviders: {
     kind: "extension",
@@ -184,11 +208,15 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
   openApiPaths: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-chat", "agent-map"],
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat", "agent-map"],
   },
   openApiComponentSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "cloud", "module-chat", "agent-map"],
+    owners: ["oidc", "webhooks", "module-ee", "module-chat", "agent-map"],
+  },
+  openApiTags: {
+    kind: "extension",
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
   },
   openApiExemptSchemas: {
     kind: "extension",
@@ -196,10 +224,9 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     justification:
       "verify-openapi step 7b is fail-closed on every component schema. Without this member a module-owned wire schema can only be exempted from the CORE response-type registry, so shipping a module route means editing a core file — the coupling the contract exists to remove.",
   },
-  openApiTags: { kind: "extension", owners: ["oidc", "webhooks", "cloud", "module-chat"] },
   openApiSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "module-chat"],
+    owners: ["oidc", "webhooks", "module-chat", "module-ee"],
     justification:
       "Zod/OpenAPI parity is tied to each module's routes; centralizing these schemas would make the platform import module-private request shapes.",
   },
@@ -232,11 +259,21 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
       "Execution backends beyond core docker/process plug into the orchestrator registry — " +
       "firecracker is the reference (and only) contributor; core stays free of KVM/Linux code.",
   },
+  principalPermissions: {
+    kind: "seam",
+    owners: ["module-ee"],
+    justification:
+      "Org-level grants attached to a PRINCIPAL rather than a role (RBAC spec §4.2/§10). " +
+      "The EE billing managers cannot be an `org_role` value — core is Apache-2.0 and carries " +
+      "zero billing vocabulary — and the grant is per-user, so `permissionsContribution` " +
+      "(role-keyed) cannot express it. Single-owner today; SSO group mapping is the second " +
+      "consumer and promotes it to `extension`.",
+  },
   emailOverrides: {
     kind: "seam",
-    owners: ["cloud"],
+    owners: ["module-ee"],
     justification:
-      "Email-template override into @appstrate/emails registry — cloud branding, single-owner by design.",
+      "Email-template override into @appstrate/emails registry — EE branding, single-owner by design.",
   },
 } satisfies Record<ContractMember, LedgerEntry>;
 
@@ -247,7 +284,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
  * platform maintained its whole call path.
  */
 const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
-  beforeUsage: { owners: ["cloud"] },
+  beforeUsage: { owners: ["module-ee"] },
   beforeSignup: { owners: ["oidc"] },
   afterSignup: { owners: ["oidc"] },
 };
@@ -258,10 +295,10 @@ const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
  * was emitted on every ledger write and listened to by nobody.
  */
 const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
-  onRunStatusChange: { owners: ["webhooks"] },
+  onRunStatusChange: { owners: ["webhooks", "module-chat"] },
   onRunConnectionMissing: { owners: ["webhooks"] },
-  onOrgCreate: { owners: ["mcp", "cloud"] },
-  onOrgDelete: { owners: ["mcp", "cloud"] },
+  onOrgCreate: { owners: ["mcp", "module-ee"] },
+  onOrgDelete: { owners: ["mcp", "module-ee"] },
 };
 
 /**
@@ -274,20 +311,20 @@ const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
 const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   logger: { owners: ["module-observability"] },
   http: { owners: ["module-chat", "module-observability"] },
-  usage: { owners: ["cloud"] },
+  usage: { owners: ["module-ee"] },
   inProcess: { owners: ["module-chat"] },
-  resolveSubscriptionChatModel: { owners: ["module-chat"] },
+  resolveChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },
   resolveChatAttachment: { owners: ["module-chat"] },
-  cleanupSessionDocuments: { owners: ["module-chat"] },
+  cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
-  setDocumentStorageLimit: { owners: ["cloud"] },
+  setFileStorageLimit: { owners: ["module-ee"] },
 };
 
 /**
  * Detect a top-level object-literal member declaration on its own indented
  * line: `member:` (value), `member(` (method), or `member,` (ES shorthand —
- * how cloud declares `openApiPaths,`/`openApiTags,`). The scan is best-effort
+ * how module-ee declares `openApiPaths,`/`openApiTags,`). The scan is best-effort
  * (warnings only), so a stray false positive is a nudge, not a gate.
  */
 function declaresMember(source: string, member: string): boolean {
@@ -295,7 +332,7 @@ function declaresMember(source: string, member: string): boolean {
 }
 
 async function moduleIsPresent(root: string): Promise<boolean> {
-  return Bun.file(resolve(WORKSPACE, root, "index.ts")).exists();
+  return Bun.file(resolve(ROOT, root, "index.ts")).exists();
 }
 
 async function scanDeclarers(): Promise<{
@@ -307,7 +344,7 @@ async function scanDeclarers(): Promise<{
   const present = new Set<string>();
 
   for (const [moduleId, root] of Object.entries(DECLARER_ROOTS)) {
-    const absRoot = resolve(WORKSPACE, root);
+    const absRoot = resolve(ROOT, root);
     if (!(await moduleIsPresent(root))) continue; // private repo absent in CI — ledger covers it
     present.add(moduleId);
 
@@ -354,7 +391,9 @@ for (const [member, entry] of Object.entries(LEDGER) as [ContractMember, LedgerE
           `Internalize it into that module, or reclassify as \`seam\` with a justification.`,
       );
     } else {
-      const tenants = new Set(entry.owners.map((o) => MODULE_TENANT[o] ?? "oss"));
+      // Every owner is a DECLARER_ROOTS key by the check below, and the two
+      // tables carry the same keys, so the lookup cannot miss.
+      const tenants = new Set(entry.owners.map((o) => MODULE_TENANT[o]));
       if (tenants.size < 2 && !entry.justification) {
         warnings.push(
           `\`${member}\` has ${ownerCount} owners but all in one license tenant (${[...tenants][0]}). ` +
@@ -409,7 +448,7 @@ function auditNamedSurface(
 
 /**
  * Scan drift (soft) — assistive only; the scan can't see members assembled
- * dynamically, nor modules whose repo is absent (cloud in CI), so disagreement
+ * dynamically, nor a module whose root is absent from the checkout, so disagreement
  * is a nudge, not a gate.
  */
 function reportScanDrift(
@@ -438,6 +477,27 @@ function reportScanDrift(
 auditNamedSurface("HOOK_LEDGER", HOOK_LEDGER, "ModuleHooks");
 auditNamedSurface("EVENT_LEDGER", EVENT_LEDGER, "ModuleEvents");
 auditNamedSurface("SERVICE_LEDGER", SERVICE_LEDGER, "PlatformServices");
+
+// An owner nobody can scan is an owner nobody can contradict: the drift passes
+// above compare the ledger against what `DECLARER_ROOTS` walks, so a misspelt
+// or retired module id turns every check on that entry into a no-op while the
+// entry still counts towards the ">= 2 owners" rule.
+for (const [ledgerName, ledger] of [
+  ["LEDGER", LEDGER],
+  ["HOOK_LEDGER", HOOK_LEDGER],
+  ["EVENT_LEDGER", EVENT_LEDGER],
+  ["SERVICE_LEDGER", SERVICE_LEDGER],
+] as [string, Record<string, { owners: string[] }>][]) {
+  for (const [member, entry] of Object.entries(ledger)) {
+    for (const owner of entry.owners) {
+      if (owner in DECLARER_ROOTS) continue;
+      problems.push(
+        `unknown owner: ${ledgerName}.${member}.owners names \`${owner}\`, which is not a ` +
+          `module in DECLARER_ROOTS. Add the module there (and to MODULE_TENANT), or fix the name.`,
+      );
+    }
+  }
+}
 
 for (const w of warnings) console.warn(`⚠️  ${w}`);
 for (const p of problems) console.error(`❌ ${p}`);

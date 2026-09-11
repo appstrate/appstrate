@@ -42,7 +42,7 @@ import {
   seedOrgModel,
   seedPackage,
   seedRun,
-  seedApplication,
+  seedSpace,
 } from "../../helpers/seed.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 
@@ -101,7 +101,7 @@ async function buildHarness(overrides?: {
   });
   const key = await seedApiKey({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     createdBy: ctx.user.id,
     scopes: overrides?.scopes ?? ["llm-proxy:call"],
   });
@@ -117,7 +117,7 @@ function authHeaders(h: Harness, extra?: Record<string, string>): Record<string,
   return {
     Authorization: `Bearer ${h.apiKey}`,
     "X-Org-Id": h.ctx.orgId,
-    "X-Application-Id": h.ctx.defaultAppId,
+    "X-Space-Id": h.ctx.defaultSpaceId,
     "Content-Type": "application/json",
     ...extra,
   };
@@ -374,7 +374,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       headers: {
         Cookie: h.ctx.cookie,
         "X-Org-Id": h.ctx.orgId,
-        "X-Application-Id": h.ctx.defaultAppId,
+        "X-Space-Id": h.ctx.defaultSpaceId,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -455,6 +455,12 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/event-stream");
+    // No upstream vendor sends this, and both header paths here derive from the
+    // upstream reply — so without an explicit set it never appeared, and an
+    // nginx in front delivered the whole completion in one batch at the end.
+    // `/api/realtime/*` sets it directly and the chat stream inherits it from
+    // the AI SDK's `UI_MESSAGE_STREAM_HEADERS`; this was the third producer.
+    expect(res.headers.get("x-accel-buffering")).toBe("no");
     const echoedBody = await res.text();
     expect(echoedBody).toBe(sseBody);
 
@@ -806,7 +812,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
 // `computeRunSpend` → `runs.cost`. Pre-fix the header was persisted verbatim,
 // so any principal holding `llm-proxy:call` could inflate the cost of ANY run
 // whose id it knew — including another tenant's. The fix validates the run
-// against the principal's org + application BEFORE the upstream call.
+// against the principal's org + space BEFORE the upstream call.
 describe("POST /api/llm-proxy/* — X-Run-Id run-attribution guard (CRIT-07)", () => {
   beforeEach(async () => {
     await truncateAll();
@@ -814,10 +820,10 @@ describe("POST /api/llm-proxy/* — X-Run-Id run-attribution guard (CRIT-07)", (
   });
   afterEach(() => restoreFetch());
 
-  /** Seed an agent package + run inside the given (org, application). */
-  async function seedRunIn(orgId: string, applicationId: string): Promise<string> {
+  /** Seed an agent package + run inside the given (org, space). */
+  async function seedRunIn(orgId: string, spaceId: string): Promise<string> {
     const pkg = await seedPackage({ orgId });
-    const run = await seedRun({ packageId: pkg.id, orgId, applicationId });
+    const run = await seedRun({ packageId: pkg.id, orgId, spaceId });
     return run.id;
   }
 
@@ -836,7 +842,7 @@ describe("POST /api/llm-proxy/* — X-Run-Id run-attribution guard (CRIT-07)", (
     const h = await buildHarness();
     // Victim tenant with a real run the attacker knows the id of.
     const victim = await createTestContext({ orgSlug: "crit07-victim" });
-    const victimRunId = await seedRunIn(victim.orgId, victim.defaultAppId);
+    const victimRunId = await seedRunIn(victim.orgId, victim.defaultSpaceId);
 
     let upstreamHit = false;
     mockUpstream(async () => {
@@ -863,12 +869,12 @@ describe("POST /api/llm-proxy/* — X-Run-Id run-attribution guard (CRIT-07)", (
     expect(usageRows).toHaveLength(0);
   });
 
-  it("404s an X-Run-Id of a run in ANOTHER application of the key's own org, and mints no usage row", async () => {
+  it("404s an X-Run-Id of a run in ANOTHER space of the key's own org, and mints no usage row", async () => {
     const h = await buildHarness();
-    // Same org, different application — API keys are app-bound, so the
-    // application boundary must hold even inside the key's own tenant.
-    const otherApp = await seedApplication({ orgId: h.ctx.orgId, name: "CRIT07 Other App" });
-    const foreignAppRunId = await seedRunIn(h.ctx.orgId, otherApp.id);
+    // Same org, different space — API keys are space-bound, so the
+    // space boundary must hold even inside the key's own tenant.
+    const otherSpace = await seedSpace({ orgId: h.ctx.orgId, name: "CRIT07 Other Space" });
+    const foreignSpaceRunId = await seedRunIn(h.ctx.orgId, otherSpace.id);
 
     let upstreamHit = false;
     mockUpstream(async () => {
@@ -876,16 +882,16 @@ describe("POST /api/llm-proxy/* — X-Run-Id run-attribution guard (CRIT-07)", (
       return new Response("must not be reached", { status: 599 });
     });
 
-    const res = await callWithRunId(h, foreignAppRunId);
+    const res = await callWithRunId(h, foreignSpaceRunId);
     expect(res.status).toBe(404);
     expect(upstreamHit).toBe(false);
     const usageRows = await db.select().from(llmUsage);
     expect(usageRows).toHaveLength(0);
   });
 
-  it("accepts an X-Run-Id of a run in the key's own application and pins the usage row to it", async () => {
+  it("accepts an X-Run-Id of a run in the key's own space and pins the usage row to it", async () => {
     const h = await buildHarness();
-    const ownRunId = await seedRunIn(h.ctx.orgId, h.ctx.defaultAppId);
+    const ownRunId = await seedRunIn(h.ctx.orgId, h.ctx.defaultSpaceId);
 
     mockUpstream(
       async () =>
@@ -959,7 +965,7 @@ describe("POST /api/llm-proxy/* — model-alias swap", () => {
     // Field swapped; content mention left intact (exact-value match, not blind replace).
     expect(json.choices[0].message.content).toBe("I am deepseek-chat-SECRET");
 
-    // The ledger keeps the real backing privately (admin/cloud only).
+    // The ledger keeps the real backing privately (admin/billing only).
     const row = await waitForRow(() =>
       db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId)).limit(1),
     );

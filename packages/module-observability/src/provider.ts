@@ -23,15 +23,15 @@ import {
   recordProcessAnomaly,
   recordStorageDeletionSweep,
   recordStorageDeletionResult,
-  recordDocumentCreated,
-  recordDocumentDeleted,
-  recordDocumentStorageLimitRejection,
-  recordDocumentPartialPublication,
+  recordFileCreated,
+  recordFileDeleted,
+  recordFileStorageLimitRejection,
+  recordFilePartialPublication,
   setQueueDepthProvider,
   shutdownObservability,
 } from "./otel.ts";
 
-export interface TelemetryProviderDeps {
+interface TelemetryProviderDeps {
   /** Platform client-IP resolver (`ctx.services.http.clientIp`). */
   clientIp: (c: Context) => string;
 }
@@ -62,10 +62,10 @@ export function createTelemetryProvider(deps: TelemetryProviderDeps): TelemetryP
     recordProcessAnomaly,
     recordStorageDeletionSweep,
     recordStorageDeletionResult,
-    recordDocumentCreated,
-    recordDocumentDeleted,
-    recordDocumentStorageLimitRejection,
-    recordDocumentPartialPublication,
+    recordFileCreated,
+    recordFileDeleted,
+    recordFileStorageLimitRejection,
+    recordFilePartialPublication,
     setQueueDepthSource: setQueueDepthProvider,
     httpMiddleware: observability({ clientIp: deps.clientIp }),
     shutdown: shutdownObservability,

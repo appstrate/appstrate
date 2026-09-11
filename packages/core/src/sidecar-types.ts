@@ -10,7 +10,7 @@
  */
 
 import type { IntegrationManifest } from "./integration.ts";
-import type { ModelNativeReasoningLevel } from "./model-generation.ts";
+import type { ModelNativeReasoningLevel, ModelReasoningLevel } from "./model-generation.ts";
 
 /**
  * Manifest `auths.{key}.delivery.http` block — the header-render config the
@@ -23,12 +23,48 @@ export type ManifestDeliveryHttp = NonNullable<
 >;
 
 /**
+ * Header the AGENT container stamps on every request to its sidecar's control
+ * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`, `/runtime-events`),
+ * carrying {@link SidecarConfig.sidecarAuthToken}.
+ *
+ * A dedicated header rather than `Authorization`: on `/llm/*` that slot already
+ * carries the vendor credential placeholder the sidecar swaps for the real key,
+ * so reusing it would collide with the one thing that surface exists to do.
+ *
+ * Container → sidecar only: the `/llm/*` passthrough strips it (and the
+ * `x-appstrate-pi-sdk` sibling) from the forwarded header set, so the sidecar's
+ * own credential never travels next to it.
+ */
+export const SIDECAR_AUTH_HEADER = "x-appstrate-sidecar-auth";
+
+/**
  * Sidecar runtime configuration. The sidecar process reads this from its
  * own environment at boot and uses it for the lifetime of the run. The
  * platform sends every field as an env var when spawning the container.
  */
 export interface SidecarConfig {
   runToken: string;
+  /**
+   * Per-run secret the AGENT container must present on
+   * {@link SIDECAR_AUTH_HEADER} to reach the sidecar's control surface.
+   *
+   * NOT {@link runToken} and carries none of its authority: it authenticates
+   * "I am the agent container talking to my own sidecar" and nothing else. The
+   * zero-knowledge boundary is unchanged — the agent still holds no token that
+   * can call the platform back, and this one cannot be used to derive one.
+   *
+   * It exists because the per-run Docker network is NOT a boundary between the
+   * agent and its siblings: `integration-runtime-adapter-docker.ts` attaches
+   * every third-party integration runner to the same bridge and hands it
+   * `http://sidecar:<port>`. Without this token a `source.kind: "local"`
+   * integration reaches the LLM proxy with one `curl` and spends the org's
+   * provider credential unattributed.
+   *
+   * Absent ⇒ the sidecar cannot authenticate anyone and answers 401 on the
+   * whole control surface (`/health` excepted). There is no unauthenticated
+   * fallback.
+   */
+  sidecarAuthToken?: string;
   platformApiUrl: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;
@@ -63,6 +99,14 @@ export interface SidecarConfig {
  */
 export interface SidecarLaunchSpec {
   runToken: string;
+  /**
+   * See {@link SidecarConfig.sidecarAuthToken}. Minted per run by the launcher
+   * and handed to BOTH sides of the pair: here (→ the sidecar's
+   * `SIDECAR_AUTH_TOKEN` env var) and to `buildRuntimePiEnv` (→ the agent
+   * container's `SIDECAR_AUTH_TOKEN`). Omitted only for a connect-run, whose
+   * sidecar exits before it ever serves the agent surface.
+   */
+  sidecarAuthToken?: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;
   /** See {@link SidecarConfig.modelContextWindow}. */
@@ -132,7 +176,7 @@ export interface SidecarLaunchSpec {
 /**
  * Per-integration spec consumed by the sidecar. The platform launcher
  * resolves the chain `agent.dependencies.integrations[id] →
- * applicationPackages → integration_connections` and emits one entry
+ * spacePackages → integration_connections` and emits one entry
  * per installed-and-connected integration.
  *
  * Bundle bytes are NOT inlined — they would blow past the Linux env
@@ -277,9 +321,8 @@ export interface IntegrationSpawnSpec {
        * runnable BYTES come from the SAME version as the manifest the
        * spawn-resolver read — eliminating the manifest/bytes version skew and
        * the "publish ≠ deploy" footgun (issue #588). Omitted for system
-       * mcp-servers (single version served from the boot registry) and for
-       * remote/serverless integrations. When absent, the byte route falls back
-       * to the latest non-yanked published version (back-compat).
+       * mcp-servers — the byte route serves those from the in-memory boot
+       * registry by id alone — and for remote/serverless integrations.
        */
       version?: string;
       /**
@@ -302,11 +345,13 @@ export interface IntegrationSpawnSpec {
        */
       url?: string;
       /**
-       * AFPS §7.1 — remote MCP transport selector. Mirrors the
-       * manifest's `source.remote.transport` enum (`"streamable-http" |
-       * "sse"`). Defaults to `"streamable-http"` on the sidecar side when
-       * absent (back-compat for manifests that predate the enum). Only meaningful when
-       * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`.
+       * AFPS §7.1 — remote MCP transport selector, mirroring the manifest's
+       * `source.remote.transport` enum. REQUIRED for remote sources: the
+       * sidecar dispatches on it and hard-fails on anything that is not one
+       * of the two values, an absent one included. Optional in TypeScript
+       * only because this `server` bag is the collapsed union of the local /
+       * remote / serverless shapes (same reason as `url` above) — it is
+       * omitted for local and serverless sources, where it means nothing.
        */
       transport?: "streamable-http" | "sse";
     };
@@ -518,17 +563,36 @@ export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
  * platform's model-provider registry, and the OAuth token cache all reference
  * a single source of truth — drift between the three previously caused 401s
  * to surface as "unknown apiShape" rather than a real auth failure.
+ *
+ * `pi-messages` is pi-ai's own vendor-neutral protocol rather than a vendor's:
+ * an aliased run's container speaks it, so no vendor-shaped request or response
+ * crosses into the container. See `docs/architecture/MODEL_ALIASES.md`.
  */
-export type ModelApiShape =
-  | "anthropic-messages"
-  | "openai-completions"
-  | "openai-responses"
-  | "openai-codex-responses"
-  | "mistral-conversations"
-  | "google-generative-ai"
-  | "google-vertex"
-  | "azure-openai-responses"
-  | "bedrock-converse-stream";
+export const MODEL_API_SHAPES = [
+  "pi-messages",
+  "anthropic-messages",
+  "openai-completions",
+  "openai-responses",
+  "openai-codex-responses",
+  "mistral-conversations",
+  "google-generative-ai",
+  "google-vertex",
+  "azure-openai-responses",
+  "bedrock-converse-stream",
+] as const;
+
+/**
+ * The runtime array above is the single source; the type is derived from it.
+ *
+ * This used to be a bare type union, which left consumers needing a runtime
+ * list to hand-mirror it. `runtime-pi/env.ts` did, guarded by
+ * `satisfies readonly ModelApiShape[]` — but `satisfies` only proves each
+ * listed member is valid, never that the list is COMPLETE. Adding a shape here
+ * and wiring the platform to emit it therefore typechecked green everywhere
+ * and then failed every run at container boot with `MODEL_API: unknown api`.
+ * Deriving the type from the array removes the mirror instead of policing it.
+ */
+export type ModelApiShape = (typeof MODEL_API_SHAPES)[number];
 
 /**
  * Model-alias swap (LLM-gateway alias pattern). Present only for model aliases.
@@ -551,6 +615,23 @@ export interface ModelSwap {
   /** Real upstream model id forwarded to the provider. */
   real: string;
   /**
+   * Protocol the CLIENT of this boundary speaks (`pi-messages` for an aliased
+   * run's container). Never inferred from {@link backingApiShape}.
+   */
+  clientApiShape: ModelApiShape;
+  /* The sidecar's inbound allowlist keys on THIS field; keying it on
+     `backingApiShape` would refuse every aliased call. */
+  /**
+   * Protocol this boundary speaks UPSTREAM; differs from {@link clientApiShape}
+   * when it terminates and re-originates. Never reaches the agent container.
+   */
+  backingApiShape: ModelApiShape;
+  /**
+   * Catalog the sidecar rebuilds the real pi-ai `Model` record from. Required
+   * exactly when `clientApiShape !== backingApiShape`; enforced at sidecar boot.
+   */
+  backing?: ModelSwapBacking;
+  /**
    * Request-scoped Anthropic transport correction for an adaptive backing.
    * Pi cannot infer adaptive support from a hidden alias id, so the sidecar
    * restores the catalogued request shape without exposing this fact to the
@@ -559,6 +640,24 @@ export interface ModelSwap {
   anthropicAdaptiveReasoning?: {
     effort: Exclude<ModelNativeReasoningLevel, "none">;
   };
+}
+
+/**
+ * Backing model catalog, private to the platform↔sidecar channel and never
+ * emitted into the agent container — only what a pi-ai `Model` record needs.
+ */
+export interface ModelSwapBacking {
+  /**
+   * pi provider key of the real vendor. Drives pi-ai's per-vendor request
+   * shaping, which on an aliased run happens here, not in the container.
+   */
+  providerId: string;
+  /** Whether the backing supports extended thinking at all. */
+  reasoning: boolean;
+  /** Native thinking-level mapping; the container receives only the portable level. */
+  reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
+  /** Input modalities the backing accepts — pi-ai gates image content on them. */
+  input: ReadonlyArray<string>;
 }
 
 export interface LlmProxyApiKeyConfig {

@@ -77,7 +77,7 @@ export interface RunnerOrchestrator extends RunOrchestrator {
   readConsole(id: string, tailBytes: number): Promise<string | null>;
 }
 
-export interface RunnerAppDeps {
+interface RunnerAppDeps {
   orchestrator: RunnerOrchestrator;
   /** Shared bearer secret — every request must present it. */
   token: string;
@@ -117,7 +117,7 @@ function tokenMatches(presented: string, expected: string): boolean {
  * response (malformed JSON and schema violations are both client errors
  * — the orchestrator must never see an unvalidated payload).
  *
- * NOTE: deliberately NOT the platform's `apps/api/src/lib/request-body.ts`
+ * NOTE: deliberately NOT `@appstrate/core/request-body`'s
  * `readJsonBody`. This is the standalone runner daemon: it speaks a different
  * wire shape (a `{ ok, data | res }` result the caller unwraps, plain `{ error }`
  * bodies) instead of throwing RFC-9457 `ApiError`s, so the divergence is
@@ -257,7 +257,7 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
   app.post(RUNNER_ROUTES.stopWorkload, async (c) => {
     const body = await readBody(c, stopWorkloadBodySchema);
     if (!body.ok) return body.res;
-    await orchestrator.stopWorkload(body.data.handle, body.data.timeoutSeconds);
+    await orchestrator.stopWorkload(body.data.handle);
     return c.body(null, 204);
   });
 
@@ -324,7 +324,7 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
   app.post(RUNNER_ROUTES.stopRun, async (c) => {
     const body = await readBody(c, stopRunBodySchema);
     if (!body.ok) return body.res;
-    const result = await orchestrator.stopByRunId(body.data.runId, body.data.timeoutSeconds);
+    const result = await orchestrator.stopByRunId(body.data.runId);
     return c.json({ result });
   });
 

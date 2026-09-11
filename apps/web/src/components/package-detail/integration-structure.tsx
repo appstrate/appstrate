@@ -155,12 +155,12 @@ function StructureNode({ data }: NodeProps<Node<StructureNodeData>>) {
 }
 function OAuthClientsNode(props: NodeProps<Node<StructureNodeData>>) {
   const { t } = useTranslation("settings");
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const clients = useIntegrationClients(
-    isAdmin ? props.data.packageId : undefined,
+    can("integrations:configure") ? props.data.packageId : undefined,
     props.data.authKey,
   );
-  const message = !isAdmin
+  const message = !can("integrations:configure")
     ? t("integration.structure.clientsAdminOnly")
     : clients.isLoading
       ? t("integration.structure.loading")

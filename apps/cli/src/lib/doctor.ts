@@ -108,7 +108,7 @@ export interface ProbeBinary {
  * "unknown command" → we fall back to `<binary> --version` so we can at least
  * report the version, with `source: "unknown"`.
  */
-export const defaultProbeBinary: ProbeBinary = async (binary, timeoutMs) => {
+const defaultProbeBinary: ProbeBinary = async (binary, timeoutMs) => {
   const probe = await runCommand(binary, ["__install-source"], { timeoutMs });
   if (probe.ok) {
     try {

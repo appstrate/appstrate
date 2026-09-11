@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  UPSTREAM_HEADER_ALLOWLIST,
-  buildUpstreamMeta,
-  projectAllowedHeaders,
-} from "../upstream-meta.ts";
+import { UPSTREAM_HEADER_ALLOWLIST } from "@appstrate/mcp-transport";
+import { buildUpstreamMeta, projectAllowedHeaders } from "../upstream-meta.ts";
 
 describe("upstream-meta — header projection", () => {
   it("keeps allowlisted headers, strips everything else", () => {
@@ -68,68 +65,6 @@ describe("upstream-meta — buildUpstreamMeta", () => {
     const meta = buildUpstreamMeta(res);
     expect(meta.status).toBe(404);
     expect(meta.headers["content-type"]).toBe("text/plain");
-  });
-});
-
-describe("upstream-meta — finalUrl sanitization (#471)", () => {
-  it("omits finalUrl when not supplied (preflight / non-attaching paths)", () => {
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res);
-    expect(meta.finalUrl).toBeUndefined();
-    expect("finalUrl" in meta).toBe(false);
-  });
-
-  it("passes a clean URL through verbatim", () => {
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res, "https://api.example.com/callback?code=ABC&state=xyz");
-    expect(meta.finalUrl).toBe("https://api.example.com/callback?code=ABC&state=xyz");
-  });
-
-  it("strips userinfo (basic-auth credentials in URL)", () => {
-    // Mirrors WHATWG Fetch Response.url: never leak `user:pass@`.
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res, "https://user:secret@api.example.com/p?q=1");
-    expect(meta.finalUrl).toBe("https://api.example.com/p?q=1");
-    expect(meta.finalUrl).not.toContain("user");
-    expect(meta.finalUrl).not.toContain("secret");
-  });
-
-  it("strips username-only userinfo", () => {
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res, "https://onlyuser@api.example.com/");
-    expect(meta.finalUrl).toBe("https://api.example.com/");
-  });
-
-  it("strips fragment (`#…`)", () => {
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res, "https://api.example.com/p?q=1#access_token=leak");
-    expect(meta.finalUrl).toBe("https://api.example.com/p?q=1");
-  });
-
-  it("strips both userinfo and fragment together", () => {
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res, "https://u:p@api.example.com/cb?code=ABC#token=Y");
-    expect(meta.finalUrl).toBe("https://api.example.com/cb?code=ABC");
-  });
-
-  it("preserves query string (callback codes / tickets live there)", () => {
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res, "https://api.example.com/signin?code=ABC123&state=xyz");
-    expect(meta.finalUrl).toContain("code=ABC123");
-    expect(meta.finalUrl).toContain("state=xyz");
-  });
-
-  it("omits finalUrl when input is unparseable (defence against malformed Location)", () => {
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res, "not://a valid url!! ");
-    expect(meta.finalUrl).toBeUndefined();
-    expect("finalUrl" in meta).toBe(false);
-  });
-
-  it("preserves non-standard ports", () => {
-    const res = new Response(null, { status: 200 });
-    const meta = buildUpstreamMeta(res, "https://api.example.com:8443/cb?code=X");
-    expect(meta.finalUrl).toBe("https://api.example.com:8443/cb?code=X");
   });
 });
 

@@ -33,7 +33,8 @@ import * as fsPromises from "node:fs/promises";
 import * as nodePath from "node:path";
 
 import { z } from "zod";
-import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
+import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
+import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 
 /**
@@ -42,7 +43,7 @@ import { AuthorizedUrisError, ResolverError } from "../errors.ts";
  * in `runtime-pi/sidecar/helpers.ts` (256 KB) so the two layers stay
  * in sync — both truncate at the same boundary.
  */
-export const defaultInlineLimit = 256 * 1024;
+const defaultInlineLimit = 256 * 1024;
 
 /**
  * Hard upper bound on `responseMode.maxInlineBytes` — the agent-supplied
@@ -59,39 +60,91 @@ export const defaultInlineLimit = 256 * 1024;
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000;
 
 /**
- * Hard upper bound on `{ fromFile }` and `{ fromBytes }` request bodies.
- * Mirrors `MAX_REQUEST_BODY_SIZE` on the sidecar — checked client-side so
- * over-sized uploads fail with a typed error instead of a 413.
+ * Absolute ceiling for any request-body cap override. Above this, raising
+ * the limit stops being a config knob and starts being real engineering
+ * (a streaming refactor, chunked uploads), so an override past it is
+ * refused rather than honoured.
  *
- * Default 10 MB. Configurable via the `SIDECAR_MAX_REQUEST_BODY_BYTES`
- * env var, which is read by both the sidecar and the runtime so the two
- * layers stay aligned. Override is rejected if non-positive or above
- * 100 MB (the absolute ceiling).
+ * Single-sourced: `runtime-pi/sidecar/helpers.ts` imports this rather than
+ * spelling `100 * 1024 * 1024` a second time, and applies it to its own
+ * `SIDECAR_MAX_MCP_ENVELOPE_BYTES` knob too.
  */
-export const MAX_REQUEST_BODY_SIZE = (() => {
-  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-    ?.env?.SIDECAR_MAX_REQUEST_BODY_BYTES;
-  const fallback = 10 * 1024 * 1024;
-  if (raw === undefined || raw === "") return fallback;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) return fallback;
-  if (parsed > 100 * 1024 * 1024) return fallback;
-  return parsed;
-})();
+export const ABSOLUTE_BODY_CEILING = 100 * 1024 * 1024;
 
 /**
- * Above this size, `{ fromFile }` uploads are streamed from disk to
- * the sidecar instead of being read into memory first. Mirrors the
- * sidecar's own `STREAMING_THRESHOLD` so the two layers transition
- * together.
+ * Resolve the request-body cap from `SIDECAR_MAX_REQUEST_BODY_BYTES`,
+ * falling back to 10 MB when unset/empty.
+ *
+ * Strict on purpose: a malformed or over-ceiling override THROWS instead of
+ * quietly reverting to the default, because a cap the operator believes
+ * they raised and did not is a silent production incident. Message wording
+ * is kept identical to the sidecar's `readPositiveIntEnv` — the two used to
+ * be separate parsers and operators may match on either text.
+ *
+ * `process` is read through `globalThis` so the module still loads in a
+ * runtime without it (this package is published and runs outside Bun/Node).
+ */
+function readRequestBodyCapEnv(): number {
+  const name = "SIDECAR_MAX_REQUEST_BODY_BYTES";
+  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    ?.env?.[name];
+  if (raw === undefined || raw === "") return 10 * 1024 * 1024;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer (bytes), got ${JSON.stringify(raw)}.`);
+  }
+  if (parsed > ABSOLUTE_BODY_CEILING) {
+    throw new Error(
+      `${name}=${parsed} exceeds the absolute ceiling of ${ABSOLUTE_BODY_CEILING} (bytes). ` +
+        `Caps above this require code changes (memory pressure on the sidecar).`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Hard upper bound on `{ fromFile }`, `{ fromBytes }` and `{ multipart }`
+ * request bodies — checked client-side so over-sized uploads fail with a
+ * typed error instead of a 413. Default 10 MB, configurable via
+ * `SIDECAR_MAX_REQUEST_BODY_BYTES`.
+ *
+ * SOLE reader of that variable, read before touching: `runtime-pi/sidecar/
+ * helpers.ts` re-exports THIS constant instead of parsing the variable
+ * again. It used to parse it independently, and the two parsers disagreed
+ * on failure policy — the sidecar's threw at boot on a malformed or
+ * over-ceiling override, this one silently returned 10 MB. Both module
+ * graphs load in the sidecar process (it imports these resolvers for
+ * `executeApiCall`), so which policy an operator observed was decided by
+ * import order: a typo'd override either wedged the sidecar or quietly ran
+ * at the default. One parser, one policy, and the strict one, since a cap
+ * that silently did not take effect is the worse of the two failures.
+ *
+ * The 10 MB literal is the default for the standalone/CLI resolver path,
+ * which has no sidecar to align with.
+ */
+export const MAX_REQUEST_BODY_SIZE = readRequestBodyCapEnv();
+
+/**
+ * Above this size, `{ fromFile }` uploads are streamed from disk instead
+ * of being read into memory first — applied by {@link resolveBodyForFetch}
+ * when the caller opts into streaming.
+ *
+ * Sole source, read before touching: the sidecar declared a same-named
+ * constant until it was deleted as unused (`runtime-pi/sidecar/helpers.ts`
+ * records the deletion). Nothing mirrors this value any more; it is not a
+ * sidecar knob and not settable, so changing it is a code change here.
  */
 export const STREAMING_THRESHOLD = 1 * 1024 * 1024;
 
 /**
- * Hard upper bound on streamed request/response bodies. Mirrors
- * `MAX_STREAMED_BODY_SIZE` on the sidecar — `{ fromFile }` uploads
- * larger than this fail client-side with a typed error before any
- * bytes hit the wire.
+ * Hard upper bound on streamed request/response bodies — `{ fromFile }`
+ * uploads larger than this fail client-side with a typed error before any
+ * bytes hit the wire, and streamed responses are cut off at it.
+ *
+ * Sole source, same history as {@link STREAMING_THRESHOLD}: the sidecar's
+ * same-named constant is gone. The in-container resolvers
+ * (`runtime-pi/mcp/api-upload-resolver.ts`) and the platform's
+ * `/api/credential-proxy/proxy` route both import this one.
  */
 export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024;
 
@@ -607,12 +660,12 @@ export function makeApiCallTool(
  * so scoped package ids like `@appstrate/gmail` become safe tool
  * identifiers.
  *
- * Internal: used by {@link makeApiCallTool} to derive a default tool
- * name when the caller does not pass an explicit `toolName`. The
- * integration resolvers always pass `{ns}__api_call`, so this fallback
- * mostly serves tests.
+ * Module-private: its only caller is {@link defaultApiCallToolName} just
+ * below, which {@link makeApiCallTool} uses to derive a tool name when the
+ * caller passes no explicit `toolName`. The integration resolvers always pass
+ * `{ns}__api_call`, so that fallback mostly serves tests.
  */
-export function slugifyIntegrationId(integrationId: string): string {
+function slugifyIntegrationId(integrationId: string): string {
   return integrationId.replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
@@ -976,8 +1029,6 @@ async function buildMultipartBytes(
   parts: NonNullable<Extract<ApiCallRequest["body"], { multipart: unknown }>["multipart"]>,
   workspace: string,
 ): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: string }> {
-  const path = await import("node:path");
-  const fs = await import("node:fs/promises");
   const fd = new FormData();
   let totalSize = 0;
 
@@ -1016,11 +1067,11 @@ async function buildMultipartBytes(
           { max: MAX_REQUEST_BODY_SIZE },
         );
       }
-      const fileBytes = await fs.readFile(absPath);
+      const fileBytes = await fsPromises.readFile(absPath);
       const blob = new Blob([fileBytes], {
         type: part.contentType ?? "application/octet-stream",
       });
-      fd.append(part.name, blob, part.filename ?? path.basename(part.fromFile));
+      fd.append(part.name, blob, part.filename ?? nodePath.basename(part.fromFile));
     } else {
       // Inline base64 bytes — validate and decode via shared helper.
       // Note: the per-part size check uses MAX_REQUEST_BODY_SIZE as the
@@ -1091,7 +1142,12 @@ function decodeBase64Body(
     decoded = new Uint8Array(buf.byteLength);
     decoded.set(buf);
   } catch (err) {
-    throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes", {
+    // `undefined` is the `details` bag: `cause` belongs in the 4th argument
+    // (`ErrorOptions`), which is what sets `error.cause` and lets
+    // `formatErrorChain` walk it. Passed positionally as `details` it was
+    // serialized onto the wire as `details.cause` instead, and `error.cause`
+    // stayed unset while ESLint's `preserve-caught-error` read as satisfied.
+    throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes", undefined, {
       cause: err,
     });
   }
@@ -1171,7 +1227,6 @@ export async function resolveBodyForFetch(
       { fromFile: body.fromFile },
     );
   }
-  const fs = await import("node:fs/promises");
   const { absPath: safePath, stat: lst } = await resolveSafeFile(opts.workspace, body.fromFile);
   // Streaming path: file size > threshold AND caller opted in. Hard
   // cap at MAX_STREAMED_BODY_SIZE — beyond that the upload is refused
@@ -1195,7 +1250,7 @@ export async function resolveBodyForFetch(
       { fromFile: body.fromFile, size: lst.size, max: MAX_REQUEST_BODY_SIZE },
     );
   }
-  return { kind: "bytes", bytes: toArrayBufferUint8(await fs.readFile(safePath)) };
+  return { kind: "bytes", bytes: toArrayBufferUint8(await fsPromises.readFile(safePath)) };
 }
 
 /**
@@ -1237,73 +1292,40 @@ function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
  * with a body that happens to be ASCII MUST come back as inline bytes,
  * not text.
  *
- * CANONICAL LIST: `@appstrate/core/mime` (`isTextShapedMime`), which the
- * platform MIME policy and the sidecar's `api_call` classifier both delegate
- * to. This copy is NOT free-form — it is the same policy, kept local only
- * because `afps-runtime` deliberately carries no dependency on core (it is a
- * portable bundle runner and a standalone `afps` CLI; core sits beside it, not
- * below it, so importing it would pull the whole platform surface into the
- * runtime's install). `test/resolvers/http-call-core-mime-parity.test.ts`
- * asserts the two agree, so a format added to core cannot silently skip this
- * path. Add formats in core FIRST, then mirror them here.
+ * The media-type policy itself lives in `@appstrate/afps-shared/mime`
+ * ({@link isTextShapedMime}), which the platform MIME policy, the sidecar's
+ * `api_call` classifier and `@appstrate/core/mime` all delegate to. It used to
+ * be hand-copied into this file, because `afps-runtime` deliberately carries no
+ * dependency on core — but afps-shared IS a dependency here, so the copy no
+ * longer buys anything. It drifted three times while a parity test guarded it,
+ * once classifying XLSX as XML and corrupting every OOXML download; that test
+ * is gone with the copy, since a parity test over a single source asserts
+ * nothing. Add formats in `@appstrate/afps-shared/mime`.
  *
- * Every rule below matches an exact media type or an RFC 6839 structured
- * suffix — never a substring. `contentType.includes("xml")` classifies
- * `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (an XLSX,
- * i.e. a ZIP binary) as text and corrupts it on decode; that is the bug this
- * predicate exists to prevent.
+ * This wrapper adds exactly ONE rule on top of the shared predicate, and that
+ * rule is specific to `http_call`: when the base media type says nothing —
+ * `application/octet-stream`, or a header carrying only parameters — an
+ * explicit `charset` parameter is taken as a declaration of textness, because
+ * an upstream that bothers to declare a charset on an otherwise opaque body is
+ * telling us it is text. The shared predicate is media-type-only on purpose:
+ * its other consumer (upload sniff enforcement) must not let a caller talk a
+ * binary past the magic-byte check by appending `; charset=utf-8`.
+ *
+ * The rule is deliberately gated on an ambiguous base type. It used to run
+ * FIRST, ahead of the media-type check, defended by "an OOXML container carries
+ * no charset" — but that is an assumption about upstream servers, not an
+ * invariant: a server that blanket-appends `; charset=utf-8` to every response
+ * would have flipped an XLSX onto the lossy `fatal: false` decode and destroyed
+ * it, which is the exact corruption class this module exists to prevent. A
+ * declared binary container now wins over any parameter.
  */
 export function isTextLikeMimeType(contentType: string | null | undefined): boolean {
   if (!contentType) return false;
-  const ct = contentType.toLowerCase();
-  if (ct.startsWith("text/")) return true;
-  // Charset parameter is a strong signal regardless of base type — the one
-  // rule specific to this path (an upstream that bothers to declare a charset
-  // is telling us the body is text).
-  if (/;\s*charset=/.test(ct)) return true;
-  const mediaType = ct.split(";", 1)[0]!.trim();
-  // Structured-syntax suffixes (RFC 6839) — `+json`, `+xml`, `+yaml`.
-  if (mediaType.endsWith("+json") || mediaType.endsWith("+xml") || mediaType.endsWith("+yaml")) {
-    return true;
-  }
-  return TEXT_LIKE_MEDIA_TYPES.has(mediaType);
-}
-
-/**
- * Mirror of the media-type set in `@appstrate/core/mime`. Kept in sync by
- * `http-call-core-mime-parity.test.ts` — do not edit one without the other.
- */
-export const TEXT_LIKE_MEDIA_TYPES: ReadonlySet<string> = new Set([
-  // JSON family
-  "application/json",
-  "application/ld+json",
-  "application/x-ndjson",
-  "application/jsonl",
-  "application/json-seq",
-  // XML family
-  "application/xml",
-  "application/xml-dtd",
-  "application/xml-external-parsed-entity", // RFC 7303
-  "image/svg+xml",
-  // YAML family
-  "application/yaml",
-  "application/x-yaml",
-  // Scripting / tabular / form encodings with no magic signature
-  "application/javascript",
-  "application/x-javascript",
-  "application/ecmascript",
-  "application/csv",
-  "application/x-sh",
-  "application/x-httpd-php",
-  "application/x-www-form-urlencoded",
-]);
-
-function parseMimeType(contentType: string | null | undefined): string {
-  if (!contentType) return "application/octet-stream";
-  const semi = contentType.indexOf(";");
-  return (
-    (semi >= 0 ? contentType.slice(0, semi) : contentType).trim() || "application/octet-stream"
-  );
+  const base = normalizeMime(contentType);
+  if (isTextShapedMime(base)) return true;
+  // Ambiguous base type only: charset is the sole signal we have.
+  if (base !== "" && base !== "application/octet-stream") return false;
+  return /;\s*charset=/i.test(contentType);
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -1335,15 +1357,13 @@ async function writeStreamToFile(
   absPath: string,
   options: { signal?: AbortSignal; maxBytes?: number } = {},
 ): Promise<{ size: number; sha256: string }> {
-  const path = await import("node:path");
-  const fs = await import("node:fs/promises");
   const crypto = await import("node:crypto");
-  await fs.mkdir(path.dirname(absPath), { recursive: true });
+  await fsPromises.mkdir(nodePath.dirname(absPath), { recursive: true });
 
   const { signal } = options;
 
   const hasher = crypto.createHash("sha256");
-  const handle = await fs.open(absPath, "w");
+  const handle = await fsPromises.open(absPath, "w");
   let size = 0;
   const reader = source.getReader();
 
@@ -1356,7 +1376,7 @@ async function writeStreamToFile(
       /* ignore */
     }
     try {
-      await fs.unlink(absPath);
+      await fsPromises.unlink(absPath);
     } catch {
       /* ignore */
     }
@@ -1382,13 +1402,13 @@ async function writeStreamToFile(
       })
     : null;
 
-  // TOCTOU re-check: the signal may have fired between fs.open and the
+  // TOCTOU re-check: the signal may have fired between fsPromises.open and the
   // addEventListener call above. addEventListener does NOT fire retroactively
   // for already-aborted signals, so we must re-check here explicitly.
   if (signal?.aborted) {
     reader.cancel(signal.reason).catch(() => {});
     await handle.close().catch(() => {});
-    await fs.unlink(absPath).catch(() => {});
+    await fsPromises.unlink(absPath).catch(() => {});
     throw signal.reason instanceof Error ? signal.reason : new Error("aborted");
   }
 
@@ -1429,7 +1449,7 @@ async function writeStreamToFile(
       /* ignore */
     }
     try {
-      await fs.unlink(absPath);
+      await fsPromises.unlink(absPath);
     } catch {
       /* ignore */
     }
@@ -1474,6 +1494,12 @@ function base64Encode(bytes: Uint8Array): string {
  *
  * Uses `file-type` (^22) for the magic-byte lookup. Reads at most the
  * first 4 100 bytes (the library's internal look-ahead window).
+ *
+ * `declaredMime` MUST already be normalized ({@link normalizeMime}: parameters
+ * stripped, lowercased). The ambiguity test below is an exact string compare,
+ * so an un-normalized `Application/Octet-Stream` would read as a specific
+ * declared type — sniffing skipped, and the mixed-case string stored as the
+ * body's mime.
  *
  * Streaming responses (responseMode.toFile) are NOT sniffed by this
  * helper — bytes are written to disk before we buffer them. A future
@@ -1531,10 +1557,12 @@ export interface SerializeFetchResponseContext {
  * preserved end-to-end — the regression fixed by issues #149 / #151 in
  * the sidecar resurfaced when the runtime moved from `curl` to typed
  * `{ns}__api_call` tools, because the client-side serializer still
- * stringified bytes as UTF-8. Decoding now follows a strict whitelist
- * (text/*, application/json, application/xml, +json/+xml suffixes,
- * `; charset=...`); everything else round-trips as base64 (`inline`)
- * or spills to a file (`file`).
+ * stringified bytes as UTF-8. Decoding now follows a strict media-type
+ * whitelist (text/*, application/json, application/xml, +json/+xml/+yaml
+ * suffixes — see {@link isTextLikeMimeType}); a `; charset=...` parameter is
+ * NOT a whitelist entry, only a fallback consulted when the base type is
+ * ambiguous (absent, or `application/octet-stream`). Everything else
+ * round-trips as base64 (`inline`) or spills to a file (`file`).
  */
 export async function serializeFetchResponse(
   res: Response,
@@ -1547,7 +1575,7 @@ export async function serializeFetchResponse(
 
   const requestedToFileEarly = ctx.responseMode?.toFile;
   const contentTypeEarly = res.headers.get("content-type");
-  const mimeTypeEarly = parseMimeType(contentTypeEarly);
+  const mimeTypeEarly = normalizeMime(contentTypeEarly) || "application/octet-stream";
 
   // Streaming response → file: write the body to disk in chunks while
   // computing size + sha256 on the fly. Avoids buffering large
@@ -1581,7 +1609,7 @@ export async function serializeFetchResponse(
   const bytes = new Uint8Array(arrayBuffer);
   const size = bytes.byteLength;
   const contentType = res.headers.get("content-type");
-  const mimeType = parseMimeType(contentType);
+  const mimeType = normalizeMime(contentType) || "application/octet-stream";
 
   // Read truncation metadata forwarded by the sidecar. X-Truncated is
   // set when the upstream response was sliced at MAX_RESPONSE_SIZE (or
@@ -1608,10 +1636,8 @@ export async function serializeFetchResponse(
   // 1. Caller asked for a file: write there, regardless of size or mime.
   if (typeof requestedToFile === "string" && requestedToFile.length > 0) {
     const safePath = await resolveSafeOutputPath(ctx.workspace, requestedToFile);
-    const path = await import("node:path");
-    const fs = await import("node:fs/promises");
-    await fs.mkdir(path.dirname(safePath), { recursive: true });
-    await fs.writeFile(safePath, bytes);
+    await fsPromises.mkdir(nodePath.dirname(safePath), { recursive: true });
+    await fsPromises.writeFile(safePath, bytes);
     const sha256 = await sha256Hex(bytes);
     const { mime: finalMime, sniffed } = await maybeSniffMimeType(mimeType, bytes);
     return {
@@ -1632,10 +1658,8 @@ export async function serializeFetchResponse(
   if (size > effectiveInlineLimit) {
     const relative = `responses/${ctx.toolCallId}.bin`;
     const safePath = await resolveSafePath(ctx.workspace, relative);
-    const path = await import("node:path");
-    const fs = await import("node:fs/promises");
-    await fs.mkdir(path.dirname(safePath), { recursive: true });
-    await fs.writeFile(safePath, bytes);
+    await fsPromises.mkdir(nodePath.dirname(safePath), { recursive: true });
+    await fsPromises.writeFile(safePath, bytes);
     const sha256 = await sha256Hex(bytes);
     const { mime: finalMime, sniffed } = await maybeSniffMimeType(mimeType, bytes);
     return {
@@ -1735,10 +1759,71 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
  * scheme: within the authority both `*` and `**` compile to `[^/]*` (an
  * authority never contains a slash), so a host wildcard only ever matches
  * within the host component; only a `**` in the path expands to `.*`.
+ *
+ * That containment only holds against a NORMALISED target, so the target is
+ * re-serialised through WHATWG `URL` before the regex runs and an unparseable
+ * target is refused outright — see the inline note in the body for why `?`,
+ * `#` and userinfo defeat the raw-string form.
  */
 export function matchesAuthorizedUriSpec(pattern: string, target: string): boolean {
+  // SECURITY — normalise the target BEFORE matching. The authority fragment
+  // above is `[^/]*`, which is only containment if `/` is the ONLY character
+  // that can end an authority. It is not: `?` opens the query and `#` opens
+  // the fragment, and neither is a `/`, so in the RAW string both sail
+  // straight through `[^/]*` carrying an allowlisted-looking suffix:
+  //
+  //   pattern https://*.salesforce.com/**
+  //   target  https://attacker.example?.salesforce.com/steal   real host attacker.example
+  //   target  https://attacker.example#.salesforce.com/steal   real host attacker.example
+  //
+  // Both matched, and the caller then attached the integration's server-held
+  // credential to a request aimed at a host the operator never allowed (13
+  // shipped system integrations use wildcard-host patterns). `?`/`#` in the
+  // authority is not a shape any legitimate target has, so there is nothing
+  // to preserve here.
+  //
+  // Re-serialising through WHATWG `URL` collapses each form to its true
+  // origin: `?`/`#` gain the `/` that ends the authority — precisely the `/`
+  // the authority fragment cannot cross. Userinfo (`user@host`) is folded away
+  // by the same pass: it was NOT a bypass against these suffix-anchored host
+  // patterns (`foo.salesforce.com@attacker.example` does not end in
+  // `.salesforce.com`), but dropping it keeps the matcher host-based rather
+  // than leaving a second authority-detaching character to reason about.
+  //
+  // Fail closed on anything that is not a URL rather than testing the raw
+  // string: a target we cannot normalise is a target whose real host we cannot
+  // name, and every caller of this matcher is deciding whether to hand over a
+  // credential. `authorized_uris` targets are absolute URLs by spec, so an
+  // unparseable one is a malformed call, not a shape to accommodate.
+  const normalized = stripUserInfoAndFragment(target);
+  if (normalized === undefined) return false;
   const regex = new RegExp("^" + compileAuthorizedUriPattern(pattern) + "$");
-  return regex.test(target);
+  return regex.test(normalized);
+}
+
+/**
+ * Strip userinfo (`user:pass@`) and fragment (`#…`) from a URL, returning the
+ * WHATWG-normalised serialisation. Mirrors Fetch `Response.url` sanitisation.
+ * Two callers, both policy gates: {@link matchesAuthorizedUriSpec} normalises
+ * every target before allowlist matching, and the redirect-follower runs it on
+ * every hop before policy checks / re-fetch (block attacker-injected
+ * basic-auth, keep the allowlist matcher host-based).
+ *
+ * Returns `undefined` when the input does not parse as a URL. The matcher
+ * treats that as "no match" (fail closed); the redirect-follower resolves the
+ * `Location` through `new URL()` first, so for it that arm is defensive and it
+ * falls back to the unstripped string rather than dropping the hop.
+ */
+export function stripUserInfoAndFragment(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    u.username = "";
+    u.password = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 /** Escape regex metacharacters, leaving the `*` wildcard chars intact. */
@@ -1758,28 +1843,129 @@ function compileUriComponent(part: string, crossSlash: boolean): string {
   return escapeUriLiteral(part).replace(/\*\*|\*/g, (m) => (m === "**" ? doubleStar : "[^/]*"));
 }
 
-function compileAuthorizedUriPattern(pattern: string): string {
-  const schemeMatch = pattern.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//);
-  if (!schemeMatch) {
+const URI_PATTERN_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+
+/**
+ * Count non-overlapping occurrences of `needle` in `haystack`.
+ * `needle` is always one of the wildcard placeholders below (never empty).
+ */
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at === -1) return count;
+    count += 1;
+    from = at + needle.length;
+  }
+}
+
+/**
+ * Put the PATTERN through the same WHATWG normalisation the target goes
+ * through, so the two sides are compared in one representation.
+ *
+ * {@link matchesAuthorizedUriSpec} normalises the target (that is what closes
+ * the `?`/`#` authority-smuggling bypass). Normalising only ONE side breaks
+ * every literal whose canonical form differs from how its author spelled it —
+ * both measured before this existed:
+ *
+ *   - `("https://api.example.com", "https://api.example.com")` → false.
+ *     `URL.toString()` gives the empty path a `/`, the compiled pattern is
+ *     `$`-anchored without one, and AFPS documents "literal URLs (no
+ *     wildcards) → exact equality".
+ *   - `("https://a.com/v1/{id}", "https://a.com/v1/{id}")` → false. The target
+ *     percent-encodes to `%7Bid%7D`; the raw pattern still says `{id}`. Same
+ *     class for space, `|`, `^` and a backtick.
+ *
+ * The pattern cannot simply go through `new URL()`: `*` and `**` are not
+ * URL-legal in every position they may appear. So each wildcard is first
+ * masked with an all-lowercase ASCII placeholder — which survives host
+ * lowercasing and path percent-encoding untouched — the masked pattern is
+ * normalised, and the placeholders are restored. If a placeholder does not
+ * come back out exactly as many times as it went in (IDNA folding, an
+ * unforeseen encoding pass), or the masked pattern does not parse at all, we
+ * return `undefined` and the caller compiles the raw pattern as before.
+ *
+ * Because both sides are now canonical, three things that used to be
+ * non-matches now match. All three are the WHATWG reading of "same URL" and
+ * none of them widens the authority boundary:
+ *
+ *   1. **Default ports are elided on both sides.** `https://*.wrike.com/api/**`
+ *      now matches `https://www.wrike.com:443/api/x` (`:443` IS the https
+ *      authority), and — new here — a pattern that spells `:443` explicitly
+ *      finally matches anything at all; before, `https://*.wrike.com:443/api/**`
+ *      matched neither the ported nor the unported target. A NON-default port
+ *      is still part of the host component and still has to match.
+ *   2. **Scheme and host are case-folded on both sides.** Target-side folding
+ *      already happened; the pattern side did not, so `https://*.SALESFORCE.com/**`
+ *      matched nothing. Host and scheme are case-insensitive per RFC 3986; the
+ *      PATH remains case-sensitive on both sides.
+ *   3. **Dot-segments are resolved before matching.** This one TIGHTENS:
+ *      `https://slack.com/api/../../evil` no longer matches
+ *      `https://slack.com/api/**`, because the request that actually goes on
+ *      the wire is for `/evil`. A traversal that stays inside the prefix
+ *      (`/api/v1/../chat` → `/api/chat`) still matches, as it should.
+ *
+ * A path-less literal also now matches its own trailing-slash form
+ * (`https://api.example.com` ≡ `https://api.example.com/`) — the same URL by
+ * every reading, and the shape (a) above was reported against.
+ */
+function normalizeAuthorizedUriPattern(pattern: string): string | undefined {
+  // Pick placeholders the pattern does not already contain, so restoring them
+  // cannot resurrect a wildcard the author wrote literally.
+  let n = 0;
+  let single = "zzurisinglezz";
+  let double = "zzuridoublezz";
+  while (pattern.includes(single) || pattern.includes(double)) {
+    n += 1;
+    single = `zzurisingle${n}zz`;
+    double = `zzuridouble${n}zz`;
+  }
+  // `**` before `*` — same ordered alternation the compiler uses.
+  const masked = pattern.replace(/\*\*|\*/g, (m) => (m === "**" ? double : single));
+  const normalized = stripUserInfoAndFragment(masked);
+  if (normalized === undefined) return undefined;
+  if (
+    countOccurrences(normalized, single) !== countOccurrences(masked, single) ||
+    countOccurrences(normalized, double) !== countOccurrences(masked, double)
+  ) {
+    return undefined;
+  }
+  return normalized.split(double).join("**").split(single).join("*");
+}
+
+function compileAuthorizedUriPattern(rawPattern: string): string {
+  const rawSchemeMatch = rawPattern.match(URI_PATTERN_SCHEME_RE);
+  if (!rawSchemeMatch) {
     // No `scheme://authority` prefix — compile the whole pattern as a path
     // (preserves the historical `**` → `.*` behavior for opaque targets).
-    return compileUriComponent(pattern, true);
+    // Nothing to normalise: there is no URL here to canonicalise.
+    return compileUriComponent(rawPattern, true);
   }
-  const scheme = schemeMatch[0];
+  // The bare `scheme://**` catch-all is decided on the RAW pattern, BEFORE
+  // normalisation: `new URL("https://<placeholder>")` would hand back a
+  // trailing `/`, turning the catch-all into `^https://[^/]*/$` and breaking
+  // the "any host, any path" contract the SSRF-gate branch tests rely on.
+  if (rawPattern.slice(rawSchemeMatch[0].length) === "**") {
+    // Scheme is case-insensitive and the target's is lowercased by `URL`.
+    return escapeUriLiteral(rawSchemeMatch[0].toLowerCase()) + ".*";
+  }
+  // Fall back to the raw pattern when it cannot be canonicalised — a pattern
+  // we cannot normalise matches strictly LESS than before, never more, since
+  // the target side stays normalised either way.
+  const pattern = normalizeAuthorizedUriPattern(rawPattern) ?? rawPattern;
+  const schemeMatch = pattern.match(URI_PATTERN_SCHEME_RE);
+  const scheme = schemeMatch ? schemeMatch[0] : rawSchemeMatch[0];
   const afterScheme = pattern.slice(scheme.length);
   const slashIdx = afterScheme.indexOf("/");
-  // `https://**` with NO path is the explicit "any host, any path" catch-all
-  // (historical behaviour, relied on by the SSRF-gate branch tests). It carries
-  // no literal host suffix, so there is nothing for an attacker to smuggle past
-  // (the authority-confusion attack needs a fixed suffix like `.example.com`
-  // AFTER the `**`), and any actual internal host it admits is still refused
-  // downstream by the SSRF gate. So compile the bare form as a full `.*`.
-  // Anything WITH a path (`https://**/health`) keeps the authority
-  // boundary-contained: `**` in the host is `[^/]*` and cannot swallow the `/`
-  // that ends the authority.
-  if (slashIdx === -1 && afterScheme === "**") {
-    return escapeUriLiteral(scheme) + ".*";
-  }
+  // The bare `scheme://**` catch-all ("any host, any path", relied on by the
+  // SSRF-gate branch tests) is handled above, on the raw pattern. Anything
+  // WITH a path (`https://**/health`) keeps the authority boundary-contained:
+  // `**` in the host is `[^/]*` and cannot swallow the `/` that ends the
+  // authority. It carries no literal host suffix either, so there is nothing
+  // for an attacker to smuggle past (the authority-confusion attack needs a
+  // fixed suffix like `.example.com` AFTER the `**`), and any actual internal
+  // host it admits is still refused downstream by the SSRF gate.
   const authority = slashIdx === -1 ? afterScheme : afterScheme.slice(0, slashIdx);
   const rest = slashIdx === -1 ? "" : afterScheme.slice(slashIdx);
   return (

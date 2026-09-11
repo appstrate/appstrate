@@ -44,10 +44,10 @@ export function ItemTab({
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { data: rawItems, isLoading } = usePackageList(type);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
-  const creation = useCreationHandoff(type, isAdmin);
+  const creation = useCreationHandoff(type, can("org:read"));
 
   const presentation = TYPE_PRESENTATION[type];
   const typeLabel = t(presentation.typeKey);
@@ -73,7 +73,7 @@ export function ItemTab({
         emptyHint={t("packages.emptyItemsHint", { type: typeLabel })}
         emptyIcon={presentation.emptyIcon}
         extraActions={
-          isAdmin ? (
+          can("org:read") ? (
             <PageActionsMenu>
               <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
                 <Upload />

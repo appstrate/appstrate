@@ -8,11 +8,7 @@ import {
   buildBundleFromCatalog,
   extractRootFromAfps,
 } from "../../src/bundle/build.ts";
-import {
-  InMemoryPackageCatalog,
-  composeCatalogs,
-  emptyPackageCatalog,
-} from "../../src/bundle/catalog.ts";
+import { InMemoryPackageCatalog, emptyPackageCatalog } from "../../src/bundle/catalog.ts";
 import {
   computeRecordEntries,
   recordIntegrity,
@@ -425,36 +421,6 @@ describe("buildBundleFromCatalog", () => {
     expect((err as BundleError).code).toBe("ARCHIVE_INVALID");
     expect((err as BundleError).message).toBe("broken archive for @me/a@1.0.0");
   });
-
-  it("composes in-memory + fallback for inline-run-style ingestion", async () => {
-    // Simulates a user posting a root manifest that references an
-    // already-registered skill. Posted payload (in-memory) takes
-    // precedence; missing deps fall through to the DB catalog.
-    const rootManifest = {
-      ...ROOT,
-      dependencies: { skills: { "@me/pre-registered": "^1" } },
-    };
-    const root = makePkg("@me/root@1.0.0" as PackageIdentity, rootManifest, {
-      "prompt.md": enc("p"),
-    });
-    const registered = makePkg(
-      "@me/pre-registered@1.0.0" as PackageIdentity,
-      {
-        name: "@me/pre-registered",
-        version: "1.0.0",
-        type: "skill",
-        schema_version: "0.1",
-      },
-      { "SKILL.md": enc("s") },
-    );
-
-    const inline = new InMemoryPackageCatalog([]);
-    const db = new InMemoryPackageCatalog([registered]);
-    const composed = composeCatalogs(inline, db);
-
-    const bundle = await buildBundleFromCatalog(root, composed);
-    expect(bundle.packages.size).toBe(2);
-  });
 });
 
 describe("extractRootFromAfps / buildBundleFromAfps", () => {
@@ -475,6 +441,26 @@ describe("extractRootFromAfps / buildBundleFromAfps", () => {
     });
     const root = extractRootFromAfps(zip);
     expect(root.files.get("manifest.json")).toBeDefined();
+  });
+
+  // The run launcher's package catalog reads every installed skill through
+  // this function, so a published skill declaring only a frontmatter `name`
+  // must keep loading — the producer rule must not break runs retroactively.
+  it("loads a published skill whose SKILL.md declares only a frontmatter name", () => {
+    const zip = zipSync({
+      "manifest.json": enc(
+        JSON.stringify({
+          name: "@me/triage",
+          version: "1.0.0",
+          type: "skill",
+          schema_version: "0.1",
+        }),
+      ),
+      "SKILL.md": enc("---\nname: triage\n---\nbody"),
+    });
+    const root = extractRootFromAfps(zip);
+    expect(root.identity).toBe("@me/triage@1.0.0");
+    expect(new TextDecoder().decode(root.files.get("SKILL.md")!)).toContain("name: triage");
   });
 
   it("rejects non-scoped manifest name", () => {

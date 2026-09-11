@@ -6,7 +6,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { agentProxyKeys, packageKeys } from "../lib/query-keys";
 
@@ -60,18 +60,18 @@ export function useTestProxy() {
 
 export function useAgentProxy(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Key kept legacy-shaped: invalidated by useSetAgentProxy below and
-    // app-switch resets.
-    queryKey: agentProxyKeys.detail(orgId, applicationId, packageId),
+    // space-switch resets.
+    queryKey: agentProxyKeys.detail(orgId, spaceId, packageId),
     queryFn: async () => {
       const { data } = await client.GET("/api/agents/{scope}/{name}/proxy", {
         params: { path: splitPackageRef(packageId!) },
       });
       return data!;
     },
-    enabled: !!orgId && !!applicationId && !!packageId,
+    enabled: !!orgId && !!spaceId && !!packageId,
   });
 }
 

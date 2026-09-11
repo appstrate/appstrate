@@ -58,7 +58,7 @@ interface MutableCredentialsWire {
   expiresAtEpochMs: Record<string, number | null>;
 }
 
-export interface ResolveLiveCredentialsOptions {
+interface ResolveLiveCredentialsOptions {
   /** When true, refresh OAuth tokens regardless of remaining lifetime. */
   forceRefresh?: boolean;
 }
@@ -95,7 +95,7 @@ export async function resolveLiveIntegrationCredentials(
   context: {
     runId: string;
     orgId: string;
-    applicationId: string;
+    spaceId: string;
     agentPackageId: string;
     actor: Actor | null;
     /**
@@ -128,7 +128,7 @@ export async function resolveLiveIntegrationCredentials(
     integrationId,
     context.resolvedIntegrationVersions?.[integrationId] ?? null,
   );
-  await assertIntegrationActive(integrationId, context.applicationId);
+  await assertIntegrationActive(integrationId, context.spaceId);
 
   const auths = (manifest.auths ?? {}) as Record<string, AfpsManifestAuth>;
   if (Object.keys(auths).length === 0) {
@@ -156,11 +156,11 @@ export async function resolveLiveIntegrationCredentials(
     integrationId,
     Object.keys(auths),
     snapshotEntry?.connectionId ?? null,
-    { applicationId: context.applicationId, actor: context.actor },
+    { spaceId: context.spaceId, actor: context.actor },
   );
   if (!connection) {
     // STATE A — nothing to decrypt. Either the row the run PINNED at kickoff is
-    // no longer reachable (deleted, unshared, moved to another application), or
+    // no longer reachable (deleted, unshared, moved to another space), or
     // the actor never connected this integration at all. Both are 404: the
     // doc comment above already promises "no connection for the actor", there
     // is no row to flag `needsReconnection` on, and 410 would lie about one
@@ -179,7 +179,7 @@ export async function resolveLiveIntegrationCredentials(
       snapshotEntry
         ? `Integration '${integrationId}': the connection pinned for this run ` +
             `(${snapshotEntry.connectionId}, source '${snapshotEntry.source}') is no longer ` +
-            `reachable — it was deleted, unshared, or moved to another application after the ` +
+            `reachable — it was deleted, unshared, or moved to another space after the ` +
             `run started. Re-connect '${integrationId}' and relaunch the run.`
         : `Integration '${integrationId}' has no connection for this run's actor ` +
             `(declared auths: ${Object.keys(auths).join(", ")}). Connect '${integrationId}' ` +
@@ -282,7 +282,7 @@ export async function resolveLiveIntegrationCredentials(
         integrationId,
         authKey,
         authDef,
-        context.applicationId,
+        context.spaceId,
         connection.clientRef,
       );
     } catch (err) {
@@ -325,7 +325,19 @@ export async function resolveLiveIntegrationCredentials(
         authKey,
         connection.credentialsEncrypted,
         refreshContext,
+        // A forced refresh follows an upstream 401: the post-lock freshness
+        // short-circuit must not answer it with the very token that 401'd.
+        // The proactive (lead-window) branch keeps the short-circuit — there
+        // the stored token is presumed good, we are merely ahead of expiry.
+        { force: options.forceRefresh === true },
       );
+      if (classified.status === "terminal") {
+        // The connection can never be refreshed as stored (no refresh_token).
+        // Same terminal surface as every other dead credential: 410 + flagged.
+        // `markIntegrationConnectionNeedsReconnection` is idempotent, so the
+        // helper having already flagged the row costs nothing here.
+        return flagTerminalAndThrow(classified.reason);
+      }
       if (classified.status === "revoked") {
         // 410 here propagates to the sidecar, which translates back
         // to a 401 to the integration's MCP client. The
@@ -373,7 +385,7 @@ export async function resolveLiveIntegrationCredentials(
       if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
         const granted = refreshed.scopesGranted;
         const { required } = await computeRequiredScopes({
-          scope: { orgId: context.orgId, applicationId: context.applicationId },
+          scope: { orgId: context.orgId, spaceId: context.spaceId },
           integrationId: integrationId,
           authKey,
         });
@@ -405,7 +417,7 @@ export async function resolveLiveIntegrationCredentials(
       }
     } else if (options.forceRefresh === true) {
       // OAuth2 but `buildIntegrationOAuthRefreshContext` returned null — no
-      // per-app OAuth client (DCR / system-wide / shared) or no token_endpoint,
+      // per-space OAuth client (DCR / system-wide / shared) or no token_endpoint,
       // so the token can never be refreshed. Terminal.
       await flagTerminalAndThrow("no OAuth client or token endpoint");
     }

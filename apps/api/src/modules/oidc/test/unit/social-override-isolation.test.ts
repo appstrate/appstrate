@@ -5,7 +5,7 @@
  *
  * Two concurrent "requests" each run inside their own async context (via
  * `AsyncLocalStorage.run`, which is how Bun/Node wraps HTTP handlers) and
- * each set a different per-app override. The test asserts that reads inside
+ * each set a different per-space override. The test asserts that reads inside
  * one context never see the other's override, even when the two contexts
  * interleave their awaits.
  *

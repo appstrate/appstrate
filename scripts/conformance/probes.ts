@@ -16,7 +16,7 @@
  * mutates the sandbox account.
  */
 
-export interface AuthProbe {
+interface AuthProbe {
   /** Read-only endpoint to GET with the package's credential injected. */
   url: string;
   /** HTTP statuses that count as "credential accepted / provider alive". */

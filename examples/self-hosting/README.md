@@ -105,10 +105,6 @@ The installer opens `/register` in your browser and the bootstrap owner
 signs up there (form pre-fills + locks the email field) — see
 [AUTH_MODES.md](./AUTH_MODES.md) for the full matrix of closed-mode options.
 
-Legacy `APPSTRATE_AUTO_INSTALL=1` is preserved as an escape hatch for
-existing scripted provisioning that depended on the previous "always
-auto-install" default.
-
 Overrides: `APPSTRATE_VERSION=v1.2.3` (env var pins a specific release
 binary). Per-field flags: `bash -s -- --tier 3 --dir ~/appstrate`.
 
@@ -410,7 +406,7 @@ install dir itself, so use it only when you intend a full wipe.
 - Place a reverse proxy (nginx, Caddy, Traefik) in front of Appstrate for TLS termination
 - Set `APP_URL` to your public HTTPS URL
 - Set `TRUSTED_ORIGINS` to your public domain
-- Set `TRUST_PROXY=true` so client IPs and forwarded-proto are read from `X-Forwarded-*`
+- Set `TRUST_PROXY` to the number of proxy hops in front of Appstrate (`1` for the single reverse proxy above) so the per-IP rate limiters and the audit trail read `X-Forwarded-For`. Not optional: behind an HTTPS `APP_URL` the image refuses to boot on `TRUST_PROXY=false`
 
 The `appstrate install` CLI wires all three for you when you pass the public URL
 (`--app-url https://appstrate.example.com`, or `APPSTRATE_APP_URL` for the
@@ -429,7 +425,7 @@ appstrate.example.com {
 
 ### Agent-HTML previews (`USERCONTENT_URL`)
 
-Agents can publish HTML documents, which the dashboard renders in a hardened,
+Agents can publish HTML files, which the dashboard renders in a hardened,
 cookie-less preview. That HTML is untrusted (agent-generated), so it is served
 from a dedicated preview route with an opaque-sandbox iframe, a strict CSP, and
 an injected meta CSP. For the strongest isolation in production, set
@@ -448,7 +444,7 @@ other users to view.
 **Setting it changes no behaviour, only isolation.** Agent HTML is rendered as
 active content **only** inside the dashboard's sandboxed iframe (`Sec-Fetch-Dest:
 iframe`), in _every_ mode — set or unset. Opening a `preview_url` in a top-level
-tab shows the document's source, never a rendered page, whatever this variable
+tab shows the file's source, never a rendered page, whatever this variable
 says. There is no "configured ⇒ trusted" exemption.
 
 **Do not point `USERCONTENT_URL` at `APP_URL`'s host.** A same-host value is not
@@ -485,6 +481,25 @@ Appstrate:
   `request_body { max_size 100MB }` if you had set one).
 - **Traefik**: no body limit by default; if you use the `buffering`
   middleware, set `maxRequestBodyBytes` ≥ `104857600`.
+
+### Streaming responses (chat + live run logs)
+
+The settings above cover the REQUEST direction. The RESPONSE direction matters
+too: Appstrate streams chat tokens and run logs over Server-Sent Events, and a
+proxy that buffers responses turns a live feed into one batch delivered when the
+turn ends. Appstrate sets `X-Accel-Buffering: no` on every SSE response — the three
+producers are `/api/realtime/*`, the chat stream (via the AI SDK's own
+`UI_MESSAGE_STREAM_HEADERS`) and `/api/llm-proxy/*` — which nginx honours — but two things are worth checking on your own deployment:
+
+- **nginx**: the header is enough. Add `proxy_buffering off;` on the Appstrate
+  location if you have overridden buffering behaviour elsewhere.
+- **Compression**: do NOT gzip `text/event-stream`. A compressor holds bytes
+  until a flush boundary, so it delays the first token by design. nginx's
+  `gzip_types` excludes it by default; if you enable compression in Traefik or
+  Caddy, confirm `text/event-stream` is not in the compressed set.
+- **Traefik**: responses are not buffered unless you configure the `buffering`
+  middleware. If you do, it must not apply to `/api/chat`, `/api/realtime` or
+  the run-log endpoints.
 
 Only direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) bypasses the proxy —
 browsers then PUT straight at the public S3 endpoint. Its bucket CORS policy

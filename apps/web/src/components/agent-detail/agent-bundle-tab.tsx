@@ -97,7 +97,7 @@ export function AgentBundleTab({
                 <Fact
                   label={t("detail.overview.skills")}
                   value={t("detail.overview.itemCount", {
-                    count: detail.dependencies.skills.length,
+                    count: (detail.dependencies.skills ?? []).length,
                   })}
                 />
                 <Fact
@@ -109,7 +109,7 @@ export function AgentBundleTab({
                 <Fact
                   label={t("detail.overview.mcpServers")}
                   value={t("detail.overview.itemCount", {
-                    count: detail.dependencies.mcp_servers.length,
+                    count: (detail.dependencies.mcp_servers ?? []).length,
                   })}
                 />
               </div>
@@ -131,7 +131,7 @@ export function AgentBundleTab({
               <section className="rounded-lg border p-4">
                 <h3 className="text-sm font-semibold">{t("detail.overview.skills")}</h3>
                 <div className="mt-3 space-y-2">
-                  {detail.dependencies.skills.map((skill) => (
+                  {(detail.dependencies.skills ?? []).map((skill) => (
                     <div key={skill.id} className="flex justify-between gap-3 text-sm">
                       <code>{skill.id}</code>
                       <span className="text-muted-foreground">{skill.version ?? "—"}</span>
@@ -153,7 +153,7 @@ export function AgentBundleTab({
               <section className="rounded-lg border p-4">
                 <h3 className="text-sm font-semibold">{t("detail.overview.mcpServers")}</h3>
                 <div className="mt-3 space-y-2">
-                  {detail.dependencies.mcp_servers.map((server) => (
+                  {(detail.dependencies.mcp_servers ?? []).map((server) => (
                     <div key={server.id} className="flex justify-between gap-3 text-sm">
                       <code>{server.id}</code>
                       <span className="text-muted-foreground">{server.version}</span>

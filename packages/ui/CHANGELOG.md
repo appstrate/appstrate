@@ -30,4 +30,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release. Extracted from `apps/web/src/components/schema-form/`.
 - `./schema-form` export — `SchemaForm` RJSF wrapper, Tailwind-styled templates, custom widgets (text, textarea, select, multi-select, checkbox, file).
 - `FileWidget` with drag-and-drop upload via the `upload://` direct-upload protocol.
-- i18n-agnostic contract: consumers inject translated strings via the `labels` prop and the upload endpoint via `uploadPath`.
+- i18n-agnostic contract: consumers inject translated strings via the `labels` prop and the upload transport via the `upload` prop.
+  (The `uploadPath` escape hatch this line used to name was removed — it existed only for the retired Portal proxy and had no producer.)

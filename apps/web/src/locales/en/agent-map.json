@@ -92,7 +92,6 @@
   "emptyConfig": "No setting declared",
   "configUnset": "not set",
   "editConfig": "Edit the configuration",
-  "editConfigSchema": "Edit the declared settings",
   "concept.config.title": "Configuration",
   "concept.config.body": "A setting the agent's author made adjustable without touching the prompt.\n\nTake the \"Weekly report\" agent. The Slack channel it posts to never changes from one week to the next, but it does change from one company to the next: that is configuration, set once at install time. The week to analyse changes at every launch: that is input.\n\nSame shape in the manifest, two lifetimes. Hence this card's place, next to the model rather than on the agent's axis: configuration and model are both settings of your installation, not data flowing through the agent.\n\nTwo things are editable here. The header pencil changes which settings the agent DECLARES, which touches its manifest. Clicking a row sets its VALUE for this application: the same definition installed twice can post to two different channels.",
   "concept.schedules.title": "Schedules",

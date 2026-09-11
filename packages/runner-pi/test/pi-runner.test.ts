@@ -444,10 +444,3 @@ describe("PiRunner.run — timeout watchdog", () => {
     expect(sink.finalized?.status).toBe("success");
   });
 });
-
-describe("PiRunner.run — Runner contract", () => {
-  it("implements Runner.name", () => {
-    const runner = new ScriptedPiRunner(async () => {});
-    expect(runner.name).toBe("pi-runner");
-  });
-});

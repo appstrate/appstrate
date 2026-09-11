@@ -16,7 +16,10 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
+import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import type { Api, Model } from "./pi-sdk.ts";
+import { MODEL_API_SHAPES, SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import {
   modelNativeReasoningLevelSchema,
   modelReasoningLevelSchema,
@@ -24,7 +27,7 @@ import {
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 
-export interface RuntimeEnv {
+interface RuntimeEnv {
   /** Run identifier injected by the platform on container create. */
   runId: string;
   /** Workspace root inside the container. */
@@ -43,10 +46,21 @@ export interface RuntimeEnv {
   modelTemperature?: number;
   modelReasoningLevel?: ModelReasoningLevel;
   modelReasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
+  /**
+   * Appstrate model-provider id of the real upstream (`MODEL_PROVIDER`). On a
+   * proxied run `MODEL_BASE_URL` points at the sidecar, so this is what lets
+   * Pi still recognise the provider and emit its request shape. Absent on an
+   * older platform — the api shape's generic key is the fallback.
+   */
+  modelProvider?: string;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<"text" | "image">;
-  /** Per-token cost (input/output/cacheRead/cacheWrite USD). */
-  modelCost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /**
+   * Per-token cost (input/output/cacheRead/cacheWrite USD), or ABSENT when the
+   * platform resolved no rates — unpriced, or aliased (the published rate card
+   * names the vendor). Absent means the run reports no cost, never a fake 0.
+   */
+  modelCost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** Pi SDK context window in tokens. */
   modelContextWindow: number;
   /** Pi SDK max completion tokens. */
@@ -59,8 +73,18 @@ export interface RuntimeEnv {
   sink: { url: string; finalizeUrl: string; secret: string };
   /** Sidecar URL — present when the platform attached a sidecar. */
   sidecarUrl?: string;
-  /** Heartbeat ping interval (ms). */
-  heartbeatIntervalMs: number;
+  /**
+   * Per-run secret this container presents on `SIDECAR_AUTH_HEADER` for every
+   * request to the sidecar's control surface (`/llm/*`, `/mcp`,
+   * `/integrations/boot-report`, `/runtime-events`). Present exactly when
+   * {@link sidecarUrl} is — the platform mints and emits the pair together.
+   *
+   * Captured here so `entrypoint.ts` can delete the env var alongside
+   * `SIDECAR_URL` once the model and the clients hold it: the two together are
+   * the capability to reach the sidecar, and the Pi bash extension must not be
+   * able to `env | grep SIDECAR` its way to a free `/llm` call.
+   */
+  sidecarAuthToken?: string;
   /**
    * Wall-clock execution budget for the run, in seconds. Surfaced on
    * `ExecutionContext.timeoutSeconds`; the runner arms its own timeout
@@ -77,13 +101,6 @@ export interface RuntimeEnv {
    * and falls back to a fresh trace on malformed values.
    */
   traceparent?: string;
-  /**
-   * Wall-clock budget for the initial MCP handshake against the sidecar
-   * (in milliseconds). Wraps both the connect retry loop and the final
-   * attempt. Operators on slow registries can widen this when cold
-   * container pulls exceed the default. See issue #406.
-   */
-  mcpConnectDeadlineMs: number;
   /**
    * Optional per-call MCP tool timeout for the agent→sidecar client
    * (#779 annex). Third-party integration servers doing a cold OAuth
@@ -107,22 +124,32 @@ export interface RuntimeEnv {
   warnings: string[];
 }
 
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 16_384;
-const DEFAULT_MCP_CONNECT_DEADLINE_MS = 60_000;
-const MODEL_API_SLUGS = [
-  "anthropic-messages",
-  "openai-completions",
-  "openai-responses",
-  "openai-codex-responses",
-  "mistral-conversations",
-  "google-generative-ai",
-  "google-vertex",
-  "azure-openai-responses",
-  "bedrock-converse-stream",
-] as const satisfies readonly ModelApiShape[];
-const KNOWN_MODEL_APIS = new Set<string>(MODEL_API_SLUGS);
+
+// Fixed timings, deliberately NOT operator knobs. Both were parsed from
+// `APPSTRATE_HEARTBEAT_INTERVAL_MS` / `APPSTRATE_MCP_CONNECT_DEADLINE_MS` and
+// documented as tunable, but no writer has ever existed on any topology: the
+// agent container's environment is exactly what `buildRuntimePiEnv()` returns,
+// neither key is in `SIDECAR_OPERATOR_ENV_KEYS`, and the process orchestrator's
+// allowlist carries no `APPSTRATE_*` at all. Setting either in a shell was a
+// no-op that read as configuration. Changing them is a code change; if an
+// operator knob is ever genuinely wanted, add the key to the platform-side
+// allowlist in the same commit that reintroduces the parse.
+
+/** Heartbeat ping interval against `{SINK_URL}/heartbeat`. */
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+
+/**
+ * Wall-clock budget for the initial MCP handshake against the sidecar. Wraps
+ * both the connect retry loop and the final attempt. See issue #406.
+ */
+export const MCP_CONNECT_DEADLINE_MS = 60_000;
+// Read from core rather than mirrored here. The mirror was guarded by
+// `satisfies readonly ModelApiShape[]`, which cannot prove COMPLETENESS — a
+// shape added to core and emitted by the platform typechecked green and then
+// threw `MODEL_API: unknown api` at every container boot.
+const KNOWN_MODEL_APIS = new Set<string>(MODEL_API_SHAPES);
 
 export class RuntimeEnvError extends Error {
   override readonly name = "RuntimeEnvError";
@@ -205,22 +232,20 @@ function parseModelCost(
   raw: string | undefined,
   issues: string[],
   warnings: string[],
-): { input: number; output: number; cacheRead: number; cacheWrite: number } {
-  const fallback = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
+  const fallback = { ...ZERO_MODEL_COST };
   if (!raw) {
-    // The platform only sets MODEL_COST when the resolved model carries rates
-    // (`buildRuntimePiEnv`), so an absent var means the model could not be
-    // priced. The all-zero fallback below is arithmetically fine but silent:
-    // every metric event this run emits will report cost 0, indistinguishable
-    // from a genuinely free model. Report it — non-fatally, see
-    // {@link RuntimeEnv.warnings}. (Server-side, the same run's ledger row is
-    // stamped `pricing_status='unpriced'` from `runs.model_cost`; this line is
-    // the in-container half of the same fact, for operators reading logs.)
+    // The platform sets MODEL_COST only when the model carries rates AND the
+    // run may see them (an aliased model's card names the vendor it hides).
+    // `undefined`, not zeros: a fake `cost: 0` is indistinguishable from a free
+    // model and trips the ledger's cost-divergence warning on an aliased run.
+    // Server-side the same run's ledger row is stamped `pricing_status='unpriced'`
+    // from `runs.model_cost`; this line is its in-container half, for operators.
     warnings.push(
-      "MODEL_COST: absent — no per-token pricing was resolved for this model; " +
-        "this run's reported cost will be 0 regardless of tokens consumed",
+      "MODEL_COST: absent — no per-token pricing reached this container; " +
+        "this run reports no cost of its own (the platform prices it server-side)",
     );
-    return fallback;
+    return undefined;
   }
   let parsed: unknown;
   try {
@@ -330,6 +355,14 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     issues.push(`SIDECAR_URL: must be an http(s) URL when set (got "${sidecarUrl}")`);
   }
 
+  // FATAL rather than a warning: without it every sidecar call answers 401, so
+  // the run would boot, connect to nothing, and fail on its first tool call
+  // with an error that names the symptom instead of the cause.
+  const sidecarAuthToken = source.SIDECAR_AUTH_TOKEN;
+  if (sidecarUrl && !sidecarAuthToken) {
+    issues.push("SIDECAR_AUTH_TOKEN: required whenever SIDECAR_URL is set");
+  }
+
   const modelBaseUrl = source.MODEL_BASE_URL;
   if (modelBaseUrl && !isHttpUrl(modelBaseUrl))
     issues.push(`MODEL_BASE_URL: must be an http(s) URL when set (got "${modelBaseUrl}")`);
@@ -372,18 +405,6 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     );
   }
   const modelReasoningLevelMap = parseReasoningLevelMap(source.MODEL_REASONING_LEVEL_MAP, issues);
-  const heartbeatIntervalMs = parsePositiveInt(
-    "APPSTRATE_HEARTBEAT_INTERVAL_MS",
-    source.APPSTRATE_HEARTBEAT_INTERVAL_MS,
-    DEFAULT_HEARTBEAT_INTERVAL_MS,
-    issues,
-  );
-  const mcpConnectDeadlineMs = parsePositiveInt(
-    "APPSTRATE_MCP_CONNECT_DEADLINE_MS",
-    source.APPSTRATE_MCP_CONNECT_DEADLINE_MS,
-    DEFAULT_MCP_CONNECT_DEADLINE_MS,
-    issues,
-  );
   // Optional: a 0 fallback means "absent" (parsePositiveNumber only returns it
   // for a missing var, or after pushing an issue for a malformed one). We map
   // 0 → undefined so an absent budget leaves runner-side enforcement off.
@@ -417,20 +438,62 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
       ? { modelReasoningLevel: modelReasoningLevel.data as ModelReasoningLevel }
       : {}),
     ...(modelReasoningLevelMap ? { modelReasoningLevelMap } : {}),
+    ...(source.MODEL_PROVIDER ? { modelProvider: source.MODEL_PROVIDER } : {}),
     modelInput,
-    modelCost,
+    ...(modelCost !== undefined ? { modelCost } : {}),
     modelContextWindow,
     modelMaxTokens,
     agentPrompt: agentPrompt!,
     agentInput,
     sink: { url: sinkUrl!, finalizeUrl: sinkFinalizeUrl!, secret: sinkSecret! },
     sidecarUrl: sidecarUrl || undefined,
-    heartbeatIntervalMs,
+    sidecarAuthToken: sidecarAuthToken || undefined,
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,
-    mcpConnectDeadlineMs,
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
     warnings,
+  };
+}
+
+/**
+ * Build the Pi SDK `Model` record the session is driven with; its `provider` +
+ * `baseUrl` decide the vendor request shape pi-ai emits.
+ */
+export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
+  return {
+    id: env.modelId,
+    name: env.modelId,
+    api: env.modelApi as Api,
+    // Pi re-derives each provider's request shape from `provider` + `baseUrl`.
+    // An aliased container is given no MODEL_PROVIDER and must derive none: the
+    // api-shape fallback yields Appstrate's own key, naming no vendor.
+    provider: derivePiProvider(env.modelProvider, env.modelApi),
+    baseUrl: env.modelBaseUrl ?? "",
+    reasoning: env.modelReasoning,
+    ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
+    // One rule, one constant — see `PLATFORM_MODEL_COMPAT` for why long
+    // cache retention is refused and why refusing the ENV alone is not enough.
+    compat: { ...PLATFORM_MODEL_COMPAT },
+    input: [...env.modelInput],
+    // `Model.cost` is REQUIRED by the Pi SDK on every settled turn, so an unpriced
+    // run still hands it zeros; the runner's `unpriced` flag stops the 0 escaping.
+    // One spelling of those zeros — see `ZERO_MODEL_COST` for the second, very
+    // different reason the sidecar hands the same literal to pi-ai.
+    cost: env.modelCost ?? { ...ZERO_MODEL_COST },
+    contextWindow: env.modelContextWindow,
+    maxTokens: env.modelMaxTokens,
+    // Agent→sidecar auth for the `/llm/*` leg, and the only place it can ride:
+    // the Pi SDK owns the request and takes no per-call headers from us.
+    // `ModelRuntime`'s provider composer folds `Model.headers` into the
+    // per-request options, so this reaches the wire for every api shape —
+    // including `pi-messages` (aliased runs) and `bedrock-converse-stream`,
+    // whose pi-ai adapters read `options.headers` and nothing else. Pinned on
+    // the bytes in `packages/runner-pi/test/alias-provider-registration.test.ts`
+    // and `runtime-pi/test/pi-runner-transport.test.ts`.
+    //
+    // Carried on the model rather than read from `process.env` at request time,
+    // so the bootloader can delete the variable once the run is wired.
+    ...(env.sidecarAuthToken ? { headers: { [SIDECAR_AUTH_HEADER]: env.sidecarAuthToken } } : {}),
   };
 }
 
@@ -448,14 +511,14 @@ const SINK_ENV_KEYS = [
  * Same zero-knowledge reasoning as the `delete process.env.SIDECAR_URL` in
  * `entrypoint.ts`: the agent loop runs arbitrary model-chosen commands through
  * the Pi bash extension, and the agent's input (an email body, a fetched page,
- * an input document) is attacker-controllable. `env | grep SINK` would hand a
+ * an input file) is attacker-controllable. `env | grep SINK` would hand a
  * prompt-injected agent the HMAC key for its own run, which is enough to forge
  * a `status: "success"` finalize the platform cannot distinguish from the real
- * one, or to POST documents straight to `/api/runs/:id/documents` past the
+ * one, or to POST files straight to `/api/runs/:id/files` past the
  * `runtime_tools` gate up to the per-run cap.
  *
  * Safe: nothing downstream re-reads these from the environment. The sink, the
- * document uploader and the provisioning fetches all take the captured
+ * file uploader and the provisioning fetches all take the captured
  * `env.sink` struct.
  */
 export function scrubSinkEnv(source: NodeJS.ProcessEnv = process.env): void {

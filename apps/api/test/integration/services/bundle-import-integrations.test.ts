@@ -20,6 +20,9 @@ import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 
+/** Service-level tests exercise the import itself; route guards are tested at the HTTP layer. */
+const noAuthorize = async () => {};
+
 const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
 function enc(s: string): Uint8Array {
@@ -75,17 +78,17 @@ function validManifest(overrides: Record<string, unknown> = {}): Record<string, 
 
 describe("handleImportBundle — integration packages", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "testorg" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
   });
 
   it("imports a minimal integration .afps and persists the package + version", async () => {
     const afps = buildIntegrationAfps({ manifest: validManifest() });
-    const result = await handleImportBundle(afps, scope, ctx.user.id);
+    const result = await handleImportBundle(afps, scope, ctx.user.id, noAuthorize);
 
     expect(result.root_package_id).toBe("@official/gmail");
     expect(result.root_version).toBe("1.0.0");
@@ -115,7 +118,7 @@ describe("handleImportBundle — integration packages", () => {
 
   it("surfaces integration via integration-service after import", async () => {
     const afps = buildIntegrationAfps({ manifest: validManifest() });
-    await handleImportBundle(afps, scope, ctx.user.id);
+    await handleImportBundle(afps, scope, ctx.user.id, noAuthorize);
 
     const summary = await getIntegration(ctx.orgId, "@official/gmail");
     expect(summary).not.toBeNull();
@@ -128,8 +131,8 @@ describe("handleImportBundle — integration packages", () => {
 
   it("re-import is idempotent and returns `reused`", async () => {
     const afps = buildIntegrationAfps({ manifest: validManifest() });
-    await handleImportBundle(afps, scope, ctx.user.id);
-    const second = await handleImportBundle(afps, scope, ctx.user.id);
+    await handleImportBundle(afps, scope, ctx.user.id, noAuthorize);
+    const second = await handleImportBundle(afps, scope, ctx.user.id, noAuthorize);
     expect(second.imported[0]!.status).toBe("reused");
   });
 
@@ -138,7 +141,7 @@ describe("handleImportBundle — integration packages", () => {
     // `auths` map fails schema validation at bundle read time.
     const broken = validManifest({ auths: {} });
     const afps = buildIntegrationAfps({ manifest: broken });
-    await expect(handleImportBundle(afps, scope, ctx.user.id)).rejects.toThrow();
+    await expect(handleImportBundle(afps, scope, ctx.user.id, noAuthorize)).rejects.toThrow();
   });
 
   it("preserves the optional INTEGRATION.md companion as package content", async () => {
@@ -147,7 +150,7 @@ describe("handleImportBundle — integration packages", () => {
       manifest: validManifest(),
       integrationDoc: doc,
     });
-    const result = await handleImportBundle(afps, scope, ctx.user.id);
+    const result = await handleImportBundle(afps, scope, ctx.user.id, noAuthorize);
     expect(result.imported[0]!.status).toBe("inserted");
 
     const [row] = await db

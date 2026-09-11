@@ -27,9 +27,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-
-// ─── Constants mirrored from credential-proxy route ──────────────────────────
-const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
+// Imported, not mirrored: this suite's declared-length guard asserts the real
+// production ceiling, so a local copy would keep passing against a stale number
+// if the shared constant ever moved. Same single source the route reads
+// (`apps/api/src/routes/credential-proxy.ts`).
+import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 // ─── Test sizes (see module doc) ─────────────────────────────────────────────
 /** Cap injected into the cap-behavior tests — many chunks, no 100 MB entropy. */

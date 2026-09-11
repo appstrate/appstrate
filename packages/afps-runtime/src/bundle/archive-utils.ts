@@ -7,6 +7,8 @@
  * re-implement them.
  */
 
+import type { DecompressionLimitError } from "@appstrate/afps-shared/unzip-bounded";
+
 import { BundleError } from "./errors.ts";
 import type { BundleLimits } from "./limits.ts";
 
@@ -83,27 +85,15 @@ export function sanitizeEntries(
  * If every entry shares a single top-level directory, strip it. Used for
  * user-authored AFPS ZIPs whose tools add a wrapper folder.
  *
- * Mirror of `stripWrapperPrefix` in `@appstrate/core/zip` (Record + Map
- * generic). This package intentionally avoids an `@appstrate/core` runtime
- * dependency to stay portable + standalone, so we maintain a local Map-only
- * copy. Keep the two algorithms in sync.
+ * Re-exported from `@appstrate/afps-shared/archive-prefix`, which owns the one
+ * implementation this package and `@appstrate/core/zip` both read. It used to
+ * be a hand-copy of core's `Map` branch under a comment asking a human to keep
+ * the two algorithms in sync — the justification being that this package
+ * intentionally carries no `@appstrate/core` runtime dependency, which is
+ * precisely the question `@appstrate/afps-shared` exists to answer (both
+ * packages already depend on it).
  */
-export function stripWrapperPrefix(files: Map<string, Uint8Array>): Map<string, Uint8Array> {
-  if (files.size === 0) return files;
-  const prefixes = new Set<string>();
-  for (const key of files.keys()) {
-    const slash = key.indexOf("/");
-    if (slash === -1) return files;
-    prefixes.add(key.slice(0, slash));
-  }
-  if (prefixes.size !== 1) return files;
-  const prefix = `${[...prefixes][0]!}/`;
-  const stripped = new Map<string, Uint8Array>();
-  for (const [key, value] of files) {
-    stripped.set(key.slice(prefix.length), value);
-  }
-  return stripped;
-}
+export { stripWrapperPrefix } from "@appstrate/afps-shared/archive-prefix";
 
 /** Sum of decompressed sizes for budget checks. */
 export function sumSizes(files: Map<string, Uint8Array> | Record<string, Uint8Array>): number {
@@ -114,4 +104,32 @@ export function sumSizes(files: Map<string, Uint8Array> | Record<string, Uint8Ar
     for (const v of Object.values(files)) total += v.length;
   }
   return total;
+}
+
+/**
+ * Map a mid-inflate {@link DecompressionLimitError} onto the {@link BundleError}
+ * shape the bundle builder and the bundle readers already throw. A
+ * `corrupt-archive` reason surfaces as `ARCHIVE_INVALID` (matching the previous
+ * decompress-failure branch); the three resource-budget reasons surface as
+ * `LIMITS_EXCEEDED` with a `field` mirroring the post-hoc checks they replace.
+ *
+ * Lives here rather than in `build.ts` and `read.ts`: both inflate through
+ * `unzipBounded` and both have to turn the same four reasons into the same four
+ * `BundleError`s, and the two module-private copies this replaces were byte
+ * identical apart from one word of prose.
+ */
+export function decompressionLimitToBundleError(
+  err: DecompressionLimitError,
+  context: string,
+): BundleError {
+  if (err.reason === "corrupt-archive") {
+    return new BundleError("ARCHIVE_INVALID", `failed to decompress ${context}: ${err.message}`);
+  }
+  const field =
+    err.reason === "too-many-files"
+      ? "files"
+      : err.reason === "file-too-large"
+        ? "fileBytes"
+        : "decompressedBytes";
+  return new BundleError("LIMITS_EXCEEDED", err.message, { field });
 }

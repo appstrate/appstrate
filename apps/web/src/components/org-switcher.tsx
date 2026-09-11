@@ -24,8 +24,8 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { $api } from "../api/client";
-import { useApplications } from "../hooks/use-applications";
-import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
+import { useSpaces } from "../hooks/use-spaces";
+import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
@@ -65,9 +65,9 @@ export function OrgSwitcher({
   const navigate = useNavigate();
   const location = useLocation();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
-  const { data: applications } = useApplications();
-  const currentAppId = useCurrentApplicationId();
-  const { switchApp } = useAppSwitcher();
+  const { data: spaces } = useSpaces();
+  const currentSpaceId = useCurrentSpaceId();
+  const { switchSpace } = useSpaceSwitcher();
   const { isMobile, setOpenMobile } = useSidebar();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -76,7 +76,7 @@ export function OrgSwitcher({
   // it after a look around never leaves you exploring somewhere else.
   const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
 
-  const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
+  const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
   const mobilePresentation = variant === "mobile" || isMobile;
@@ -85,14 +85,14 @@ export function OrgSwitcher({
     setOpenMobile(false);
   };
 
-  // Workspaces of the EXPLORED organisation. The header is passed explicitly,
+  // Spaces of the EXPLORED organisation. The header is passed explicitly,
   // so it is part of the query key and the client middleware leaves it alone
   // (it only fills headers a request does not already carry). Exploring your
-  // own org therefore hits the very same key as `useApplications()` — same
+  // own org therefore hits the very same key as `useSpaces()` — same
   // cache entry, no second request.
-  const exploredApps = $api.useQuery(
+  const exploredSpaces = $api.useQuery(
     "get",
-    "/api/applications",
+    "/api/spaces",
     { params: { header: { "X-Org-Id": exploredId ?? undefined } } },
     { enabled: open && !!exploredId, select: (e) => e.data },
   );
@@ -103,7 +103,7 @@ export function OrgSwitcher({
   const needle = query.trim().toLowerCase();
   const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
   const shownOrgs = orgs.filter((o) => matches(o.name));
-  const shownApps = (exploredApps.data ?? []).filter((a) => matches(a.name));
+  const shownSpaces = (exploredSpaces.data ?? []).filter((a) => matches(a.name));
 
   /**
    * The one place the context is applied — and it is applied whole. Switching
@@ -115,10 +115,10 @@ export function OrgSwitcher({
    * Settings are the exception: their routes describe a page type, not a
    * resource id, so they remain valid when the context changes.
    */
-  const applyContext = (orgId: string, applicationId: string) => {
+  const applyContext = (orgId: string, spaceId: string) => {
     const orgChanged = orgId !== currentOrg.id;
-    if (orgChanged) switchOrg(orgId, applicationId);
-    else switchApp(applicationId);
+    if (orgChanged) switchOrg(orgId, spaceId);
+    else switchSpace(spaceId);
     setOpen(false);
     // The global shell stays on the background router location while settings
     // are mounted as an overlay route. Read the visible URL for this exception
@@ -164,12 +164,14 @@ export function OrgSwitcher({
             />
             <span className="flex min-w-0 flex-1 items-center text-left">
               <span className="max-w-[48%] shrink-0 truncate font-semibold">{currentOrg.name}</span>
-              {currentApp && (
+              {currentSpace && (
                 <>
                   <span className="text-border mx-1.5 shrink-0" aria-hidden>
                     |
                   </span>
-                  <span className="text-muted-foreground min-w-0 truncate">{currentApp.name}</span>
+                  <span className="text-muted-foreground min-w-0 truncate">
+                    {currentSpace.name}
+                  </span>
                 </>
               )}
             </span>
@@ -196,12 +198,12 @@ export function OrgSwitcher({
               <span className="font-semibold">{currentOrg.name}</span>
               {/* The workspace stays visible even when there is only one: a
                   level nobody ever sees is a level nobody learns. */}
-              {currentApp && (
+              {currentSpace && (
                 <>
                   <span className="text-border mx-1.5" aria-hidden>
                     |
                   </span>
-                  <span className="text-muted-foreground">{currentApp.name}</span>
+                  <span className="text-muted-foreground">{currentSpace.name}</span>
                 </>
               )}
             </span>
@@ -227,12 +229,12 @@ export function OrgSwitcher({
               <span className="font-semibold">{currentOrg.name}</span>
               {/* The workspace stays visible even when there is only one: a
                   level nobody ever sees is a level nobody learns. */}
-              {currentApp && (
+              {currentSpace && (
                 <>
                   <span className="text-border mx-1.5" aria-hidden>
                     |
                   </span>
-                  <span className="text-muted-foreground">{currentApp.name}</span>
+                  <span className="text-muted-foreground">{currentSpace.name}</span>
                 </>
               )}
             </span>
@@ -251,14 +253,14 @@ export function OrgSwitcher({
               className="size-5 rounded-[5px] text-[0.65rem]"
             />
             <span className="truncate font-semibold">{currentOrg.name}</span>
-            {currentApp && (
+            {currentSpace && (
               <>
                 {/* The workspace stays visible even when there is only one: a
                     level nobody ever sees is a level nobody learns. */}
                 <span className="text-border" aria-hidden>
                   |
                 </span>
-                <span className="truncate font-semibold">{currentApp.name}</span>
+                <span className="truncate font-semibold">{currentSpace.name}</span>
               </>
             )}
             <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
@@ -363,20 +365,20 @@ export function OrgSwitcher({
             <ColumnHeader
               label={t("switcher.workspacesColumn")}
               addLabel={t("switcher.add")}
-              onAdd={isExploringElsewhere ? undefined : "/org-settings/applications"}
+              onAdd={isExploringElsewhere ? undefined : "/org-settings/spaces"}
             />
-            {exploredApps.isPending ? (
+            {exploredSpaces.isPending ? (
               <div className="space-y-1 p-2">
                 <Skeleton className="h-5 w-2/3" />
                 <Skeleton className="h-5 w-1/2" />
               </div>
-            ) : shownApps.length === 0 ? (
+            ) : shownSpaces.length === 0 ? (
               <p className="text-muted-foreground px-2 py-4 text-xs">
                 {t("switcher.workspacesEmpty")}
               </p>
             ) : (
-              shownApps.map((app) => {
-                const isCurrent = app.id === currentAppId && !isExploringElsewhere;
+              shownSpaces.map((app) => {
+                const isCurrent = app.id === currentSpaceId && !isExploringElsewhere;
                 return (
                   <div
                     key={app.id}

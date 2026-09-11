@@ -133,7 +133,7 @@ const prompt = await renderPrompt({
 });
 
 // Consume an event stream through a sink (produced by a runner you wire
-// up externally — e.g. the spec-aligned `Runner` interface from
+// up externally — one that takes the `RunOptions` shape from
 // `@appstrate/afps-runtime/runner`) and fold it into a RunResult.
 const { sink, snapshot } = createReducerSink();
 const events: RunEvent[] = [
@@ -153,7 +153,7 @@ console.log(snapshot().output); // { done: true }
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `@appstrate/afps-runtime`             | Everything — re-exports all modules                                                                               |
 | `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                                                                |
-| `@appstrate/afps-runtime/runner`      | `Runner`, `RunOptions`, `reduceEvents`, `RunResult`                                                               |
+| `@appstrate/afps-runtime/runner`      | `RunOptions`, `reduceEvents`, `RunResult`                                                                         |
 | `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                                                                              |
 | `@appstrate/afps-runtime/sinks`       | `HttpSink`, `CompositeSink`, `createReducerSink`, `attachStdoutBridge`                                            |
 | `@appstrate/afps-runtime/resolvers`   | `LocalIntegrationResolver`, `RemoteAppstrateIntegrationResolver`, `IntegrationApiCallResolver`, `makeApiCallTool` |
@@ -236,11 +236,11 @@ Runtime dependencies are intentionally minimal:
 - **[`mustache`](https://github.com/janl/mustache.js)** — logic-less template rendering (MIT, zero-dep)
 - **[`zod`](https://zod.dev)** — runtime type validation (MIT)
 
-The runtime exposes a `Runner` interface under
-`@appstrate/afps-runtime/runner` but does not ship a concrete LLM-backed
-implementation in v1 — downstream projects (including Appstrate itself,
-which delegates execution to a Docker container) implement the interface
-with their own session backend.
+The runtime defines the run invocation surface — `RunOptions` under
+`@appstrate/afps-runtime/runner` — but ships no concrete LLM-backed
+runner. Downstream projects (including Appstrate itself, which delegates
+execution to a Docker container) drive that surface with their own
+session backend.
 
 ## License
 

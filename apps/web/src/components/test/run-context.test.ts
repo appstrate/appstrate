@@ -2,7 +2,8 @@
 
 /**
  * The shared context derivation (#1046) — the single source both the run-header
- * gauge and the Info tab's per-turn table read from. Pure, so it needs no DOM.
+ * gauge and the Exécution pane's per-turn table (`run-execution-tab.tsx`) read
+ * from. Pure, so it needs no DOM.
  */
 
 import { describe, it, expect } from "bun:test";

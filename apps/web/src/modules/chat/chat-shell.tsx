@@ -29,7 +29,7 @@ import {
 } from "@appstrate/module-chat/ui";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { ShellHeader, ShellSidebar } from "@/components/shell-frame";
-import { useApplicationResolver } from "@/hooks/use-current-application";
+import { useSpaceResolver } from "@/hooks/use-current-space";
 import { useChatSidebarStore } from "@/stores/sidebar-store";
 import { ChatTitleCrumb } from "./chat-title-crumb";
 
@@ -52,7 +52,7 @@ export function ChatShell({
   // Every request the chat makes is scoped by the current workspace, and it is
   // this hook that resolves one. `MainLayout` calls it for the rest of the app;
   // the chat no longer passes through it.
-  useApplicationResolver();
+  useSpaceResolver();
   const { open, setOpen } = useChatSidebarStore();
 
   // The chat's two contexts, raised over the WHOLE shell rather than published

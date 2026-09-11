@@ -50,12 +50,12 @@ const VALID_SKILL = {
 };
 
 /**
- * SKILL.md fixture with valid YAML frontmatter `name`. AFPS §3.3 requires
- * skill packages to declare a `name` frontmatter — the validator + the
- * runtime bundle loader both reject SKILL.md without it (covered by the
- * dedicated conformance cases).
+ * SKILL.md fixture satisfying both rules: the loader (this validator and the
+ * bundle loader) asks only for an inline frontmatter `name`, while the write
+ * paths (`checkSkillMarkdown`) also require a conforming name and a
+ * non-empty `description`.
  */
-const VALID_SKILL_MD = enc("---\nname: skill\n---\nbody");
+const VALID_SKILL_MD = enc("---\nname: skill\ndescription: A test skill.\n---\nbody");
 
 /** A valid AFPS mcp-server manifest (MCPB shape + root identity). */
 const VALID_MCP_SERVER = {

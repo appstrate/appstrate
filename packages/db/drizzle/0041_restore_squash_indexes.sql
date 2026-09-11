@@ -1,0 +1,76 @@
+-- Re-create two indexes that the schema declares but production does not have.
+--
+-- `idx_runs_package_started` and `idx_runs_schedule_id` are declared in
+-- src/schema/runs.ts and created in 0000_init.sql (lines 633-634). When
+-- production was audited they were the only two of the 132 indexes declared at
+-- that point (`meta/0038_snapshot.json`) absent from the production database;
+-- 0039 has since dropped 18, so the schema declares 114 today. The DDL below is
+-- those two lines verbatim, with `IF NOT EXISTS` added and nothing else
+-- changed.
+--
+-- WHY THEY ARE MISSING. 0000_init.sql is a SQUASH, and production predates it.
+-- Drizzle replays only the journal entries past a database's watermark, so for
+-- a database created before the squash 0000_init is history, never pending
+-- work. Anything the squash introduced *by itself* — rather than through a
+-- forward migration that production also ran — therefore never reached it.
+-- These two indexes were introduced that way.
+--
+-- NOT A WATERMARK PROBLEM, and deliberately not fixed like one.
+-- `drizzle.__drizzle_migrations` on production is healthy: 39 rows, no gap. No
+-- migration was skipped and no record is wrong, so there is nothing in the
+-- bookkeeping table to repair. What is missing is DDL, and the instrument for
+-- missing DDL is a forward migration — this file. Rewriting the watermark
+-- instead would re-run every intervening migration against a database that
+-- already applied them.
+--
+-- WHY `IF NOT EXISTS`. Every database created FROM the squash — every dev
+-- machine, every test database, every fresh install — already has both
+-- indexes, because 0000_init.sql created them there. This migration runs
+-- against two populations with different starting states and must be a no-op
+-- for one of them. Unguarded, `relation "..." already exists` would abort the
+-- whole batch (drizzle's pg dialect wraps every pending migration in ONE
+-- `session.transaction(...)`) and wedge the deploy for every fresh install,
+-- which is nearly all of them. An index that is already present IS the
+-- intended end state; skipping it is correct, not a silent failure. Same
+-- reasoning as the `IF EXISTS` guards in 0039 and the `to_regclass(...)`
+-- guards in 0002_fold_webhooks_tables.sql.
+--
+-- WHY NOT `CONCURRENTLY`. It is impossible here, not merely unwanted. Postgres
+-- forbids CREATE INDEX CONCURRENTLY inside a transaction block, and the whole
+-- pending batch runs inside one transaction (see above). A CONCURRENTLY
+-- statement in a drizzle migration fails at runtime, every time.
+--
+-- LOCK NOTE. A plain CREATE INDEX takes SHARE on `runs` — not ACCESS EXCLUSIVE;
+-- that is DROP INDEX. SHARE does not conflict with a reader's ACCESS SHARE, so
+-- readers neither block this migration nor are blocked by it. It does conflict
+-- with ROW EXCLUSIVE: these statements block WRITES to `runs`, and only a
+-- long-lived writing transaction can make them wait. Locks are held to COMMIT
+-- and drizzle commits the whole batch at once, so that write block lasts the
+-- rest of the batch, not just the two builds (trivial at 4345 rows).
+--
+-- Hence the `SET LOCAL lock_timeout = '3s'` fence below, reset to DEFAULT after
+-- — same instrument as 0039, different conflict (its DROP INDEX statements take
+-- ACCESS EXCLUSIVE, so they block readers too); see its header for `SET LOCAL`
+-- rather than `SET`, and for the reset. The cost, written down rather than
+-- discovered: on expiry the statement errors and aborts the single transaction
+-- wrapping the batch — `migrate` throws, boot fails, the deploy fails its
+-- health gate. That is the right trade for an index restore that is not urgent
+-- (fail fast, retry), but it is a failed deploy, not a silent skip.
+--
+-- SIDE EFFECT WORTH NAMING. 0039 dropped `idx_runs_package_id` on the grounds
+-- that `idx_runs_package_started` is a leading-prefix cover, and its own header
+-- records that the cover was absent on production. That drop was justified
+-- there by a different index (`idx_runs_package_run_number`), so nothing was
+-- broken; restoring `idx_runs_package_started` simply makes the stated
+-- justification true on production as well.
+--
+-- THIS CLASS OF DRIFT RECURS. It is structural, not a one-off mistake: the
+-- next time this folder is squashed, every index, constraint and default the
+-- new squash introduces without a matching forward migration will again be
+-- absent from every database that predates it, and the journal will look
+-- perfectly healthy while that is true. Only a diff of the declared schema
+-- against a live production catalog surfaces it.
+SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_runs_package_started" ON "runs" USING btree ("package_id","started_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_runs_schedule_id" ON "runs" USING btree ("schedule_id") WHERE "runs"."schedule_id" IS NOT NULL;--> statement-breakpoint
+SET LOCAL lock_timeout = DEFAULT;

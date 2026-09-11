@@ -8,7 +8,7 @@ import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
 import { bootCritical, bootBackground, probeUsercontentReachability } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
-import { requireAppContext } from "./middleware/app-context.ts";
+import { isSpaceScopedPath, requireSpaceContext } from "./middleware/space-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { telemetry } from "./middleware/telemetry.ts";
 import { clientIp } from "./middleware/client-ip.ts";
@@ -26,13 +26,14 @@ import { createModelsRouter } from "./routes/models.ts";
 import { createModelProviderCredentialsRouter } from "./routes/model-provider-credentials.ts";
 import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.ts";
 import { createInternalRouter } from "./routes/internal.ts";
-import { createApplicationsRouter } from "./routes/applications.ts";
+import { createSpacesRouter } from "./routes/spaces.ts";
+import { createRolesRouter } from "./routes/roles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
 import { createEndUsersRouter } from "./routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads.ts";
-import { createDocumentsRouter, createDocumentPreviewRouter } from "./routes/documents.ts";
+import { createFilesRouter, createFilePreviewRouter } from "./routes/files.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
 import { createSpaFallbackHandler } from "./routes/spa.ts";
 import { staticCacheControl } from "./lib/static-cache.ts";
@@ -43,6 +44,7 @@ import { createLlmProxyRouter } from "./routes/llm-proxy.ts";
 import { createLibraryRouter } from "./routes/library.ts";
 import { createAuthBootstrapRouter } from "./routes/auth-bootstrap.ts";
 import orgsRouter from "./routes/organizations.ts";
+import { ORG_PATH_MIDDLEWARE } from "./middleware/org-path-context.ts";
 import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
@@ -61,7 +63,7 @@ import {
 import { ApiError, notFound } from "./lib/errors.ts";
 import { apiVersion } from "./middleware/api-version.ts";
 import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
-import { getOrgSettings } from "./services/organizations.ts";
+import { getCachedOrgApiVersion } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
 import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
@@ -100,13 +102,13 @@ app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 // (up to 100 MB by design), enforced while the body streams to disk: the
 // signed max replaces this cap and chunked encoding cannot bypass it.
 const globalBodyLimit = bodyLimit(env.API_BODY_LIMIT_BYTES);
-// Matches the agent-output ingestion POST — its body is a raw document stream
-// (up to DOCUMENT_MAX_FILE_BYTES, 100 MiB by default) enforced mid-stream by
+// Matches the agent-output ingestion POST — its body is a raw file stream
+// (up to FILE_MAX_BYTES, 100 MiB by default) enforced mid-stream by
 // the route's own counting cap, so the global JSON-sized cap must not reject it.
-const RUN_DOCUMENT_UPLOAD_PATH = /^\/api\/runs\/[^/]+\/documents$/;
+const RUN_FILE_UPLOAD_PATH = /^\/api\/runs\/[^/]+\/files$/;
 app.use("*", async (c, next) => {
   if (c.req.path === "/api/uploads/_content") return next();
-  if (c.req.method === "POST" && RUN_DOCUMENT_UPLOAD_PATH.test(c.req.path)) return next();
+  if (c.req.method === "POST" && RUN_FILE_UPLOAD_PATH.test(c.req.path)) return next();
   return globalBodyLimit(c, next);
 });
 
@@ -163,12 +165,12 @@ Install the CLI (\`curl -fsSL https://get.appstrate.dev | bash\` or \`bunx appst
 `;
 app.get("/llms.txt", (c) => c.text(LLMS_TXT));
 
-// Cookie-less HTML document preview — mounted BEFORE the auth pipeline so no
-// cookie/API-key/org/app middleware ever runs on it. Authorized solely by the
+// Cookie-less HTML file preview — mounted BEFORE the auth pipeline so no
+// cookie/API-key/org/space middleware ever runs on it. Authorized solely by the
 // short-lived signed token in the URL; serves untrusted agent HTML under a
 // strict CSP + injected meta CSP. Dedicated `/preview/*` namespace, so it never
-// collides with the `/documents` SPA page route below.
-app.route("/", createDocumentPreviewRouter());
+// collides with the `/files` SPA page route below.
+app.route("/", createFilePreviewRouter());
 
 // Shutdown gate — reject new write requests during graceful shutdown
 let shuttingDown = false;
@@ -208,28 +210,15 @@ applyAuthPipeline(app, {
   authStrategies: getModuleAuthStrategies,
 });
 
-// App context middleware: resolve X-Application-Id for app-scoped routes.
-// Modules own app-scoping for their own routes (e.g. webhooks gates via an
-// explicit `applicationId` body/query field), so the prefix list is core-only.
-const APP_SCOPED_PREFIXES = [
-  "/api/agents",
-  "/api/runs",
-  "/api/schedules",
-  "/api/end-users",
-  "/api/api-keys",
-  "/api/notifications",
-  "/api/packages",
-  "/api/integrations",
-  "/api/uploads",
-  "/api/documents",
-];
-
-const appContextMiddleware = requireAppContext();
+// Space context middleware: resolve X-Space-Id for space-scoped routes.
+// The prefix list itself lives in `middleware/space-context.ts` so this wiring
+// and the test harness read the same one.
+const spaceContextMiddleware = requireSpaceContext();
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
   if (!c.get("user")) return next();
-  if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
-  return appContextMiddleware(c, next);
+  if (!isSpaceScopedPath(c.req.path)) return next();
+  return spaceContextMiddleware(c, next);
 });
 
 // API versioning: resolve Appstrate-Version header > org setting > default.
@@ -237,10 +226,18 @@ app.use("*", async (c, next) => {
 // settings in the same query as the membership check — read them from
 // context instead of hitting the organizations table again on every
 // request. Non-session auth (API key, module strategies) resolves orgId
-// inline without that middleware, so fall back to the direct lookup there.
+// inline without that middleware, so fall back to `getCachedOrgApiVersion`
+// there: ONLY the pin is cached (10 s, `services/org-settings-cache.ts`), so
+// the chat module's in-process `chatloop_` hops (two per tool call) cost one
+// organizations query per org per window rather than one per hop, while the
+// rest of `org_settings` — including the oidc SSO gate — still reads fresh.
+// The `Appstrate-Version` header override never touches the cache: the
+// middleware resolves it before this callback runs, so an explicit request
+// for a version is always honoured immediately.
 const apiVersionMiddleware = apiVersion(async (orgId, c) => {
-  const settings = c.get("orgSettings") ?? (await getOrgSettings(orgId));
-  return settings.api_version ?? null;
+  const settings = c.get("orgSettings");
+  if (settings) return settings.api_version ?? null;
+  return getCachedOrgApiVersion(orgId);
 });
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
@@ -250,7 +247,7 @@ app.use("*", async (c, next) => {
 
 // `Idempotency-Key` honesty guard — refuse the header on mutating routes that
 // do not honour it, rather than ignoring it. Mounted last in the pipeline so
-// auth/org/app failures still answer 401/403 first, and before every router
+// auth/org/space failures still answer 401/403 first, and before every router
 // below so it covers all of `routes/` and the module routers.
 app.use("*", idempotencyGuard());
 
@@ -333,12 +330,18 @@ const agentsRouter = createAgentsRouter();
 const runsRouter = createRunsRouter();
 const schedulesRouter = createSchedulesRouter();
 
+// Org context for the `/api/orgs/:orgId*` family, where the org comes from the
+// PATH. Mounted here — before the orgs router AND before every module router
+// below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
+// `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
+
 // Organization routes (no org context needed — self-managed auth)
 app.route("/api/orgs", orgsRouter);
 
 // User-scoped identity routes — `/api/me/orgs` skips `requireOrgContext`
 // (it is the prerequisite to setting `X-Org-Id`); the other routes run
-// inside org (or application) context.
+// inside org (or space) context.
 app.route("/api/me", meRouter);
 
 app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
@@ -359,14 +362,15 @@ app.route("/api/end-users", createEndUsersRouter());
 // Public path (no auth middleware — authenticated via HMAC token), rate-limited.
 app.route("/api/uploads/_content", createUploadContentRouter());
 app.route("/api/uploads", createUploadsRouter());
-app.route("/api", createDocumentsRouter());
+app.route("/api", createFilesRouter());
 app.route("/api/admin/storage-deletion-jobs", createAdminStorageDeletionRouter());
 app.route("/api/api-keys", createApiKeysRouter());
 app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
 app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
 app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
-app.route("/api/applications", createApplicationsRouter());
+app.route("/api/spaces", createSpacesRouter());
+app.route("/api/roles", createRolesRouter());
 app.route("/api/library", createLibraryRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());

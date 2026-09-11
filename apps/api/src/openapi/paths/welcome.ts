@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 export const welcomePaths = {
   "/api/welcome/setup": {
     post: {
@@ -16,6 +18,7 @@ export const welcomePaths = {
               properties: {
                 displayName: { type: "string", maxLength: 100 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -23,10 +26,7 @@ export const welcomePaths = {
       responses: {
         "204": {
           description: "Profile updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },

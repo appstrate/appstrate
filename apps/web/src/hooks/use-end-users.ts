@@ -7,7 +7,7 @@ import { useOrgScope } from "./use-org-scope";
 /** Wire shape from the OpenAPI spec (components.schemas.EndUserObject). */
 export type EndUserInfo = components["schemas"]["EndUserObject"];
 
-export interface EndUserListParams {
+interface EndUserListParams {
   limit?: number;
   startingAfter?: string;
   search?: string;

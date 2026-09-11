@@ -34,8 +34,8 @@ import type { AppEnv } from "../types/index.ts";
  *
  * Call before throwing 401 from the auth pipeline. Do NOT call from the
  * realm guard: an end-user session that lands on a platform route is still
- * a legitimate session for the OIDC application it was minted for, and
- * killing the cookie would log the user out from that application too.
+ * a legitimate session for the end-user space it was minted for, and
+ * killing the cookie would log the user out from that space too.
  *
  * Two complementary mechanisms run together — not a primary + legacy split,
  * defense in depth with different trade-offs:

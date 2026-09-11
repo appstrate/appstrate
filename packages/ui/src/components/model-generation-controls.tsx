@@ -37,7 +37,6 @@ export interface ModelGenerationControlsProps {
   stacked?: boolean;
   compact?: boolean;
   hideUnsupported?: boolean;
-  className?: string;
 }
 
 function withoutTemperature(value: ModelGenerationSettings): ModelGenerationSettings {
@@ -72,7 +71,6 @@ export function ModelGenerationControls({
   stacked = false,
   compact = false,
   hideUnsupported = false,
-  className,
 }: ModelGenerationControlsProps) {
   const id = useId();
   const temperatureUnsupported = capabilities?.temperature === "unsupported";
@@ -88,9 +86,7 @@ export function ModelGenerationControls({
     : labels.inherit;
 
   return (
-    <FieldGroup
-      className={cn("grid", compact ? "gap-2" : "gap-3", !stacked && "sm:grid-cols-2", className)}
-    >
+    <FieldGroup className={cn("grid", compact ? "gap-2" : "gap-3", !stacked && "sm:grid-cols-2")}>
       {(!hideUnsupported || !temperatureUnsupported) && (
         <Field
           data-disabled={temperatureDisabled || undefined}

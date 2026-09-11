@@ -4,7 +4,7 @@
  * Platform-side bundle import — takes a parsed multi-package {@link Bundle}
  * and registers every embedded package (one packages row + one
  * packageVersions row + stored ZIP) in the current org, then installs
- * the root in the current application.
+ * the root in the current space.
  *
  * Conflict semantics (spec §9.2):
  *   - Per-version identity is `(packageId, version, zipIntegrity)`.
@@ -50,9 +50,11 @@ import {
   type CarriedVersion,
 } from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
+import { assertArchiveContentConforms } from "./package-items/config.ts";
+import type { PackageType } from "@appstrate/core/validation";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
-import { installPackage } from "./application-packages.ts";
+import { installPackage } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -129,7 +131,7 @@ export async function readOrBuildBundle(
 // Conflict detection
 // ---------------------------------------------------------------------------
 
-export interface BundleConflict {
+interface BundleConflict {
   identity: string;
   reason: "integrity_mismatch" | "foreign_org_owner";
   existingIntegrity?: string;
@@ -218,7 +220,7 @@ export async function detectBundleConflicts(
 // Import
 // ---------------------------------------------------------------------------
 
-export interface ImportedPackageResult {
+interface ImportedPackageResult {
   identity: string;
   status: "inserted" | "reused";
   version_id: number | null;
@@ -229,7 +231,7 @@ export interface ImportedPackageResult {
   type?: string;
 }
 
-export interface ImportBundleResult {
+interface ImportBundleResult {
   imported: ImportedPackageResult[];
   root_installed: boolean;
   root_package_id: string;
@@ -243,21 +245,21 @@ export interface ImportBundleResult {
   warnings: string[];
 }
 
-export interface BundleImportAuditRecord {
+interface BundleImportAuditRecord {
   resourceId: string;
   after: {
     type: string | null;
     version: string | null;
-    via: "import:bundle" | "import:document";
+    via: "import:bundle" | "import:file";
     root: boolean;
-    document_id?: string;
+    file_id?: string;
   };
 }
 
-/** Pure audit projection shared by HTTP and MCP document import callers. */
+/** Pure audit projection shared by HTTP and MCP file import callers. */
 export function bundleImportAuditRecords(
   result: ImportBundleResult,
-  source: { via: "import:bundle" } | { via: "import:document"; documentId: string },
+  source: { via: "import:bundle" } | { via: "import:file"; fileId: string },
 ): BundleImportAuditRecord[] {
   return result.imported.flatMap((entry) => {
     if (entry.status !== "inserted") return [];
@@ -270,21 +272,21 @@ export function bundleImportAuditRecords(
           version: identity?.version ?? null,
           via: source.via,
           root: entry.identity === `${result.root_package_id}@${result.root_version}`,
-          ...(source.via === "import:document" ? { document_id: source.documentId } : {}),
+          ...(source.via === "import:file" ? { file_id: source.fileId } : {}),
         },
       },
     ];
   });
 }
 
-export interface BundleImportPreflight {
+interface BundleImportPreflight {
   bundle: Bundle;
   conflicts: BundleConflict[];
 }
 
 /**
  * Import every package in {@link bundle} into the org registry, then
- * install the root in the calling application. Callers SHOULD run
+ * install the root in the calling space. Callers SHOULD run
  * {@link detectBundleConflicts} first for a complete conflict report, but
  * correctness does not depend on it: ownership is re-checked here,
  * atomically with each write, so a concurrent cross-org race resolves to a
@@ -518,7 +520,7 @@ export async function importBundle(
     });
   }
 
-  // Install root in the application (idempotent — no-op if already there).
+  // Install root in the space (idempotent — no-op if already there).
   const rootParsed = parsePackageIdentity(bundle.root);
   if (!rootParsed) {
     throw invalidRequest("Bundle root identity is invalid");
@@ -608,16 +610,33 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
   if (errors.length > 0) throw validationFailed(errors);
 }
 
+// ROOT ONLY: the root is author input; every other entry is a dependency copy of
+// an already-published artifact, and gating those would permanently refuse any
+// bundle transitively depending on a pre-rule package.
+function assertBundleRootConforms(bundle: Bundle): void {
+  const root = bundle.packages.get(bundle.root);
+  if (!root) return;
+  const parsed = parsePackageIdentity(bundle.root);
+  // Platform inputs reused verbatim — same skip as the gates around this one.
+  if (parsed && isSystemPackage(parsed.packageId)) return;
+  const type = (root.manifest as { type?: PackageType }).type;
+  if (!type) return;
+  assertArchiveContentConforms(type, root.files, "file", `${bundle.root}: `);
+}
+
 /**
- * Pure-read import preflight shared by HTTP upload and document-backed MCP
+ * Pure-read import preflight shared by HTTP upload and file-backed MCP
  * tools. It performs the exact parse, callable-tool and conflict checks the
  * mutation will use, but writes nothing.
  */
 export async function preflightBundleImport(
   bytes: Uint8Array,
   scope: BundleAssemblyScope,
+  authorize: (bundle: Bundle) => Promise<void>,
 ): Promise<BundleImportPreflight> {
   const bundle = await readOrBuildBundle(bytes, scope);
+  assertBundleRootConforms(bundle);
+  await authorize(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
@@ -631,8 +650,9 @@ export async function handleImportBundle(
   bytes: Uint8Array,
   scope: BundleAssemblyScope,
   userId: string,
+  authorize: (bundle: Bundle) => Promise<void>,
 ): Promise<ImportBundleResult> {
-  const { bundle, conflicts } = await preflightBundleImport(bytes, scope);
+  const { bundle, conflicts } = await preflightBundleImport(bytes, scope, authorize);
   if (conflicts.length > 0) {
     const summary = conflicts
       .map((c) =>

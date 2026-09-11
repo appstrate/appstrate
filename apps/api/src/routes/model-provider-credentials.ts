@@ -17,6 +17,7 @@ import { isSystemModelProviderCredential } from "../services/model-registry.ts";
 import {
   createApiKeyCredential,
   dedupeCredentialLabel,
+  deriveCredentialLabel,
   deleteModelProviderCredential,
   getOrgModelProviderCredential,
   listOrgModelProviderCredentials,
@@ -26,6 +27,8 @@ import {
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { resolveFeaturedModels } from "../services/model-providers/model-selection.ts";
 import { discoverAvailableModels } from "../services/model-providers/model-discovery.ts";
+import { listServedModels } from "../services/model-providers/model-listing.ts";
+import { describeServedModel } from "../services/model-providers/model-metadata.ts";
 import { listCatalogModels } from "../services/pricing-catalog.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ProviderRegistryEntry, ProviderRegistryModelEntry } from "@appstrate/shared-types";
@@ -40,31 +43,37 @@ import {
   internalError,
   systemEntityForbidden,
 } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-export const createSchema = z.object({
-  /**
-   * Optional. When omitted, the server derives the label from the provider's
-   * `displayName`. Either way it is deduped against existing org credentials
-   * (suffixed ` (2)`, ` (3)`, … on collision). See {@link dedupeCredentialLabel}.
-   */
-  label: z.string().min(1).optional(),
-  providerId: z.string().min(1, "providerId is required"),
-  apiKey: z.string().min(1, "apiKey is required"),
-  /** Required only for providers with `baseUrlOverridable: true` (e.g. `openai-compatible`). */
-  baseUrlOverride: z.url({ error: "baseUrlOverride must be a valid URL" }).optional().nullable(),
-});
+export const createSchema = z
+  .object({
+    /**
+     * Optional. When omitted, the server derives the label from the provider's
+     * `displayName`, prefixed with the endpoint host when the credential carries
+     * a `baseUrlOverride` (see {@link deriveCredentialLabel}). Either way it is
+     * deduped against existing org credentials (suffixed ` (2)`, ` (3)`, … on
+     * collision). See {@link dedupeCredentialLabel}.
+     */
+    label: z.string().min(1).optional(),
+    providerId: z.string().min(1, "providerId is required"),
+    apiKey: z.string().min(1, "apiKey is required"),
+    /** Required only for providers with `baseUrlOverridable: true` (the custom-endpoint entries). */
+    baseUrlOverride: z.url({ error: "baseUrlOverride must be a valid URL" }).optional().nullable(),
+  })
+  .strict();
 
 /**
  * `apiShape` and `baseUrl` are intentionally absent — they are pinned by the
  * canonical `providerId` selected at create time and cannot be mutated.
  * To switch providers, delete the credential and re-create it.
  */
-export const updateSchema = z.object({
-  label: z.string().min(1).optional(),
-  apiKey: z.string().min(1).optional(),
-});
+export const updateSchema = z
+  .object({
+    label: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+  })
+  .strict();
 
 /** PG referential-integrity violation on delete. PostgreSQL raises
  * `foreign_key_violation` (23503); PGlite (tier 0) surfaces `ON DELETE
@@ -87,12 +96,102 @@ function pgErrorCode(err: unknown): string | undefined {
   return undefined;
 }
 
-export const testInlineSchema = z.object({
-  apiShape: z.string().min(1),
-  baseUrl: z.url(),
-  apiKey: z.string().optional(),
-  existingKeyId: z.string().optional(),
-});
+/** Exactly one of `credential_id` or inline `provider_id` + `api_key`; the route enforces which. */
+export const discoverSchema = z
+  .object({
+    credential_id: z.uuid().optional(),
+    provider_id: z.string().min(1).optional(),
+    api_key: z.string().min(1).optional(),
+    base_url_override: z.url().optional(),
+  })
+  .strict();
+
+/** Resolved inference target for one discovery call. */
+interface DiscoverTarget {
+  providerId: string;
+  apiShape: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
+/** Enumeration never spends a subscription token (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`). */
+function assertApiKeyProvider(cfg: ModelProviderDefinition, param: string): void {
+  if (cfg.authMode !== "api_key") {
+    throw invalidRequest(
+      `Provider ${cfg.providerId} authenticates with OAuth; its models are not enumerated`,
+      param,
+    );
+  }
+}
+
+/** Resolve the `POST /discover` body into the endpoint to enumerate. */
+async function resolveDiscoverTarget(
+  orgId: string,
+  body: z.infer<typeof discoverSchema>,
+): Promise<DiscoverTarget> {
+  const inline =
+    body.provider_id !== undefined ||
+    body.api_key !== undefined ||
+    body.base_url_override !== undefined;
+
+  if (body.credential_id !== undefined) {
+    if (inline) {
+      throw invalidRequest(
+        "Provide either credential_id or an inline provider_id + api_key, not both",
+        "credential_id",
+      );
+    }
+    if (isSystemModelProviderCredential(body.credential_id)) {
+      throw systemEntityForbidden("model provider credential", body.credential_id);
+    }
+    const creds = await loadInferenceCredentials(orgId, body.credential_id);
+    if (!creds) throw notFound("Model provider credential not found");
+    const cfg = getModelProvider(creds.providerId);
+    if (!cfg) throw invalidRequest(`Unknown providerId: ${creds.providerId}`, "credential_id");
+    assertApiKeyProvider(cfg, "credential_id");
+    return {
+      providerId: creds.providerId,
+      apiShape: creds.apiShape,
+      baseUrl: creds.baseUrl,
+      apiKey: creds.apiKey,
+    };
+  }
+
+  if (!inline) {
+    throw invalidRequest(
+      "Provide either credential_id or an inline provider_id + api_key",
+      "credential_id",
+    );
+  }
+  if (body.provider_id === undefined)
+    throw invalidRequest("provider_id is required", "provider_id");
+  if (body.api_key === undefined) throw invalidRequest("api_key is required", "api_key");
+
+  const cfg = getModelProvider(body.provider_id);
+  if (!cfg) throw invalidRequest(`Unknown providerId: ${body.provider_id}`, "provider_id");
+  assertApiKeyProvider(cfg, "provider_id");
+  if (body.base_url_override !== undefined && !cfg.baseUrlOverridable) {
+    throw invalidRequest(
+      `Provider ${cfg.providerId} does not accept a base URL override`,
+      "base_url_override",
+    );
+  }
+  return {
+    providerId: cfg.providerId,
+    apiShape: cfg.apiShape,
+    baseUrl: body.base_url_override ?? cfg.defaultBaseUrl,
+    apiKey: body.api_key,
+  };
+}
+
+export const testInlineSchema = z
+  .object({
+    apiShape: z.string().min(1),
+    baseUrl: z.url(),
+    apiKey: z.string().optional(),
+    existingKeyId: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Build the picker-facing model list for one provider. The vendored
@@ -103,13 +202,13 @@ export const testInlineSchema = z.object({
  *     `catalogProviderId` — codex → openai, claude-code → anthropic):
  *     expose every catalog entry as metadata; ids in `featuredModels` get
  *     `featured: true`. For subscription OAuth providers the served set is
- *     narrower than the catalog, but the empirical probe decides that at
- *     selection time (the model form filters this list by the credential's
- *     freshly probed ids) — the registry just supplies the metadata, so it
+ *     narrower than the catalog, but the empirical discovery run decides
+ *     that at selection time (the model form filters this list by the
+ *     credential's discovered ids) — the registry just supplies the metadata, so it
  *     carries the full catalog and stays a pure, org-independent function.
  *   - **No catalog** (`featuredModels` empty — openrouter live-search,
- *     openai-compatible Custom): empty list. The picker falls back to
- *     "Custom" or its own live-search UI.
+ *     the base-URL-overridable custom endpoints): empty list. The picker
+ *     falls back to a typed model id or its own live-search UI.
  */
 function serializeProviderModels(p: ModelProviderDefinition): ProviderRegistryModelEntry[] {
   const catalogKey = p.catalogProviderId ?? p.providerId;
@@ -201,7 +300,10 @@ export function createModelProviderCredentialsRouter() {
 
     // Always dedupe — a user-supplied label is suffixed on collision too, so
     // labels stay unique within the org (same scheme as org models).
-    const label = await dedupeCredentialLabel(orgId, data.label?.trim() || cfg.displayName);
+    const label = await dedupeCredentialLabel(
+      orgId,
+      data.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
+    );
 
     try {
       const id = await createApiKeyCredential({
@@ -266,6 +368,44 @@ export function createModelProviderCredentialsRouter() {
     },
   );
 
+  // POST /api/model-provider-credentials/discover — what an endpoint serves,
+  // described from its listing and the catalog, BEFORE a credential exists.
+  // Persists nothing, never echoes the key; gated like `refresh-models`.
+  router.post(
+    "/discover",
+    rateLimit(6),
+    requirePermission("model-provider-credentials", "write"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const body = await readJsonBody(c, discoverSchema);
+      const target = await resolveDiscoverTarget(orgId, body);
+      const listing = await listServedModels(target);
+      if (!listing.ok) {
+        return c.json({
+          outcome: listing.error.toLowerCase(),
+          models: [],
+          message: listing.message,
+        });
+      }
+      return c.json({
+        outcome: "ok",
+        models: listing.models.map(({ id, hints }) => {
+          const described = describeServedModel(target.providerId, id, hints);
+          return {
+            id,
+            label: described.label,
+            context_window: described.contextWindow,
+            max_tokens: described.maxTokens,
+            input: described.input,
+            reasoning: described.reasoning,
+            source: described.source,
+          };
+        }),
+        message: null,
+      });
+    },
+  );
+
   // POST /api/model-provider-credentials/:id/test
   router.post(
     "/:id/test",
@@ -304,17 +444,17 @@ export function createModelProviderCredentialsRouter() {
   );
 
   // POST /api/model-provider-credentials/:id/refresh-models — model
-  // discovery. For `"probe"` (API-key) providers this is empirical: probes
-  // every discovery candidate against the live credential (1-token requests)
-  // and persists the ids that answered as `available_model_ids`. For
+  // discovery. For API-key providers this is empirical: one `GET /models`
+  // listing against the live credential, intersected with the provider's
+  // discovery candidates, persisted as `available_model_ids`. For
   // `mode: "static"` providers (subscription: codex, claude-code) it is a
   // no-op that reports the current list: ZERO upstream calls and ZERO writes,
   // because their served set is derived from (definition, catalog) on every
-  // read — `probed_count` comes back 0. The endpoint is kept rather than
-  // removed so the model form keeps ONE code path for both provider kinds.
-  // Rate-limited (a probe call burns a handful of requests on the user's own
-  // quota), but loose enough for the model form to revalidate on every open
-  // while configuring several models in a row.
+  // read. The endpoint is kept rather than removed so the model form keeps
+  // ONE code path for both provider kinds. Rate-limited (each call reaches
+  // the provider on the user's own credential), but loose enough for the
+  // model form to revalidate on every open while configuring several models
+  // in a row.
   router.post(
     "/:id/refresh-models",
     rateLimit(6),
@@ -330,15 +470,15 @@ export function createModelProviderCredentialsRouter() {
         if (result.outcome === "credential_not_found") {
           throw notFound("Model provider credential not found");
         }
-        // Re-read through the credential DTO rather than echoing
-        // `result.verifiedModelIds`: on a probe round that verified nothing
-        // the previous list is what still stands, and the DTO is the single
+        // Re-read through the credential DTO rather than echoing the ids
+        // discovery just verified: on a round that verified nothing the
+        // previous list is what still stands, and the DTO is the single
         // place where a static provider's list gets derived. Both provider
         // kinds therefore answer with exactly what a subsequent GET returns.
         const credential = await getOrgModelProviderCredential(orgId, id);
         return c.json({
           outcome: result.outcome,
-          probed_count: result.probedCount,
+          candidate_count: result.candidateCount,
           available_model_ids: credential?.available_model_ids ?? null,
         });
       } catch (err) {

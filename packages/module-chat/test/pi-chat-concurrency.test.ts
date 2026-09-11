@@ -13,8 +13,11 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   acquirePiChatSlot,
   chatCapacityResponse,
+  piChatConcurrencyStats,
   piChatMaxConcurrency,
+  warnIfDefaultChatConcurrency,
   releaseOnClose,
+  resetPiChatConcurrencyStats,
   type PiChatSlot,
 } from "../src/pi-chat/concurrency.ts";
 
@@ -155,5 +158,67 @@ describe("releaseOnClose", () => {
     }).getReader();
     const { done } = await reader.read();
     expect(done).toBe(true);
+  });
+});
+
+describe("capacity signal for sizing the cap", () => {
+  afterEach(() => {
+    delete process.env[ENV_VAR];
+    resetPiChatConcurrencyStats();
+  });
+
+  it("records the high-water mark, so a quiet process reads differently from a pinned one", () => {
+    process.env[ENV_VAR] = "3";
+    resetPiChatConcurrencyStats();
+    const a = acquirePiChatSlot()!;
+    const b = acquirePiChatSlot()!;
+    expect(piChatConcurrencyStats()).toMatchObject({ active: 2, highWaterMark: 2, max: 3 });
+
+    // Releasing lowers `active` but must NOT lower the mark — the peak is the
+    // whole point: an operator sizing the cap needs what the process ever held,
+    // not what it happens to hold when they look.
+    a.release();
+    b.release();
+    expect(piChatConcurrencyStats()).toMatchObject({ active: 0, highWaterMark: 2 });
+  });
+
+  it("counts every refusal", () => {
+    process.env[ENV_VAR] = "1";
+    resetPiChatConcurrencyStats();
+    const held = acquirePiChatSlot()!;
+    expect(acquirePiChatSlot()).toBeNull();
+    expect(acquirePiChatSlot()).toBeNull();
+    expect(piChatConcurrencyStats()).toMatchObject({ rejected: 2, active: 1, max: 1 });
+    held.release();
+  });
+
+  it("falls back to the default on absent or invalid input, and honours a valid cap", () => {
+    delete process.env[ENV_VAR];
+    expect(piChatMaxConcurrency()).toBe(6);
+    process.env[ENV_VAR] = "nope";
+    expect(piChatMaxConcurrency()).toBe(6);
+    process.env[ENV_VAR] = "0";
+    expect(piChatMaxConcurrency()).toBe(6);
+    process.env[ENV_VAR] = "32";
+    expect(piChatMaxConcurrency()).toBe(32);
+  });
+
+  it("treats an invalid cap as NOT an operator decision, so a typo still warns", () => {
+    // Separate from the cap assertions above on purpose: `piChatMaxConcurrency`
+    // surfaces only `max`, so it cannot distinguish "fell back to 6" from
+    // "operator chose 6". `warnIfDefaultChatConcurrency` is the only thing that
+    // reads `fromEnv`, and its return is that decision. Without this, a
+    // regression treating `"nope"` as deliberate would silence the boot warning
+    // with every other test still green.
+    delete process.env[ENV_VAR];
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "nope";
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "0";
+    expect(warnIfDefaultChatConcurrency()).toBe(true);
+    process.env[ENV_VAR] = "6"; // the default value, but chosen — not a fallback
+    expect(warnIfDefaultChatConcurrency()).toBe(false);
+    process.env[ENV_VAR] = "32";
+    expect(warnIfDefaultChatConcurrency()).toBe(false);
   });
 });

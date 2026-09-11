@@ -23,7 +23,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest, type TestResult } from "../../hooks/use-connection-test";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { ErrorState, EmptyState } from "../../components/page-states";
+import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { TestResultSpan } from "../../components/test-result-span";
 import { TableRowActions } from "../../components/table-row-actions";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
@@ -179,7 +179,7 @@ export function useProxyColumns({
 
 export function OrgSettingsProxiesPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
 
   const [proxyModalOpen, setProxyModalOpen] = useState(false);
   const [editProxy, setEditProxy] = useState<OrgProxyInfo | null>(null);
@@ -215,9 +215,13 @@ export function OrgSettingsProxiesPage() {
       : null,
   });
 
+  // Below the hooks, same reason as members.tsx.
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
+
   // Every hook first, THEN the guard: the column set is a hook now, and a
   // return above it makes the call conditional.
-  if (!isAdmin) return <NavigateKeepingState to="/org-settings/general" />;
+  if (!can("proxies:read")) return <NavigateKeepingState to="/org-settings/general" />;
 
   return (
     <>

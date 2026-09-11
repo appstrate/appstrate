@@ -15,9 +15,9 @@ import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import { renderSocialButtons, renderSocialSignInScript } from "./social-sign-in-script.ts";
 import { renderExpiryWarning, renderLoginExpiryScript } from "./login-expiry-script.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
-export interface LoginPageProps {
+interface LoginPageProps {
   /** Raw query string from the authorize redirect — forwarded to the form action. */
   queryString: string;
   /** Optional error message to display above the form. */
@@ -26,8 +26,8 @@ export interface LoginPageProps {
   email?: string;
   /** CSRF token injected into the form + paired cookie. */
   csrfToken: string;
-  /** Resolved branding for the owning application. */
-  branding: ResolvedAppBranding;
+  /** Resolved branding for the owning space. */
+  branding: ResolvedSpaceBranding;
   /** Available social auth providers. */
   socialProviders?: { google?: boolean; github?: boolean };
   /** Whether SMTP is configured (enables forgot password + magic link). */

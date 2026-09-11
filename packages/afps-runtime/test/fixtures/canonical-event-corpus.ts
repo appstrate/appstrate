@@ -4,59 +4,53 @@
 /**
  * The single fixture corpus for the canonical-event contract.
  *
- * Two independent implementations describe the same payload contract:
+ * `isCanonicalRunEvent` (`src/types/canonical-events.ts`) is the runtime
+ * structural guard that narrows an open `RunEvent` into the discriminated
+ * union. A rejection is not cosmetic: the reducer drops the event from the
+ * `RunResult`, and the stdout bridge refuses to believe it. This corpus is the
+ * only list of accept/reject cases for it; `test/types/canonical-events.test.ts`
+ * runs every fixture through the guard and asserts the `valid` label.
  *
- * - `isCanonicalRunEvent` (`src/types/canonical-events.ts`) — the runtime
- *   structural guard that narrows an open `RunEvent` into the discriminated
- *   union AND gates the CloudEvents `dataschema` attribute;
- * - the published JSON Schema documents generated from the Zod source in
- *   `src/events/canonical-event-schemas.ts`.
+ * ## Labels
  *
- * They must agree. Previously each test file carried its own hand-copied
- * list of fixtures, so "agreement" was an assertion maintained by hand and
- * the two lists could — and did — leave whole fields un-exercised. This
- * module is now the only list: `test/types/canonical-events.test.ts` runs
- * it through the guard, `test/events/canonical-event-schemas.test.ts` runs
- * it through ajv, and each asserts against the SAME `valid` label. Parity
- * is therefore structural rather than restated.
+ * Each fixture's `label` names the constraint it exercises — e.g.
+ * "memory.added — numeric content" is the wrong-typed-value case for
+ * `content`, and "— missing content" is the omission case. Labels are for
+ * humans reading an assertion diff; they are not what proves coverage.
  *
- * ## `violates` and the coverage guard
+ * ## Coverage is checked, not trusted
  *
- * A fixture that puts a **wrong-typed value** at a field names that field
- * in `violates`. `canonical-event-schemas.test.ts` derives the set of
- * constrained field paths mechanically from the generated JSON Schema
- * documents (every subschema carrying `type` or `enum`) and fails unless
- * each one is named by at least one fixture. Adding a constraint to a Zod
- * schema therefore fails the suite until a fixture exercises it — the
- * blind spot cannot be reintroduced by inspection alone.
+ * `test/types/canonical-events.test.ts` derives the constrained field paths
+ * from `CANONICAL_CONSTRAINTS` and asserts that each one is, for some fixture
+ * here, the constraint that rejects it. Adding a constraint to the guard
+ * without adding a fixture that violates it fails that test by name.
  *
- * Omission fixtures (a missing `required` field) deliberately carry no
- * `violates`: they exercise `required`, not the field's type constraint.
+ * That guard was lost for a while: the derivation used to read generated JSON
+ * Schema documents, and those were removed as unpublished — taking the only
+ * machine-readable list of constraints with them, which is how `durationMs`,
+ * `usage`'s inner counters and `progress`/`error`'s `data` had once been
+ * caught going un-exercised. Expressing the constraints as data restored the
+ * derivation from the implementation itself (issue #1184). A `violates` field
+ * on each fixture, which once carried the same information by hand, is
+ * deliberately NOT back: it would be a second copy to keep in sync, and the
+ * point is that nothing here is maintained by inspection.
  */
 
 import type { RunEvent } from "@afps-spec/types";
 
 const base = { timestamp: 1, runId: "r1" };
 
-export interface CanonicalEventFixture {
+interface CanonicalEventFixture {
   /** Human-readable label, surfaced in assertion diffs. */
   readonly label: string;
   readonly event: RunEvent;
-  /**
-   * Expected verdict from BOTH `isCanonicalRunEvent` and the generated
-   * JSON Schema for `event.type`.
-   */
+  /** Expected verdict from `isCanonicalRunEvent`. */
   readonly valid: boolean;
-  /**
-   * Dotted path (within the CloudEvent `data` projection) at which this
-   * fixture places a wrong-typed value. Drives the coverage guard.
-   */
-  readonly violates?: string;
 }
 
 /**
  * Every fixture whose `type` IS canonical. Third-party types live in
- * {@link NON_CANONICAL_EVENTS} — they have no schema to compare against.
+ * {@link NON_CANONICAL_EVENTS} — the guard cannot know their shape.
  */
 export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
   // --- memory.added ---------------------------------------------------
@@ -84,13 +78,11 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "memory.added — numeric content",
     event: { ...base, type: "memory.added", content: 42 },
     valid: false,
-    violates: "content",
   },
   {
     label: "memory.added — unknown scope",
     event: { ...base, type: "memory.added", content: "x", scope: "global" },
     valid: false,
-    violates: "scope",
   },
 
   // --- pinned.set -----------------------------------------------------
@@ -135,7 +127,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "pinned.set — numeric key",
     event: { ...base, type: "pinned.set", key: 42, content: 1 },
     valid: false,
-    violates: "key",
   },
   {
     label: "pinned.set — empty key",
@@ -146,7 +137,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "pinned.set — unknown scope",
     event: { ...base, type: "pinned.set", key: "k", content: 1, scope: "everyone" },
     valid: false,
-    violates: "scope",
   },
 
   // --- output.emitted -------------------------------------------------
@@ -181,7 +171,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "log.written — unknown level",
     event: { ...base, type: "log.written", level: "debug", message: "x" },
     valid: false,
-    violates: "level",
   },
   {
     label: "log.written — missing message",
@@ -192,7 +181,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "log.written — numeric message",
     event: { ...base, type: "log.written", level: "warn", message: 42 },
     valid: false,
-    violates: "message",
   },
 
   // --- appstrate.progress ---------------------------------------------
@@ -215,19 +203,16 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "appstrate.progress — numeric message",
     event: { ...base, type: "appstrate.progress", message: 42 },
     valid: false,
-    violates: "message",
   },
   {
     label: "appstrate.progress — string data",
     event: { ...base, type: "appstrate.progress", message: "m", data: "str" },
     valid: false,
-    violates: "data",
   },
   {
     label: "appstrate.progress — null data",
     event: { ...base, type: "appstrate.progress", message: "m", data: null },
     valid: false,
-    violates: "data",
   },
 
   // --- appstrate.error -------------------------------------------------
@@ -250,19 +235,16 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "appstrate.error — numeric message",
     event: { ...base, type: "appstrate.error", message: 42 },
     valid: false,
-    violates: "message",
   },
   {
     label: "appstrate.error — numeric data",
     event: { ...base, type: "appstrate.error", message: "m", data: 42 },
     valid: false,
-    violates: "data",
   },
   {
     label: "appstrate.error — array data",
     event: { ...base, type: "appstrate.error", message: "m", data: [] },
     valid: false,
-    violates: "data",
   },
 
   // --- appstrate.metric ------------------------------------------------
@@ -306,25 +288,21 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     label: "appstrate.metric — scalar usage",
     event: { ...base, type: "appstrate.metric", usage: 42 },
     valid: false,
-    violates: "usage",
   },
   {
     label: "appstrate.metric — array usage",
     event: { ...base, type: "appstrate.metric", usage: [] },
     valid: false,
-    violates: "usage",
   },
   {
     label: "appstrate.metric — string input_tokens",
     event: { ...base, type: "appstrate.metric", usage: { input_tokens: "5" } },
     valid: false,
-    violates: "usage.input_tokens",
   },
   {
     label: "appstrate.metric — null output_tokens",
     event: { ...base, type: "appstrate.metric", usage: { output_tokens: null } },
     valid: false,
-    violates: "usage.output_tokens",
   },
   {
     label: "appstrate.metric — array cache_creation_input_tokens",
@@ -334,7 +312,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
       usage: { cache_creation_input_tokens: [] },
     },
     valid: false,
-    violates: "usage.cache_creation_input_tokens",
   },
   {
     label: "appstrate.metric — object cache_read_input_tokens",
@@ -344,31 +321,26 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
       usage: { cache_read_input_tokens: {} },
     },
     valid: false,
-    violates: "usage.cache_read_input_tokens",
   },
   {
     label: "appstrate.metric — negative cost",
     event: { ...base, type: "appstrate.metric", cost: -1 },
     valid: false,
-    violates: "cost",
   },
   {
     label: "appstrate.metric — string cost",
     event: { ...base, type: "appstrate.metric", cost: "0.5" },
     valid: false,
-    violates: "cost",
   },
   {
     label: "appstrate.metric — string durationMs",
     event: { ...base, type: "appstrate.metric", durationMs: "later" },
     valid: false,
-    violates: "durationMs",
   },
   {
     label: "appstrate.metric — array durationMs alongside a valid cost",
     event: { ...base, type: "appstrate.metric", cost: 0.5, durationMs: [] },
     valid: false,
-    violates: "durationMs",
   },
 ];
 
@@ -388,7 +360,7 @@ export const NON_CANONICAL_EVENTS: readonly { label: string; event: RunEvent }[]
   },
   {
     // `report.appended` was canonical until the report tool was retired in
-    // favour of durable `outputs/` documents — a stale emitter is now
+    // favour of durable `outputs/` files — a stale emitter is now
     // third-party as far as the runtime is concerned.
     label: "retired report.appended",
     event: { ...base, type: "report.appended", content: "# Report" },
@@ -397,17 +369,15 @@ export const NON_CANONICAL_EVENTS: readonly { label: string; event: RunEvent }[]
 ];
 
 /**
- * The ONE place guard and schema deliberately disagree.
+ * Values the guard is deliberately stricter about than a JSON Schema would be.
  *
- * `NaN` / `±Infinity` are `number`s in JS, so an in-memory ajv run against
- * `{"type":"number"}` accepts them — but `JSON.stringify` turns them into
- * `null`, which the same schema rejects on the wire. The guard therefore
- * rejects them, which is the safe direction: it can only cost an omitted
- * OPTIONAL `dataschema`, never a false one.
+ * `NaN` / `±Infinity` are `number`s in JS, so `{"type":"number"}` accepts them
+ * in memory — but `JSON.stringify` turns them into `null`, so the consumer
+ * never receives what the producer held. The guard rejects them up front.
  *
- * These fixtures are excluded from {@link CANONICAL_EVENT_CORPUS} because
- * they have no single verdict; both test files assert the divergence
- * explicitly instead.
+ * Kept out of {@link CANONICAL_EVENT_CORPUS} so its fixtures stay
+ * "verdict per the wire"; the guard suite asserts these separately, and the
+ * coverage guard reads them too, since each is a genuine rejection.
  */
 export const NON_FINITE_DIVERGENCES: readonly { label: string; event: RunEvent }[] = [
   {

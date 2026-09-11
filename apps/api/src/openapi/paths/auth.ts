@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+
 export const authPaths = {
   "/api/auth/sign-up/email": {
     post: {
@@ -17,7 +19,11 @@ export const authPaths = {
               required: ["email", "password", "name"],
               properties: {
                 email: { type: "string", format: "email" },
-                password: { type: "string", minLength: 8 },
+                password: {
+                  type: "string",
+                  minLength: MIN_PASSWORD_LENGTH,
+                  maxLength: MAX_PASSWORD_LENGTH,
+                },
                 name: { type: "string" },
               },
             },
@@ -138,7 +144,7 @@ export const authPaths = {
       tags: ["Auth"],
       summary: "Claim ownership of an unattended install",
       description:
-        "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default application, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
+        "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
       security: [],
       requestBody: {
         required: true,
@@ -155,9 +161,18 @@ export const authPaths = {
                   description: "Bootstrap token from the install banner / .env.",
                 },
                 email: { type: "string", format: "email" },
-                password: { type: "string", minLength: 8 },
+                // BOTH bounds are shared: this endpoint sets the same
+                // credential `sign-up/email` does, so a ceiling of its own was
+                // a second source of truth (it said 256 while Better Auth
+                // enforced 128).
+                password: {
+                  type: "string",
+                  minLength: MIN_PASSWORD_LENGTH,
+                  maxLength: MAX_PASSWORD_LENGTH,
+                },
                 name: { type: "string", minLength: 1, maxLength: 120 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -185,7 +200,7 @@ export const authPaths = {
                         type: "array",
                         items: { type: "string" },
                         description:
-                          "Optional advisory codes — e.g. `default_app_provisioning_failed` when the post-bootstrap default-app/agent hook failed. The owner+org are still committed; the operator can self-heal via /api/applications.",
+                          "Optional advisory codes — e.g. `default_space_provisioning_failed` when the post-bootstrap default-space/agent hook failed. The owner+org are still committed; the operator can self-heal via /api/spaces.",
                       },
                     },
                   },

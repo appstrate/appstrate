@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** OAuth clients admin table for organization and workspace settings. */
+/**
+ * OAuth clients admin tab for org/space settings pages.
+ * Lists registered clients and lets admins register, edit, rotate secrets
+ * for, disable, and delete them.
+ *
+ * Feature-gated by `features.oidc` at the parent tab level — this component
+ * should never render when the OIDC module is absent.
+ */
 
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -16,7 +23,7 @@ import { OAuthClientFormModal } from "./oauth-client-form-modal";
 import { useOAuthClientColumns } from "./oauth-client-columns";
 
 interface OAuthClientsTabProps {
-  level?: "org" | "application";
+  level?: "org" | "space";
 }
 
 export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
@@ -54,7 +61,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   return (
     <div>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        {level === "application" && (
+        {level === "space" && (
           <p className="text-muted-foreground max-w-xl text-sm">
             {t("settings:oauthClients.introApp")}
           </p>

@@ -6,7 +6,7 @@
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 [![Discord](https://img.shields.io/discord/1492939551495426169?logo=discord&logoColor=white&label=community&color=5865F2)](https://discord.gg/5Js2CKWNnh)
 
-An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, config, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
+An open-source platform for running autonomous AI agents in sandboxed Docker containers. Each agent receives its full context (prompt, input, credentials) and runs to completion without human interaction — then returns structured results. Connect OAuth/API key services, click "Run" or schedule via cron, and let the AI handle the rest.
 
 ![Appstrate](.github/assets/screenshot.png)
 
@@ -27,7 +27,7 @@ Appstrate uses the [AFPS](https://github.com/appstrate/afps-spec) (Agent Format 
                 └───────────────────────────────┘
 ```
 
-- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, mcp-servers, integrations), and input/output/config schemas. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
+- An **agent** is the primary unit. It declares a goal (`prompt.md`), its dependencies (skills, mcp-servers, integrations), and its input/output schemas. There is no separate `config` schema: migration `0040_config_into_input` folded that second parameter namespace into `input`, leaving one. Each run creates a fresh Docker container, injects the prompt and credentials via a sidecar proxy, and produces a structured result.
 - A **skill** adds knowledge — reusable instructions the agent follows during a run (`SKILL.md` + the [Anthropic Agent Skills](https://agentskills.io/) format).
 - An **mcp-server** adds runnable tools. A packaged MCP Bundle (MCPB-vocabulary `server` / `tools` / `user_config`) that runs as a subprocess and speaks JSON-RPC. The agent calls its tools through the sidecar. `server.type ∈ { node, python, binary, uv }` with an optional `_meta["dev.appstrate/mcp-server"].runtime: "bun"` override for Bun-native servers.
 - An **integration** adds authenticated access to an external service. Declares a `source` (local mcp-server, remote MCP endpoint, or HTTP API), one or more `auths` methods, and `delivery` for credential injection. Supports OAuth 2.0 (with RFC 8414 discovery + RFC 8707 resource indicators + PKCE), API key, basic auth, mTLS, and custom credential flows.
@@ -45,7 +45,7 @@ Agents are **prompt-driven**: the AI coding agent inside the container interpret
 - **Package import** — Import agents, skills, MCP servers, and integrations from ZIP/AFPS files
 - **Skills & MCP servers** — Extend agent capabilities with SKILL.md instructions and packaged MCP Bundles (`server.type ∈ node | python | binary | uv`)
 - **Realtime** — SSE-based run monitoring with LISTEN/NOTIFY
-- **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member)
+- **Multi-tenant** — Organization-based isolation with role-based access (owner/admin/member/guest), per-space membership and space roles
 - **API keys** — Programmatic access via `ask_*` prefixed API keys
 - **OpenAPI documentation** — every endpoint documented at `/api/openapi.json` + Swagger UI at `/api/docs` (coverage enforced by `bun run verify:openapi`)
 - **Connection profiles** — Share connection sets across agents
@@ -101,7 +101,7 @@ appstrate openapi list --tag runs --json
 appstrate openapi show createRun --json      # fully dereferenced operation
 
 # 3. Call the API — curl-compatible, bearer stays in the keyring
-appstrate api POST /api/agents/:id/run -d @input.json
+appstrate api POST /api/agents/@acme/my-agent/run -d @input.json
 
 # 4. Scope to an org (auto-pinned on login when possible)
 appstrate org switch acme                     # X-Org-Id sent on every subsequent call
@@ -178,7 +178,7 @@ appstrate/
 ├── apps/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
-│   │   ├── modules/          # Built-in modules (core-providers, firecracker, mcp, oidc, webhooks) — routes + RBAC, no owned schemas
+│   │   ├── modules/          # Built-in modules — routes + RBAC, no owned schemas; see modules/README.md
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler
 │   │   ├── openapi/          # OpenAPI 3.1 spec — source of truth for every endpoint
 │   │   └── middleware/       # Auth, rate-limit, guards (requirePermission, requireAgent)
@@ -189,7 +189,7 @@ appstrate/
 │       ├── pages/            # Route pages (React Router v7)
 │       ├── hooks/            # React Query + SSE realtime hooks
 │       ├── components/       # UI components (modals, forms, editors)
-│       └── stores/           # Zustand stores (auth, org, app, sidebar, theme)
+│       └── stores/           # Zustand stores (auth, org, space, sidebar, theme)
 │
 ├── packages/
 │   ├── core/                 # @appstrate/core — shared validation, storage, utilities (published on npm)
@@ -199,13 +199,13 @@ appstrate/
 │   ├── runner-pi/            # @appstrate/runner-pi — Pi run driver + container/sidecar env construction
 │   ├── mcp-transport/        # @appstrate/mcp-transport — MCP SDK adapter (sidecar tools surface)
 │   ├── db/                   # @appstrate/db — Drizzle ORM + Better Auth (all tables, incl. module-read ones)
-│   ├── emails/               # @appstrate/emails — email template registry + cloud override
+│   ├── emails/               # @appstrate/emails — email template registry + module overrides
 │   ├── env/                  # @appstrate/env — Zod env validation
 │   ├── shared-types/         # @appstrate/shared-types — Drizzle InferSelectModel re-exports
-│   ├── module-*/             # opt-in workspace modules (chat, claude-code, codex, observability)
+│   ├── module-*/             # workspace modules — chat is in the default MODULES; claude-code, codex, observability, ee are opt-in
 │   └── connect/              # @appstrate/connect — OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 │
-├── system-packages/           # System package `.afps` archives (skills, mcp-servers, integrations, agents — loaded at boot)
+├── system-packages/           # System package `.afps` archives — integrations + one mcp-server, loaded at boot
 │
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents to platform sink
@@ -222,7 +222,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | Domain                  | Description                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | **Auth**                | Better Auth email/password + cookie sessions                                                                                    |
-| **Agents**              | Agent CRUD, config, skills/mcp-servers/integrations binding, versions, bundle export                                            |
+| **Agents**              | Agent CRUD, input settings, skills/mcp-servers/integrations binding, versions, bundle export                                    |
 | **Runs**                | Run agents, list runs, logs, cancel, remote run minting + HMAC event ingestion + sink TTL extension                             |
 | **Realtime**            | SSE streams for run monitoring (with `Last-Event-ID` resume)                                                                    |
 | **Schedules**           | Cron-based agent scheduling                                                                                                     |
@@ -233,7 +233,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Proxies**             | Org-level and agent-level HTTP proxy config                                                                                     |
 | **API Keys**            | Programmatic access tokens (`ask_*`)                                                                                            |
 | **Packages**            | Org packages CRUD, import (incl. `.afps-bundle` multi-package), publish, dist-tags, version pinning                             |
-| **Library**             | Consolidated package list with per-app install state                                                                            |
+| **Library**             | Consolidated package list with per-space install state                                                                          |
 | **Notifications**       | Run notification management                                                                                                     |
 | **Organizations**       | Org CRUD, members, invitations                                                                                                  |
 | **Profile**             | User profile management                                                                                                         |
@@ -243,8 +243,8 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Meta**                | OpenAPI spec + Swagger UI                                                                                                       |
 | **Models**              | Org-level LLM model configuration and testing                                                                                   |
 | **Health**              | Health check                                                                                                                    |
-| **Applications**        | Primary workspace boundary — scopes agents, runs, schedules, webhooks, connections, packages, end-users                         |
-| **App Profiles**        | Application-scoped connection profile management                                                                                |
+| **Spaces**              | Primary scoping boundary — scopes agents, runs, schedules, webhooks, connections, packages, end-users                           |
+| **Space Profiles**      | Space-scoped connection profile management                                                                                      |
 | **End-Users**           | External end-user management for headless API (cursor pagination via `startingAfter`/`endingBefore`)                            |
 | **Webhooks**            | Run event webhooks with HMAC signing (Standard Webhooks)                                                                        |
 | **Credential Proxy**    | Server-side credential injection for external runners (5 verbs: GET/POST/PUT/PATCH/DELETE)                                      |
@@ -275,7 +275,7 @@ The agent's primary completions are served by the sidecar's `/llm/*` HTTP passth
 Browser (React SPA)              Platform (Bun + Hono :3000)
     |                                |
     |-- Login/Signup --------------->|-- Better Auth (cookie session)
-    |-- POST /api/agents/:id/run ->|
+    |-- POST /api/agents/{scope}/{name}/run -->|
     |                                |-- Validate → Create run → Fire-and-forget
     |<-- SSE (realtime) ------------|-- LISTEN/NOTIFY → SSE stream
     |                                |
@@ -328,13 +328,14 @@ The installer (`curl -fsSL https://get.appstrate.dev | bash`) generates all five
 ```sh
 bun run setup            # One-command dev bootstrap (first time only)
 bun run dev              # Start API + web (turbo, hot-reload)
-bun run check            # TypeScript + ESLint + Prettier + OpenAPI validation
+bun run check            # The full quality gate — 18 tasks, listed in CLAUDE.md
 bun test                 # All tests — requires Docker
 bun run db:generate      # Generate Drizzle migrations from schema changes
 bun run db:migrate       # Apply migrations manually (boot applies them automatically)
 bun run build            # Build everything (turbo)
-bun run build-runtime    # Build agent Docker image (only if you modify runtime-pi/)
-bun run build-sidecar    # Build sidecar Docker image (only if you modify runtime-pi/sidecar/)
+bun run build-runtime    # Rebuild the runtime image PAIR — appstrate-pi + appstrate-sidecar
+                         # (only if you modify runtime-pi/; the two are a version contract
+                         #  and are never built one at a time)
 ```
 
 ### Testing
@@ -359,7 +360,7 @@ Test infrastructure (PostgreSQL, Redis, MinIO, DinD) is started automatically by
 - **i18n**: i18next (fr default, en)
 - **Docker**: fetch() + unix socket (not dockerode)
 - **Scheduling**: BullMQ (Redis-backed distributed cron) + cron-parser
-- **Validation**: AJV (config/input/output), Zod (env), `@appstrate/core` (manifests)
+- **Validation**: Zod 4 everywhere — every route request body is validated with `.safeParse()`, and `@appstrate/env` validates the environment. AJV is used only for the dynamic JSON Schemas an agent manifest declares (input/output)
 - **Build**: Turborepo + Bun workspaces
 - **Code quality**: ESLint + Prettier + OpenAPI lint (`@redocly/openapi-core`)
 
@@ -396,4 +397,4 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, conventions, and
 
 ## License
 
-[Apache License 2.0](./LICENSE)
+[Apache License 2.0](./LICENSE), with one exception: `packages/module-ee/` is source-available under the Appstrate Commercial License found in that directory.

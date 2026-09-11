@@ -68,7 +68,7 @@ export async function runOpenssl(
 }
 
 /** Drain a byte stream to a UTF-8 string, swallowing read errors. */
-export async function collectStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+async function collectStream(stream: ReadableStream<Uint8Array>): Promise<string> {
   const chunks: Uint8Array[] = [];
   const reader = stream.getReader();
   try {
@@ -129,8 +129,7 @@ export function secondsToDaysCeil(seconds: number): number {
 /** Resolve `Bun.spawn`; throw (via `makeError`) when not running under Bun. */
 export function resolveBunSpawn(makeError: OpensslExecError): OpensslSpawnFn {
   const fn = (globalThis as unknown as { Bun?: { spawn?: unknown } }).Bun?.spawn as
-    | OpensslSpawnFn
-    | undefined;
+    OpensslSpawnFn | undefined;
   if (!fn) {
     throw makeError(
       "OPENSSL_NOT_FOUND",
@@ -146,12 +145,10 @@ export function resolveBunSpawn(makeError: OpensslExecError): OpensslSpawnFn {
  * minter passes an explicit random serial via `-set_serial` to avoid the
  * shared-serial-file race when minting concurrently under one CA.
  */
-export type LeafSerial =
-  | { mode: "createserial"; serialPath: string }
-  | { mode: "set"; value: string };
+type LeafSerial = { mode: "createserial"; serialPath: string } | { mode: "set"; value: string };
 
 /** Parameters for {@link mintLeafCert}. Captures the two sites' intentional differences. */
-export interface MintLeafCertParams {
+interface MintLeafCertParams {
   /** Spawn used to drive `openssl` (injectable for tests). */
   spawn: OpensslSpawnFn;
   /** `openssl` binary path. */
@@ -181,7 +178,7 @@ export interface MintLeafCertParams {
 }
 
 /** Result of {@link mintLeafCert}: the leaf key + cert PEMs. */
-export interface MintLeafCertResult {
+interface MintLeafCertResult {
   keyPem: string;
   certPem: string;
 }

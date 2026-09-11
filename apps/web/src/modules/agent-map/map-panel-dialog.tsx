@@ -23,7 +23,7 @@ import { Spinner } from "../../components/spinner";
 import { AgentConnectionsSection } from "../../components/package-detail/agent-connections-section";
 import { AgentMemoryTab } from "../../components/package-detail/agent-tabs";
 import {
-  ConfigSection,
+  InputSettingsSection,
   ModelSection,
   ProxySection,
 } from "../../components/package-detail/agent-configuration-tab";
@@ -64,7 +64,10 @@ const TITLE_KEY: Record<MapPanelKind, string> = {
 function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: () => void }) {
   const { t } = useTranslation(["agents", "agent-map", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
-  const deps = useScheduleFormDeps(packageId);
+  // The hook now answers `{ deps, error }`, and `deps` stays null until the
+  // agent detail lands — the form seeds its input state once, so mounting it
+  // early would seed a field that has since been locked.
+  const { deps } = useScheduleFormDeps(packageId);
   const createSchedule = useCreateSchedule(packageId);
 
   return (
@@ -75,10 +78,9 @@ function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: ()
       agents={[{ id: packageId, displayName: detail?.display_name ?? packageId }]}
       selectedAgentId={packageId}
       onAgentChange={() => undefined}
-      inputSchema={deps?.inputSchema}
-      configSchema={deps?.configSchema}
-      persistedConfig={deps?.persistedConfig ?? {}}
+      inputWrapper={deps?.inputWrapper}
       persistedModelId={deps?.persistedModelId ?? null}
+      persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
       persistedProxyId={deps?.persistedProxyId ?? null}
       persistedVersion={deps?.persistedVersion ?? null}
       packageId={packageId}
@@ -133,14 +135,14 @@ function ModelPanel({ packageId }: { packageId: string }) {
 /**
  * The per-installation settings form.
  *
- * `ConfigSection` renders `null` when the agent declares no config schema, and
+ * `InputSettingsSection` renders the same form as the configuration tab, and
  * an agent with no settings has an empty card that should say so rather than
  * open a blank dialog.
  */
 function ConfigPanel({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "agent-map"]);
   const { data: detail } = usePackageDetail("agent", packageId);
-  const schema = detail?.config?.schema ? asJSONSchemaObject(detail.config.schema) : null;
+  const schema = detail?.input?.schema ? asJSONSchemaObject(detail.input.schema) : null;
 
   if (!detail) {
     return (
@@ -152,7 +154,18 @@ function ConfigPanel({ packageId }: { packageId: string }) {
   if (!schema?.properties || Object.keys(schema.properties).length === 0) {
     return <p className="text-muted-foreground text-sm">{t("agent-map:emptyConfig")}</p>;
   }
-  return <ConfigSection packageId={packageId} schema={schema} />;
+  return (
+    <InputSettingsSection
+      // Same remount rule as the configuration tab: restart from what the
+      // server holds rather than from a snapshot taken before the write.
+      key={JSON.stringify([detail.input.values, detail.input.locked_fields])}
+      packageId={packageId}
+      wrapper={{ schema }}
+      initialValues={detail.input.values}
+      initialLocked={detail.input.locked_fields}
+      isHistorical={false}
+    />
+  );
 }
 
 export function MapPanelDialog({

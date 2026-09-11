@@ -64,7 +64,7 @@ export function EndUserCreateModal({ open, onClose }: Props) {
     <Modal
       open={open}
       onClose={handleClose}
-      title={t("applications.createEndUserTitle")}
+      title={t("spaces.createEndUserTitle")}
       actions={
         <>
           <Button type="button" variant="outline" onClick={handleClose}>
@@ -78,17 +78,17 @@ export function EndUserCreateModal({ open, onClose }: Props) {
     >
       <form id="create-end-user-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="eu-name">{t("applications.endUserName")}</Label>
+          <Label htmlFor="eu-name">{t("spaces.endUserName")}</Label>
           <Input
             id="eu-name"
             type="text"
-            placeholder={t("applications.endUserNamePlaceholder")}
+            placeholder={t("spaces.endUserNamePlaceholder")}
             autoFocus
             {...register("name")}
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="eu-email">{t("applications.endUserEmail")}</Label>
+          <Label htmlFor="eu-email">{t("spaces.endUserEmail")}</Label>
           <Input
             id="eu-email"
             type="email"
@@ -97,7 +97,7 @@ export function EndUserCreateModal({ open, onClose }: Props) {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="eu-external-id">{t("applications.endUserExternalId")}</Label>
+          <Label htmlFor="eu-external-id">{t("spaces.endUserExternalId")}</Label>
           <Input
             id="eu-external-id"
             type="text"

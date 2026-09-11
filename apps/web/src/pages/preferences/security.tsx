@@ -18,8 +18,12 @@ import { GoogleIcon, GitHubIcon } from "../../components/icons";
 import { ReauthModal } from "../../components/reauth-modal";
 import { SessionNotFreshError } from "../../lib/auth-errors";
 import { availableReauthMethods } from "../../lib/reauth-methods";
+import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 
-type LinkedAccount = { providerId: string; accountId: string };
+// Shape as `listAccounts()` returns it. `id` is Better Auth's `account` row
+// primary key — the value `unlinkAccount()` takes. `accountId` is the id AT
+// THE PROVIDER and is display-only here.
+type LinkedAccount = { id: string; providerId: string; accountId: string };
 
 function LinkedAccountsSection({
   accounts,
@@ -33,6 +37,8 @@ function LinkedAccountsSection({
   const { linkGoogle, linkGithub, unlinkAccount } = useAuth();
   const [unlinking, setUnlinking] = useState<string | false>(false);
   const [linking, setLinking] = useState<string | false>(false);
+  // Account row id (`LinkedAccount["id"]`) awaiting a step-up re-login, not a
+  // provider id — it is fed straight back to `unlinkAccount()` on retry.
   const [pendingUnlink, setPendingUnlink] = useState<string | null>(null);
 
   if (!features.googleAuth && !features.githubAuth) return null;
@@ -96,7 +102,9 @@ function LinkedAccountsSection({
         )}
         {socialProviders.map((provider) => {
           const Icon = provider.icon;
-          return provider.account ? (
+          // Bound to a local so the narrowing survives into the click handlers.
+          const account = provider.account;
+          return account ? (
             <div
               key={provider.id}
               className="border-border bg-card flex items-center justify-between rounded-lg border p-4"
@@ -105,7 +113,7 @@ function LinkedAccountsSection({
                 <Icon className="h-5 w-5" />
                 <div>
                   <span className="text-sm font-medium">{provider.name}</span>
-                  <div className="text-muted-foreground text-xs">{provider.account.accountId}</div>
+                  <div className="text-muted-foreground text-xs">{account.accountId}</div>
                 </div>
               </div>
               <Button
@@ -116,13 +124,13 @@ function LinkedAccountsSection({
                 onClick={async () => {
                   setUnlinking(provider.id);
                   try {
-                    await unlinkAccount(provider.id);
+                    await unlinkAccount(account.id);
                     await refetch();
                   } catch (err: unknown) {
                     if (err instanceof SessionNotFreshError) {
                       // Session too old for a sensitive action — walk the user
                       // through a step-up re-login, then retry the unlink.
-                      setPendingUnlink(provider.id);
+                      setPendingUnlink(account.id);
                     } else {
                       // Surface the failure — previously a rejection here was
                       // silently swallowed and the button just stopped spinning.
@@ -248,13 +256,13 @@ function PasswordChangeForm() {
             type="password"
             {...register("newPassword", {
               required: t("validation.required", { ns: "common" }),
-              // Better Auth rejects passwords shorter than 8 (minPasswordLength)
+              // Better Auth's own minimum, imported rather than restated.
               minLength: {
-                value: 8,
-                message: t("validation.minLength", { ns: "common", min: 8 }),
+                value: MIN_PASSWORD_LENGTH,
+                message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
               },
             })}
-            minLength={8}
+            minLength={MIN_PASSWORD_LENGTH}
             autoComplete="new-password"
             aria-invalid={showError("newPassword") ? true : undefined}
             className={cn(showError("newPassword") && "border-destructive")}
@@ -359,13 +367,13 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
             type="password"
             {...register("newPassword", {
               required: t("validation.required", { ns: "common" }),
-              // Better Auth rejects passwords shorter than 8 (minPasswordLength)
+              // Better Auth's own minimum, imported rather than restated.
               minLength: {
-                value: 8,
-                message: t("validation.minLength", { ns: "common", min: 8 }),
+                value: MIN_PASSWORD_LENGTH,
+                message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
               },
             })}
-            minLength={8}
+            minLength={MIN_PASSWORD_LENGTH}
             autoComplete="new-password"
             aria-invalid={showError("newPassword") ? true : undefined}
             className={cn(showError("newPassword") && "border-destructive")}

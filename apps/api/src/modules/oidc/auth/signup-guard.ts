@@ -28,12 +28,12 @@
  *   - `instance` → `allowSignup` gates the guard; auto-provisioned platform
  *                  client is `true`, env-declared satellites are `false`.
  *                  No post-signup action.
- *   - `application` → `allowSignup` gates the guard (unified semantic per
+ *   - `space` → `allowSignup` gates the guard (unified semantic per
  *                     `a2aae3af`). When `false`, end-users must be
  *                     pre-provisioned via the headless API; the BA-user
  *                     creation that backs the OIDC end-user mapping is
  *                     blocked here. `enduser-mapping.ts` surfaces the
- *                     same gate as `AppSignupClosedError` for direct calls.
+ *                     same gate as `SpaceSignupClosedError` for direct calls.
  *
  * Safe fallthrough: the guard is a no-op when no binding resolves or the
  * client is unknown / disabled.
@@ -53,6 +53,7 @@ import {
   loadClientSignupPolicy,
   resolveOrCreateOrgMembership,
   OrgSignupClosedError,
+  OrgSignupConfigurationError,
 } from "../services/orgmember-mapping.ts";
 import { resolvePendingClientBinding } from "../services/oauth-transaction-binding.ts";
 
@@ -62,7 +63,7 @@ import { resolvePendingClientBinding } from "../services/oauth-transaction-bindi
  * wiring in `packages/db/src/auth.ts` extracts and forwards) so the function
  * has no coupling to BA's internal `GenericEndpointContext` type.
  */
-export interface BeforeSignupGuardInput {
+interface BeforeSignupGuardInput {
   /** The user BA is about to create. Only `email` is required. */
   user: { email: string };
   /** Request headers — `null` if the signup is happening outside an HTTP context. */
@@ -86,8 +87,8 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
     query: input.query ?? null,
   });
   if (binding.kind === "none") {
-    // Signup outside an OIDC flow — defer to other modules (e.g. cloud
-    // free-tier hook) and the core signup path.
+    // Signup outside an OIDC flow — defer to other modules (e.g. the ee
+    // module's free-tier hook) and the core signup path.
     return;
   }
   if (binding.kind === "invalid") {
@@ -102,7 +103,7 @@ export async function oidcBeforeSignupGuard(input: BeforeSignupGuardInput): Prom
   // Pass-through cases:
   //   - no policy (unknown/disabled client) → let core handle default signup
   //   - open policy → afterSignup may auto-join for org-level, and the
-  //     enduser-mapping layer handles JIT provisioning for application-level
+  //     enduser-mapping layer handles JIT provisioning for space-level
   if (!policy || policy.allowSignup) return;
 
   // Closed policy: block the BA user creation outright. The browser ends
@@ -182,7 +183,7 @@ export async function oidcAfterSignupHandler(input: {
   if (!policy) return;
 
   // Only org-level clients need a post-signup auto-join. Instance and
-  // application clients have no org context to map into — the before
+  // space clients have no org context to map into — the before
   // guard already let them through (or blocked them).
   if (policy.level !== "org") return;
   if (!policy.orgId) return;
@@ -195,7 +196,11 @@ export async function oidcAfterSignupHandler(input: {
     await resolveOrCreateOrgMembership(
       { id: input.user.id, email: input.user.email },
       policy.orgId,
-      { allowSignup: policy.allowSignup, signupRole: policy.signupRole },
+      {
+        allowSignup: policy.allowSignup,
+        signupRole: policy.signupRole,
+        signupSpaceAssignments: policy.signupSpaceAssignments,
+      },
     );
     logger.info("oidc: auto-joined new signup to organization", {
       module: "oidc",
@@ -206,6 +211,12 @@ export async function oidcAfterSignupHandler(input: {
       role: policy.signupRole,
     });
   } catch (err) {
+    if (err instanceof OrgSignupConfigurationError) {
+      throw new APIError("FORBIDDEN", {
+        code: "signup_configuration_invalid",
+        message: err.message,
+      });
+    }
     if (err instanceof OrgSignupClosedError) {
       // Cannot happen after the `before` guard, but log for visibility.
       logger.warn("oidc: afterSignup reached closed-policy branch", {

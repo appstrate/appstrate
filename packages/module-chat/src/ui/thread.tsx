@@ -33,28 +33,27 @@ import {
 } from "lucide-react";
 import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { formatBytes } from "@appstrate/core/format";
-import { Button } from "./button.tsx";
+import { Button } from "@appstrate/ui/components/button";
 import { MarkdownText } from "./markdown-text.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
   SearchOperationsToolUI,
   DescribeOperationToolUI,
-  GetMeToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-import { resolveAttachmentContent } from "./run-events.ts";
+import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import {
-  DocumentAttachment,
-  isImageMime,
+  FileAttachment,
   ATTACHMENT_CHIP_CLASS,
   ATTACHMENT_IMAGE_CLASS,
-} from "./document-attachment.tsx";
+} from "./file-attachment.tsx";
+import { isImageMime } from "@appstrate/core/mime";
 
 export function Thread({
   composerSlot,
@@ -77,7 +76,6 @@ export function Thread({
       <RunAndWaitToolUI />
       <SearchOperationsToolUI />
       <DescribeOperationToolUI />
-      <GetMeToolUI />
 
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
@@ -111,7 +109,7 @@ const WELCOME_SUGGESTIONS = [
   "Que peux-tu faire ?",
   "Quels agents puis-je lancer ?",
   "Montre-moi mes derniers runs",
-  "Cherche dans mes documents",
+  "Cherche dans mes fichiers",
 ];
 
 function ThreadWelcome({
@@ -127,7 +125,7 @@ function ThreadWelcome({
         <div className="text-center">
           <p className="text-lg font-medium">Appstrate Chat</p>
           <p className="text-muted-foreground mt-1 text-sm">
-            Demandez à lancer un agent, inspecter un run, ou chercher dans vos documents.
+            Demandez à lancer un agent, inspecter un run, ou chercher dans vos fichiers.
           </p>
         </div>
         <Composer slot={composerSlot} initialDraft={initialComposerDraft} />
@@ -161,6 +159,7 @@ function ScrollToBottom() {
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <Button
+        type="button"
         variant="outline"
         size="icon"
         className="absolute -top-10 rounded-full disabled:invisible"
@@ -203,7 +202,7 @@ function FileAttachmentPart(props: { filename?: string }) {
   return (
     <div className="bg-background text-foreground mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs">
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="max-w-52 truncate font-medium">{props.filename ?? "document"}</span>
+      <span className="max-w-52 truncate font-medium">{props.filename ?? UNNAMED_FILE}</span>
     </div>
   );
 }
@@ -220,17 +219,17 @@ function InertAttachmentChip({ name }: { name: string }) {
   return (
     <div className={ATTACHMENT_CHIP_CLASS}>
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="truncate font-medium">{name || "document"}</span>
+      <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
     </div>
   );
 }
 
 /**
- * One sent attachment on a user message. A `document://` (server-persisted, or a
+ * One sent attachment on a user message. An `appfile://` (server-persisted, or a
  * reloaded conversation) is interactive: image mime → thumbnail, else a
  * download chip. An `upload://` (just-sent optimistic, not yet materialized) or
  * unparseable URI shows the local File as a thumbnail when it's an image still
- * held by the runtime, else an inert chip — the content route serves documents
+ * held by the runtime, else an inert chip — the content route serves files
  * only.
  */
 function SentAttachmentChip() {
@@ -241,20 +240,20 @@ function SentAttachmentChip() {
   const content = useAuiState((s) => s.attachment.content);
   const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
 
-  if (resolved.kind !== "document") {
+  if (resolved.kind !== "file") {
     // Just-sent optimistic attachment (`upload://`, not yet materialized): the
     // staged-image cache still holds a local preview of the picked file. Not
-    // interactive — there is no document id to preview or download yet; the
-    // persisted `document://` part takes over on reload.
+    // interactive — there is no file id to preview or download yet; the
+    // persisted `appfile://` part takes over on reload.
     const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
     if (localSrc && isImageMime(contentType))
       return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
     return <InertAttachmentChip name={name} />;
   }
 
-  // A resolved `document://` is interactive: the unified renderer shows an image
+  // A resolved `appfile://` is interactive: the unified renderer shows an image
   // thumbnail or a download/preview chip, resolving the opener-vs-download action.
-  return <DocumentAttachment doc={{ id: resolved.id, name, mime: contentType }} />;
+  return <FileAttachment file={{ id: resolved.id, name, mime: contentType }} />;
 }
 
 function Composer({ slot, initialDraft }: { slot?: React.ReactNode; initialDraft?: string }) {
@@ -285,6 +284,7 @@ function Composer({ slot, initialDraft }: { slot?: React.ReactNode; initialDraft
         <div className="flex min-w-0 items-center gap-1">
           <ComposerPrimitive.AddAttachment multiple asChild>
             <Button
+              type="button"
               variant="ghost"
               size="icon"
               className="text-muted-foreground size-8 shrink-0 rounded-lg"
@@ -297,7 +297,12 @@ function Composer({ slot, initialDraft }: { slot?: React.ReactNode; initialDraft
         </div>
         <ThreadPrimitive.If running={false}>
           <ComposerPrimitive.Send asChild>
-            <Button size="icon" className="size-8 shrink-0 rounded-lg" aria-label="Envoyer">
+            <Button
+              type="button"
+              size="icon"
+              className="size-8 shrink-0 rounded-lg"
+              aria-label="Envoyer"
+            >
               <SendHorizontalIcon />
             </Button>
           </ComposerPrimitive.Send>
@@ -305,6 +310,7 @@ function Composer({ slot, initialDraft }: { slot?: React.ReactNode; initialDraft
         <ThreadPrimitive.If running>
           <ComposerPrimitive.Cancel asChild>
             <Button
+              type="button"
               size="icon"
               variant="secondary"
               className="size-8 shrink-0 rounded-lg"
@@ -451,7 +457,7 @@ function MessageError() {
             autoSend
             asChild
           >
-            <Button variant="outline" size="sm" className="shrink-0">
+            <Button type="button" variant="outline" size="sm" className="shrink-0">
               <RotateCcwIcon className="size-3.5" />
               {t("turn.retry")}
             </Button>
@@ -514,6 +520,7 @@ const IconButton = React.forwardRef<
 >(({ label, children, ...props }, ref) => (
   <Button
     ref={ref}
+    type="button"
     variant="ghost"
     size="icon"
     className="text-muted-foreground size-7 [&_svg]:size-3.5"

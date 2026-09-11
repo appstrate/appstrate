@@ -128,7 +128,7 @@ for (const provider of PROVIDER_CASES) {
       });
       expect(replayBadRes.status()).toBe(410);
 
-      // 4. Helper sim — bearer-only, no cookie/X-Org-Id/X-Application-Id.
+      // 4. Helper sim — bearer-only, no cookie/X-Org-Id/X-Space-Id.
       //    Body carries `email` and (for hook-bearing providers) `accountId`,
       //    which take precedence over the module's JWT identity hook (the
       //    helper does this when the OAuth response body already surfaces

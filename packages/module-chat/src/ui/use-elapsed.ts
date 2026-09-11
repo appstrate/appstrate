@@ -3,8 +3,10 @@
 /**
  * Live execution-time ticker for the run card. Given the run's `startedAt` (and
  * `completedAt` once terminal), returns the elapsed milliseconds, re-rendering
- * ~10×/s while the run is in flight (so the card's tenth-of-a-second figure
- * updates smoothly) and freezing at the final duration once it completes.
+ * 5×/s while the run is in flight and freezing at the final duration once it
+ * completes. The card shows tenths of a second: a 200 ms tick advances the
+ * displayed figure by a regular 0.2 s and re-renders the card half as often
+ * as a per-tenth tick would.
  *
  * Returns `undefined` until `startedAt` is known (e.g. a run_and_wait still
  * blocking before its first `run_update`), so the caller can omit the time
@@ -25,7 +27,7 @@ export function useLiveElapsedMs(
 
   useEffect(() => {
     if (!ticking) return;
-    const timer = setInterval(() => setNow(Date.now()), 100);
+    const timer = setInterval(() => setNow(Date.now()), 200);
     return () => clearInterval(timer);
   }, [ticking]);
 

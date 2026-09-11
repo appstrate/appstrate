@@ -6,7 +6,7 @@ import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts"
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
-import { cleanupExpiredDocuments, startDocumentGc } from "../services/documents.ts";
+import { cleanupExpiredFiles, startFileGc } from "../services/files.ts";
 import { startStorageDeletionWorker } from "../services/storage-deletion.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
@@ -27,9 +27,12 @@ import {
   type BetterAuthPluginList,
 } from "@appstrate/db/auth";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { betterAuthRateLimitStorage } from "../infra/rate-limit/better-auth-storage.ts";
+import { CLIENT_IP_HEADER } from "./client-ip.ts";
 import { triggerPostBootstrapOrg } from "./post-bootstrap-hook.ts";
 import { reconcileBootstrapTokenAtBoot } from "./bootstrap-token.ts";
 import { initRealtime } from "../services/realtime.ts";
+import { initCacheBus } from "./cache-bus.ts";
 import { initSystemProxies } from "../services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../services/model-registry.ts";
 import { initSystemIntegrations } from "../services/integration-client-registry.ts";
@@ -52,32 +55,13 @@ import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
  * well under the postgres.js pool (`max: 20`).
  */
 const ORPHAN_CLEANUP_CONCURRENCY = 6;
-
-/**
- * `Promise.all`-shaped map with a bounded worker pool. Local by design: this
- * file and `services/system-packages.ts` each keep their own tiny pool rather
- * than sharing a new util module.
- */
-async function mapBounded<T>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < items.length) {
-      const item = items[cursor++]!;
-      await fn(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-}
 
 /**
  * Phase 1 — everything the HTTP surface's *shape* depends on, plus every
@@ -114,14 +98,10 @@ export async function bootCritical(): Promise<void> {
     await applyCoreMigrations();
   }
 
-  // Self-heal RFC 8707 oauth `resources` columns (migration 0006) when the
-  // migration watermark is ahead of the real schema. Idempotent — a no-op on
-  // any healthy DB, runs the missing DDL only on a watermark-drifted prod DB.
-  await reconcileOAuthResourceColumns().catch((err) => {
-    logger.warn("Could not reconcile oauth resource columns", {
-      error: getErrorMessage(err),
-    });
-  });
+  // Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
+  // are absent although the migrator reported nothing pending. Detection only —
+  // the repair is an operator task, see the function's doc comment.
+  await assertOAuthResourceColumnsPresent();
 
   // Bootstrap-token reconciliation (#344). If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
@@ -135,7 +115,7 @@ export async function bootCritical(): Promise<void> {
     });
   });
 
-  // Load modules (cloud, webhooks, etc.)
+  // Load modules (oidc, webhooks, etc.)
   // Modules may run their own migrations in init() — core DB is ready.
   await loadModules(getModuleRegistry(), buildModuleInitContext());
 
@@ -147,12 +127,19 @@ export async function bootCritical(): Promise<void> {
   registerModelProviders(getModuleModelProviders());
 
   // Initialize Better Auth AFTER modules have registered their plugin +
-  // schema contributions. `createAuth()` narrows the `unknown[]` from the
-  // core contract to Better Auth's plugin list type. Module tables (e.g.
-  // OIDC's oauth_clients/jwks) now live in the core schema barrel, so the
-  // Better Auth adapter resolves them directly — no module schema injection.
-  const contributions = getModuleContributions();
-  createAuth(contributions.betterAuthPlugins as BetterAuthPluginList);
+  // schema contributions. Passed as a thunk, which `createAuth()` calls
+  // exactly once here — it re-collects (rather than re-using plugin objects a
+  // previous build already initialized) whenever the instance is rebuilt. The
+  // cast narrows the `unknown[]` from the core contract to Better Auth's
+  // plugin list type. Module tables (e.g. OIDC's oauth_clients/jwks) now live
+  // in the core schema barrel, so the Better Auth adapter resolves them
+  // directly — no module schema injection.
+  createAuth({
+    plugins: () => getModuleContributions().betterAuthPlugins as BetterAuthPluginList,
+    rateLimitStorage: betterAuthRateLimitStorage(),
+    rateLimitEnabled: env.NODE_ENV === "production",
+    clientIpHeader: CLIENT_IP_HEADER,
+  });
 
   // Wire module contributions that were declared on the module contract
   for (const mod of getModules().values()) {
@@ -161,7 +148,7 @@ export async function bootCritical(): Promise<void> {
     }
   }
   // `beforeSignup` / `afterSignup` broadcast to EVERY loaded module (not
-  // first-match-wins like the other hooks) via `callAllHooks`: the cloud
+  // first-match-wins like the other hooks) via `callAllHooks`: the ee module's
   // free-tier gate AND the OIDC per-client signup policy both run on every
   // signup, and a throwing `beforeSignup` aborts user creation. OIDC's
   // `afterSignup` auto-joins the new user to the org pinned by the in-flight
@@ -172,8 +159,8 @@ export async function bootCritical(): Promise<void> {
   // `createBootstrapOrg` actually inserted the org row. Mirrors the post-
   // create sequence in `routes/organizations.ts` so the bootstrap owner
   // lands on a usable workspace (default app + hello-world agent) AND so
-  // module listeners on `onOrgCreate` (cloud free-tier, audit, analytics)
-  // observe the org creation. Each side effect catches its own errors —
+  // module listeners on `onOrgCreate` (the ee module's free-tier gate, audit,
+  // analytics) observe the org creation. Each side effect catches its own errors —
   // signup must never fail on a non-fatal provisioning hiccup.
   setPostBootstrapOrgHook(triggerPostBootstrapOrg);
   if (env.S3_BUCKET) {
@@ -256,15 +243,26 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
 
   // Parallel init: NOTIFY triggers and realtime are independent
   await Promise.all([
+    // `error`, not `warn`: without the triggers or without the LISTEN install
+    // every dashboard SSE is silent for the life of the process.
     createNotifyTriggers(db)
       .then(() => logger.info("NOTIFY triggers installed"))
       .catch((err) => {
-        logger.warn("Could not install NOTIFY triggers", {
+        logger.error("Could not install NOTIFY triggers", {
           error: getErrorMessage(err),
         });
       }),
     initRealtime().catch((err) => {
-      logger.warn("Could not initialize realtime LISTEN", {
+      logger.error("Could not initialize realtime LISTEN", {
+        error: getErrorMessage(err),
+      });
+      retryRealtimeInBackground();
+    }),
+    // Cross-replica cache invalidation rides the same LISTEN client. Without
+    // it every `@appstrate/core/cache` invalidation stays process-local and
+    // other replicas fall back to their TTL — degraded, not broken.
+    initCacheBus().catch((err) => {
+      logger.warn("Could not initialize the cache invalidation bus", {
         error: getErrorMessage(err),
       });
     }),
@@ -293,7 +291,13 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
       //
       // Concurrency is capped well under the postgres.js pool (`max: 20`)
       // because `synthesiseFinalize` writes.
-      await mapBounded(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
+      // The pool aborts on the first rejection (no new orphan is picked up
+      // once one worker throws). That is a real change from the pool this used
+      // to call, which kept draining the queue regardless — but it cannot fire
+      // here: the callback body below catches everything it can raise and
+      // degrades to a `logger.warn`, so a boot with N orphans still attempts
+      // all N. The abort is the safety net for the day that stops being true.
+      await mapWithConcurrency(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
         try {
           // An orphaned run may still have a live remote workload — a
           // firecracker microVM on the runner host keeps executing (and
@@ -445,12 +449,12 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
           error: getErrorMessage(err),
         });
       }),
-    cleanupExpiredDocuments()
+    cleanupExpiredFiles()
       .then((count) => {
-        if (count > 0) logger.info("Removed expired documents", { count });
+        if (count > 0) logger.info("Removed expired files", { count });
       })
       .catch((err) => {
-        logger.warn("Could not clean up expired documents", {
+        logger.warn("Could not clean up expired files", {
           error: getErrorMessage(err),
         });
       }),
@@ -458,37 +462,93 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
 
   await Promise.all(parallelInits);
 
-  // Kick off the recurring upload + document sweeps once initial cleanup is scheduled.
+  // Kick off the recurring upload + file sweeps once initial cleanup is scheduled.
   startUploadGc();
-  startDocumentGc();
+  startFileGc();
   // Transactional storage-deletion outbox worker: drains any boot-time backlog
   // immediately, then polls for due jobs. Purges S3/FS objects whose DB rows
-  // were deleted (documents, uploads, run workspaces, org/app/end-user cascades).
+  // were deleted (files, uploads, run workspaces, org/app/end-user cascades).
   startStorageDeletionWorker();
 
   return { agentsHealthy };
 }
 
 /**
- * Self-heal the RFC 8707 oauth `resources` columns when the migration
- * watermark is ahead of the actual schema.
+ * Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
+ * are absent although the migrator reported nothing pending.
  *
- * Migration 0006 adds `resources text[]` to oauth_access_tokens /
- * oauth_consents / oauth_refresh_tokens (audience binding) and re-defaults
- * oauth_clients.level. drizzle-orm's postgres-js migrator applies migrations
- * by timestamp watermark (`max(created_at)` in `__drizzle_migrations`), NOT by
- * hash-set membership: a production DB whose watermark was corrupted to a
- * future date (known prod incident) silently SKIPS 0006. The pinned
- * better-auth 1.7 oauth-provider then expects columns that were never created,
- * which breaks token mint on resource/MCP flows.
+ * drizzle-orm's postgres-js migrator applies migrations by timestamp watermark
+ * (`max(created_at)` in `__drizzle_migrations`), NOT by hash-set membership. A
+ * production DB whose watermark was corrupted to a future date (known prod
+ * incident) reports nothing pending while every migration below that date was
+ * never applied — 0006 among them, which adds `resources text[]` to
+ * oauth_access_tokens / oauth_consents / oauth_refresh_tokens and re-defaults
+ * oauth_clients.level. The pinned better-auth 1.7 oauth-provider then queries
+ * columns that do not exist, and token mint fails on resource/MCP flows.
+ * Tier 0 cannot reach this state: `applyCorePGliteMigrations` keys on the
+ * journal tag, not on a watermark.
  *
- * This runs the same additive DDL as 0006 — idempotently (`IF NOT EXISTS`) —
- * AFTER the migrator. On a healthy DB the columns already exist and it is a
- * no-op. On a watermark-drifted DB it creates the missing columns and logs
- * loudly so the operator realigns `__drizzle_migrations` before the *next*
- * schema release (this guard only covers 0006).
+ * This used to re-run 0006's DDL here, idempotently, on every boot of every
+ * deployment, forever — a broken database made to work silently, with nothing
+ * recording when the repair could stop shipping. That is what
+ * `docs/NO_TRANSITIONAL_CODE.md` §3 and §5 forbid. The DDL moved to
+ * `scripts/migration/0004-oauth-resources-watermark-drift.sql`, run once by an
+ * operator; what stays here detects and refuses.
+ *
+ * NOT retirement machinery, despite replacing a self-heal: it does not refuse a
+ * RETIRED FORM, it detects a watermark corruption that — in this function's own
+ * words below — "fires for a drift that first appears from here on". The
+ * transition it came from is over; the failure mode it guards is not, so
+ * `docs/NO_TRANSITIONAL_CODE.md` §4 does not reach it. A transitional-code
+ * audit deleted it once on the strength of the resemblance; that was wrong.
+ *
+ * Refusing rather than warning, deliberately: the drift is not scoped to 0006.
+ * It skipped every migration below the corrupted watermark, so a process that
+ * kept running would be serving from a schema nobody can enumerate, failing
+ * later at arbitrary unrelated queries. One actionable message at boot beats
+ * that. The cost is real and accepted — a deployment this used to repair in
+ * place now stays down until the script is run.
+ *
+ * The probe is a signature, not a proof, and the gap is wider than it looks.
+ * It sees one migration, so a watermark corrupted *after* 0006 applied leaves
+ * these columns present and this check passes with other migrations still
+ * missing. Worse for the upgrade path: the self-heal shipped in every release
+ * up to this one and ran on every boot, so a database that drifted BEFORE this
+ * release already had the columns restored — it will pass here while its
+ * watermark is still corrupt. In practice this fires for a drift that first
+ * appears from here on, and for restores of a backup taken before the heal.
+ *
+ * Restoring the columns therefore clears the boot refusal, not the drift.
+ * `scripts/migration/0004-…` ships the ledger diagnostic for the real extent,
+ * and its header says the same thing.
+ *
+ * The general check — compare `max(created_at)` in `__drizzle_migrations`
+ * against the largest `when` in `meta/_journal.json` — was considered and
+ * rejected. It is exact for this incident but refuses boot after any deliberate
+ * ROLLBACK, where a database legitimately carries a watermark from a newer
+ * release than the code, and turning routine rollbacks into outages costs more
+ * than the corruption it would catch. The diagnostic stays a query an operator
+ * runs, not a predicate that stops the process.
+ *
+ * `columnExists` is injected for tests — production reads the live database.
  */
-async function reconcileOAuthResourceColumns(): Promise<void> {
+export async function assertOAuthResourceColumnsPresent(
+  columnExists: () => Promise<boolean> = oauthResourcesColumnExists,
+): Promise<void> {
+  if (await columnExists()) return;
+
+  throw new Error(
+    "Schema drift: the oauth `resources` columns (migration 0006) are absent even though " +
+      "the migrator reported nothing pending. __drizzle_migrations is ahead of the real " +
+      "schema, so 0006 — and every other migration below the corrupted watermark — was " +
+      "silently skipped. Refusing to boot: token mint would fail at runtime on resource/MCP " +
+      "flows, and the rest of the skipped set is unknown. Apply " +
+      "scripts/migration/0004-oauth-resources-watermark-drift.sql to this database (it ships " +
+      "the diagnostic query for the full extent of the drift), then restart.",
+  );
+}
+
+async function oauthResourcesColumnExists(): Promise<boolean> {
   const { sql: rawSql } = await import("drizzle-orm");
   const present = toRows(
     await db.execute(rawSql`
@@ -499,25 +559,7 @@ async function reconcileOAuthResourceColumns(): Promise<void> {
       LIMIT 1
     `),
   );
-  if (present.length > 0) return;
-
-  logger.error(
-    "Schema drift: oauth `resources` columns (migration 0006) are absent even though " +
-      "the migration watermark is satisfied. The __drizzle_migrations watermark is ahead " +
-      "of the real schema, so 0006 was silently skipped. Self-healing the columns now — " +
-      "realign __drizzle_migrations so future migrations are not skipped too.",
-  );
-  await db.execute(
-    rawSql`ALTER TABLE "oauth_access_tokens" ADD COLUMN IF NOT EXISTS "resources" text[]`,
-  );
-  await db.execute(
-    rawSql`ALTER TABLE "oauth_consents" ADD COLUMN IF NOT EXISTS "resources" text[]`,
-  );
-  await db.execute(
-    rawSql`ALTER TABLE "oauth_refresh_tokens" ADD COLUMN IF NOT EXISTS "resources" text[]`,
-  );
-  await db.execute(rawSql`ALTER TABLE "oauth_clients" ALTER COLUMN "level" SET DEFAULT 'instance'`);
-  logger.warn("Self-healed oauth `resources` columns (migration 0006 watermark drift)");
+  return present.length > 0;
 }
 
 /**
@@ -595,12 +637,11 @@ async function applyCoreMigrations(): Promise<void> {
  * the real client address.
  *
  * We can't detect a real proxy with certainty (network topology is
- * out-of-band). The best we can do is flag the two most common
- * misconfigurations: `TRUST_PROXY=true` in production without an
- * obvious reverse-proxy signal, and the default `false` when the
- * server is apparently behind a proxy (XFF present from a first
- * request — out of scope for this boot-time check; runtime detection
- * in a middleware would be more invasive than warranted for v1).
+ * out-of-band), so this covers one side of the mistake: `TRUST_PROXY`
+ * enabled in production without an obvious reverse-proxy signal. The
+ * other side is a boot failure rather than a warning — `@appstrate/env`
+ * refuses `TRUST_PROXY=false` in production behind a non-loopback
+ * `APP_URL`, where a proxy is present by construction.
  */
 function warnOnTrustProxyMisconfig(trustProxy: string, nodeEnv: string): void {
   if (trustProxy === "false") return;
@@ -610,7 +651,8 @@ function warnOnTrustProxyMisconfig(trustProxy: string, nodeEnv: string): void {
     `is terminating client connections and writing those headers itself. If the server is ` +
     `directly exposed to the internet, any client can spoof their source IP, bypassing every ` +
     `per-IP rate limit (OIDC /oauth2/token, CLI device-flow, auth endpoints). ` +
-    `Verify the deployment topology or set TRUST_PROXY=false.`;
+    `Verify the deployment topology. TRUST_PROXY=false is the right value only when nothing ` +
+    `proxies this instance, which in production means a plain-http loopback APP_URL.`;
   // In production we emit at `error` severity deliberately — a
   // deployment running `LOG_LEVEL=warn` or `error` is exactly the one
   // most likely to silently ship TRUST_PROXY=true with no front proxy,
@@ -667,10 +709,42 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
   );
 }
 
+let realtimeRetryArmed = false;
+
+/**
+ * Retry the realtime LISTEN install until it lands, armed once per process.
+ * Exponential backoff capped at 60 s: giving up would leave a process whose
+ * every dashboard SSE is silent for its whole life, with `/health` reporting
+ * `checks.realtime: degraded` and nothing acting on it. Fire-and-forget:
+ * readiness never waits on it.
+ */
+function retryRealtimeInBackground(): void {
+  if (realtimeRetryArmed) return;
+  realtimeRetryArmed = true;
+  void (async () => {
+    for (let delayMs = 1_000; ; delayMs = Math.min(delayMs * 2, 60_000)) {
+      // Unref'd: a pending retry must never hold the process (or a test run) open.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, delayMs).unref?.();
+      });
+      try {
+        await initRealtime();
+        logger.info("Realtime LISTEN channels initialized after retry");
+        return;
+      } catch (err) {
+        logger.error("Realtime LISTEN retry failed", {
+          nextDelayMs: Math.min(delayMs * 2, 60_000),
+          error: getErrorMessage(err),
+        });
+      }
+    }
+  })();
+}
+
 /**
  * Boot-time reachability probe for `USERCONTENT_URL` (issue #1001).
  *
- * The platform *signs* preview URLs (`services/documents.ts` → `mintPreviewUrl`)
+ * The platform *signs* preview URLs (`services/files.ts` → `mintPreviewUrl`)
  * but never fetches them — so if `USERCONTENT_URL` is set to a host the browser
  * cannot reach, every `preview_url` this instance mints is dead with zero
  * server-side trace. This probe fires ONE unauthenticated GET at the preview
@@ -690,7 +764,7 @@ export async function probeUsercontentReachability(): Promise<void> {
   // Replicate `mintPreviewUrl`'s slash-trim so we probe the exact base we sign.
   let base = env.USERCONTENT_URL;
   while (base.endsWith("/")) base = base.slice(0, -1);
-  const url = `${base}/preview/documents/_probe`;
+  const url = `${base}/preview/files/_probe`;
   const status: number | null = await fetch(url, {
     method: "GET",
     redirect: "manual",
@@ -703,7 +777,7 @@ export async function probeUsercontentReachability(): Promise<void> {
   logger.error(
     `USERCONTENT_URL preview probe did not return 401 (got ${status ?? "no response"}). ` +
       `Every preview_url this instance signs points at ${base} — if that host is unrouted, all ` +
-      `document previews are dead with no server-side trace. NOTE: this probe reaches the host from ` +
+      `file previews are dead with no server-side trace. NOTE: this probe reaches the host from ` +
       `INSIDE the container network; a failure here can be a false positive when hairpin-NAT / ` +
       `split-horizon DNS prevents the container from reaching its own public hostname while browsers ` +
       `reach it fine. Verify a preview actually fails before acting.`,

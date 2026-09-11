@@ -7,14 +7,13 @@ import { Switch } from "@appstrate/ui/components/switch";
 import { Label } from "@appstrate/ui/components/label";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toast } from "sonner";
-import { usePermissions } from "../../hooks/use-permissions";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrg } from "../../hooks/use-org";
+import { useAppConfig } from "../../hooks/use-app-config";
+import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { Spinner } from "../../components/spinner";
-import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 
 const OAuthClientsTab = lazy(() =>
   import("../../modules/oidc/components/oauth-clients-tab").then((m) => ({
@@ -24,15 +23,11 @@ const OAuthClientsTab = lazy(() =>
 
 export function OrgSettingsOAuthPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
-  const { features } = useAppConfig();
   const { data: orgSettings, isLoading, failureReason } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
   const { currentOrg } = useOrg();
-
-  if (!isAdmin || !features.oidc) {
-    return <NavigateKeepingState to="/org-settings/general" />;
-  }
+  const { features } = useAppConfig();
+  if (!features.oidc) return <NavigateKeepingState to="/org-settings/general" />;
 
   if (failureReason) return <ErrorState message={getErrorMessage(failureReason)} />;
   if (isLoading) return <LoadingState />;

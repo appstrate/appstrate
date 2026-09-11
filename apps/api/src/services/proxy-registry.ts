@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { loadSystemRegistry } from "../lib/system-registry.ts";
 
-export interface ProxyDefinition {
+interface ProxyDefinition {
   id: string;
   label: string;
   url: string;

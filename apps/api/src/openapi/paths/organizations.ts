@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
+
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+
+/** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
+const SPACE_ASSIGNMENTS_BODY = {
+  type: "array",
+  description:
+    "Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space.",
+  items: { $ref: "#/components/schemas/SpaceAssignment" },
+} as const;
 
 export const organizationsPaths = {
   "/api/orgs": {
@@ -9,13 +20,11 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "List user organizations",
       description: "List organizations the current user is a member of.",
+      parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
         "200": {
           description: "Organization list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -38,15 +47,21 @@ export const organizationsPaths = {
                     id: "550e8400-e29b-41d4-a716-446655440000",
                     name: "Acme Corp",
                     slug: "acme-corp",
+                    logo: null,
                     role: "owner",
+                    permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
+                    deleting_at: null,
                   },
                 ],
               },
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     post: {
@@ -66,6 +81,7 @@ export const organizationsPaths = {
                 name: { type: "string", minLength: 1 },
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -73,10 +89,7 @@ export const organizationsPaths = {
       responses: {
         "201": {
           description: "Organization created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -95,6 +108,7 @@ export const organizationsPaths = {
                 id: "550e8400-e29b-41d4-a716-446655440001",
                 name: "New Organization",
                 slug: "new-org",
+                logo: null,
                 role: "owner",
                 createdAt: "2026-01-15T10:30:00Z",
               },
@@ -117,10 +131,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization detail with members and invitations",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -128,6 +139,7 @@ export const organizationsPaths = {
                 id: "550e8400-e29b-41d4-a716-446655440000",
                 name: "Acme Corp",
                 slug: "acme-corp",
+                logo: null,
                 members: [
                   {
                     userId: "usr_abc123",
@@ -176,6 +188,7 @@ export const organizationsPaths = {
                     "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null restores the initial fallback.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -183,10 +196,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgDetail" },
@@ -208,10 +218,7 @@ export const organizationsPaths = {
       responses: {
         "204": {
           description: "Organization deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -233,11 +240,15 @@ export const organizationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["email", "role"],
+              // `role` carries a server-side default, so it is optional on the
+              // wire — listing it required contradicted the `default` beside it.
+              required: ["email"],
               properties: {
                 email: { type: "string", format: "email" },
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES], default: "member" },
+                space_assignments: SPACE_ASSIGNMENTS_BODY,
               },
+              additionalProperties: false,
             },
           },
         },
@@ -246,10 +257,7 @@ export const organizationsPaths = {
         "201": {
           description:
             "Invitation created — bare OrgInvitationInfo (same shape as the items in the invitations list in GET /api/orgs/{orgId}).",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgInvitationInfo" },
@@ -257,6 +265,7 @@ export const organizationsPaths = {
                 id: "inv_abc123",
                 email: "newuser@example.com",
                 role: "member",
+                space_assignments: [{ space_id: "spc_...", preset_role: "operator" }],
                 token: "inv_abc123def456",
                 expiresAt: "2026-02-01T00:00:00Z",
                 createdAt: "2026-01-25T00:00:00Z",
@@ -267,6 +276,30 @@ export const organizationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token.",
+          content: {
+            "application/problem+json": {
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/ProblemDetail" },
+                  {
+                    type: "object",
+                    required: ["invitation_id"],
+                    properties: {
+                      invitation_id: {
+                        type: "string",
+                        description: "The pending invitation already held by this email.",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
@@ -277,7 +310,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Change member role",
       description:
-        "Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.",
+        "Change a member's role. Owners can manage any non-owner; admins can manage guests and members.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -292,6 +325,7 @@ export const organizationsPaths = {
               properties: {
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -299,10 +333,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Updated member — same shape as the members list in GET /api/orgs/{orgId}",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgMember" },
@@ -334,10 +365,7 @@ export const organizationsPaths = {
       responses: {
         "204": {
           description: "Member removed",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -350,7 +378,8 @@ export const organizationsPaths = {
       operationId: "changeInvitationRole",
       tags: ["Organizations"],
       summary: "Change invitation role",
-      description: "Change the role assigned to a pending invitation. Admin or owner required.",
+      description:
+        "Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "invitationId", in: "path", required: true, schema: { type: "string" } },
@@ -364,7 +393,9 @@ export const organizationsPaths = {
               required: ["role"],
               properties: {
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES] },
+                space_assignments: SPACE_ASSIGNMENTS_BODY,
               },
+              additionalProperties: false,
             },
           },
         },
@@ -373,10 +404,7 @@ export const organizationsPaths = {
         "200": {
           description:
             "Updated invitation — same shape as the invitations list in GET /api/orgs/{orgId}",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgInvitationInfo" },
@@ -384,6 +412,7 @@ export const organizationsPaths = {
                 id: "inv_abc123",
                 email: "carol@acme.com",
                 role: "admin",
+                space_assignments: [],
                 token: "tok_xyz789",
                 expiresAt: "2026-02-01T00:00:00Z",
                 createdAt: "2026-01-25T00:00:00Z",
@@ -409,10 +438,7 @@ export const organizationsPaths = {
       responses: {
         "204": {
           description: "Invitation cancelled",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -430,10 +456,7 @@ export const organizationsPaths = {
       responses: {
         "200": {
           description: "Organization settings",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },
@@ -456,17 +479,25 @@ export const organizationsPaths = {
       requestBody: {
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/OrgSettings" },
+            // Spelled out rather than `$ref: OrgSettings`, and CLOSED:
+            // `orgSettingsPatchSchema` (`services/organizations.ts`) is
+            // `.strict()`, so an unknown key is a 400 and never a silently
+            // dropped setting. The component stays open because the READ path
+            // returns the stored JSONB verbatim — the members are shared, the
+            // closure is not.
+            schema: {
+              type: "object",
+              description: "Organization settings patch — only provided fields are updated.",
+              properties: ORG_SETTINGS_PROPERTIES,
+              additionalProperties: false,
+            },
           },
         },
       },
       responses: {
         "200": {
           description: "Settings updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgSettings" },

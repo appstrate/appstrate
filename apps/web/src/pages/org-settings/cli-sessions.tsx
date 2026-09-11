@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
+import { usePermissions } from "../../hooks/use-permissions";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -26,7 +27,7 @@ export function OrgSettingsCliSessionsPage() {
     { params: { path: { orgId: orgId ?? "" } } },
     {
       enabled: !!orgId,
-      // Unwrap the list envelope (legacy apiList behavior).
+      // Unwrap the list envelope — the universal 2xx list shape here.
       select: (envelope) => envelope.data,
     },
   );
@@ -61,7 +62,7 @@ export function OrgSettingsCliSessionsPage() {
           {t("orgCliSessions.description")}
         </p>
       </div>
-
+      import {usePermissions} from "../../hooks/use-permissions";
       <DataTable
         columns={columns}
         rows={sessions}
@@ -78,7 +79,6 @@ export function OrgSettingsCliSessionsPage() {
           />
         }
       />
-
       <ConfirmModal
         open={pendingRevoke !== null}
         title={t("orgCliSessions.confirmRevokeTitle")}

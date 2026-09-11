@@ -29,7 +29,7 @@ import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import { readOtelEnv } from "./env.ts";
 import { isObservabilityEnabled, runWithSpan, currentSpan } from "./otel.ts";
 
-export interface ObservabilityMiddlewareDeps {
+interface ObservabilityMiddlewareDeps {
   /**
    * Client-IP resolver honoring the platform's `TRUST_PROXY` semantics —
    * injected from `ctx.services.http.clientIp` at module init (the resolver

@@ -53,7 +53,7 @@ async function seedCancellableRun(
     id: runId,
     packageId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: overrides.status ?? "running",
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(RUN_SECRET),
@@ -106,8 +106,9 @@ async function installTerminalSpy(): Promise<TerminalSpy> {
   await loadModulesFromInstances([mod], {
     redisUrl: null,
     appUrl: "http://localhost:3000",
-    getSendMail: async () => () => {},
-    getOrgAdminEmails: async () => [],
+    getSendMail: async () => async () => {},
+    getOrgOwnerEmails: async () => [],
+    getOrgMembers: async () => [],
     getOrgName: async () => null,
     services: {} as never,
   });
@@ -155,7 +156,7 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     const params = spy.lastParams()!;
     expect(params.runId).toBe(runId);
     expect(params.orgId).toBe(ctx.orgId);
-    expect(params.applicationId).toBe(ctx.defaultAppId);
+    expect(params.spaceId).toBe(ctx.defaultSpaceId);
     expect(params.status).toBe("cancelled");
     expect(params.modelSource).toBe("system");
     // Cost rounded — `runs.cost` is doublePrecision, llm_usage stores the
@@ -195,7 +196,7 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     expect(row!.status).toBe("cancelled");
   });
 
-  it("cancelling a BYOK run forwards modelSource='org' so the cloud module skips billing", async () => {
+  it("cancelling a BYOK run forwards modelSource='org' so the ee module skips billing", async () => {
     const spy = await installTerminalSpy();
     const runId = await seedCancellableRun(ctx, agentId, { modelSource: "org" });
     await seedLlmUsage(ctx, runId, 0.1);

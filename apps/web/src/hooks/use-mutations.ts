@@ -25,6 +25,28 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 // events, and the runs hooks are migrated with the same pinned keys. The
 // package/agent keys stay legacy too (see the note in use-packages.ts).
 
+/**
+ * Input-lock refusals, translated.
+ *
+ * Both codes are about ONE named field, and the server puts its name in
+ * `param` (`input.<field>` / `locked_fields.<field>`). The raw `detail` is an
+ * English sentence, so it is replaced rather than prefixed — a French UI that
+ * falls back to it tells the user nothing they can act on.
+ */
+const LOCK_ERROR_KEYS: Record<string, string> = {
+  locked_input_field: "error.lockedInputField",
+  locked_required_field_empty: "error.lockedRequiredFieldEmpty",
+};
+
+function lockErrorMessage(err: ApiError): string | null {
+  const key = LOCK_ERROR_KEYS[err.code];
+  if (!key) return null;
+  // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
+  // the first segment is the prefix.
+  const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
+  return i18n.t(key, { field, ns: "agents" });
+}
+
 export function onMutationError(err: Error) {
   // Skip the generic toast for missing_integration_connection (412) —
   // the RunAgentButton renders MissingConnectionsModal off `runAgent.error`
@@ -33,16 +55,29 @@ export function onMutationError(err: Error) {
   if (err instanceof ApiError && err.code === "missing_integration_connection") {
     return;
   }
+  if (err instanceof ApiError) {
+    const locked = lockErrorMessage(err);
+    if (locked) {
+      toast.error(locked);
+      return;
+    }
+  }
   toast.error(i18n.t("error.prefix", { message: getErrorMessage(err) }));
 }
 
-export function useSaveConfig(packageId: string) {
+/**
+ * Persist the editor layer of input resolution for this space.
+ *
+ * Both members are FULL replacements — an omitted key is cleared, never left
+ * unchanged — so the caller always sends the complete pair.
+ */
+export function useSaveInputSettings(packageId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (config: Record<string, unknown>) => {
-      const { data } = await client.PUT("/api/agents/{scope}/{name}/config", {
+    mutationFn: async (settings: { values: Record<string, unknown>; locked_fields: string[] }) => {
+      const { data } = await client.PUT("/api/agents/{scope}/{name}/input-settings", {
         params: { path: splitPackageRef(packageId) },
-        body: config,
+        body: settings,
       });
       return data!;
     },
@@ -53,7 +88,7 @@ export function useSaveConfig(packageId: string) {
   });
 }
 
-export interface RunAgentParams {
+interface RunAgentParams {
   input?: Record<string, unknown>;
   /**
    * Version selector forwarded as `?version=`: `"draft"`, `"published"`, or
@@ -77,8 +112,6 @@ export interface RunAgentParams {
   proxyId?: string;
   /** Per-run temperature/reasoning override (wire `generation`). */
   generation?: ModelGenerationSettings;
-  /** Per-run config delta, deep-merged with the persisted config (wire `config`). */
-  config?: Record<string, unknown>;
   /**
    * Per-run dependency version overrides (#666) — `{ "@scope/skill": "draft"
    * | "<semver|dist-tag>" }`. From the run-with-options modal. "draft" runs a
@@ -99,7 +132,6 @@ export function useRunAgent(packageId: string) {
         modelId,
         proxyId,
         generation,
-        config,
         dependencyOverrides,
       } = params ?? {};
       const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
@@ -123,7 +155,6 @@ export function useRunAgent(packageId: string) {
           ...(modelId !== undefined ? { modelId } : {}),
           ...(generation !== undefined ? { generation } : {}),
           ...(proxyId !== undefined ? { proxyId } : {}),
-          ...(config !== undefined ? { config } : {}),
           ...(dependencyOverrides !== undefined
             ? { dependency_overrides: dependencyOverrides }
             : {}),
@@ -314,8 +345,12 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
+    // Exactly the keys the editor sends: the skill/integration branches forward
+    // this object whole and the create schemas are `.strict()`, so a key
+    // declared here that the server does not model is a 400 rather than a
+    // silent drop. `id` sat beside the retired `source_code` until #1128 took
+    // that one; no caller ever passed either.
     mutationFn: async (body: {
-      id?: string;
       manifest: Record<string, unknown>;
       content: string;
     }): Promise<{ id: string }> => {

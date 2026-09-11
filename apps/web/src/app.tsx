@@ -21,17 +21,20 @@ import { RedirectAppSettings } from "./components/redirect-app-settings";
 import { ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
+import { ViewAsBanner } from "./components/view-as-banner";
 
 import { useAuth } from "./hooks/use-auth";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
-import { useApplicationResolver } from "./hooks/use-current-application";
+import { useSpaceResolver } from "./hooks/use-current-space";
+import { RequirePermission } from "./components/require-permission";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
+import { WEBHOOK_READ_PERMISSIONS } from "./lib/webhook-permissions";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
@@ -64,9 +67,7 @@ const RunDetailPage = lazy(() =>
   import("./pages/run-detail").then((m) => ({ default: m.RunDetailPage })),
 );
 const RunsPage = lazy(() => import("./pages/runs-page").then((m) => ({ default: m.RunsPage })));
-const DocumentsPage = lazy(() =>
-  import("./pages/documents").then((m) => ({ default: m.DocumentsPage })),
-);
+const FilesPage = lazy(() => import("./pages/files").then((m) => ({ default: m.FilesPage })));
 const SchedulesListPage = lazy(() =>
   import("./pages/schedules-list").then((m) => ({ default: m.SchedulesListPage })),
 );
@@ -152,21 +153,31 @@ const OrgSettingsCliSessionsPage = lazy(() =>
     default: m.OrgSettingsCliSessionsPage,
   })),
 );
-const OrgSettingsApplicationsPage = lazy(() =>
-  import("./pages/org-settings/applications").then((m) => ({
-    default: m.OrgSettingsApplicationsPage,
+const OrgSettingsRolesPage = lazy(() =>
+  import("./pages/org-settings/roles").then((m) => ({ default: m.OrgSettingsRolesPage })),
+);
+const OrgSettingsSpacesPage = lazy(() =>
+  import("./pages/org-settings/spaces").then((m) => ({
+    default: m.OrgSettingsSpacesPage,
   })),
 );
-const OrgSettingsAppGeneralPage = lazy(() =>
-  import("./pages/org-settings/app/general").then((m) => ({
-    default: m.OrgSettingsAppGeneralPage,
+const OrgSettingsSpaceGeneralPage = lazy(() =>
+  import("./pages/org-settings/space/general").then((m) => ({
+    default: m.OrgSettingsSpaceGeneralPage,
   })),
 );
-const OrgSettingsAppAuthPage = lazy(() =>
-  import("./pages/org-settings/app/auth").then((m) => ({ default: m.OrgSettingsAppAuthPage })),
+const OrgSettingsSpaceMembersPage = lazy(() =>
+  import("./pages/org-settings/space/members").then((m) => ({
+    default: m.OrgSettingsSpaceMembersPage,
+  })),
 );
-const OrgSettingsAppOauthPage = lazy(() =>
-  import("./pages/org-settings/app/oauth").then((m) => ({ default: m.OrgSettingsAppOauthPage })),
+const OrgSettingsSpaceAuthPage = lazy(() =>
+  import("./pages/org-settings/space/auth").then((m) => ({ default: m.OrgSettingsSpaceAuthPage })),
+);
+const OrgSettingsSpaceOauthPage = lazy(() =>
+  import("./pages/org-settings/space/oauth").then((m) => ({
+    default: m.OrgSettingsSpaceOauthPage,
+  })),
 );
 const PreferencesLayout = lazy(() =>
   import("./pages/preferences/layout").then((m) => ({ default: m.PreferencesLayout })),
@@ -213,7 +224,7 @@ function BootScreen() {
 
 function MainLayout() {
   const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
-  useApplicationResolver();
+  useSpaceResolver();
 
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
@@ -226,6 +237,9 @@ function MainLayout() {
           further right than the content it is supposed to line up with. */}
       <SidebarInset className="bg-canvas h-svh overflow-y-auto">
         <ShellHeader />
+        {/* Must stay visible on every route, including the settings layouts and
+            the permission-denied pages a persona is precisely there to provoke. */}
+        <ViewAsBanner />
         {/* Full-bleed surfaces (anything that owns its own height) opt out
             with `data-full-bleed` on their root. */}
         <div className="max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0">
@@ -357,16 +371,80 @@ export function App() {
   const orgSettingsRoutes = (
     <>
       <Route index element={<NavigateKeepingState to="general" />} />
-      <Route path="general" element={<OrgSettingsGeneralPage />} />
-      <Route path="members" element={<OrgSettingsMembersPage />} />
-      <Route path="applications" element={<OrgSettingsApplicationsPage />} />
+      <Route
+        path="general"
+        element={
+          <RequirePermission permission="org:read">
+            <OrgSettingsGeneralPage />
+          </RequirePermission>
+        }
+      />
+      <Route
+        path="members"
+        element={
+          <RequirePermission permission="members:read">
+            <OrgSettingsMembersPage />
+          </RequirePermission>
+        }
+      />
+      <Route
+        path="roles"
+        element={
+          <RequirePermission permission="roles:read">
+            <OrgSettingsRolesPage />
+          </RequirePermission>
+        }
+      />
+      <Route
+        path="spaces"
+        element={
+          <RequirePermission permission="spaces:read">
+            <OrgSettingsSpacesPage />
+          </RequirePermission>
+        }
+      />
       <Route path="library" element={<OrgSettingsLibraryPage />} />
-      <Route path="models" element={<OrgSettingsModelsPage />} />
-      <Route path="proxies" element={<OrgSettingsProxiesPage />} />
-      <Route path="oauth" element={<OrgSettingsOAuthPage />} />
-      <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
+      <Route
+        path="models"
+        element={
+          <RequirePermission permission="models:read">
+            <OrgSettingsModelsPage />
+          </RequirePermission>
+        }
+      />
+      <Route
+        path="proxies"
+        element={
+          <RequirePermission permission="proxies:read">
+            <OrgSettingsProxiesPage />
+          </RequirePermission>
+        }
+      />
+      <Route
+        path="oauth"
+        element={
+          <RequirePermission permission="oauth-clients:read">
+            <OrgSettingsOAuthPage />
+          </RequirePermission>
+        }
+      />
+      <Route
+        path="cli-sessions"
+        element={
+          <RequirePermission permission="cli-sessions:read">
+            <OrgSettingsCliSessionsPage />
+          </RequirePermission>
+        }
+      />
       <Route path="mcp-access" element={<OrgSettingsMcpAccessPage />} />
-      <Route path="billing" element={<OrgSettingsBillingPage />} />
+      <Route
+        path="billing"
+        element={
+          <RequirePermission permission="billing:read">
+            <OrgSettingsBillingPage />
+          </RequirePermission>
+        }
+      />
     </>
   );
 
@@ -376,15 +454,47 @@ export function App() {
   const workspaceSettingsRoutes = (
     <>
       <Route index element={<NavigateKeepingState to="general" />} />
-      <Route path="general" element={<OrgSettingsAppGeneralPage />} />
-      <Route path="auth" element={<OrgSettingsAppAuthPage />} />
+      <Route path="general" element={<OrgSettingsSpaceGeneralPage />} />
+      {/* Space membership and its custom roles: who is in THIS space, and as
+          what. Org members are the other surface — a person can hold an org
+          role and no seat here. */}
+      <Route
+        path="members"
+        element={
+          <RequirePermission permission="space-members:read">
+            <OrgSettingsSpaceMembersPage />
+          </RequirePermission>
+        }
+      />
+      <Route path="auth" element={<OrgSettingsSpaceAuthPage />} />
       <Route path="api-keys" element={<ApiKeysPage />} />
-      <Route path="oauth" element={<OrgSettingsAppOauthPage />} />
-      <Route path="end-users" element={<EndUsersPage />} />
+      <Route path="oauth" element={<OrgSettingsSpaceOauthPage />} />
+      <Route
+        path="end-users"
+        element={
+          <RequirePermission permission="end-users:read">
+            <EndUsersPage />
+          </RequirePermission>
+        }
+      />
       {features.webhooks && (
         <>
-          <Route path="webhooks" element={<WebhooksPage />} />
-          <Route path="webhooks/:id" element={<WebhookDetailPage />} />
+          <Route
+            path="webhooks"
+            element={
+              <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
+                <WebhooksPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="webhooks/:id"
+            element={
+              <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
+                <WebhookDetailPage />
+              </RequirePermission>
+            }
+          />
         </>
       )}
     </>
@@ -668,17 +778,21 @@ export function App() {
             <Route
               path="/agents/new"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="agent" />
-                </LazyRoute>
+                <RequirePermission permission="agents:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="agent" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/agents/:scope/:name/edit"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="agent" />
-                </LazyRoute>
+                <RequirePermission permission="agents:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="agent" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -714,51 +828,61 @@ export function App() {
               }
             />
             <Route
-              path="/documents"
+              path="/files"
               element={
                 <LazyRoute>
-                  <DocumentsPage />
+                  <FilesPage />
                 </LazyRoute>
               }
             />
             <Route
               path="/schedules"
               element={
-                <LazyRoute>
-                  <SchedulesListPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:read">
+                  <LazyRoute>
+                    <SchedulesListPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/schedules/new"
               element={
-                <LazyRoute>
-                  <ScheduleCreatePage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:write">
+                  <LazyRoute>
+                    <ScheduleCreatePage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/schedules/:id"
               element={
-                <LazyRoute>
-                  <ScheduleDetailPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:read">
+                  <LazyRoute>
+                    <ScheduleDetailPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/schedules/:id/edit"
               element={
-                <LazyRoute>
-                  <ScheduleEditPage />
-                </LazyRoute>
+                <RequirePermission permission="schedules:write">
+                  <LazyRoute>
+                    <ScheduleEditPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills"
               element={
-                <LazyRoute>
-                  <SkillsPage />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <SkillsPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -796,57 +920,71 @@ export function App() {
             <Route
               path="/skills/new"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills/:scope/:name/edit"
               element={
-                <LazyRoute>
-                  <PackageEditorPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills/:scope/:name"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/skills/:scope/:name/:version"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="skill" />
-                </LazyRoute>
+                <RequirePermission permission="skills:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="skill" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/mcp-servers"
               element={
-                <LazyRoute>
-                  <McpServersPage />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <McpServersPage />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/mcp-servers/:scope/:name"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="mcp-server" />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="mcp-server" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
               path="/mcp-servers/:scope/:name/:version"
               element={
-                <LazyRoute>
-                  <UnifiedPackageDetailPage type="mcp-server" />
-                </LazyRoute>
+                <RequirePermission permission="mcp-servers:read">
+                  <LazyRoute>
+                    <UnifiedPackageDetailPage type="mcp-server" />
+                  </LazyRoute>
+                </RequirePermission>
               }
             />
             <Route
@@ -863,10 +1001,7 @@ export function App() {
                 />
               }
             />
-            <Route
-              path="/applications"
-              element={<Navigate to="/org-settings/applications" replace />}
-            />
+            <Route path="/applications" element={<Navigate to="/org-settings/spaces" replace />} />
             <Route
               path="/app-settings"
               element={<Navigate to="/workspace-settings/general" replace />}
@@ -905,6 +1040,51 @@ export function App() {
               <Route path="devices" element={<PreferencesDevicesPage />} />
               <Route path="connections" element={<PreferencesConnectionsPage />} />
             </Route>
+            {features.webhooks && (
+              <>
+                <Route
+                  path="/webhooks"
+                  element={
+                    <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
+                      <Suspense fallback={<LoadingState />}>
+                        <WebhooksPage />
+                      </Suspense>
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/webhooks/:id"
+                  element={
+                    <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
+                      <Suspense fallback={<LoadingState />}>
+                        <WebhookDetailPage />
+                      </Suspense>
+                    </RequirePermission>
+                  }
+                />
+              </>
+            )}
+            {features.chat && (
+              <>
+                <Route
+                  path="/chat"
+                  element={
+                    <Suspense fallback={<LoadingState />}>
+                      <ChatModulePage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/chat/:conversationId"
+                  element={
+                    <Suspense fallback={<LoadingState />}>
+                      <ChatModulePage />
+                    </Suspense>
+                  }
+                />
+              </>
+            )}
+            {/* Space-scoped routes (read spaceId from store, like orgId) */}
             <Route
               element={
                 <LazyRoute>

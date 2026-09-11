@@ -1,0 +1,166 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Unit tests for the API's binding of the shared input resolution — that the
+ * layers reach `@appstrate/core/input-resolution` in the right order, that a
+ * locked field is refused as an `ApiError(400, "locked_input_field")`, and the
+ * write-time guard on the lock configuration itself.
+ *
+ * The merge itself (overlay ordering, absent-vs-null, the injected refusal) is
+ * covered in `packages/core/test/input-resolution.test.ts`.
+ */
+
+import { describe, it, expect } from "bun:test";
+import type { JSONSchemaObject } from "@appstrate/core/form";
+import { ApiError } from "../../src/lib/errors.ts";
+import {
+  assertLockedFieldsSatisfiable,
+  resolveEffectiveInput,
+} from "../../src/services/input-resolution.ts";
+
+const SCHEMA: JSONSchemaObject = {
+  type: "object",
+  properties: {
+    tone: { type: "string", default: "neutral" },
+    folder: { type: "string", default: "inbox" },
+    limit: { type: "integer", default: 10 },
+    subject: { type: "string" },
+  },
+  required: ["subject"],
+};
+
+/** Assert `fn` throws an `ApiError` with the given status + code, and return it. */
+function expectApiError(fn: () => unknown, status: number, code: string): ApiError {
+  let caught: unknown;
+  try {
+    fn();
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(ApiError);
+  const err = caught as ApiError;
+  expect(err.status).toBe(status);
+  expect(err.code).toBe(code);
+  return err;
+}
+
+describe("resolveEffectiveInput — three-layer precedence", () => {
+  it("applies author < editor < overlay, last one wins", () => {
+    const resolved = resolveEffectiveInput({
+      schema: SCHEMA,
+      editorDefaults: { folder: "archive", limit: 50 },
+      overlay: { origin: "input", values: { limit: 100, subject: "ad-hoc" } },
+    });
+
+    expect(resolved).toEqual({
+      // author only — no higher layer touches it
+      tone: "neutral",
+      // editor beats author
+      folder: "archive",
+      // the overlay beats the editor
+      limit: 100,
+      // the overlay is the only layer that supplies it
+      subject: "ad-hoc",
+    });
+  });
+
+  it("passes an author default through when it is the only layer", () => {
+    expect(
+      resolveEffectiveInput({ schema: SCHEMA, overlay: { origin: "input", values: undefined } }),
+    ).toEqual({
+      tone: "neutral",
+      folder: "inbox",
+      limit: 10,
+    });
+  });
+
+  it("lets the caller override an unlocked editor default", () => {
+    const resolved = resolveEffectiveInput({
+      schema: SCHEMA,
+      editorDefaults: { folder: "archive" },
+      overlay: { origin: "input", values: { folder: "sent" } },
+    });
+    expect(resolved.folder).toBe("sent");
+  });
+
+  it("lets a schedule's frozen values override an unlocked editor default", () => {
+    const resolved = resolveEffectiveInput({
+      schema: SCHEMA,
+      editorDefaults: { folder: "archive", limit: 50 },
+      overlay: { origin: "schedule input", values: { limit: 100 } },
+    });
+    expect(resolved.limit).toBe(100);
+    expect(resolved.folder).toBe("archive");
+  });
+
+  it("refuses caller input on a locked field, naming the field", () => {
+    const err = expectApiError(
+      () =>
+        resolveEffectiveInput({
+          schema: SCHEMA,
+          editorDefaults: { folder: "archive" },
+          lockedFields: ["folder"],
+          overlay: { origin: "input", values: { folder: "sent" } },
+        }),
+      400,
+      "locked_input_field",
+    );
+    expect(err.message).toContain("folder");
+  });
+
+  it("refuses schedule values on a locked field", () => {
+    const err = expectApiError(
+      () =>
+        resolveEffectiveInput({
+          schema: SCHEMA,
+          lockedFields: ["folder"],
+          overlay: { origin: "schedule input", values: { folder: "sent" } },
+        }),
+      400,
+      "locked_input_field",
+    );
+    expect(err.message).toContain("folder");
+    expect(err.message).toContain("schedule input");
+  });
+
+  it("keeps a locked field resolving from author + editor", () => {
+    const resolved = resolveEffectiveInput({
+      schema: SCHEMA,
+      editorDefaults: { folder: "archive" },
+      lockedFields: ["folder", "tone"],
+      overlay: { origin: "input", values: { subject: "hello" } },
+    });
+    expect(resolved.folder).toBe("archive");
+    expect(resolved.tone).toBe("neutral");
+  });
+});
+
+describe("assertLockedFieldsSatisfiable", () => {
+  it("refuses a required field locked with no value behind it", () => {
+    const err = expectApiError(
+      () => assertLockedFieldsSatisfiable(SCHEMA, ["subject"], {}),
+      400,
+      "locked_required_field_empty",
+    );
+    expect(err.message).toContain("subject");
+  });
+
+  it("accepts a required locked field that has an editor value", () => {
+    expect(() =>
+      assertLockedFieldsSatisfiable(SCHEMA, ["subject"], { subject: "fixed" }),
+    ).not.toThrow();
+  });
+
+  it("accepts a required locked field satisfied by an author default", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { tone: { type: "string", default: "neutral" } },
+      required: ["tone"],
+    };
+    expect(() => assertLockedFieldsSatisfiable(schema, ["tone"], {})).not.toThrow();
+  });
+
+  it("accepts locking an optional field with no value", () => {
+    expect(() => assertLockedFieldsSatisfiable(SCHEMA, ["folder"], {})).not.toThrow();
+  });
+});

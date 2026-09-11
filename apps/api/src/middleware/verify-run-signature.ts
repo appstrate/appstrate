@@ -3,7 +3,7 @@
 /**
  * Run-sink authentication for the routes an agent process calls back on
  * (`POST /api/runs/:runId/events`, `/finalize`, and
- * `POST /api/runs/:runId/documents`).
+ * `POST /api/runs/:runId/files`).
  *
  * These routes are called from agent processes that hold no user session —
  * the authentic principal is the **run itself**. Proof of authenticity is
@@ -64,7 +64,7 @@ const UPLOAD_REPLAY_KEY_PREFIX = "appstrate:run-upload:replay:";
  * Build a run-authentication middleware: resolve the run sink from `:runId`,
  * fast-reject a closed sink, and verify the Standard Webhooks HMAC over the body
  * `readBody` returns. Both the event-ingestion guard (signs the raw JSON body)
- * and the streaming document-upload guard (signs an EMPTY body) are this factory
+ * and the streaming file-upload guard (signs an EMPTY body) are this factory
  * with a different `readBody` — the only real difference between them.
  *
  * `exposeWebhookId` sets `c.get("webhookId")` for the event handler's replay
@@ -129,7 +129,7 @@ function makeRunSignatureGuard(
  *
  * The claim is NOT released on a downstream failure. Unlike the event sink
  * (whose runner retries an in-flight envelope with the SAME `webhook-id`, so
- * `ingestRunEvent` must release the key for the retry to land), the document
+ * `ingestRunEvent` must release the key for the retry to land), the file
  * uploader signs a fresh `randomUUID()` per attempt — see
  * `runtime-pi/publish.ts` — so a retry after any failure carries a new id and
  * is unaffected.
@@ -157,13 +157,13 @@ export const verifyRunSignature = makeRunSignatureGuard(
 );
 
 /**
- * Signature guard for the streaming document-ingestion POST
- * (`POST /api/runs/:runId/documents`). Identical run-authentication to
+ * Signature guard for the streaming file-ingestion POST
+ * (`POST /api/runs/:runId/files`). Identical run-authentication to
  * {@link verifyRunSignature} — Standard Webhooks HMAC over the run secret —
  * but the HMAC is verified over an EMPTY body, exactly like the run's signed
- * workspace/documents GET provisioning fetches (see `runtime-pi/provision.ts`).
+ * workspace/files GET provisioning fetches (see `runtime-pi/provision.ts`).
  *
- * The document bytes are therefore NOT part of the signature, which is
+ * The file bytes are therefore NOT part of the signature, which is
  * deliberate: buffering the whole (up to 100 MiB) file to re-hash it for the
  * HMAC would defeat the streaming ingestion the route is built for. The run
  * secret authenticates the caller as the run; the body's integrity is captured
@@ -173,7 +173,7 @@ export const verifyRunSignature = makeRunSignatureGuard(
  * Because the body is unsigned, ONE captured header set would otherwise
  * authenticate an unbounded number of arbitrary bodies within the timestamp
  * tolerance — each replay spending the org's storage quota and the run's
- * document budget, and each with DIFFERENT content (so the `(run, sha256,
+ * file budget, and each with DIFFERENT content (so the `(run, sha256,
  * name)` dedup does not absorb them). The `webhook-id` claim above closes
  * that: the header set authenticates exactly one request, matching what the
  * `/events` path already gets from body-signing plus its own replay cache.

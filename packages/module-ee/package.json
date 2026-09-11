@@ -1,0 +1,33 @@
+{
+  "name": "@appstrate/module-ee",
+  "version": "0.0.0",
+  "description": "Appstrate module — commercial features: Stripe billing, credit quotas, usage metering, custom space roles. Opt-in: append `@appstrate/module-ee` to MODULES to enable. Source-available, NOT Apache-2.0 — see LICENSE.",
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "type": "module",
+  "main": null,
+  "module": null,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test test/",
+    "repair:account": "bun run src/scripts/repair-account.ts",
+    "db:generate": "cd drizzle && bunx drizzle-kit generate",
+    "db:migrate": "cd drizzle && bunx drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@appstrate/core": "workspace:*",
+    "@appstrate/emails": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.7",
+    "ioredis": "^6.0.0",
+    "postgres": "^3.4.9",
+    "stripe": "^22.6.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10"
+  }
+}

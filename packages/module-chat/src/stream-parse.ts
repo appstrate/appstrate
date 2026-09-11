@@ -8,12 +8,19 @@
  * without a per-engine persistence callback or a core-contract change.
  */
 
-import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
+import { consumeStream, createUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { logger } from "./logger.ts";
 
-/** Decode an AI SDK UI-message SSE byte stream into its chunk objects. */
-function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIMessageChunk> {
+/**
+ * Decode an AI SDK UI-message SSE byte stream into its chunk objects.
+ *
+ * Exported for the equivalence tests, which feed identical input to the AI
+ * SDK's `readUIMessageStream` and to {@link extractAssistantMessage}.
+ */
+export function sseToChunks(
+  byteStream: ReadableStream<Uint8Array>,
+): ReadableStream<UIMessageChunk> {
   const decoder = new TextDecoder();
   let buffer = "";
   // Fail loud, but only once per stream: a malformed frame is dropped (never
@@ -50,42 +57,79 @@ function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIM
 }
 
 /**
- * Drain the stream and return the FINAL state of EACH assembled message, in
- * order of first appearance. `readUIMessageStream` re-emits an evolving snapshot
- * per message as chunks arrive, so we key a Map by message id (last snapshot
- * wins). The engine emits a single top-level `start` per turn today, so the
- * multi-message handling is defensive — but it is what makes a future
- * multi-message engine safe to add without silently dropping or duplicating
- * content. Reading the whole stream is what drives generation to completion on
- * this teed branch.
+ * Drain the stream and return the turn's assistant message, or `undefined` when
+ * it produced none.
+ *
+ * A turn carries exactly ONE top-level `start`, from exactly one of three
+ * writers: `engine.ts` writes it before iterating the Pi session; `closePiTurn`
+ * writes it only when that never happened (a setup failure); and
+ * `PiChatUiStreamMapper.map` emits the per-turn `start-step`/`finish-step`
+ * boundaries but never a `start`. So the whole stream assembles ONE message,
+ * and only its final state matters.
+ *
+ * Single pass, no per-chunk snapshot: `createUIMessageStream`'s `onFinish`
+ * (`handleUIMessageStreamFinish`) runs the AI SDK's message processor with a
+ * no-op `write` and hands over `state.message` itself, uncloned, once, when
+ * the merged stream ends — the `flush()` of its terminal transform. (The
+ * SDK's `readUIMessageStream` would instead `structuredClone` the whole
+ * in-progress message on EVERY chunk, O(chunks × message size) on the event
+ * loop every other user's stream shares, for a snapshot only read once.) Verified
+ * against the vendored source: an `error` chunk only reaches `onError` and does
+ * not stop the stream, so `onFinish` still fires; `isAborted` only reports an
+ * `abort` chunk (the AI SDK's client-abort marker, which this engine never
+ * emits) and does not change what is returned.
+ *
+ * "Produced none" is "no `start` was seen": the processor seeds an empty
+ * assistant message before the first chunk, so `onFinish` always has one to
+ * hand over, and the `start` chunk is the one every writer above emits exactly
+ * once per turn. A stream that ends without it (nothing at all, or a lone
+ * `error` chunk) yields `undefined`.
+ *
+ * Reading the stream to the end is what drives generation to completion on this
+ * teed branch — the disconnect-survival guarantee (see `finalize-stream.ts`).
  */
-export async function extractAssistantMessages(
+export async function extractAssistantMessage(
   byteStream: ReadableStream<Uint8Array>,
-): Promise<UIMessage[]> {
-  const byId = new Map<string, UIMessage>();
-  for await (const message of readUIMessageStream({ stream: sseToChunks(byteStream) })) {
-    // Map insertion order is fixed at first `set` of a key; re-setting updates
-    // the snapshot without moving it — so order = first appearance, value = last.
-    byId.set(message.id, message);
-  }
-  const snapshots = [...byId.values()];
-  // ai-sdk v6 `readUIMessageStream` carries parts forward across a mid-stream
-  // `start` boundary (it relabels the message id rather than resetting parts),
-  // so each later snapshot is cumulative: message N begins with everything
-  // message N-1 already held. Persisting that verbatim would duplicate the
-  // earlier messages' content in the later rows — strip the carried prefix.
-  // Comparing against the PREVIOUS snapshot (itself cumulative) covers the
-  // whole run of prior messages.
-  return snapshots.map((message, i) => {
-    if (i === 0) return message;
-    const prevParts = snapshots[i - 1]!.parts;
-    const carried =
-      prevParts.length > 0 &&
-      message.parts.length >= prevParts.length &&
-      prevParts.every(
-        (part, j) =>
-          part === message.parts[j] || JSON.stringify(part) === JSON.stringify(message.parts[j]),
-      );
-    return carried ? { ...message, parts: message.parts.slice(prevParts.length) } : message;
+): Promise<UIMessage | undefined> {
+  let sawStart = false;
+  const chunks = sseToChunks(byteStream).pipeThrough(
+    new TransformStream<UIMessageChunk, UIMessageChunk>({
+      transform(chunk, controller) {
+        if (chunk.type === "start") sawStart = true;
+        controller.enqueue(chunk);
+      },
+    }),
+  );
+
+  // Same contract as the frame decoder above: a processing failure (the
+  // processor throws on a semantically broken sequence, e.g. a delta for a part
+  // that was never started; the decoder throws past its frame-size bound) is
+  // logged once and never thrown — a throw would fail the persist drain and
+  // lose the turn. `createUIMessageStream` turns a rejection of the merged
+  // stream into an `error` chunk through `onError`, and `consumeStream` reports
+  // a failure of the processor pipe through its own `onError`; both land here.
+  let loggedProcessError = false;
+  const reportProcessError = (err: unknown): void => {
+    if (loggedProcessError) return;
+    loggedProcessError = true;
+    logger.error("chat ui stream processing failed", { err: String(err) });
+  };
+
+  let assembled: UIMessage | undefined;
+  const stream = createUIMessageStream<UIMessage>({
+    execute: ({ writer }) => {
+      writer.merge(chunks);
+    },
+    onError: (err) => {
+      reportProcessError(err);
+      return "chat ui stream processing failed";
+    },
+    onFinish: ({ responseMessage }) => {
+      assembled = responseMessage;
+    },
   });
+  await consumeStream({ stream, onError: reportProcessError });
+
+  if (!sawStart || !assembled) return undefined;
+  return assembled.role === "assistant" ? assembled : undefined;
 }

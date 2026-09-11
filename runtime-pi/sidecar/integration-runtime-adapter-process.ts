@@ -8,11 +8,23 @@
  * The subprocess inherits the sidecar's network namespace, so the MITM
  * listener stays on 127.0.0.1 and the CA cert lives on shared fs.
  *
- * Used in dev (sidecar running as a Bun subprocess on the host) and in
- * tests. In production the docker adapter takes precedence.
+ * Used in dev (sidecar running as a Bun subprocess on the host), in
+ * tests, and inside the Firecracker guest (the sidecar runs in the
+ * microVM, so its integration runners are guest subprocesses). In
+ * production-on-Docker the docker adapter takes precedence.
+ *
+ * A runner spawned here is a plain child of the sidecar, on the SAME
+ * uid, unless the launching supervisor supplies a privilege-dropping
+ * exec wrapper (`APPSTRATE_RUNNER_EXEC`). Same uid means the runner can
+ * read the sidecar's own environment — on Linux `/proc/<sidecar-pid>/
+ * environ` is one open() away for a same-uid process — which holds the
+ * platform API key, the run bearer token, the proxy URL's basic-auth,
+ * and every connected integration's decrypted credentials. So this
+ * adapter REFUSES to spawn when no wrapper is configured; see
+ * {@link requirePrivilegeDropWrapper}.
  */
 
-import { mkdir, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdir, stat, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -25,6 +37,7 @@ import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
   isPathSafeForMount,
+  normalizeMountPath,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
   WORKSPACE_ENV_VAR,
@@ -58,6 +71,91 @@ const HOST_INTERPRETER_BY_TYPE: Record<
   // `binary` is a no-op: exec the bundle entry directly.
   binary: { command: "", argsBefore: [] },
 };
+
+/**
+ * Fail-closed gate on the only thing that makes a host subprocess a
+ * boundary: the ability to land the runner on a different uid.
+ *
+ * The Firecracker guest supervisor sets `APPSTRATE_RUNNER_EXEC` to a
+ * setuid wrapper (`spawnAs`, `modules/firecracker/guest/supervisor.ts`),
+ * so runners there execute as a dedicated runner uid and the sidecar's
+ * environ is unreadable to them. Nothing else sets it — host process
+ * mode (the `RUN_ADAPTER=process` default, the zero-install path) has no
+ * portable way to drop privilege from Bun, so the runner would be a
+ * same-uid child that can read every credential the sidecar holds.
+ *
+ * The env allowlist in `SubprocessTransport` does not close that: it
+ * bounds what we HAND the child, not what the child can go and read out
+ * of the parent. The boundary therefore moves to admission — refuse the
+ * spawn — rather than pretending a scrubbed env is isolation.
+ *
+ * Third-party bytes are the reason this is a refusal and not a warning:
+ * a `source.kind: "local"` integration runs code the platform fetched
+ * from a package registry, in the sidecar's own trust domain. Only
+ * `local` integrations spawn at all — `remote` (Streamable HTTP MCP)
+ * and `none` (api_call-only) never reach an adapter, so they are
+ * unaffected by this gate.
+ *
+ * What is checked, and what that proves. The var must name a regular file
+ * carrying the SETUID bit (`S_ISUID`) — the shipped wrapper is built
+ * `chown root:1000` + `chmod 4750`
+ * (`apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs`). Presence
+ * alone proved nothing: `APPSTRATE_RUNNER_EXEC=/usr/bin/env` satisfied it while
+ * exec'ing the runner on the sidecar's own uid, so the gate reported a boundary
+ * that did not exist. A file with no setuid bit CANNOT change the child's uid,
+ * whatever it does once running, so refusing it is exact.
+ *
+ * It is not checked that the setuid owner is root, or that it is anyone other
+ * than the sidecar's own uid: a stat cannot tell a privilege DROP from a
+ * same-uid setuid file, and the wrapper's uid layout is the guest image's to
+ * declare, not the sidecar's to assume. This is a misconfiguration gate, not an
+ * adversary boundary — the party who sets this env var is the orchestrator, and
+ * the party it defends against is the third-party runner bytes, which cannot
+ * set it.
+ *
+ * Returns the wrapper path so the caller reads the environment exactly
+ * once — the check and the value it gates can never disagree.
+ */
+async function requirePrivilegeDropWrapper(spec: IntegrationSpawnSpec): Promise<string> {
+  const wrapper = process.env.APPSTRATE_RUNNER_EXEC;
+  const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
+  // Explicitly typed so TypeScript narrows `wrapper` past the first refusal:
+  // a `never` return only narrows through an annotated binding.
+  const refuse: (why: string) => never = (why: string) => {
+    throw new Error(
+      `${spec.integrationId}: refusing to spawn its mcp-server "${serverPackageId}" — ` +
+        `source.kind "local" runs third-party code, and this adapter cannot drop privilege ` +
+        `(${why}), so the runner would be a same-uid child of the ` +
+        `sidecar and could read the sidecar's environment — platform API key, run token, ` +
+        `proxy credentials, every connected integration's decrypted tokens — straight out ` +
+        `of /proc. Remedies, cheapest first: set INTEGRATION_RUNTIME_ADAPTER=docker to keep ` +
+        `the run itself in process mode while each integration runner gets its own ` +
+        `container; or run under RUN_ADAPTER=docker; or under RUN_ADAPTER=firecracker, ` +
+        `whose guest supervisor execs every runner through a setuid wrapper onto a ` +
+        `dedicated uid. Integrations whose source.kind is "remote" or "none" spawn nothing ` +
+        `and are unaffected.`,
+    );
+  };
+  if (!wrapper) refuse("no APPSTRATE_RUNNER_EXEC wrapper");
+
+  // The try wraps ONLY the syscall, so a refusal thrown below cannot be
+  // mistaken for a stat failure and re-labelled.
+  let st: Awaited<ReturnType<typeof stat>>;
+  try {
+    st = await stat(wrapper);
+  } catch {
+    refuse(`APPSTRATE_RUNNER_EXEC "${wrapper}" does not exist or cannot be stat'ed`);
+  }
+  if (!st.isFile()) refuse(`APPSTRATE_RUNNER_EXEC "${wrapper}" is not a regular file`);
+  // 0o4000 = S_ISUID. Bun exposes no `constants.S_ISUID`, and the octal is the
+  // same number the wrapper's `chmod 4750` writes.
+  if ((st.mode & 0o4000) === 0) {
+    refuse(
+      `APPSTRATE_RUNNER_EXEC "${wrapper}" carries no setuid bit, so exec'ing it leaves the runner on the sidecar's uid`,
+    );
+  }
+  return wrapper;
+}
 
 interface SubprocessPlan {
   command: string;
@@ -113,17 +211,31 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
  * Returns the set of created paths so `shutdown()` can clean them up.
  */
 /**
- * R8a — same safe-path floor as the docker adapter. Even though the process
- * adapter writes to the host filesystem (where the manifest path is far less
- * dangerous than inside a container), we still refuse kernel-managed surfaces
- * and the well-known privilege-escalation files to keep the contract uniform
- * across adapters and to prevent dev tooling from accidentally overwriting
- * host configs.
+ * R8a — safe-path floor for `delivery.files` on the process adapter.
+ *
+ * ENTIRELY the shared floor: {@link isPathSafeForMount} refuses every surface
+ * the system reads on its own initiative — kernel-managed trees, the PATH and
+ * loader search directories, the loader/shell/cron/auth files, the system
+ * trust store, and the per-run `/workspace/` tree. `/usr/` and `/workspace/`
+ * used to be passed here as this adapter's extras; they are not
+ * adapter-specific and both adapters passed them, so they moved into the floor
+ * along with the rest of the class `/usr/` was refused for.
+ *
+ * Why the floor matters MORE here than under docker: this adapter has FEWER
+ * containment layers, not more. It is the Tier-0 default and what the
+ * Firecracker orchestrator pins, and `materializeFileMountsOnHost` does
+ * `mkdir -p` + `writeFile` at the manifest-declared path with the
+ * manifest-declared mode, so the bytes reach the host or the guest rootfs
+ * directly.
+ *
+ * ADAPTER-SPECIFIC, and deliberately NOT enforced here: `/.docker/` and
+ * `/.dockerenv`. Those are Docker-private surfaces that exist inside a runner
+ * container and mean nothing on the host filesystem.
+ *
+ * `delivery.files` exists for certs, keys and service-account JSON, which
+ * belong under `/run/`, `/etc/<vendor>/` or `/tmp/` — none of the above.
  */
 export function isHostPathSafeForMount(hostPath: string): boolean {
-  // Process adapter uses the shared floor with no extra surfaces — the
-  // subprocess shares the host fs, so only the kernel-managed +
-  // privilege-escalation floor applies.
   return isPathSafeForMount(hostPath);
 }
 
@@ -134,14 +246,21 @@ export async function materializeFileMountsOnHost(
   const createdPaths: string[] = [];
   const envOverrides: Record<string, string> = {};
 
-  for (const [containerPath, entry] of Object.entries(fileMounts)) {
-    // R8a — refuse kernel-managed / privilege-escalation surfaces even on
-    // the process adapter. The fallback scratch path bypass is also gated
-    // on this check: a manifest pointing at `/dev/null` would otherwise
-    // silently write to the scratch dir, mojibake'ing the contract.
+  for (const [declaredPath, entry] of Object.entries(fileMounts)) {
+    // The path is canonicalized ONCE, and everything downstream — the safety
+    // check, the `mkdir -p`, the `writeFile`, the scratch mirror and the env
+    // override name — uses that one form. Checking `/./usr/local/bin/gh` while
+    // writing it is how the floor was bypassed: the check compared strings and
+    // the kernel resolved the path, landing the file on the PATH the check had
+    // just refused.
+    const containerPath = normalizeMountPath(declaredPath);
+    // R8a — refuse kernel-managed / privilege-escalation / auto-consumed
+    // surfaces even on the process adapter. The fallback scratch path bypass
+    // is also gated on this check: a manifest pointing at `/dev/null` would
+    // otherwise silently write to the scratch dir, mojibake'ing the contract.
     if (!isHostPathSafeForMount(containerPath)) {
       logger.warn("delivery.files: refused to mount credential file at unsafe path; skipping", {
-        manifestPath: containerPath,
+        manifestPath: declaredPath,
       });
       continue;
     }
@@ -219,6 +338,10 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
       const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
+      // First, before any credential material is rendered: a runner we are
+      // going to refuse must not have `delivery.files` secrets written to
+      // disk on its behalf.
+      const runnerExec = await requirePrivilegeDropWrapper(spec);
       const plan = planSubprocess(spec, bundleRoot);
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
       if (egress) {
@@ -271,16 +394,15 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         createdPaths.push(...paths);
         Object.assign(procEnv, envOverrides);
       }
-      // Privilege-drop wrapper (Firecracker guest): when the supervisor
-      // provides APPSTRATE_RUNNER_EXEC, every runner execs through the
-      // setuid wrapper and lands on the dedicated runner uid instead of
-      // inheriting the sidecar's — the sidecar's environ (credentials)
-      // stays unreadable. Unset in host process mode: runners remain
-      // plain children.
-      const runnerExec = process.env.APPSTRATE_RUNNER_EXEC;
+      // Privilege-drop wrapper (Firecracker guest): the supervisor provides
+      // APPSTRATE_RUNNER_EXEC, so every runner execs through the setuid
+      // wrapper and lands on the dedicated runner uid instead of inheriting
+      // the sidecar's — the sidecar's environ (credentials) stays
+      // unreadable. Resolved at the top of `spawn` by
+      // `requirePrivilegeDropWrapper`, which refused when it is unset.
       const transport = new SubprocessTransport({
-        command: runnerExec ?? plan.command,
-        args: runnerExec ? [plan.command, ...plan.args] : plan.args,
+        command: runnerExec,
+        args: [plan.command, ...plan.args],
         cwd: plan.cwd,
         env: procEnv,
         envPassthrough: ["PATH", "HOME", "NODE_OPTIONS"],

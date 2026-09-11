@@ -2,12 +2,13 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  buildPublishDocumentDef,
+  buildPublishFileDef,
   buildRuntimeToolDefs,
-  documentPublishedEvent,
+  CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
+  filePublishedEvent,
   reEmitRuntimeToolEvents,
   RUNTIME_TOOL_EVENTS_META_KEY,
-  type PublishedDocument,
+  type PublishedFile,
   type RuntimeToolEvent,
 } from "../src/runtime-tool-defs.ts";
 
@@ -113,83 +114,220 @@ describe("reEmitRuntimeToolEvents", () => {
   });
 });
 
-describe("buildPublishDocumentDef", () => {
-  const primaryDocument: PublishedDocument = {
-    id: "doc_primary",
-    uri: "document://doc_primary",
+describe("buildPublishFileDef", () => {
+  const publishedFile: PublishedFile = {
+    id: "file_primary",
+    uri: "appfile://file_primary",
     name: "Final report.html",
     mime: "text/html",
     size: 42,
     sha256: "abc123",
-    presentation: "primary",
   };
 
-  it("declares the primary-only presentation schema", () => {
-    const def = buildPublishDocumentDef(async () => primaryDocument);
-    const properties = def.descriptor.inputSchema.properties as Record<
-      string,
-      Record<string, unknown>
-    >;
+  it("declares only `path` and `name`, and says nothing about how files are displayed", () => {
+    const def = buildPublishFileDef(async () => publishedFile);
+    const schema = def.descriptor.inputSchema;
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
 
-    expect(properties.presentation).toEqual({
-      type: "string",
-      enum: ["primary"],
-      description: expect.stringContaining("last successful"),
-    });
-    expect(def.descriptor.description).toContain("finish editing it first");
-    expect(def.descriptor.description).toContain("last successful primary publication");
-    expect(def.descriptor.description).toMatch(/one clearly main user-facing file/i);
-    expect(def.descriptor.description).toMatch(/no file/i);
-    expect(def.descriptor.description).toMatch(/several peer files/i);
-    expect(def.descriptor.description).toMatch(/never infer.*file count/i);
+    expect(Object.keys(properties).sort()).toEqual(["name", "path"]);
+    expect(schema.required).toEqual(["path"]);
+    // The retired `presentation` concept must not resurface anywhere in the
+    // tool surface — the model no longer decides anything about presentation.
+    expect(JSON.stringify(schema)).not.toContain("presentation");
+    expect(def.descriptor.description).not.toContain("presentation");
+    expect(def.descriptor.description).not.toMatch(/primary/i);
+    // What the description must still carry.
+    expect(def.descriptor.description).toContain("appfile://");
+    expect(def.descriptor.description).toContain("./outputs/");
   });
 
-  it("passes presentation through the backward-compatible uploader signature", async () => {
-    const requests: Array<[string, string | undefined, "primary" | undefined]> = [];
-    const def = buildPublishDocumentDef(async (path, name, presentation) => {
-      requests.push([path, name, presentation]);
-      return primaryDocument;
+  it("uploads with (path, name) only", async () => {
+    const requests: Array<[string, string | undefined]> = [];
+    const def = buildPublishFileDef(async (path, name) => {
+      requests.push([path, name]);
+      return publishedFile;
     });
 
     const result = await def.handler({
       path: "outputs/final.html",
       name: "Final report.html",
-      presentation: "primary",
     });
 
-    expect(requests).toEqual([["outputs/final.html", "Final report.html", "primary"]]);
+    expect(requests).toEqual([["outputs/final.html", "Final report.html"]]);
     expect(eventsOf(result._meta)).toEqual([
       {
-        ...documentPublishedEvent(primaryDocument),
+        ...filePublishedEvent(publishedFile),
         timestamp: expect.any(Number),
       },
     ]);
   });
 
-  it("keeps legacy two-argument uploaders valid and normalizes absent presentation", async () => {
+  it("emits a file.published event with no presentation field", () => {
+    expect(filePublishedEvent(publishedFile)).toEqual({
+      type: "file.published",
+      file_id: "file_primary",
+      uri: "appfile://file_primary",
+      name: "Final report.html",
+      mime: "text/html",
+      size: 42,
+      sha256: "abc123",
+    });
+  });
+
+  it("IGNORES a retired `presentation` argument instead of rejecting the call", async () => {
+    // Version skew: an agent running against a cached manifest (or an older
+    // system prompt) may still pass `presentation`. The deliverable must be
+    // published anyway — a retired argument is never an error.
     const requests: Array<[string, string | undefined]> = [];
-    const ordinaryDocument: PublishedDocument = {
-      id: "doc_legacy",
-      uri: "document://doc_legacy",
-      name: "notes.md",
-      mime: "text/markdown",
-      size: 12,
-      sha256: "legacy-sha",
-    };
-    // This is the exact public uploader shape accepted before presentation was
-    // introduced. Fewer parameters remain assignable and work unchanged.
-    const def = buildPublishDocumentDef(async (path, name) => {
+    const def = buildPublishFileDef(async (path, name) => {
       requests.push([path, name]);
-      return ordinaryDocument;
+      return publishedFile;
     });
 
     const result = await def.handler({
-      path: "outputs/notes.md",
-      name: "",
+      path: "outputs/final.html",
       presentation: "primary",
     });
 
+    expect(result.isError).toBeUndefined();
+    expect(requests).toEqual([["outputs/final.html", undefined]]);
+    expect(eventsOf(result._meta)).toHaveLength(1);
+  });
+
+  it("normalizes an empty `name` to undefined on the way to the uploader", async () => {
+    // A model that has nothing better to send fills the optional field with the
+    // empty string rather than omitting it. `""` must reach the uploader as
+    // `undefined` so the uploader falls back to the on-disk file name; passing
+    // `""` through names the deliverable the empty string.
+    const requests: Array<[string, string | undefined]> = [];
+    const def = buildPublishFileDef(async (path, name) => {
+      requests.push([path, name]);
+      return publishedFile;
+    });
+
+    const result = await def.handler({ path: "outputs/notes.md", name: "" });
+
+    expect(result.isError).toBeUndefined();
     expect(requests).toEqual([["outputs/notes.md", undefined]]);
-    expect(eventsOf(result._meta)[0]?.presentation).toBeNull();
+  });
+
+  it("still rejects a missing path", async () => {
+    const def = buildPublishFileDef(async () => publishedFile);
+    const result = await def.handler({ presentation: "primary" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("non-empty `path`");
+  });
+
+  it("is named publish_file and never mentions the retired vocabulary", () => {
+    const def = buildPublishFileDef(async () => publishedFile);
+    expect(def.descriptor.name).toBe("publish_file");
+    expect(def.descriptor.description).not.toContain("publish_document");
+    expect(def.descriptor.description).not.toContain("document://");
+  });
+});
+
+describe("run-event type compatibility (#1177)", () => {
+  it("file.published is canonical and document.published is no longer accepted", () => {
+    expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).toContain("file.published");
+    expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).not.toContain("document.published" as never);
+
+    // The only producer of the retired name is this module's own
+    // `filePublishedEvent`, bundled into the SAME artifact as the acceptor
+    // below — there is no version boundary between them, so the name can now
+    // only arrive forged, and the acceptor drops it like any other.
+    const emitted: unknown[] = [];
+    reEmitRuntimeToolEvents(
+      {
+        [RUNTIME_TOOL_EVENTS_META_KEY]: [
+          { type: "document.published", document_id: "file_legacy" },
+          { type: "file.published", file_id: "file_new" },
+          { type: "forged.event", x: 1 },
+        ],
+      },
+      (e) => emitted.push(e),
+    );
+    expect(emitted).toEqual([{ type: "file.published", file_id: "file_new" }]);
+  });
+});
+
+describe("output — schema dialect and compile failure", () => {
+  /**
+   * The in-container check exists to pre-empt the server's post-hoc
+   * `validateOutput`. It can only do that if both sides speak the SAME
+   * dialect. This used to be a private draft-07 Ajv with no ajv-formats
+   * beside the server's shared Ajv2020; a 2020-12 keyword compiled on one
+   * side and not the other.
+   */
+  it("compiles a 2020-12-only schema and enforces it", async () => {
+    const def = buildRuntimeToolDefs({
+      runtimeTools: ["output"],
+      outputSchema: {
+        type: "object",
+        properties: {
+          pair: {
+            type: "array",
+            // `prefixItems` is 2020-12. Draft-07 does not know it and treats
+            // it as an unknown annotation, so this constraint vanished.
+            prefixItems: [{ type: "string" }, { type: "number" }],
+            minItems: 2,
+          },
+        },
+        required: ["pair"],
+      },
+    })[0]!;
+
+    const bad = await def.handler({ data: { pair: [1, "x"] } });
+    expect(bad.isError).toBe(true);
+    expect(bad.content[0]).toMatchObject({ text: expect.stringContaining("validation failed") });
+
+    const good = await def.handler({ data: { pair: ["x", 1] } });
+    expect(good.isError).toBeUndefined();
+  });
+
+  /**
+   * A schema that cannot compile used to set `validator = null`, and the guard
+   * was `if (validator && !validator(data))` — so EVERY payload was accepted,
+   * silently, and the run failed later at the server check this tool exists to
+   * pre-empt.
+   */
+  it("refuses every output when the declared schema cannot compile", async () => {
+    const def = buildRuntimeToolDefs({
+      runtimeTools: ["output"],
+      outputSchema: { type: "object", properties: { n: { type: "not-a-json-schema-type" } } },
+    })[0]!;
+
+    const res = await def.handler({ data: { anything: true } });
+    expect(res.isError).toBe(true);
+    expect(res.content[0]).toMatchObject({
+      text: expect.stringContaining("cannot be compiled"),
+    });
+  });
+
+  /**
+   * Regression guard for the second half of the private-instance bug: it never
+   * called `removeSchema`, so compiling two schemas carrying the same `$id` in
+   * one process threw "schema with key or id … already exists" — caught, and
+   * turned into the silent accept-everything above.
+   */
+  it("compiles two schemas carrying the same $id in one process", async () => {
+    const schema = {
+      $id: "https://example.test/out.json",
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    };
+    const first = buildRuntimeToolDefs({
+      runtimeTools: ["output"],
+      outputSchema: { ...schema },
+    })[0]!;
+    const second = buildRuntimeToolDefs({
+      runtimeTools: ["output"],
+      outputSchema: { ...schema },
+    })[0]!;
+
+    for (const def of [first, second]) {
+      expect((await def.handler({ data: { n: "nope" } })).isError).toBe(true);
+      expect((await def.handler({ data: { n: 1 } })).isError).toBeUndefined();
+    }
   });
 });

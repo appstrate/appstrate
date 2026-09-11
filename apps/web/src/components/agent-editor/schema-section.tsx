@@ -25,13 +25,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  toSlug,
-  toLiveSlug,
-  toCredentialKey,
-  toLiveCredentialKey,
-  CREDENTIAL_KEY_RE,
-} from "../../lib/strings";
+import { toSlug, toLiveSlug } from "../../lib/strings";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -69,7 +63,7 @@ export interface SchemaField {
   arrayEnumItems?: string;
 }
 
-type SchemaMode = "input" | "output" | "config" | "credentials";
+type SchemaMode = "input" | "output";
 
 interface SchemaSectionProps {
   title: string;
@@ -100,52 +94,38 @@ function emptyField(mode: SchemaMode): SchemaField {
     type: "string",
     description: "",
     required: false,
-    ...(mode === "input" ? { placeholder: "", default: "" } : {}),
-    ...(mode === "config" ? { default: "", enumValues: "" } : {}),
+    ...(mode === "input" ? { placeholder: "", default: "", enumValues: "" } : {}),
   };
-}
-
-function hasDetailsRow(mode: SchemaMode): boolean {
-  return mode === "input" || mode === "config";
 }
 
 function SortableFieldCard({
   field,
   index,
   mode,
-  readOnly,
   onUpdate,
   onRemove,
 }: {
   field: SchemaField;
   index: number;
   mode: SchemaMode;
-  readOnly?: boolean;
   onUpdate: (index: number, patch: Partial<SchemaField>) => void;
   onRemove: (index: number) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: field._id,
-    disabled: readOnly,
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
   const isFile = mode === "input" && !!field.isFile;
-  const showDetails = hasDetailsRow(mode);
+  const showDetails = mode === "input";
   const isNumeric = field.type === "number" || field.type === "integer";
   const isString = field.type === "string" && !isFile;
   const isArray = field.type === "array";
 
-  // Credential keys must match the sidecar substitution contract (underscore-based,
-  // no hyphens) — agent/tool input/config keys stay slug-based (hyphen-based,
-  // URL-safe). See @appstrate/core/naming#CREDENTIAL_KEY_RE.
-  const keyTransform =
-    mode === "credentials"
-      ? { live: toLiveCredentialKey, final: toCredentialKey }
-      : { live: toLiveSlug, final: toSlug };
-  const keyIsInvalid =
-    mode === "credentials" && field.key.length > 0 && !CREDENTIAL_KEY_RE.test(field.key);
+  // Agent/tool input and output keys are slug-based (hyphen-based, URL-safe):
+  // `live` while the user types, `final` on blur.
+  const keyTransform = { live: toLiveSlug, final: toSlug };
 
   return (
     <div
@@ -154,33 +134,27 @@ function SortableFieldCard({
       className="border-border bg-card mb-2 rounded-md border p-2.5 [&[style*='transform']]:z-10 [&[style*='transform']]:shadow-lg"
     >
       <div className="flex items-center gap-2">
-        {!readOnly && (
-          <span
-            className="text-muted-foreground hover:text-foreground cursor-grab text-base leading-none select-none active:cursor-grabbing"
-            {...attributes}
-            {...listeners}
-          >
-            ⠿
-          </span>
-        )}
+        <span
+          className="text-muted-foreground hover:text-foreground cursor-grab text-base leading-none select-none active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+        >
+          ⠿
+        </span>
+
         <Input
           type="text"
           placeholder={t("editor.fieldKey")}
           value={field.key}
           onChange={(e) => onUpdate(index, { key: keyTransform.live(e.target.value) })}
           onBlur={() => onUpdate(index, { key: keyTransform.final(field.key) })}
-          className={`h-7 w-[120px] min-w-0 shrink-0 font-mono text-xs ${
-            keyIsInvalid ? "border-destructive focus-visible:ring-destructive" : ""
-          }`}
-          disabled={readOnly}
-          aria-invalid={keyIsInvalid || undefined}
+          className="h-7 w-[120px] min-w-0 shrink-0 font-mono text-xs"
         />
         <Select
           value={field.type}
           onValueChange={(v) =>
             onUpdate(index, { type: v, ...(v !== "string" ? { isFile: false } : {}) })
           }
-          disabled={readOnly}
         >
           <SelectTrigger className="h-7 w-[100px] text-xs">
             <SelectValue />
@@ -199,14 +173,12 @@ function SortableFieldCard({
           value={field.description}
           onChange={(e) => onUpdate(index, { description: e.target.value })}
           className="h-7 min-w-0 flex-1 text-xs"
-          disabled={readOnly}
         />
         <div className="flex items-center gap-1.5">
           <Checkbox
             id={`field-req-${index}`}
             checked={field.required}
             onCheckedChange={(checked) => onUpdate(index, { required: Boolean(checked) })}
-            disabled={readOnly}
           />
           <Label
             htmlFor={`field-req-${index}`}
@@ -221,7 +193,6 @@ function SortableFieldCard({
               id={`field-file-${index}`}
               checked={field.isFile ?? false}
               onCheckedChange={(checked) => onUpdate(index, { isFile: Boolean(checked) })}
-              disabled={readOnly}
             />
             <Label
               htmlFor={`field-file-${index}`}
@@ -231,17 +202,15 @@ function SortableFieldCard({
             </Label>
           </div>
         )}
-        {!readOnly && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-destructive h-7 w-7"
-            onClick={() => onRemove(index)}
-          >
-            &times;
-          </Button>
-        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground hover:text-destructive h-7 w-7"
+          onClick={() => onRemove(index)}
+        >
+          &times;
+        </Button>
       </div>
       {showDetails && (
         <div className="mt-2 flex flex-wrap gap-2">
@@ -253,7 +222,6 @@ function SortableFieldCard({
                 value={field.accept ?? ""}
                 onChange={(e) => onUpdate(index, { accept: e.target.value })}
                 className="h-7 min-w-[100px] flex-1 text-xs"
-                disabled={readOnly}
               />
               <Input
                 type="text"
@@ -261,14 +229,12 @@ function SortableFieldCard({
                 value={field.maxSize ?? ""}
                 onChange={(e) => onUpdate(index, { maxSize: e.target.value })} // canonical-casing-exempt: SchemaField TS-internal (carve-out); manifest write via fieldsToSchema → `max_size`
                 className="h-7 min-w-[100px] flex-1 text-xs"
-                disabled={readOnly}
               />
               <div className="flex items-center gap-1.5">
                 <Checkbox
                   id={`field-multiple-${index}`}
                   checked={field.multiple ?? false}
                   onCheckedChange={(checked) => onUpdate(index, { multiple: Boolean(checked) })}
-                  disabled={readOnly}
                 />
                 <Label
                   htmlFor={`field-multiple-${index}`}
@@ -284,48 +250,37 @@ function SortableFieldCard({
                   value={field.maxFiles ?? ""}
                   onChange={(e) => onUpdate(index, { maxFiles: e.target.value })}
                   className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
                 />
               )}
             </>
           ) : (
             <>
-              {(mode === "input" || mode === "config") && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldDefault")}
-                  value={field.default ?? ""}
-                  onChange={(e) => onUpdate(index, { default: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
-              {mode === "input" && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldPlaceholder")}
-                  value={field.placeholder ?? ""}
-                  onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
-              {mode === "config" && (
-                <Input
-                  type="text"
-                  placeholder={t("editor.fieldEnum")}
-                  value={field.enumValues ?? ""}
-                  onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
-                  className="h-7 min-w-[100px] flex-1 text-xs"
-                  disabled={readOnly}
-                />
-              )}
+              <Input
+                type="text"
+                placeholder={t("editor.fieldDefault")}
+                value={field.default ?? ""}
+                onChange={(e) => onUpdate(index, { default: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+              />
+              <Input
+                type="text"
+                placeholder={t("editor.fieldPlaceholder")}
+                value={field.placeholder ?? ""}
+                onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+              />
+              <Input
+                type="text"
+                placeholder={t("editor.fieldEnum")}
+                value={field.enumValues ?? ""}
+                onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
+                className="h-7 min-w-[100px] flex-1 text-xs"
+              />
               {/* String format dropdown */}
               {isString && (
                 <Select
                   value={field.format ?? ""}
                   onValueChange={(v) => onUpdate(index, { format: v || undefined })}
-                  disabled={readOnly}
                 >
                   <SelectTrigger className="h-7 w-[110px] text-xs">
                     <SelectValue placeholder="Format" />
@@ -348,7 +303,6 @@ function SortableFieldCard({
                     value={field.minLength ?? ""}
                     onChange={(e) => onUpdate(index, { minLength: e.target.value })}
                     className="h-7 w-[90px] text-xs"
-                    disabled={readOnly}
                   />
                   <Input
                     type="text"
@@ -356,7 +310,6 @@ function SortableFieldCard({
                     value={field.maxLength ?? ""}
                     onChange={(e) => onUpdate(index, { maxLength: e.target.value })}
                     className="h-7 w-[90px] text-xs"
-                    disabled={readOnly}
                   />
                   <Input
                     type="text"
@@ -364,7 +317,6 @@ function SortableFieldCard({
                     value={field.pattern ?? ""}
                     onChange={(e) => onUpdate(index, { pattern: e.target.value })}
                     className="h-7 min-w-[100px] flex-1 font-mono text-xs"
-                    disabled={readOnly}
                   />
                 </>
               )}
@@ -377,7 +329,6 @@ function SortableFieldCard({
                     value={field.minimum ?? ""}
                     onChange={(e) => onUpdate(index, { minimum: e.target.value })}
                     className="h-7 w-[70px] text-xs"
-                    disabled={readOnly}
                   />
                   <Input
                     type="text"
@@ -385,7 +336,6 @@ function SortableFieldCard({
                     value={field.maximum ?? ""}
                     onChange={(e) => onUpdate(index, { maximum: e.target.value })}
                     className="h-7 w-[70px] text-xs"
-                    disabled={readOnly}
                   />
                   <Input
                     type="text"
@@ -393,7 +343,6 @@ function SortableFieldCard({
                     value={field.step ?? ""}
                     onChange={(e) => onUpdate(index, { step: e.target.value })}
                     className="h-7 w-[70px] text-xs"
-                    disabled={readOnly}
                   />
                 </>
               )}
@@ -405,7 +354,6 @@ function SortableFieldCard({
                   value={field.arrayEnumItems ?? ""}
                   onChange={(e) => onUpdate(index, { arrayEnumItems: e.target.value })}
                   className="h-7 min-w-[150px] flex-1 text-xs"
-                  disabled={readOnly}
                 />
               )}
             </>
@@ -460,7 +408,6 @@ export function SchemaSection({
               field={field}
               index={i}
               mode={mode}
-              readOnly={readOnly}
               onUpdate={update}
               onRemove={remove}
             />

@@ -81,11 +81,11 @@ describe("syncInstanceClientsFromEnv — create", () => {
     expect(row!.postLogoutRedirectUris).toEqual(["https://admin.example.com"]);
     expect(row!.scopes).toEqual(["openid", "profile", "email", "offline_access"]);
     expect(row!.skipConsent).toBe(false);
-    expect(row!.type).toBe("web");
+    expect(row!.applicationType).toBe("web");
     expect(row!.tokenEndpointAuthMethod).toBe("client_secret_basic");
     expect(row!.requirePKCE).toBe(true);
     expect(row!.referencedOrgId).toBeNull();
-    expect(row!.referencedApplicationId).toBeNull();
+    expect(row!.referencedSpaceId).toBeNull();
     expect(row!.allowSignup).toBe(false);
   });
 
@@ -102,7 +102,7 @@ describe("syncInstanceClientsFromEnv — create", () => {
     expect(row!.clientSecret).toBe(await hashSecret(VALID_SECRET));
   });
 
-  it("persists metadata with { level, clientId } shape", async () => {
+  it("persists an instance-level, operator-provisioned client", async () => {
     setDeclaration([validEntry()]);
     await syncInstanceClientsFromEnv();
 
@@ -111,9 +111,9 @@ describe("syncInstanceClientsFromEnv — create", () => {
       .from(oauthClient)
       .where(eq(oauthClient.clientId, "admin-dashboard"))
       .limit(1);
-    const metadata = JSON.parse(row!.metadata ?? "{}");
-    expect(metadata.level).toBe("instance");
-    expect(metadata.clientId).toBe("admin-dashboard");
+    expect(row!.level).toBe("instance");
+    // Not self-registered, so not confined to a single protected resource.
+    expect(row!.selfService).toBe(false);
   });
 
   it("creates multiple declared clients in one pass", async () => {
@@ -206,6 +206,125 @@ describe("syncInstanceClientsFromEnv — drift", () => {
 
     setDeclaration([validEntry({ name: "Renamed" })]);
     await expect(syncInstanceClientsFromEnv()).rejects.toThrow(/name/);
+  });
+
+  it("does not drift when the stored scope set is only reordered", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    await db
+      .update(oauthClient)
+      .set({ scopes: ["files:read", "openid", "profile"] })
+      .where(eq(oauthClient.clientId, "admin-dashboard"));
+
+    await syncInstanceClientsFromEnv(); // Must not throw — the compare is set-based.
+
+    const [row] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, "admin-dashboard"))
+      .limit(1);
+    // Unchanged — a match is a no-op, the sync never rewrites the row.
+    expect(row!.scopes).toEqual(["files:read", "openid", "profile"]);
+  });
+
+  it("reports a scope drift when the sets differ", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    await db
+      .update(oauthClient)
+      .set({ scopes: ["openid", "profile", "files:delete"] })
+      .where(eq(oauthClient.clientId, "admin-dashboard"));
+
+    await expect(syncInstanceClientsFromEnv()).rejects.toThrow(/scopes/);
+  });
+
+  // A scope string that a data migration rewrote (`documents:*` -> `files:*`,
+  // `applications:*` -> `spaces:*`) used to get its own diagnostic naming the
+  // rename. That branch was retirement machinery and went with the transition
+  // (`docs/NO_TRANSITIONAL_CODE.md` §4): the retired spelling is now an unknown
+  // scope like any other, and an operator whose env still names it gets the
+  // ordinary drift path. These pin that it is REFUSED — the property that
+  // matters — and that no rename vocabulary survives anywhere in the message.
+  for (const retired of ["documents:read", "applications:read"]) {
+    it(`refuses the retired spelling ${retired} as an unknown scope, naming no rename`, async () => {
+      setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+      await syncInstanceClientsFromEnv();
+
+      setDeclaration([validEntry({ scopes: ["openid", "profile", retired] })]);
+      let caught: unknown;
+      try {
+        await syncInstanceClientsFromEnv();
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(InstanceClientSyncError);
+      const message = (caught as Error).message;
+      expect(message).toContain("OIDC_INSTANCE_CLIENTS");
+      // No rename vocabulary survives: the platform does not know these were
+      // renamed, only that they are not scopes.
+      expect(message).not.toContain("renamed");
+      expect(message).not.toContain("-> files:read");
+      expect(message).not.toContain("-> spaces:read");
+      // But the DESTRUCTIVE remedy must still be withheld — not because the
+      // spelling is retired, because the declaration would not survive its own
+      // re-create. Deleting the row would lose every satellite session AND
+      // still not boot.
+      expect(message).not.toContain("DELETE FROM oauth_clients");
+      expect(message).toContain("outside the OIDC vocabulary");
+      expect(message).toContain("Do NOT delete the oauth_clients row");
+    });
+  }
+
+  it("withholds the delete remedy for ANY unusable scope, not just a renamed one", async () => {
+    // The property is "would this declaration survive a re-create?", so a plain
+    // typo gets the same protection. Without this the guard reads as if it were
+    // still about retired spellings.
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "flies:raed"] })]);
+    let caught: unknown;
+    try {
+      await syncInstanceClientsFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    const message = (caught as Error).message;
+    expect(message).toContain("flies:raed");
+    expect(message).not.toContain("DELETE FROM oauth_clients");
+  });
+
+  // Control: a drift whose declaration WOULD survive a re-create still gets the
+  // generic remedy. This is the discriminator — without it, the assertions
+  // above would pass just as well against a build that had stopped offering the
+  // delete remedy at all.
+  it("offers the delete remedy for a scope drift the declaration survives", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    setDeclaration([validEntry({ scopes: ["openid", "profile"] })]);
+    let caught: unknown;
+    try {
+      await syncInstanceClientsFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(InstanceClientSyncError);
+    expect((caught as Error).message).toContain("DELETE FROM oauth_clients");
+  });
+
+  it("refuses a retired spelling on the create path too", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "documents:read"] })]);
+    let caught: unknown;
+    try {
+      await syncInstanceClientsFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(InstanceClientSyncError);
+    expect((caught as Error).message).toContain("scopes");
   });
 
   it("treats redirectUris as order-insensitive (no drift on reorder)", async () => {
@@ -377,8 +496,9 @@ describe("oidcModule.init() — boot wiring", () => {
       appUrl: process.env.APP_URL ?? "http://localhost:3000",
       // Migrations are already applied by the test preload — we only care
       // about the post-migration steps of `init()` here.
-      getSendMail: async () => () => {},
-      getOrgAdminEmails: async () => [],
+      getSendMail: async () => async () => {},
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
       getOrgName: async () => null,
       services: {} as import("@appstrate/core/module").PlatformServices,
     };
@@ -415,8 +535,9 @@ describe("oidcModule.init() — boot wiring", () => {
     const initCtx = {
       redisUrl: process.env.REDIS_URL ?? null,
       appUrl: process.env.APP_URL ?? "http://localhost:3000",
-      getSendMail: async () => () => {},
-      getOrgAdminEmails: async () => [],
+      getSendMail: async () => async () => {},
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
       getOrgName: async () => null,
       services: {} as import("@appstrate/core/module").PlatformServices,
     };

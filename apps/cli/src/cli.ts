@@ -11,7 +11,8 @@
  *   - `appstrate whoami`:  server-authoritative identity check.
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
- *   - `appstrate app`:     manage the pinned application (`X-Application-Id`).
+ *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
+ *   - `appstrate skills`:  sync the space's skills to Claude Code / Codex.
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -44,11 +45,14 @@ import {
   orgCreateCommand,
 } from "./commands/org.ts";
 import {
-  appListCommand,
-  appSwitchCommand,
-  appCurrentCommand,
-  appCreateCommand,
-} from "./commands/app.ts";
+  spaceListCommand,
+  spaceSwitchCommand,
+  spaceCurrentCommand,
+  spaceCreateCommand,
+} from "./commands/space.ts";
+import { skillsSyncCommand } from "./commands/skills.ts";
+import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
+import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
@@ -118,6 +122,22 @@ installSignalHandlers();
  */
 function collect(val: string, prev: string[]): string[] {
   return [...prev, val];
+}
+
+/** Repeatable `--target`. No commander default: the command owns that rule. */
+function collectTarget(val: string, prev: SyncTarget[] | undefined): SyncTarget[] {
+  if (!(SYNC_TARGETS as readonly string[]).includes(val)) {
+    throw new InvalidArgumentError(`expected one of ${SYNC_TARGETS.join(", ")}, got "${val}"`);
+  }
+  return [...(prev ?? []), val as SyncTarget];
+}
+
+/** `--source` on `appstrate skills sync`. */
+function parseSkillSource(val: string): SkillSource {
+  if (val !== "published" && val !== "draft") {
+    throw new InvalidArgumentError(`expected published or draft, got "${val}"`);
+  }
+  return val;
 }
 
 // Catch stray unhandled rejections + uncaughts before Bun's default
@@ -340,23 +360,23 @@ program
   )
   .option(
     "--create-org <name>",
-    "Create a new organization with this name after login and pin it (non-interactive). A default application and hello-world agent are provisioned server-side.",
+    "Create a new organization with this name after login and pin it (non-interactive). A default space and hello-world agent are provisioned server-side.",
   )
   .option(
     "--no-org",
     "Skip the post-login org-pinning step entirely. Subsequent calls must pass `-H X-Org-Id: …` or pin later via `appstrate org switch`.",
   )
   .option(
-    "--app <id>",
-    "Pin this application on the profile after login (non-interactive). Fails if no match.",
+    "--space <id>",
+    "Pin this space on the profile after login (non-interactive). Fails if no match.",
   )
   .option(
-    "--create-app <name>",
-    "Create a new application with this name after login and pin it (non-interactive).",
+    "--create-space <name>",
+    "Create a new space with this name after login and pin it (non-interactive).",
   )
   .option(
-    "--no-app",
-    "Skip the post-login app-pinning step entirely. Subsequent calls must pass `-H X-Application-Id: …` or pin later via `appstrate app switch`.",
+    "--no-space",
+    "Skip the post-login space-pinning step entirely. Subsequent calls must pass `-H X-Space-Id: …` or pin later via `appstrate space switch`.",
   )
   .option(
     "--device-name <name>",
@@ -373,9 +393,9 @@ program
       // commander 14). `--org <value>` sets it to a string, neither leaves
       // it undefined — so `opts.org === false` is the unambiguous skip signal.
       noOrg: opts.org === false,
-      app: typeof opts.app === "string" ? opts.app : undefined,
-      createApp: typeof opts.createApp === "string" ? opts.createApp : undefined,
-      noApp: opts.app === false,
+      space: typeof opts.space === "string" ? opts.space : undefined,
+      createSpace: typeof opts.createSpace === "string" ? opts.createSpace : undefined,
+      noSpace: opts.space === false,
       deviceName: typeof opts.deviceName === "string" ? opts.deviceName : undefined,
     });
   });
@@ -457,53 +477,100 @@ orgGroup
     });
   });
 
-// ─── `appstrate app …` — manage the pinned application (issue #217) ────
+// ─── `appstrate space …` — manage the pinned space (issue #217) ────────
 
-const appGroup = program
-  .command("app")
-  .description("Manage the pinned application for the active profile");
+const spaceGroup = program
+  .command("space")
+  .description("Manage the pinned space for the active profile");
 
-appGroup
+spaceGroup
   .command("list")
-  .description("List applications in the pinned organization")
+  .description("List spaces in the pinned organization")
   .action(async () => {
     const globalOpts = program.opts<{ profile?: string }>();
-    await appListCommand({ profile: globalOpts.profile });
+    await spaceListCommand({ profile: globalOpts.profile });
   });
 
-appGroup
+spaceGroup
   .command("current")
-  .description("Print the pinned application id, or exit 1 if none is pinned")
+  .description("Print the pinned space id, or exit 1 if none is pinned")
   .action(async () => {
     const globalOpts = program.opts<{ profile?: string }>();
-    await appCurrentCommand({ profile: globalOpts.profile });
+    await spaceCurrentCommand({ profile: globalOpts.profile });
   });
 
-appGroup
+spaceGroup
   .command("switch [ref]")
   .description(
-    "Re-pin the active application on the profile. With no argument, show an interactive picker.",
+    "Re-pin the active space on the profile. With no argument, show an interactive picker.",
   )
   .action(async (ref: string | undefined) => {
     const globalOpts = program.opts<{ profile?: string }>();
-    await appSwitchCommand({
+    await spaceSwitchCommand({
       profile: globalOpts.profile,
       ref: typeof ref === "string" ? ref : undefined,
     });
   });
 
-appGroup
+spaceGroup
   .command("create [name]")
   .description(
-    "Create a new application (and pin it on the profile). With no argument, prompt interactively.",
+    "Create a new space (and pin it on the profile). With no argument, prompt interactively.",
   )
   .action(async (name: string | undefined) => {
     const globalOpts = program.opts<{ profile?: string }>();
-    await appCreateCommand({
+    await spaceCreateCommand({
       profile: globalOpts.profile,
       name: typeof name === "string" ? name : undefined,
     });
   });
+
+// ─── `appstrate skills …` — sync org skills to Claude Code / Codex ─────
+
+const skillsGroup = program
+  .command("skills")
+  .description("Sync the skills of every space you belong to, to Claude Code and Codex");
+
+skillsGroup
+  .command("sync")
+  .description(
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+  )
+  .option(
+    "--target <target>",
+    `Destination to write (repeatable): ${SYNC_TARGETS.join(" | ")}. Default: claude-plugin.`,
+    collectTarget,
+  )
+  .option(
+    "--space <space>",
+    "Narrow this sync to a space — ID or name (repeatable; overrides syncSpaces).",
+    (value: string, previous: string[] = []) => [...previous, value],
+  )
+  .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)
+  .option(
+    "--print-path",
+    "Print the Claude Code plugin directory as the only stdout line (what a marketplace `command` source consumes). Requires --target claude-plugin.",
+  )
+  .option("--dry-run", "Report what would change and write nothing.")
+  .action(
+    async (opts: {
+      target?: SyncTarget[];
+      space?: string[];
+      source?: SkillSource;
+      printPath?: boolean;
+      dryRun?: boolean;
+    }) => {
+      const globalOpts = program.opts<{ profile?: string }>();
+      await skillsSyncCommand({
+        profile: globalOpts.profile,
+        target: opts.target,
+        space: opts.space,
+        source: opts.source,
+        printPath: opts.printPath,
+        dryRun: opts.dryRun,
+      });
+    },
+  );
 
 // ─── `appstrate models …` — discover model presets on the instance ────
 
@@ -530,7 +597,7 @@ modelsGroup
 program
   .command("api <target> [extra]")
   .description(
-    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-Application-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
+    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-Space-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
       "\n" +
       "Invocation forms (all curl-compatible):\n" +
       "  appstrate api GET /api/x             # explicit method + path\n" +
@@ -606,7 +673,7 @@ program
   )
   .option(
     "-L, --location",
-    "Follow redirects to whatever host the server names in Location. Cross-origin hops drop Authorization/Cookie (WHATWG fetch) but STILL forward your -H headers and X-Org-Id/X-Application-Id.",
+    "Follow redirects to whatever host the server names in Location. Cross-origin hops drop Authorization/Cookie (WHATWG fetch) but STILL forward your -H headers and X-Org-Id/X-Space-Id.",
   )
   .option(
     "-k, --insecure",
@@ -908,7 +975,6 @@ program
   .option("--api-key <key>", "Appstrate API key (ask_...) for --integrations=remote")
   .option("--input <json>", "Input JSON object passed to the agent")
   .option("--input-file <path>", "Read input JSON from file")
-  .option("--config <json>", "Config JSON object passed to the agent")
   .option(
     "--snapshot <path>",
     "JSON file { memories?, history?, checkpoint? } seeded onto the ExecutionContext before the run",
@@ -946,11 +1012,11 @@ program
   )
   .option(
     "--proxy <id>",
-    "Proxy id to associate with the run (overrides per-app run-config inheritance)",
+    "Proxy id to associate with the run (overrides per-space run-config inheritance)",
   )
   .option(
     "--no-inherit",
-    "Skip the per-app run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
+    "Skip the per-space run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
   )
   .option(
     "-v, --verbose",
@@ -972,7 +1038,6 @@ program
       apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
       input: typeof opts.input === "string" ? opts.input : undefined,
       inputFile: typeof opts.inputFile === "string" ? opts.inputFile : undefined,
-      config: typeof opts.config === "string" ? opts.config : undefined,
       snapshot: typeof opts.snapshot === "string" ? opts.snapshot : undefined,
       model: typeof opts.model === "string" ? opts.model : undefined,
       modelApi: typeof opts.modelApi === "string" ? opts.modelApi : undefined,

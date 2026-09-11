@@ -79,7 +79,7 @@ async function seedConnection(ctx: TestContext, authKey = "primary") {
     integrationId: INTEG,
     authKey,
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-1" } }),
@@ -103,11 +103,11 @@ async function seedAndResolve(
     source: "local",
     draftManifest: integManifest(opts),
   });
-  await seedInstalledPackage(ctx.defaultAppId, INTEG);
+  await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
   await seedConnection(ctx);
   const { specs } = await resolveIntegrationSpawns({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(opts.tools),
   });
@@ -177,9 +177,8 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
     expect(spec.apiCalls![0]!.uploadProtocols).toBeUndefined();
   });
 
-  it("canonicalizes persisted long-name selections and hidden_tools aliases", async () => {
+  it("resolves a long-auth api_call by its canonical bounded name only", async () => {
     const longAuthKey = "authentication_key_that_is_valid_but_long";
-    const legacyCall = `api_call__${longAuthKey}`;
     const legacyUpload = `api_upload__${longAuthKey}`;
     const canonicalCall = "api_call__h0a0593260c3968fd8";
     const canonicalUpload = "api_upload__h0a0593260c3968fd8";
@@ -216,17 +215,68 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx, longAuthKey);
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
-      agentManifest: agentManifest([legacyCall], longAuthKey),
+      agentManifest: agentManifest([canonicalCall], longAuthKey),
     });
 
     expect(specs).toHaveLength(1);
     expect(specs[0]!.apiCalls?.[0]?.toolName).toBe(canonicalCall);
-    expect(specs[0]!.hiddenTools).toEqual([legacyUpload, canonicalUpload]);
+    // `hidden_tools` is passed through verbatim. It used to be canonicalized,
+    // so naming the raw `api_upload__{authKey}` spelling also hid the bounded
+    // one; that alias is gone and the entry now hides exactly what it names.
+    expect(specs[0]!.hiddenTools).toEqual([legacyUpload]);
+    expect(specs[0]!.hiddenTools).not.toContain(canonicalUpload);
+  });
+
+  it("does not resolve the raw long-key spelling a persisted selection may carry", async () => {
+    const longAuthKey = "authentication_key_that_is_valid_but_long";
+    const legacyCall = `api_call__${longAuthKey}`;
+    const manifest = apiIntegrationManifest({
+      name: INTEG,
+      version: "1.0.0",
+      auths: {
+        primary: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+        },
+        [longAuthKey]: {
+          type: "api_key",
+          authorizedUris: ["https://api.example.com/**"],
+          credentialFields: ["api_key"],
+        },
+      },
+    });
+    (manifest as unknown as { _meta: unknown })._meta = {
+      "dev.appstrate/api": {
+        auths: { primary: {}, [longAuthKey]: { upload_protocols: PROTOCOLS } },
+      },
+    };
+
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedConnection(ctx, longAuthKey);
+    const { specs } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest([legacyCall], longAuthKey),
+    });
+
+    // The selection names a tool that does not exist, so no api_call surface
+    // is spawned for it — rather than being quietly rewritten to the bounded
+    // name, which is how one capability came to have two spellings.
+    expect(specs[0]?.apiCalls ?? []).toEqual([]);
   });
 });

@@ -16,6 +16,7 @@
  */
 
 import type { Context } from "hono";
+import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
@@ -29,21 +30,35 @@ export type ChatEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
     orgId: string;
+    /**
+     * Space the router entered (`enterSpaceContext`, mounted on every
+     * `/api/chat/*` route). Always set: entering is what makes the space-level
+     * `chat:*` guards satisfiable, and a caller that names no space is refused
+     * there before any handler runs.
+     */
+    space: { id: string };
     orgRole?: string;
+    /**
+     * Role preview (`X-View-As`), as the platform resolved it. `orgRole` is the
+     * only field this module reads; the `Record` half is deliberate — the WHOLE
+     * value is copied into the signed loopback claims, so the trust-boundary
+     * payload is wider than what is read here. `orgRole` above stays REAL.
+     */
+    viewAs?: { orgRole: string } & Record<string, unknown>;
     orgName?: string;
     orgSlug?: string;
     /**
-     * Caller's resolved RBAC permission set (from the platform auth pipeline).
-     * Forwarded into the scoped platform-MCP bearer the Pi engine
-     * hands its external binary, so the meta-tools authorize with exactly the
-     * caller's own permissions — no amplification.
+     * Caller's resolved RBAC permission set. Always set, for the same reason
+     * `space` above is: entering the space is what writes it, and every
+     * `/api/chat/*` route enters one before a handler runs. Two things read it,
+     * and both need the whole set — the scoped platform-MCP bearer the Pi engine
+     * hands its external binary (so the meta-tools authorize with exactly the
+     * caller's own permissions, no amplification), and the container ACL of an
+     * `appfile://` attachment.
      */
-    permissions?: Set<string>;
+    permissions: Set<string>;
   };
 };
-
-/** Max length of a run error message rendered in the caller-context block. */
-const RUN_ERROR_MAX_CHARS = 200;
 
 export const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
@@ -52,18 +67,18 @@ export const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user o
 Use the tools to ground every action. For ordinary Appstrate API work, search for the right operation, read its schema, then invoke it. When you need a newly launched run's progress or result in this turn, prefer calling \`run_and_wait\` directly: it owns launch plus waiting and already declares its argument schema. The \`runAgent\` and \`runInline\` operations remain available through \`describe_operation\` and \`invoke_operation\` when you intentionally need fire-and-forget semantics. Never invent an operationId or argument shape.
 
 Choosing what to do:
-- If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search documents), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
-- If the request is to summarise, analyse, or answer questions about a document available as a \`document://\` URI, call \`read_document\` first. When it returns readable text, answer directly from that content; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable.
-- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this application — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
+- If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search files), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
+- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable.
+- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
 - If the request needs an integration, an MCP, or any external action, run an agent:
   1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version — but an agent marked "draft only" in your context has no published version (omitting would 404 \`no_published_version\`), so for those pass \`version:"draft"\` to run the working copy.
-  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a PARTIAL canonical AFPS agent \`manifest\` plus a top-level \`prompt\`. Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"). The platform derives the matching \`@inline/<kebab-case-slug>\` name and fills omitted AFPS boilerplate, \`runtime_tools\` (log, output, publish_document), and an open object output schema. Defaults apply ONLY to absent top-level fields: every field you provide replaces its default exactly, arrays and nested objects are never merged, and \`runtime_tools: []\` stays empty. You can override EVERY field — including \`name\`, \`runtime_tools\`, and a complete strict \`output.schema\` — when the task needs a complex deterministic manifest; if you provide a non-empty output schema, your explicit runtime tools must include \`output\`. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. When one of the skills listed in your context fits the task, attach it under \`dependencies.skills\` keyed by its \`@scope/name\` id with a satisfiable range (use the version shown in your context, e.g. \`"^1.2.0"\`, or \`"*"\` if none); the agent then has that skill's instructions available. In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with \`log\`, do the work, then return the result with \`output\` as its mandatory last action.
+  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a PARTIAL canonical AFPS agent \`manifest\` plus a top-level \`prompt\`. Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"). The platform derives the matching \`@inline/<kebab-case-slug>\` name and fills omitted AFPS boilerplate, \`runtime_tools\` (log, output, publish_file), and an open object output schema. Defaults apply ONLY to absent top-level fields: every field you provide replaces its default exactly, arrays and nested objects are never merged, and \`runtime_tools: []\` stays empty. You can override EVERY field — including \`name\`, \`runtime_tools\`, and a complete strict \`output.schema\` — when the task needs a complex deterministic manifest; if you provide a non-empty output schema, your explicit runtime tools must include \`output\`. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. When one of the skills listed in your context fits the task, attach it under \`dependencies.skills\` keyed by its \`@scope/name\` id with a satisfiable range (use the version shown in your context, e.g. \`"^1.2.0"\`, or \`"*"\` if none); the agent then has that skill's instructions available. In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with \`log\`, do the work, then return the result with \`output\` as its mandatory last action.
 
 When a request chains several external actions (e.g. scrape a page THEN email the result), do NOT chain one run per action: compose ONE sub-agent that declares ALL the needed integrations under \`dependencies.integrations\` and describes the whole chain in its \`prompt\` — a single \`run_and_wait\` call. Split into separate runs only when you must decide something between the steps (the user has to confirm, or the next step depends on a result you need to inspect first).
 
 When you do fan out several sub-agents (genuinely independent pieces of work), three rules hold:
-- Deliverable in a file, summary in \`output\`: tell each sub-agent to WRITE its full findings to \`outputs/<topic>.md\` (or \`.json\`) AND to return through \`output\` only a short summary naming that file. Both, always — a payload returned only through \`output\` is not a document you can chain, and a sub-agent that writes the file but never calls \`output\` fails its run.
-- Fan in by REFERENCE, never by copy: give the next run the earlier runs' \`document://\` URIs (from each \`run_and_wait\` result's \`documents\`) in its \`context_documents\` argument — the platform mounts them read-only under \`documents/\` and tells the run they are there. NEVER paste a previous run's content into the next run's \`prompt\`: data retyped by a model is data corrupted — every URL, figure and date you re-transcribe is one you can get wrong, and the file itself cannot be.
+- Deliverable in a file, summary in \`output\`: tell each sub-agent to WRITE its full findings to \`outputs/<topic>.md\` (or \`.json\`) AND to return through \`output\` only a short summary naming that file. Both, always — a payload returned only through \`output\` is not a file you can chain, and a sub-agent that writes the file but never calls \`output\` fails its run.
+- Fan in by REFERENCE, never by copy: give the next run the earlier runs' \`appfile://\` URIs (from each \`run_and_wait\` result's \`files\`) in its \`context_files\` argument — the platform mounts them read-only under \`files/\` and tells the run they are there. NEVER paste a previous run's content into the next run's \`prompt\`: data retyped by a model is data corrupted — every URL, figure and date you re-transcribe is one you can get wrong, and the file itself cannot be.
 - Bound the effort: every sub-agent \`prompt\` must carry an explicit ceiling (e.g. "at most 3 searches"), a stop criterion ("stop at 5 findings"), and \`output\` as the mandatory last action. This is measured, not decorative: the same deliverable took 43 s and $0.14 with those three lines, against 275 s and $0.92 from a prompt that only asked for "5 to 8 items, verified by sources".
 
 Once a fan-out's results are all back, write the synthesis into your message BEFORE launching the next step. A finished result that exists only inside a tool result is lost if the turn ends there — deliver it first, then continue.
@@ -85,17 +100,25 @@ Example — summarising the user's latest emails (adapt the integration id, vers
 \`\`\`
 Then read \`result.summary\` from the \`run_and_wait\` result and reply to the user from it.
 
-You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`; for inline runs pass \`{ kind:"inline", manifest, prompt, config? }\`. Either kind also takes \`connection_overrides\` — a top-level \`{ "<integration id>": "<connection id>" }\` map, used only to retry after a \`must_choose_connection\` error names its \`candidate_connection_ids\`. (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
+You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`; for inline runs pass \`{ kind:"inline", manifest, prompt, input?, context_files? }\` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch. Either kind also takes \`connection_overrides\` — a top-level \`{ "<integration id>": "<connection id>" }\` map, used only to retry after a \`must_choose_connection\` error names its \`candidate_connection_ids\`. (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
 
 After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most.
 
 Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error. One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this application — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`activateIntegration\` on that package id, then re-run once. Activation is admin-only, so that call is refused (403) when the user is not an administrator — in that case say plainly that an administrator must activate that integration, and stop.
+When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error. One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`activateIntegration\` on that package id, then re-run once. Activation is admin-only, so that call is refused (403) when the user is not an administrator — in that case say plainly that an administrator must activate that integration, and stop.
 
-Documents the user attaches to the conversation are shown to you as \`[Attached document: <name> — document://doc_… — <mime>, <size>]\` lines. Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`document://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. For an INLINE run, declare nothing: list the \`document://\` URIs in \`run_and_wait\`'s top-level \`context_documents\` and the platform mounts them read-only under \`documents/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` still works, and remains the ONLY way for a \`kind:"agent"\` run: a published agent's input schema is a versioned contract the platform never rewrites, so pass the URI through one of its declared file fields. \`upload://\` URIs need that declared field either way — \`context_documents\` takes \`document://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`document://\` itself, and the launch is REFUSED (400) when the prompt names a document the input does not mount, so put the URI in \`context_documents\` (or a declared file field) and name it in the prompt only to refer to it. Never invent a \`document://\` URI.
+Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines. Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` still works, and remains the ONLY way for a \`kind:"agent"\` run: a published agent's input schema is a versioned contract the platform never rewrites, so pass the URI through one of its declared file fields. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it. Never invent an \`appfile://\` URI.
 
-The reverse direction — the user asks for a document, file, or downloadable deliverable (a report, a CSV, an image, a PDF…) — needs a FILE, not text in the output payload: instruct the sub-agent, in its \`prompt\`, to WRITE the deliverable as a file into the \`outputs/\` directory of its workspace (creating it if needed). Everything under \`outputs/\` is published automatically when the run ends: the documents appear on the run's page, come back in the \`run_and_wait\` result's \`documents\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a document the user can open or download. Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as \`report.md\`, \`summary.md\`, \`output.md\`, \`result.md\`, or \`document.md\`. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.
+The reverse direction — the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…) — needs a FILE, not text in the output payload: instruct the sub-agent, in its \`prompt\`, to WRITE the deliverable as a file into the \`outputs/\` directory of its workspace (creating it if needed). Everything under \`outputs/\` is published automatically when the run ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download. Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.
+
+Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected, the agents they can run, and the skills available. How to act on it:
+- Use the current date to resolve relative dates and schedules.
+- Use every \`@scope/name\` id verbatim: in \`dependencies.integrations\`, in \`run_and_wait\`'s \`scope\`/\`name\`, and in \`dependencies.skills\`.
+- Prefer running an existing agent over doing the work inline when one fits the task. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
+- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
+- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with \`operation_id: "listAgents"\` or \`"listSkills"\` for the full one.
+- The context carries NO run history. When the user asks about a recent or failed run, or wants to re-run something, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
 
 Respect the user's role: actions beyond it will be refused by the platform — don't attempt them.`;
 
@@ -103,19 +126,6 @@ Respect the user's role: actions beyond it will be refused by the platform — d
 interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
-  /**
-   * The caller's most recent runs (actor-scoped), newest first — lets the model
-   * reference the last run/failure without a discovery round-trip.
-   */
-  recent_runs?:
-    | {
-        package_id: string;
-        status: string;
-        run_number?: number | null;
-        started_at?: string | null;
-        error?: string | null;
-      }[]
-    | null;
   connections?:
     | {
         integration_id: string;
@@ -174,7 +184,7 @@ export function normalizeChatLocale(raw: string | undefined): string {
  * Render the caller context into a system-prompt block. Returns "" when the
  * payload is unusable so the caller can skip injection.
  */
-export function formatCallerContext(raw: unknown, opts?: { locale?: string }): string {
+export function formatCallerContext(raw: unknown, opts?: { locale?: string; now?: Date }): string {
   const ctx = (raw ?? {}) as CallerContext;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
@@ -188,8 +198,7 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
     !orgName &&
     !ctx.connections?.length &&
     !ctx.agents?.length &&
-    !ctx.skills?.length &&
-    !ctx.recent_runs?.length
+    !ctx.skills?.length
   )
     return "";
 
@@ -203,15 +212,23 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
   ];
   // Ground "today" from the server clock. The chat carries no browser-supplied
   // clock/timezone (none is persisted server-side), so this is always UTC.
-  // Rounded to the minute: the system prompt is prefix-cached (anthropic
-  // cache_control / OpenAI auto-prefix), and a per-request seconds+millis
-  // timestamp would bust that cache on every turn for zero grounding value.
-  const now = new Date();
-  now.setUTCSeconds(0, 0);
-  lines.push(
-    `Current date and time: ${now.toISOString()} (UTC). ` +
-      "Use this to resolve relative dates and schedules.",
-  );
+  //
+  // Rounded to the HOUR, and that number is load-bearing. This block sits in the
+  // system prompt, which pi-ai emits as ONE text block carrying ONE
+  // `cache_control` breakpoint (`anthropic-messages.js` — the non-OAuth branch
+  // builds `params.system` as a single entry). A breakpoint covers the whole
+  // block, so ANY per-turn difference invalidates the entire cached prefix —
+  // and, because caching is prefix-based, the conversation-history breakpoint
+  // downstream of it with it. The ephemeral retention is 5 minutes, so an
+  // hour-granular clock is stable across every window a cache entry can live
+  // in, while still grounding the model to the right hour. A minute-granular
+  // clock (what this used to be) misses on any turn that crosses a minute —
+  // i.e. most interactive turns.
+  //
+  // `opts.now` exists so the stability invariant is testable without fake timers.
+  const now = new Date(opts?.now ?? Date.now());
+  now.setUTCMinutes(0, 0, 0);
+  lines.push(`Current date and time: ${now.toISOString()} (UTC, rounded to the hour).`);
   // UI language forwarded by the client (`X-Chat-Locale`), defaulting to the
   // platform's default locale (fr) when absent.
   lines.push(
@@ -232,10 +249,10 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
     // activated > inactive) and the default-vs-tool_catalog selection rule live
     // once in the platform MCP server instructions (apps/api/src/modules/mcp/
     // router.ts), which the engine already receives through its own MCP
-    // handshake; don't restate them here or the two drift.
-    lines.push(
-      `Integrations the user has connected and could attach to an agent: ${list}. Use the \`@scope/name\` id verbatim.`,
-    );
+    // handshake; don't restate them here or the two drift. The "use the id
+    // verbatim" instruction lives in SYSTEM_PROMPT for the same reason — see
+    // the block-wide rule below.
+    lines.push(`Integrations the user has connected and could attach to an agent: ${list}.`);
   } else {
     lines.push("The user has no connected integrations yet.");
   }
@@ -250,16 +267,7 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
           `${a.published === false ? "; draft only — run with version=draft" : ""})`,
       );
     }
-    if (ctx.agents_truncated) {
-      lines.push(
-        "More agents are available — call `invoke_operation` with " +
-          '`operation_id: "listAgents"` for the full list.',
-      );
-    }
-    lines.push(
-      "Prefer running an existing agent over doing the work inline when one fits the task. " +
-        'Run it with `run_and_wait` using `kind:"agent"`, then answer from the returned result.',
-    );
+    if (ctx.agents_truncated) lines.push("(list truncated)");
   }
   if (ctx.skills?.length) {
     lines.push("", "## Skills you can attach to an agent");
@@ -271,40 +279,12 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
           (desc ? `: ${desc}` : ""),
       );
     }
-    if (ctx.skills_truncated) {
-      lines.push(
-        "More skills are available — call `invoke_operation` with " +
-          '`operation_id: "listSkills"` for the full list.',
-      );
-    }
-    lines.push(
-      "Skills are not run on their own. When you build or configure an agent and one of these " +
-        "skills fits the task, declare it under the agent manifest's `dependencies.skills` keyed by " +
-        'its id (e.g. `"@appstrate/web-research": "^1.2.0"`) — use the version shown, or `"*"` ' +
-        "if none. The run route validates that declared skills exist.",
-    );
+    if (ctx.skills_truncated) lines.push("(list truncated)");
   }
-  if (ctx.recent_runs?.length) {
-    lines.push("", "## The user's recent runs (newest first)");
-    for (const r of ctx.recent_runs) {
-      const num = typeof r.run_number === "number" ? ` #${r.run_number}` : "";
-      const when = r.started_at?.trim() ? `, ${r.started_at.trim()}` : "";
-      const err = r.error?.trim()
-        ? ` — error: ${truncate(r.error.trim(), RUN_ERROR_MAX_CHARS)}`
-        : "";
-      lines.push(`- \`${r.package_id}\`${num} — ${r.status}${when}${err}`);
-    }
-    lines.push(
-      "Reference these when the user asks about a recent or failed run, or wants to re-run " +
-        "something; fetch full details with the run get operation when needed.",
-    );
-  }
+  // `/api/me/context` also carries `recent_runs`, deliberately neither read nor rendered here: it
+  // rewrites itself on every launch, busting the system prompt's single cache breakpoint.
+  // SYSTEM_PROMPT tells the model to call `listRuns` instead.
   return lines.join("\n");
-}
-
-/** Clamp a string for prompt size, appending an ellipsis when truncated. */
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max)}…`;
 }
 
 /**
@@ -314,32 +294,33 @@ function truncate(s: string, max: number): string {
  * platform app (auth + RBAC re-run on the dispatched Request), with a loopback
  * `fetch` fallback inside `deps.dispatch` for OSS/test wiring.
  *
- * The endpoint is app-scoped: without an application id `requireAppContext`
- * would 400, so we skip straight to an identity-only block built from the
- * already-authenticated request context (name/email/role/org). A 400 from the
- * dispatch degrades to that same identity-only block; any other failure
- * degrades to no block (""). Identity always survives so date/role grounding
- * holds even with no application context.
+ * `spaceId` is the space the chat router entered, so it is always known here.
+ * A 400 from the dispatch (the caller lost the space between the entry and this
+ * read) degrades to an identity-only block built from the already-authenticated
+ * request context (name/email/role/org); any other failure degrades to no block
+ * (""). Identity always survives so date/role grounding holds.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
   args: {
     origin: string;
     headers: Record<string, string>;
-    applicationId?: string;
+    spaceId: string;
     user: { id: string; name?: string | null; email?: string | null };
     deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
   },
 ): Promise<string> {
-  const { origin, headers, applicationId, user, deps, locale } = args;
-  const role = c.get("orgRole");
+  const { origin, headers, spaceId, user, deps, locale } = args;
+  // The persona's while previewing: this block tells the model what the caller
+  // may do, and every operation it names is checked against the persona.
+  const role = c.get("viewAs")?.orgRole ?? c.get("orgRole");
   const orgName = c.get("orgName");
   const orgSlug = c.get("orgSlug");
 
-  // Identity/role straight off the request context — the fallback when there is
-  // no application context to fetch the app-scoped lists against.
+  // Identity/role straight off the request context — the fallback when the
+  // space-scoped read cannot answer.
   const identityOnly = (): string =>
     formatCallerContext(
       {
@@ -349,16 +330,15 @@ export async function buildCallerContextBlock(
       { locale },
     );
 
-  if (!applicationId) return identityOnly();
   try {
     const ctxHeaders = new Headers();
     for (const [k, v] of Object.entries(headers)) ctxHeaders.set(k, v);
-    ctxHeaders.set("x-application-id", applicationId);
+    ctxHeaders.set("x-space-id", spaceId);
     const res = await deps.dispatch(
       new Request(new URL("/api/me/context", origin).toString(), { headers: ctxHeaders }),
     );
     if (res.ok) return formatCallerContext((await res.json()) as CallerContext, { locale });
-    // No application context (e.g. requireAppContext rejected) — keep the
+    // No space context (e.g. requireSpaceContext rejected) — keep the
     // identity/role block rather than dropping context entirely.
     if (res.status === 400) return identityOnly();
     return "";

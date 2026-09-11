@@ -19,8 +19,9 @@
  *  3. a card-local `connection_update` SSE stream (cross-tab/device backstop).
  * The first to fire wins; `resumed` guards against a double resume.
  *
- * The callback page contract lives in `apps/api/src/lib/oauth-popup-html.ts`
- * (channel name + message type must match the literals below).
+ * The callback page contract — channel name, message type, payload and the
+ * origin policy both directions must agree on — lives in
+ * `@appstrate/core/connect-handshake`.
  *
  * Layout invariant: the card is mounted from the FIRST frame of the initiate
  * tool call (before the auth url exists) and keeps the SAME two-row geometry
@@ -33,19 +34,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
 import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
-import { Button } from "./button.tsx";
-import { useChatHeaders } from "./runtime-context.ts";
+import { VIEW_AS_QUERY } from "@appstrate/core/permissions";
+// The correlation rule and the origin check in front of it come from core, not
+// from this module: every connect surface applies the same one, and a copy only
+// this module could import is what let the SPA's connect popup ship with no
+// correlation at all.
 import {
-  claimResume,
+  INTEGRATION_CONNECT_CHANNEL,
+  acceptsCompletionMessage,
   completionMatches,
-  encodeResume,
-  type CompletionDetail,
-  type ResumeMeta,
-} from "./auth-offer.ts";
+} from "@appstrate/core/connect-handshake";
+import { Button } from "@appstrate/ui/components/button";
+import { useChatHeaders } from "./runtime-context.ts";
+import { orgSpaceFromHeaders } from "./run-events.ts";
+import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-
-const BROADCAST_CHANNEL = "appstrate_integration";
-const MESSAGE_TYPE = "appstrate:integration_connection";
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
 
@@ -59,10 +62,8 @@ function watchConnectionSse(
   onHit: () => void,
 ): () => void {
   if (typeof EventSource === "undefined") return () => {};
-  const headers = getHeaders?.() ?? {};
-  const orgId = headers["X-Org-Id"] ?? headers["x-org-id"];
-  const appId = headers["X-Application-Id"] ?? headers["x-application-id"];
-  if (!orgId || !appId) return () => {};
+  const { orgId, spaceId, viewAs } = orgSpaceFromHeaders(getHeaders?.() ?? {});
+  if (!orgId || !spaceId) return () => {};
 
   let es: EventSource | null = null;
   try {
@@ -74,7 +75,14 @@ function watchConnectionSse(
       // `channels` is declared because this opens one org-wide stream PER
       // rendered card, and the listener below reads `connection_update` only.
       // Without it each card would also carry the org's whole run_log traffic.
-      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(appId)}&channels=connection_update`,
+      // A role preview travels as `view_as`: the realtime routes REFUSE the
+      // header (`EventSource` cannot send one), and a card left header-less
+      // would watch under the authority the preview replaced. The effect that
+      // opens this depends on `getHeaders`, whose identity moves with the
+      // persona, so entering or leaving reconnects.
+      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=connection_update${
+        viewAs ? `&${VIEW_AS_QUERY}=${encodeURIComponent(viewAs)}` : ""
+      }`,
       { withCredentials: true },
     );
     es.addEventListener("connection_update", (ev) => {
@@ -95,16 +103,34 @@ function watchConnectionSse(
   return () => es?.close();
 }
 
+/**
+ * Browsing-context name for this card's popup — one per integration, because a
+ * fixed name is a single popup: clicking a second card while the first popup is
+ * open NAVIGATES it to the second URL, silently abandoning flow 1. Sanitized to
+ * `[A-Za-z0-9_]`, a window name being a target token.
+ */
+function popupName(packageId: string | undefined): string {
+  if (!packageId) return "appstrate_oauth";
+  return `appstrate_oauth_${packageId.replace(/[^A-Za-z0-9_]+/g, "_")}`;
+}
+
 export function OAuthConnectCard({
   authUrl,
   state,
   packageId,
+  toolCallId,
   errorText,
 }: {
   /** Absent while the initiate call is still streaming — renders "Préparation…". */
   authUrl?: string;
   state?: string;
   packageId?: string;
+  /**
+   * Tool call this card was rendered from. Several cards share one when a
+   * run-kickoff 412 lists several integrations to connect; it is the second
+   * axis of the resume claim (see {@link claimResume}).
+   */
+  toolCallId?: string;
   /** Set when the initiate call itself failed (no auth url will ever arrive). */
   errorText?: string;
 }) {
@@ -165,10 +191,11 @@ export function OAuthConnectCard({
         return;
       }
       resumed.current = true;
-      // Another card already appended the resume for this package (same
-      // completion burst) — show the connected state without a second append,
-      // which would fork the conversation into two concurrent turns.
-      if (!claimResume(packageId)) {
+      // Another card already appended the resume for this burst — same package,
+      // or a sibling card from the same tool call — so show the connected state
+      // without a second append, which would fork the conversation into two
+      // concurrent turns.
+      if (!claimResume({ packageId, toolCallId })) {
         setPhase("connected");
         return;
       }
@@ -188,7 +215,7 @@ export function OAuthConnectCard({
         ],
       });
     },
-    [aui, label, meta, packageId],
+    [aui, label, meta, packageId, toolCallId],
   );
 
   // Listen from mount until the connection lands — NOT only after the user
@@ -198,25 +225,31 @@ export function OAuthConnectCard({
   useEffect(() => {
     if (phase === "done" || phase === "connected") return;
 
-    // Correlation (state AND packageId) lives in `completionMatches` — see its
-    // doc for why packageId is required: the hosted-connect offer carries no
-    // state, so without the package filter every card accepted every completion.
-    const matches = (d: CompletionDetail | undefined) =>
-      completionMatches(d, { messageType: MESSAGE_TYPE, state, packageId });
+    // Correlation lives in `completionMatches` — see its doc. Both identifiers
+    // are passed because neither alone covers every flow: the hosted-connect
+    // offer carries no state, and a card whose tool args never produced a
+    // `packageId` has only the state. A card that ends up with neither takes no
+    // package-addressed completion on either carrier — the intended direction,
+    // since it cannot tell its own integration's completion from anyone else's.
+    const card = { state, packageId };
+    const resume = (d: CompletionDetail) => complete(d.ok !== false, d.error);
 
+    // `acceptsCompletionMessage` validates `ev.origin` before the payload — a
+    // `message` listener that skips that check authenticates nothing.
     const onMessage = (ev: MessageEvent) => {
-      const d = ev.data as CompletionDetail | undefined;
-      if (matches(d)) complete(d!.ok !== false, d!.error);
+      if (acceptsCompletionMessage(ev, window.location.origin, card)) resume(ev.data);
     };
     window.addEventListener("message", onMessage);
 
     let bc: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== "undefined") {
       try {
-        bc = new BroadcastChannel(BROADCAST_CHANNEL);
+        // Same-origin by spec, so there is no origin to validate here.
+        bc = new BroadcastChannel(INTEGRATION_CONNECT_CHANNEL);
         bc.onmessage = (ev) => {
-          const d = ev.data as CompletionDetail | undefined;
-          if (matches(d)) complete(d!.ok !== false, d!.error);
+          // `completionMatches` is a type guard, so the raw `data` narrows here.
+          const d: unknown = ev.data;
+          if (completionMatches(d, card)) resume(d);
         };
       } catch {
         bc = null;
@@ -237,7 +270,7 @@ export function OAuthConnectCard({
     setErrMsg(null);
     setPhase("pending");
     // Keep the opener (no `noopener`) so the callback can postMessage us back.
-    const popup = window.open(authUrl, "appstrate_oauth", "width=520,height=680");
+    const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
     if (!popup) {
       // Popup blocked — fall back to a same-tab navigation; the BroadcastChannel
       // + SSE backstops still resume the (now backgrounded) chat tab.
@@ -285,7 +318,12 @@ export function OAuthConnectCard({
           </span>
         ) : (
           <>
-            <Button onClick={start} disabled={preparing || phase === "pending"} className="gap-2">
+            <Button
+              type="button"
+              onClick={start}
+              disabled={preparing || phase === "pending"}
+              className="gap-2"
+            >
               {preparing || phase === "pending" ? (
                 <Loader2Icon className="size-4 animate-spin" />
               ) : null}

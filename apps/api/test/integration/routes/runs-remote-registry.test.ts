@@ -19,7 +19,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage, updateInstalledPackage } from "../../../src/services/space-packages.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { runs, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { validateManifest } from "@appstrate/core/validation";
@@ -43,59 +43,17 @@ function publishedManifest(version = "1.2.3") {
   } as const;
 }
 
-async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
-  await seedPackage({
-    orgId: ctx.orgId,
-    id: "@acme/briefing",
-    type: "agent",
-    draftManifest: publishedManifest(version) as unknown as Record<string, unknown>,
-    draftContent: PROMPT,
-  });
-  const versionRow = await seedPackageVersion({
-    packageId: "@acme/briefing",
-    version,
-    integrity: "sha256-test",
-    artifactSize: 1024,
-    manifest: publishedManifest(version) as unknown as Record<string, unknown>,
-  });
-  // Set the `latest` dist-tag so the unspecified-spec resolution path
-  // works — `seedPackageVersion` is a thin INSERT and doesn't touch
-  // `package_dist_tags` (the `createPackageVersion` service does that on
-  // the publish flow).
-  await db
-    .insert(packageDistTags)
-    .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
-  // Upload the artefact so getVersionDetail can extract the prompt.
-  const zip = buildMinimalZip(
-    publishedManifest(version) as unknown as Record<string, unknown>,
-    PROMPT,
-  );
-  await uploadPackageZip("@acme/briefing", version, zip);
-  await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
-}
-
 /**
- * Manifest with a single file input field (`format: "uri"` + `contentMediaType`).
- * Used to exercise the remote file-input gate: platform-stored URIs
- * (`upload://` / `document://`) are rejected because a remote run executes on
- * the caller's host, whose workspace the platform never provisions.
+ * Publish `manifest` as `@acme/briefing@version` and install it in the default
+ * space: draft row, version row, `latest` dist-tag (a thin `seedPackageVersion`
+ * INSERT does not write one, but the unspecified-spec resolution path needs it)
+ * and the artefact bytes `getVersionDetail` extracts the prompt from.
  */
-function fileInputManifest(version = "3.0.0") {
-  return {
-    ...publishedManifest(version),
-    input: {
-      schema: {
-        type: "object",
-        properties: {
-          document: { type: "string", format: "uri", contentMediaType: "application/pdf" },
-        },
-      },
-    },
-  } as const;
-}
-
-async function seedFileInputAgent(ctx: TestContext, version = "3.0.0") {
-  const manifest = fileInputManifest(version) as unknown as Record<string, unknown>;
+async function seedRegistryAgent(
+  ctx: TestContext,
+  manifest: Record<string, unknown>,
+  version: string,
+) {
   await seedPackage({
     orgId: ctx.orgId,
     id: "@acme/briefing",
@@ -114,7 +72,43 @@ async function seedFileInputAgent(ctx: TestContext, version = "3.0.0") {
     .insert(packageDistTags)
     .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
   await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-  await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
+}
+
+async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
+  await seedRegistryAgent(
+    ctx,
+    publishedManifest(version) as unknown as Record<string, unknown>,
+    version,
+  );
+}
+
+/**
+ * Manifest with a single file input field (`format: "uri"` + `contentMediaType`).
+ * Used to exercise the remote file-input gate: platform-stored URIs
+ * (`upload://` / `appfile://`) are rejected because a remote run executes on
+ * the caller's host, whose workspace the platform never provisions.
+ */
+function fileInputManifest(version = "3.0.0") {
+  return {
+    ...publishedManifest(version),
+    input: {
+      schema: {
+        type: "object",
+        properties: {
+          file: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+        },
+      },
+    },
+  } as const;
+}
+
+async function seedFileInputAgent(ctx: TestContext, version = "3.0.0") {
+  await seedRegistryAgent(
+    ctx,
+    fileInputManifest(version) as unknown as Record<string, unknown>,
+    version,
+  );
 }
 
 describe("POST /api/runs/remote — kind: registry", () => {
@@ -143,7 +137,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         stage: "published",
         spec: "1.2.3",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -173,7 +167,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -223,11 +217,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -273,11 +267,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -317,11 +311,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -346,11 +340,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/draft-only");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/draft-only");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/draft-only", stage: "draft" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -380,14 +374,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@acme/broken-draft",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/broken-draft");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/broken-draft", stage: "draft" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(400);
@@ -398,7 +389,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
   it("rejects a missing package with 404", async () => {
     const res = await post({
       source: { kind: "registry", packageId: "@acme/does-not-exist", stage: "published" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(404);
@@ -407,7 +398,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
   });
 
   it("rejects an uninstalled package with 404", async () => {
-    // Seed an org-owned package + version but DON'T install it in the app.
+    // Seed an org-owned package + version but DON'T install it in the space.
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/briefing",
@@ -425,12 +416,12 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(404);
     const body = (await res.json()) as { code?: string };
-    expect(body.code).toBe("package_not_installed_in_app");
+    expect(body.code).toBe("package_not_installed_in_space");
   });
 
   it("rejects an unresolvable spec with 404", async () => {
@@ -442,7 +433,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         stage: "published",
         spec: "9.9.9",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(404);
@@ -467,7 +458,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         stage: "published",
         spec: "1.0.0",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(410);
@@ -484,7 +475,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         stage: "draft",
         spec: "1.0.0",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(400);
@@ -497,7 +488,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "1.2.3" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
       // Mirrors the platform run route: the freeze KEY gate runs on remote too.
       dependency_overrides: { "@acme/not-a-dep": "draft" },
@@ -511,7 +502,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "1.2.3" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
       dependency_overrides: { "@acme/briefing": "not a version!!" },
     });
@@ -536,7 +527,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "helper",
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/helper");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/helper");
 
     // Agent declaring a skill dependency — its id is a valid override KEY.
     const manifest = {
@@ -568,11 +559,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", "2.0.0", buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "2.0.0" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
       dependency_overrides: { "@acme/helper": "draft" },
     });
@@ -583,19 +574,19 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(run!.dependencyOverrides).toEqual({ "@acme/helper": "draft" });
   });
 
-  it("rejects a document:// file input with an explanatory 400", async () => {
+  it("rejects an appfile:// file input with an explanatory 400", async () => {
     await seedFileInputAgent(ctx, "3.0.0");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
-      applicationId: ctx.defaultAppId,
-      input: { document: "document://doc_abc123" },
+      spaceId: ctx.defaultSpaceId,
+      input: { file: "appfile://file_abc123" },
     });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code?: string; detail?: string; param?: string };
     expect(body.code).toBe("invalid_request");
-    expect(body.param).toBe("document");
+    expect(body.param).toBe("file");
     // The message must explain WHY (remote host) and point at the fix (data:).
     expect(body.detail).toContain("not supported on remote runs");
     expect(body.detail).toContain("data:");
@@ -606,14 +597,14 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
-      applicationId: ctx.defaultAppId,
-      input: { document: "upload://upl_abc123" },
+      spaceId: ctx.defaultSpaceId,
+      input: { file: "upload://upl_abc123" },
     });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code?: string; detail?: string; param?: string };
     expect(body.code).toBe("invalid_request");
-    expect(body.param).toBe("document");
+    expect(body.param).toBe("file");
     expect(body.detail).toContain("not supported on remote runs");
   });
 
@@ -622,8 +613,8 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
-      applicationId: ctx.defaultAppId,
-      input: { document: "data:application/pdf;name=report.pdf;base64,JVBERi0=" },
+      spaceId: ctx.defaultSpaceId,
+      input: { file: "data:application/pdf;name=report.pdf;base64,JVBERi0=" },
     });
 
     // `data:` is self-contained (the remote runner materializes it itself), so
@@ -649,7 +640,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         spec: "1.2.3",
         modelId: "gpt-4o",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -674,7 +665,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         spec: "1.2.3",
         proxyId: "none",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -695,7 +686,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         prompt: PROMPT,
         modelId: "gpt-4o",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -712,6 +703,108 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(ephemerals).toHaveLength(0);
   });
 
+  it("carries an author default into the run the inline shape creates", async () => {
+    // Regression: the inline preflight used to validate the RESOLVED input
+    // and return the RAW body, so a required field satisfied only by a schema
+    // `default` passed the gate and reached the runner absent. Assert on what
+    // the run actually stores, not on the validation verdict — the whole
+    // defect is that the two disagreed.
+    const res = await post({
+      source: {
+        kind: "inline",
+        manifest: {
+          ...publishedManifest("0.0.1"),
+          input: {
+            schema: {
+              type: "object",
+              required: ["tone"],
+              properties: { tone: { type: "string", default: "formal" } },
+            },
+          },
+        },
+        prompt: PROMPT,
+      },
+      spaceId: ctx.defaultSpaceId,
+      input: {},
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+    const [run] = await db.select().from(runs).where(eq(runs.id, body.id)).limit(1);
+    expect(run!.input).toEqual({ tone: "formal" });
+  });
+
+  // ─── Locked input fields on the remote registry launch ───
+  //
+  // `POST /api/runs/remote` is a FIFTH launch surface, and it re-implements
+  // the locked-field rule itself (`routes/runs-remote.ts` passes
+  // `lockedFields` into `resolveEffectiveInput`). Nothing else in this suite
+  // touches locks — delete the `lockedFields` argument and the file still
+  // compiles, every other case here still passes, and a CLI or GitHub-Action
+  // runner silently overrides a field an admin pinned for the space.
+  describe("locked input fields", () => {
+    const LOCKED_VERSION = "4.0.0";
+
+    /** Publish a two-field agent and pin `tone` to "formal" in the space. */
+    async function seedLockedToneAgent() {
+      await seedRegistryAgent(
+        ctx,
+        {
+          ...publishedManifest(LOCKED_VERSION),
+          input: {
+            schema: {
+              type: "object",
+              properties: { tone: { type: "string" }, topic: { type: "string" } },
+            },
+          },
+        } as unknown as Record<string, unknown>,
+        LOCKED_VERSION,
+      );
+      await updateInstalledPackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@acme/briefing",
+        { inputSettings: { values: { tone: "formal" }, locked: ["tone"] } },
+      );
+    }
+
+    function launch(input: Record<string, unknown>) {
+      return post({
+        source: {
+          kind: "registry",
+          packageId: "@acme/briefing",
+          stage: "published",
+          spec: LOCKED_VERSION,
+        },
+        spaceId: ctx.defaultSpaceId,
+        input,
+      });
+    }
+
+    it("refuses a remote launch that sets a locked field", async () => {
+      await seedLockedToneAgent();
+
+      const res = await launch({ tone: "casual" });
+      expect(res.status).toBe(400);
+      expect((await res.json()) as { code?: string }).toMatchObject({
+        code: "locked_input_field",
+      });
+      // Nothing was launched behind the refusal.
+      expect(await db.select({ id: runs.id }).from(runs)).toHaveLength(0);
+    });
+
+    it("accepts an unlocked field and runs with the pinned value (control)", async () => {
+      await seedLockedToneAgent();
+
+      // Same agent, same space, an input the admin did NOT lock — so the
+      // refusal above is the lock, not a blanket "remote runs ignore input".
+      const res = await launch({ topic: "quarterly numbers" });
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      const [run] = await db.select().from(runs).where(eq(runs.id, id)).limit(1);
+      expect(run!.input).toEqual({ tone: "formal", topic: "quarterly numbers" });
+    });
+  });
+
   it("accepts an integrity hint without rejecting on drift", async () => {
     await seedPublishedAgent(ctx, "1.2.3");
     const res = await post({
@@ -722,7 +815,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         spec: "1.2.3",
         integrity: "sha256-totally-bogus-hint",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     // Drift hint is observational only — the run still succeeds.

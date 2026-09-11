@@ -16,6 +16,7 @@ import * as jose from "jose";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
+import { prefixedId } from "../../../../../lib/ids.ts";
 
 const originalAppUrl = process.env.APP_URL;
 let jwksServer: ReturnType<typeof Bun.serve> | null = null;
@@ -77,9 +78,8 @@ beforeAll(async () => {
   await startJwksServer();
   const { getTestApp } = await import("../../../../../../test/helpers/app.ts");
   const { default: oidcModule } = await import("../../../index.ts");
-  const { overrideJwksResolver } = await import("../../../services/enduser-token.ts");
-  const localSet = jose.createLocalJWKSet({ keys: [publicJwk] });
-  overrideJwksResolver(localSet as unknown as Parameters<typeof overrideJwksResolver>[0]);
+  const { overrideJwks } = await import("../../../services/enduser-token.ts");
+  overrideJwks(async () => ({ keys: [publicJwk] }));
   app = getTestApp({ modules: [oidcModule] });
 });
 
@@ -96,16 +96,16 @@ afterAll(() => {
 describe("deferOrgResolution in auth pipeline", () => {
   let authUserId: string;
   let orgId: string;
-  let defaultAppId: string;
+  let defaultSpaceId: string;
   let instanceClientId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { id: ownerId } = await createTestUser();
-    const { org, defaultAppId: applicationId } = await createTestOrg(ownerId, { slug: "deferorg" });
+    const { org, defaultSpaceId: spaceId } = await createTestOrg(ownerId, { slug: "deferorg" });
     orgId = org.id;
     authUserId = ownerId;
-    defaultAppId = applicationId;
+    defaultSpaceId = spaceId;
 
     const { ensureInstanceClient } = await import("../../../services/oauth-admin.ts");
     instanceClientId = await ensureInstanceClient("http://localhost:3000");
@@ -114,14 +114,14 @@ describe("deferOrgResolution in auth pipeline", () => {
   it("defers org resolution — instance token + X-Org-Id resolves org context", async () => {
     const token = await mintInstanceToken(authUserId, instanceClientId);
 
-    // Hit an app-scoped route with X-Org-Id + X-Application-Id.
+    // Hit a space-scoped route with X-Org-Id + X-Space-Id.
     // If deferOrgResolution works, the pipeline will resolve org via X-Org-Id
     // header (same as session auth) instead of requiring inline org context.
     const res = await app.request("/api/agents", {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": orgId,
-        "X-Application-Id": defaultAppId,
+        "X-Space-Id": defaultSpaceId,
       },
     });
     // 200 means: auth passed, org resolved via X-Org-Id, permissions derived from orgRole
@@ -149,7 +149,12 @@ describe("deferOrgResolution in auth pipeline", () => {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": otherOrg.id,
-        "X-Application-Id": "app_fake",
+        // Canonical id on purpose: `assertSpaceId` would reject a lookalike,
+        // and this test is about org resolution, not the space-id guard. It
+        // passes today only because `requireOrgContext` runs before
+        // `requireSpaceContext`; a fixture that depends on that ordering would
+        // fail on the fixture the day the order changes.
+        "X-Space-Id": prefixedId("spc"),
       },
     });
     // Not a member → org context middleware rejects
@@ -161,7 +166,7 @@ describe("deferOrgResolution in auth pipeline", () => {
 
     // The test user is the org owner. The pipeline should derive owner
     // permissions from orgRole after X-Org-Id resolution.
-    const res = await app.request("/api/applications", {
+    const res = await app.request("/api/spaces", {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": orgId,
@@ -169,6 +174,36 @@ describe("deferOrgResolution in auth pipeline", () => {
     });
     // Admin-only route — should succeed since user is owner
     expect(res.status).toBe(200);
+  });
+
+  it("holds the user's FULL authority — `permissions: []` is a defer, not a ceiling", async () => {
+    // The decision this pins (§4.2, `lib/auth-pipeline.ts`): an instance token
+    // resolves no org role and an empty permission list, and the pipeline
+    // writes NO `scopeCeiling` for that shape. It is the CLI acting as the
+    // user, so it must reach what the user reaches in whichever org they
+    // select. Reading the empty list as a ceiling instead would leave this
+    // caller with zero permissions everywhere.
+    const token = await mintInstanceToken(authUserId, instanceClientId);
+
+    // A SPACE-level write, which arrives only after `requireSpaceContext`
+    // unions the space slice — precisely the step a stray empty ceiling would
+    // clamp back to nothing.
+    const spaceLevel = await app.request("/api/agents/@deferorg%2Fnope/proxy", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Org-Id": orgId,
+        "X-Space-Id": defaultSpaceId,
+      },
+    });
+    // 404, not 403: the guard passed and the agent simply does not exist.
+    expect(spaceLevel.status).toBe(404);
+
+    // And an ORG-level one on the path-org family, which `orgPathContext`
+    // resolves — same rule, second code path.
+    const orgLevel = await app.request(`/api/orgs/${orgId}/settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(orgLevel.status).toBe(200);
   });
 
   it("resolveInstanceUser returns deferOrgResolution: true", async () => {

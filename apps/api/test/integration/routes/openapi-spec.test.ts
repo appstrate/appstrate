@@ -4,7 +4,7 @@
  * `GET /api/openapi.json` — caching contract.
  *
  * The endpoint is public, pre-auth and un-rate-limited, so the ~470 KiB
- * document must be serialized once and revalidatable. `apps/cli` already
+ * file must be serialized once and revalidatable. `apps/cli` already
  * sends `If-None-Match` and handles 304; these tests lock the server side of
  * that exchange, plus the fact that the spec is not re-serialized per hit.
  */

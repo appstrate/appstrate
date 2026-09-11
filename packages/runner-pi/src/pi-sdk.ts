@@ -20,23 +20,36 @@
 // Used synchronously at tool-registration time to build parameter schemas,
 // so it stays a static export.
 export { Type } from "@earendil-works/pi-ai";
-// Pi 0.84 moved the legacy API-dispatch helper behind its compatibility
-// entrypoint. Appstrate still needs one generic dispatch seam for proxy-bound
-// chat models; the provider implementation itself remains the current native
-// module selected by Pi, including the native Mistral HTTP stream.
-export { streamSimple } from "@earendil-works/pi-ai/compat";
+// NOTHING TEST-ONLY BELONGS IN THIS FILE.
+//
+// Two re-exports lived here — `streamSimple` (from `pi-ai/compat`) and
+// `getBuiltinProviders` (from `pi-ai/providers/all`) — on the stated grounds
+// that the `no-restricted-imports` guard forbade a test from reaching the
+// vendor directly. It did not: that guard's `files` list is
+// `packages/runner-pi/src/**`, and has never covered `test/**`.
+//
+// The cost was real. `pi-ai/dist/providers` is 2.1 MB across ~45 statically
+// imported provider modules, and `compat.js` pulls it too. The package ROOT
+// does not — so before those two lines this graph was never evaluated. They are
+// static exports, so every consumer of this barrel paid for them at import
+// time: `runtime-pi/entrypoint.ts` at container boot, and `apps/api` through
+// `module-chat`. That is the exact cost this file's header exists to avoid and
+// `runtime-pi/Dockerfile` spends a bundling stage shaving.
+//
+// The tests import the vendor entrypoints directly.
 
 // --- types (erased at runtime) ---
 export type { ModelRuntime, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+export type { Api, KnownApi, Model, Transport, Message } from "@earendil-works/pi-ai";
+// The vendor's own event/usage shapes. Consumers keep their own narrow
+// structural views (a mapper must stay testable with synthetic events, and the
+// SDK value graph must stay behind `loadPiCodingAgentSdk()`); these exist so
+// those views can be PINNED against the vendor at compile time. Type-only, so
+// they are erased and drag nothing into the runtime graph.
+export type { AgentSessionEvent as PiSdkAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 export type {
-  Api,
-  KnownApi,
-  Model,
-  Transport,
-  Context,
-  Message,
-  SimpleStreamOptions,
-  AssistantMessageEventStream,
+  AssistantMessageEvent as PiSdkAssistantMessageEvent,
+  Usage as PiSdkUsage,
 } from "@earendil-works/pi-ai";
 
 // --- heavy value surface (pi-coding-agent, ~200ms) behind a dynamic import ---

@@ -16,7 +16,7 @@ interface ValidationResult {
   missingRequiredFields: string[];
 }
 
-export interface OpenApiValidator {
+interface OpenApiValidator {
   getResponseSchema(path: string, method: string, statusCode: string): unknown;
   dereference(schema: unknown): unknown;
   validateResponse(body: unknown, schema: unknown): ValidationResult;

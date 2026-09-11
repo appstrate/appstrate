@@ -30,9 +30,10 @@
 
 import { test, expect } from "../../fixtures/api.fixture.ts";
 import { createApiKey } from "../../helpers/seed.ts";
+import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 import type { APIRequestContext } from "@playwright/test";
 
-const BASE = "http://localhost:3000";
+const BASE = E2E_BASE_URL;
 const MCP_ACCEPT = "application/json, text/event-stream";
 
 /** The per-org MCP endpoint + its canonical RFC 8707 resource URI (identical). */
@@ -129,35 +130,44 @@ test.describe("MCP over an API key (full stack)", () => {
     const names = ((list.envelope.result?.tools as Array<{ name: string }>) ?? [])
       .map((t) => t.name)
       .sort();
+    // The pre-#1177 names (`list_documents`, `read_document`,
+    // `validate_package_document`, `import_package_document`) are not
+    // registered at all — not even as hidden aliases. They were once
+    // callable-but-unlisted because the server advertises
+    // `tools: { listChanged: false }`, so a client that listed before an
+    // upgrade and calls an old name after it is behaving correctly. Removing
+    // them costs such a client one `-32602 Unknown tool` and a re-list;
+    // keeping them cost a permanent second dispatch path. See
+    // `apps/api/src/modules/mcp/tools.ts` (`buildMcpTools`).
     expect(names).toEqual([
       "describe_operation",
       "get_me",
       "get_runtime_capabilities",
-      "import_package_document",
+      "import_package_file",
       "invoke_operation",
-      "list_documents",
-      "read_document",
+      "list_files",
+      "read_file",
       "run_and_wait",
       "search_operations",
-      "validate_package_document",
+      "validate_package_file",
     ]);
 
     const search = await mcpRpc(request, url, headers, {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
-      params: { name: "search_operations", arguments: { query: "application", limit: 5 } },
+      params: { name: "search_operations", arguments: { query: "space", limit: 5 } },
     });
     const searchPayload = toolPayload(search.envelope);
     expect(searchPayload.isError).toBe(false);
     expect((searchPayload.data.count as number) ?? 0).toBeGreaterThan(0);
 
-    // invoke a stable, side-effect-free GET (lists the org's applications).
+    // invoke a stable, side-effect-free GET (lists the org's spaces).
     const invoke = await mcpRpc(request, url, headers, {
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
-      params: { name: "invoke_operation", arguments: { operation_id: "listApplications" } },
+      params: { name: "invoke_operation", arguments: { operation_id: "listSpaces" } },
     });
     const payload = toolPayload(invoke.envelope);
     expect(payload.isError).toBe(false);
@@ -388,12 +398,12 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
       expect(init.status).toBe(200);
       expect(init.envelope.result?.serverInfo).toBeTruthy();
 
-      // ...and an invoke dispatches in-process as the user (owner → applications:read).
+      // ...and an invoke dispatches in-process as the user (owner → spaces:read).
       const invoke = await mcpRpc(anon, mcpUrl, headers, {
         jsonrpc: "2.0",
         id: 5,
         method: "tools/call",
-        params: { name: "invoke_operation", arguments: { operation_id: "listApplications" } },
+        params: { name: "invoke_operation", arguments: { operation_id: "listSpaces" } },
       });
       const payload = toolPayload(invoke.envelope);
       expect(payload.isError).toBe(false);
@@ -401,8 +411,8 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
 
       // Outbound confinement: the SAME token on a non-resource route is rejected.
       // The token cannot be lifted from the MCP surface to the rest of the API.
-      const lifted = await anon.get(`${BASE}/api/applications`, {
-        headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
+      const lifted = await anon.get(`${BASE}/api/spaces`, {
+        headers: { ...headers, "X-Space-Id": orgContext.org.defaultSpaceId },
       });
       expect(lifted.status()).toBe(401);
     } finally {
@@ -443,8 +453,8 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
       expect(init.envelope.result?.serverInfo).toBeTruthy();
 
       // ...and is still confined off the MCP surface.
-      const lifted = await anon.get(`${BASE}/api/applications`, {
-        headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
+      const lifted = await anon.get(`${BASE}/api/spaces`, {
+        headers: { ...headers, "X-Space-Id": orgContext.org.defaultSpaceId },
       });
       expect(lifted.status()).toBe(401);
     } finally {

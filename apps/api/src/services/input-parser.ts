@@ -18,26 +18,29 @@
  *    PUT round-trips.
  *
  * Alternatively the body may carry `rerun_from: <run_id>` instead of `input`.
- * Staged uploads are rewritten to durable `document://` URIs in persisted run
- * input, so replay resolves the same documents without an upload-retention
+ * Staged uploads are rewritten to durable `appfile://` URIs in persisted run
+ * input, so replay resolves the same files without an upload-retention
  * dependency.
  *
  * Either way the run ends up with a `FileReference` (metadata only — no
- * buffer) per document on the parsed input.
+ * buffer) per file on the parsed input.
  */
 
 import type { Context } from "hono";
+import type { AppEnv } from "../types/index.ts";
 import { fileTypeStream, fileTypeFromBuffer } from "file-type";
 import type { FileReference } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
+import { resolveEffectiveInput } from "./input-resolution.ts";
+import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import {
   invalidRequest,
   notFound,
   conflict,
   payloadTooLarge,
   validationFailed,
-  documentCountExceeded,
+  fileCountExceeded,
 } from "../lib/errors.ts";
 import {
   consumeUploadStream,
@@ -50,34 +53,25 @@ import {
 } from "./uploads.ts";
 import { getRun } from "./state/runs.ts";
 import {
-  getDocumentForActor,
-  streamDocumentContent,
-  assertWithinDocumentLimits,
+  getFileForActor,
+  streamFileContent,
+  assertWithinFileLimits,
   type PendingUploadMaterialization,
-} from "./documents.ts";
-import {
-  isUploadUri,
-  isDocumentUri,
-  parseDocumentUri,
-  documentUri,
-} from "@appstrate/core/document-uri";
+} from "./files.ts";
+import { isUploadUri, isFileUri, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { getActor } from "../lib/actor.ts";
+import { callerPermissions } from "../lib/permissions.ts";
+import { assertRunVisible } from "../lib/run-visibility.ts";
 import { prefixedId } from "../lib/ids.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
 import { extensionForMime } from "@appstrate/core/naming";
 import { isValidDistTag, isProtectedTag } from "@appstrate/core/dist-tags";
-import {
-  streamRunDocument,
-  writeRunDocumentsManifest,
-  deleteRunDocuments,
-} from "./run-workspace-storage.ts";
-import { assignWorkspaceNames } from "./run-document-naming.ts";
+import { streamRunFile, writeRunFilesManifest, deleteRunFiles } from "./run-workspace-storage.ts";
+import { assignWorkspaceNames } from "./run-file-naming.ts";
 import { getEnv } from "@appstrate/env";
-import {
-  modelGenerationSettingsSchema,
-  type ModelGenerationSettings,
-} from "@appstrate/core/model-generation";
+import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 export interface ParsedInput {
   input?: Record<string, unknown>;
@@ -88,20 +82,6 @@ export interface ParsedInput {
   generationConfigOverride?: ModelGenerationSettings;
   /** Per-run proxy override (wire field `proxyId` on the request body). */
   proxyIdOverride?: string;
-  /**
-   * Per-run config override (wire field `config` on the request body).
-   * Deep-merged with `application_packages.config` before the run is
-   * executed (see `deepMergeConfig` in `@appstrate/core/schema-validation`).
-   * Mirrors the OpenAI Assistants `runs.create { instructions, model, tools }`
-   * and Argo Workflows `submitOptions.parameters` SOTA: the merge happens
-   * server-side so UI / CLI / SDK clients all reach the same resolved config
-   * for the same `(persisted, override)` pair.
-   *
-   * Internal output names use the `*Override` suffix to match the schedule
-   * wire (`configOverride / modelIdOverride / proxyIdOverride / versionOverride`)
-   * and the run-record column (`runs.config_override`).
-   */
-  configOverride?: Record<string, unknown>;
   /**
    * Per-integration connection picks for THIS run (#199).
    * Wire field `connectionOverrides` on the request body; flows into the
@@ -121,39 +101,54 @@ export interface ParsedInput {
   dependencyOverrides?: Record<string, string>;
   /**
    * Staged uploads consumed by this run that must be materialized into durable
-   * `documents` rows once the run row exists (D1). The persisted `input`
-   * already carries the rewritten `document://<documentId>` URIs; the row
+   * `files` rows once the run row exists (D1). The persisted `input`
+   * already carries the rewritten `appfile://<fileId>` URIs; the row
    * insert is deferred to `prepareAndExecuteRun` (after `createRun`) because
-   * `documents.run_id` is a hard FK. Empty/undefined for runs with no uploads.
+   * `files.run_id` is a hard FK. Empty/undefined for runs with no uploads.
    */
-  pendingDocuments?: PendingUploadMaterialization[];
+  pendingFiles?: PendingUploadMaterialization[];
   /**
-   * The `document://` ids this run consumes as input (D1 chaining protection).
-   * Passed into `createRun`, which locks and revalidates every document before
-   * inserting the run and its `document_links` rows in one transaction. Every
-   * resolved `document://` input ref qualifies: a brand-new run is never a
-   * doc's own container. Undefined when the run consumes no documents.
+   * The `appfile://` ids this run consumes as input (D1 chaining protection).
+   * Passed into `createRun`, which locks and revalidates every file before
+   * inserting the run and its `file_links` rows in one transaction. Every
+   * resolved `appfile://` input ref qualifies: a brand-new run is never a
+   * doc's own container. Undefined when the run consumes no files.
    */
-  consumedDocumentIds?: string[];
+  consumedFileIds?: string[];
 }
 
+/**
+ * The launch-body shape `parseRequestInput` reads.
+ *
+ * Structural on purpose, not the inferred type of one surface's schema: each
+ * launch route owns the `.strict()` Zod schema for its OWN surface and hands
+ * the parsed result here. `POST /runs/inline` passes a WIDER body (`manifest`,
+ * `prompt`, `context_files` on top of these keys, and nullable `modelId` /
+ * `proxyId`), so this type is the intersection the parser actually reads.
+ *
+ * Every field is therefore already shape-validated by the time the parser sees
+ * it — no cast, no `c.req.json<T>()` lie. What remains below are the semantic
+ * guards a shape check cannot express (is this dependency spec resolvable, does
+ * this run belong to this agent).
+ */
 interface RunRequestBody {
-  input?: Record<string, unknown>;
+  input?: Record<string, unknown> | undefined;
   /**
    * Run id whose persisted `input` to replay verbatim on this run (wire field
    * `rerun_from`, mutually exclusive with `input`). Consumed staged uploads
-   * are persisted as durable `document://` URIs, so a cancelled (or completed)
-   * run can be re-triggered with the same documents and different overrides
-   * (`modelId`, `config`, `?version`) in one call, no re-upload and no
+   * are persisted as durable `appfile://` URIs, so a cancelled (or completed)
+   * run can be re-triggered with the same files and different overrides
+   * (`modelId`, `?version`) in one call, no re-upload and no
    * dependency on upload retention.
    */
-  rerun_from?: string;
-  modelId?: string;
-  generation?: ModelGenerationSettings;
-  proxyId?: string;
-  config?: Record<string, unknown>;
-  connection_overrides?: Record<string, string>;
-  dependency_overrides?: Record<string, string>;
+  rerun_from?: string | undefined;
+  /** Nullable on the inline surface only (`null` == "no override"). */
+  modelId?: string | null | undefined;
+  generation?: ModelGenerationSettings | undefined;
+  /** Nullable on the inline surface only (`null` == "no override"). */
+  proxyId?: string | null | undefined;
+  connection_overrides?: Record<string, string> | undefined;
+  dependency_overrides?: Record<string, string> | undefined;
 }
 
 /**
@@ -208,10 +203,10 @@ function isDataUri(value: unknown): value is string {
  * entries of array file fields so the inline path can rewrite the exact
  * persisted value after extraction.
  */
-export interface InputFileRef {
+interface InputFileRef {
   fieldName: string;
   uri: string;
-  kind: "upload" | "data" | "document";
+  kind: "upload" | "data" | "file";
   index?: number;
 }
 
@@ -224,11 +219,11 @@ function toFileRef(key: string, value: unknown, index?: number): InputFileRef {
       ...(index !== undefined ? { index } : {}),
     };
   }
-  if (isDocumentUri(value)) {
+  if (isFileUri(value)) {
     return {
       fieldName: key,
       uri: value,
-      kind: "document",
+      kind: "file",
       ...(index !== undefined ? { index } : {}),
     };
   }
@@ -236,7 +231,7 @@ function toFileRef(key: string, value: unknown, index?: number): InputFileRef {
     return { fieldName: key, uri: value, kind: "data", ...(index !== undefined ? { index } : {}) };
   }
   throw invalidRequest(
-    `Field '${key}' must be an 'upload://<id>' URI, a 'document://<id>' URI, or an inline ` +
+    `Field '${key}' must be an 'upload://<id>' URI, an 'appfile://<id>' URI, or an inline ` +
       "'data:<mime>;base64,<payload>' URI",
     key,
   );
@@ -273,10 +268,10 @@ export function collectFileRefs(
 }
 
 /**
- * The set of `document://` ids a run will actually MOUNT: those placed in a
+ * The set of `appfile://` ids a run will actually MOUNT: those placed in a
  * DECLARED file input field (a `format:"uri"` + `contentMediaType` property in
  * the manifest input schema). Only these refs are streamed into the run
- * workspace by `collectFileRefs` / the consume path — a `document://` URI
+ * workspace by `collectFileRefs` / the consume path — an `appfile://` URI
  * dropped into any non-file field never mounts. Reuses `collectFileRefs` so the
  * file-field detection lives in exactly one place (no duplicated schema walk).
  *
@@ -285,7 +280,7 @@ export function collectFileRefs(
  * once (post-parse), so the re-walk cannot surface a new validation error on the
  * happy path. Pure — exported for the inline-run prompt-coverage guard + tests.
  */
-export function collectMountedDocumentIds(
+export function collectMountedFileIds(
   inputSchema: JSONSchemaObject | undefined,
   input: unknown,
 ): Set<string> {
@@ -294,8 +289,8 @@ export function collectMountedDocumentIds(
     return ids;
   }
   for (const ref of collectFileRefs(inputSchema, input as Record<string, unknown>)) {
-    if (ref.kind !== "document") continue;
-    const id = parseDocumentUri(ref.uri);
+    if (ref.kind !== "file") continue;
+    const id = parseFileUri(ref.uri);
     if (id) ids.add(id);
   }
   return ids;
@@ -323,7 +318,7 @@ const MAX_INLINE_BASE64_LENGTH = Math.ceil(MAX_INLINE_FILE_BYTES / 3) * 4;
 const BASE64_RE = /^[A-Za-z0-9+/]*$/;
 
 /** A decoded inline file: declared MIME, optional declared filename, content. */
-export interface InlineFile {
+interface InlineFile {
   mime: string;
   name?: string;
   bytes: Uint8Array;
@@ -412,7 +407,7 @@ function extFromMime(mime: string): string {
  * Payload-stripped form of an inline data URI — what replaces the original
  * value in the run input before it is persisted (run record, prompt
  * templates). Keeps the run row small: the bytes live in the run workspace as
- * a document, referenced by `name`.
+ * a file, referenced by `name`.
  */
 function strippedDataUri(mime: string, docName: string): string {
   return `data:${mime};name=${encodeURIComponent(docName)};base64,`;
@@ -436,9 +431,9 @@ export function isStrippedInlineMarker(uri: string): boolean {
 }
 
 /**
- * Reject when the combined size of a run's input documents exceeds the
+ * Reject when the combined size of a run's input files exceeds the
  * per-run ceiling. Pure so it can be unit-tested without a DB or request
- * context; callers pass `getEnv().WORKSPACE_MAX_DOCS_BYTES` as the limit.
+ * context; callers pass `getEnv().WORKSPACE_MAX_FILES_BYTES` as the limit.
  * Throws `payloadTooLarge` (413) — a policy violation, surfaced before the
  * run launches rather than as a mid-flight failure.
  */
@@ -446,85 +441,52 @@ export function assertDocsWithinCap(files: { size: number }[], maxBytes: number)
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total > maxBytes) {
     throw payloadTooLarge(
-      `Input documents total ${total} bytes; the per-run limit is ${maxBytes} bytes`,
+      `Input files total ${total} bytes; the per-run limit is ${maxBytes} bytes`,
     );
   }
 }
 
 /**
- * Cap on how many input documents stream into the run workspace at once. Each
+ * Cap on how many input files stream into the run workspace at once. Each
  * in-flight stream holds a storage-adapter buffer (~5 MiB for the S3 multipart
  * part), so an unbounded `Promise.all` over a large array-file field could pin
- * `documents × 5 MiB`. Bounding it keeps the per-run streaming memory floor flat
- * regardless of document count.
+ * `files × 5 MiB`. Bounding it keeps the per-run streaming memory floor flat
+ * regardless of file count.
  *
  * Module-private: its one consumer is the `mapWithConcurrency` fan-out below
- * that streams resolved uploads into the run workspace.
+ * that streams resolved uploads into the run workspace. The pool itself lives
+ * in `@appstrate/core/map-with-concurrency` — on a rejection here the caller rolls back
+ * the run workspace by doc name, so stragglers that finished are cleaned
+ * regardless.
  */
 const DOC_STREAM_CONCURRENCY = 4;
-
-/**
- * Map over `items` running at most `limit` callbacks concurrently, preserving
- * input order in the result. On the first rejection, in-flight callbacks are
- * allowed to settle but no new ones start, and the rejection propagates — the
- * caller rolls back any partial work (here: the run workspace, by doc name, so
- * stragglers that finished are cleaned regardless).
- */
-export async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  let aborted = false;
-  async function worker(): Promise<void> {
-    while (!aborted) {
-      const i = nextIndex++;
-      if (i >= items.length) break;
-      try {
-        results[i] = await fn(items[i]!, i);
-      } catch (err) {
-        aborted = true;
-        throw err;
-      }
-    }
-  }
-  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
-  await Promise.all(workers);
-  return results;
-}
 
 /**
  * Resolve `rerun_from` to the prior run's persisted `input` snapshot.
  *
  * Access control mirrors `GET /api/runs/:id`: the lookup is scoped to the
- * caller's org + application (cross-tenant ids surface as the same not-found
- * as a missing run), end-users can only replay their own runs, and the prior
- * run must belong to the agent being triggered (its input schema is the one
- * the replayed input was validated against). The returned input flows through
+ * caller's org + space (cross-tenant ids surface as the same not-found
+ * as a missing run), the prior run must be one the caller may READ — replaying
+ * a run hands back its input, so `runs:read-all` gates a colleague's run here
+ * exactly as it gates the detail route — and it must belong to the agent being
+ * triggered (its input schema is the one the replayed input was validated
+ * against). The returned input flows through
  * the exact same consume + validation pipeline as a fresh request and the JSON
  * is re-validated against the current schema.
  */
 async function resolveRerunInput(
-  c: Context,
-  rerunFrom: unknown,
+  c: Context<AppEnv>,
+  rerunFrom: string,
   agentPackageId: string | undefined,
 ): Promise<Record<string, unknown>> {
-  if (typeof rerunFrom !== "string" || rerunFrom.length === 0) {
+  if (rerunFrom.length === 0) {
     throw invalidRequest("`rerun_from` must be a run id", "rerun_from");
   }
-  const prior = await getRun(
-    { orgId: c.get("orgId"), applicationId: c.get("applicationId") },
-    rerunFrom,
-  );
+  const prior = await getRun({ orgId: c.get("orgId"), spaceId: c.get("spaceId") }, rerunFrom);
   if (!prior) {
     throw notFound(`Run '${rerunFrom}' not found`);
   }
-  const endUser = c.get("endUser");
-  if (endUser && prior.endUserId !== endUser.id) {
-    throw notFound(`Run '${rerunFrom}' not found`);
-  }
+  assertRunVisible(c, prior);
   if (agentPackageId !== undefined && prior.packageId !== agentPackageId) {
     throw conflict(
       "rerun_agent_mismatch",
@@ -544,9 +506,18 @@ async function resolveRerunInput(
  * Parse and validate the run request body. Returns parsed input + resolved
  * uploaded files. Throws `ApiError` (invalidRequest / notFound / conflict /
  * gone) on any validation or resolution failure.
+ *
+ * `body` is the ALREADY-VALIDATED body of the calling surface (see
+ * {@link RunRequestBody}). The parser does not read the request body itself:
+ * the shape guard — which fields exist, of what type, and the refusal of any
+ * field the surface does not honour — belongs to the route, because it is the
+ * route that knows its own surface. `POST /runs/inline` legitimately carries
+ * `manifest` / `prompt` / `context_files`, which the agent route must
+ * refuse; a single schema owned here could only be right for one of them.
  */
 export async function parseRequestInput(
-  c: Context,
+  c: Context<AppEnv>,
+  body: RunRequestBody,
   runId: string,
   inputSchema?: JSONSchemaObject,
   opts?: {
@@ -561,25 +532,30 @@ export async function parseRequestInput(
      * Server-synthesized input fields merged into the request's `input` before
      * any file ref is collected. The ONLY sanctioned way to add an input field
      * the caller did not send: the merged values then travel the normal
-     * `collectFileRefs` path (ACL, caps, streaming, `document_links`) and are
+     * `collectFileRefs` path (ACL, caps, streaming, `file_links`) and are
      * announced to the agent by the platform prompt like any other input
-     * document — nothing is mounted by a side path.
+     * file — nothing is mounted by a side path.
      *
-     * Used by `POST /runs/inline` for the reserved `_context_documents` field
+     * Used by `POST /runs/inline` for the reserved `_context_files` field
      * (see `services/inline-run.ts`); the field must already be declared on the
      * `inputSchema` passed here, or it is inert.
      */
     injectedInput?: Record<string, unknown>;
+    /**
+     * Values the editor stored once on `space_packages.input_settings`
+     * (`values`) — layer 2 of the input resolution (see
+     * `input-resolution.ts`). Omitted by origins that have no per-space
+     * row (inline runs on a shadow package).
+     */
+    editorDefaults?: Record<string, unknown>;
+    /**
+     * `space_packages.input_settings` (`locked`) — input fields the
+     * caller may not set. A request naming one is refused with 400
+     * `locked_input_field`.
+     */
+    lockedFields?: readonly string[];
   },
 ): Promise<ParsedInput> {
-  let body: RunRequestBody = {};
-  try {
-    const raw = await c.req.json<RunRequestBody>();
-    if (raw && typeof raw === "object") body = raw;
-  } catch {
-    body = {};
-  }
-
   let input = body.input ?? {};
   const isRerun = body.rerun_from !== undefined;
   if (body.rerun_from !== undefined) {
@@ -589,7 +565,14 @@ export async function parseRequestInput(
         "rerun_from",
       );
     }
-    input = await resolveRerunInput(c, body.rerun_from, opts?.agentPackageId);
+    // A replay carries the prior run's RESOLVED input, which includes whatever
+    // the locked fields resolved to back then. The caller sent a run id, not
+    // values, so those keys are dropped rather than refused — they resolve
+    // again from the current editor value just below.
+    input = withoutLockedFields(
+      await resolveRerunInput(c, body.rerun_from, opts?.agentPackageId),
+      opts?.lockedFields,
+    );
   }
   // Server-synthesized fields last: they are platform-owned reserved names the
   // caller cannot legitimately hold (the route 400s on a collision before we
@@ -597,14 +580,25 @@ export async function parseRequestInput(
   if (opts?.injectedInput && Object.keys(opts.injectedInput).length > 0) {
     input = { ...input, ...opts.injectedInput };
   }
+
+  // Collapse the resolution layers BEFORE any file ref is collected, so an
+  // author or editor default that names a file travels the same ACL /
+  // cap / streaming path as a caller-supplied one, and the AJV pass below
+  // validates what the run will actually execute with.
+  input = resolveEffectiveInput({
+    schema: inputSchema,
+    editorDefaults: opts?.editorDefaults,
+    lockedFields: opts?.lockedFields,
+    overlay: { origin: "input", values: input },
+  });
   let uploadedFiles: FileReference[] = [];
-  let pendingDocuments: PendingUploadMaterialization[] = [];
-  let consumedDocumentIds: string[] = [];
+  let pendingFiles: PendingUploadMaterialization[] = [];
+  let consumedFileIds: string[] = [];
 
   if (inputSchema) {
     const refs = collectFileRefs(inputSchema, input);
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
 
     // Resolve every upload URI to an upload id up front so a malformed URI
     // fails before we touch storage.
@@ -616,23 +610,23 @@ export async function parseRequestInput(
         return { ref, id };
       });
 
-    // Resolve every document URI to a document id up front (same eager-fail as
-    // uploads). A `document://` reference points at an already-durable document
+    // Resolve every file URI to a file id up front (same eager-fail as
+    // uploads). An `appfile://` reference points at an already-durable file
     // (a prior materialized upload or an agent output); it is streamed into the
     // run workspace like an upload but never re-materialized.
-    const docRefs = refs
-      .filter((ref) => ref.kind === "document")
+    const fileRefs = refs
+      .filter((ref) => ref.kind === "file")
       .map((ref) => {
-        const id = parseDocumentUri(ref.uri);
-        if (!id) throw invalidRequest(`Invalid document URI '${ref.uri}'`, ref.fieldName);
+        const id = parseFileUri(ref.uri);
+        if (!id) throw invalidRequest(`Invalid file URI '${ref.uri}'`, ref.fieldName);
         return { ref, id };
       });
 
-    // Every resolved `document://` input ref is a consumption link (D1): the run
+    // Every resolved `appfile://` input ref is a consumption link (D1): the run
     // is brand-new, so it is never any of these docs' own container. Persisted as
-    // `document_links` atomically with `createRun`, protecting the doc from its
+    // `file_links` atomically with `createRun`, protecting the doc from its
     // producer's deletion. The ACL check below still gates the run itself.
-    consumedDocumentIds = docRefs.map(({ id }) => id);
+    consumedFileIds = fileRefs.map(({ id }) => id);
 
     // Decode inline data: URIs up front — the per-file cap is enforced inside
     // parseDataUri (pre-decode on the base64 length, post-decode on the bytes),
@@ -652,72 +646,80 @@ export async function parseRequestInput(
             `Field '${ref.fieldName}' was provided as an inline data: URI on the original run — ` +
               "inline inputs are materialized into the run workspace and stripped from the stored " +
               "input, so they cannot be replayed via rerun_from. Re-send the file in `input` " +
-              "(staged upload:// references are converted to durable document:// references).",
+              "(staged upload:// references are converted to durable appfile:// references).",
           );
         }
         return { ref, file: parseDataUri(ref.uri, ref.fieldName) };
       });
 
-    // Document object names — set once uploads are streamed, used to roll the
+    // File object names — set once uploads are streamed, used to roll the
     // run workspace back if anything below the stream fails. Empty until we
     // stream, so a pre-stream failure (bad URI, cap, peek) rolls back nothing.
-    let docNames: string[] = [];
+    let fileNames: string[] = [];
     try {
-      if (resolved.length > 0 || inline.length > 0 || docRefs.length > 0) {
-        // Bound the NUMBER of input documents a single run may carry (uploads +
-        // inline + document:// refs) — the byte caps below do not bound the
+      if (resolved.length > 0 || inline.length > 0 || fileRefs.length > 0) {
+        // Bound the NUMBER of input files a single run may carry (uploads +
+        // inline + appfile:// refs) — the byte caps below do not bound the
         // COUNT (thousands of tiny files). Rejected before any streaming.
-        const totalInputDocs = resolved.length + inline.length + docRefs.length;
-        if (totalInputDocs > getEnv().RUN_MAX_DOCUMENTS) {
-          throw documentCountExceeded(
-            `A run may carry at most ${getEnv().RUN_MAX_DOCUMENTS} input documents (got ${totalInputDocs})`,
+        const totalInputFiles = resolved.length + inline.length + fileRefs.length;
+        if (totalInputFiles > getEnv().RUN_MAX_FILES) {
+          throw fileCountExceeded(
+            `A run may carry at most ${getEnv().RUN_MAX_FILES} input files (got ${totalInputFiles})`,
           );
         }
 
         // The run-triggering actor — resolved once and threaded into both the
-        // document ACL check AND the upload ownership gate (peek/consume), so a
-        // member can only deliver documents/uploads they may read. Both gates
+        // file ACL check AND the upload ownership gate (peek/consume), so a
+        // member can only deliver files/uploads they may read. Both gates
         // REQUIRE a principal: every route reaching here is authenticated, and a
         // missing actor used to degrade the upload gate to tenant-only scoping
         // (any org member could consume another member's staged bytes).
         const actor = getActor(c);
 
-        // Resolve every `document://` reference through the container ACL (D2):
-        // the run-triggering actor must be able to read the document, else it is
-        // indistinguishable from missing (404 — covers cross-org and cross-app).
+        // Resolve every `appfile://` reference through the container ACL (D2):
+        // the run-triggering actor must be able to read the file, else it is
+        // indistinguishable from missing (404 — covers cross-org and cross-space).
         const resolvedDocs =
-          docRefs.length > 0
+          fileRefs.length > 0
             ? await Promise.all(
-                docRefs.map(async ({ ref, id }) => {
-                  const doc = await getDocumentForActor({ orgId, applicationId }, actor, id);
-                  // Cross-actor ACL (S2): resolving a run is org-wide-visible to
-                  // members, but a `user_upload` is creator-only content — a
-                  // member must not deliver another member's private upload into
-                  // their own run. The `download` capability is always true for
-                  // an `agent_output` (freely chainable, D6) but only for the
-                  // creator of an upload. A rejected ref is indistinguishable from
-                  // missing (404), matching the not-found shape above.
-                  if (!doc || !doc.capabilities.download)
-                    throw notFound(`Document '${id}' not found`);
+                fileRefs.map(async ({ ref, id }) => {
+                  const doc = await getFileForActor(
+                    { orgId, spaceId },
+                    actor,
+                    id,
+                    callerPermissions(c),
+                  );
+                  // Cross-actor ACL (S2): the container ACL is the outer gate
+                  // and narrows a run-contained output to the runs the caller
+                  // may read (`runs:read-all`, else its own); the `download`
+                  // capability adds the per-file rule on top — a `user_upload`
+                  // is creator-only content, so a member must not deliver
+                  // another member's private upload into their own run.
+                  // `download` is always true for an `agent_output` — chainable
+                  // within the container the outer gate already granted (D6) —
+                  // and true for an upload only for its creator. A rejected ref
+                  // is indistinguishable from missing (404), matching the
+                  // not-found shape above.
+                  if (!doc || !doc.capabilities.download) throw notFound(`File '${id}' not found`);
                   return { ref, doc: doc.row };
                 }),
               )
             : [];
 
-        // Bound the total input-document payload on DECLARED sizes BEFORE
-        // streaming any bytes. Documents are delivered to the agent out-of-band
+        // Bound the total input-file payload on DECLARED sizes BEFORE
+        // streaming any bytes. Files are delivered to the agent out-of-band
         // (fetched + streamed to disk), so an oversized payload is a policy
         // violation rather than a crash. The per-file `bytes === size` check
         // inside consume keeps each actual size ≤ its declared size, so a
         // declared total under the cap bounds the actual total too. Inline
-        // files count their already-decoded (exact) size; `document://`
+        // files count their already-decoded (exact) size; `appfile://`
         // references count their stored size. Reject before launch so the
         // caller gets a clean 413 instead of a mid-flight run failure.
         const metas: Map<string, UploadMeta> =
           resolved.length > 0
             ? await peekUploads(
                 resolved.map((r) => r.id),
-                { orgId, applicationId, actor },
+                { orgId, spaceId, actor },
               )
             : new Map();
         assertDocsWithinCap(
@@ -726,17 +728,17 @@ export async function parseRequestInput(
             ...inline.map((i) => ({ size: i.file.bytes.byteLength })),
             ...resolvedDocs.map(({ doc }) => ({ size: doc.size })),
           ],
-          getEnv().WORKSPACE_MAX_DOCS_BYTES,
+          getEnv().WORKSPACE_MAX_FILES_BYTES,
         );
 
-        // Documents quota + per-file cap on the uploads that will be
+        // Files quota + per-file cap on the uploads that will be
         // materialized into durable rows (D1) — a SYNCHRONOUS reject BEFORE the
         // run is created, so an over-quota / over-cap run 403/413s here rather
-        // than after `createRun`. `createDocumentFromUpload` re-checks the exact
-        // bytes inside its transaction. `document://` inputs are already durable
+        // than after `createRun`. `createFileFromUpload` re-checks the exact
+        // bytes inside its transaction. `appfile://` inputs are already durable
         // (their bytes were counted at creation) so they are not re-counted.
         if (resolved.length > 0) {
-          await assertWithinDocumentLimits(
+          await assertWithinFileLimits(
             orgId,
             resolved.map((r) => metas.get(r.id)!.size),
           );
@@ -762,15 +764,15 @@ export async function parseRequestInput(
           }
         });
 
-        // Separate each document's DISPLAY name (its human name) from its
+        // Separate each file's DISPLAY name (its human name) from its
         // WORKSPACE name (the unique single-segment filename written into the
         // run container). Unnamed inline files derive a display name from their
         // field (array entries get an index suffix). `assignWorkspaceNames`
         // then deterministically resolves any display-name collision so two
-        // documents never overwrite each other on disk — `report.pdf`,
-        // `report-2.pdf`, … The ordered list [uploads, inline, documents] is
+        // files never overwrite each other on disk — `report.pdf`,
+        // `report-2.pdf`, … The ordered list [uploads, inline, files] is
         // the single source of truth for provisioning, the manifest, and the
-        // prompt path (see run-document-naming.ts).
+        // prompt path (see run-file-naming.ts).
         const uploadDisplayNames = resolved.map(({ id }) => metas.get(id)!.name);
         const inlineDisplayNames = inline.map(({ ref, file }, i) => {
           if (file.name) return file.name;
@@ -778,26 +780,27 @@ export async function parseRequestInput(
           const suffix = ref.index !== undefined ? `-${ref.index}` : "";
           return `${ref.fieldName}${suffix}.${ext}`;
         });
-        const documentDisplayNames = resolvedDocs.map(({ doc }) => doc.name);
+        const fileDisplayNames = resolvedDocs.map(({ doc }) => doc.name);
         const workspaceNames = assignWorkspaceNames([
           ...uploadDisplayNames,
           ...inlineDisplayNames,
-          ...documentDisplayNames,
+          ...fileDisplayNames,
         ]);
         const uploadWorkspaceNames = workspaceNames.slice(0, resolved.length);
         const inlineWorkspaceNames = workspaceNames.slice(
           resolved.length,
           resolved.length + inline.length,
         );
-        const documentWorkspaceNames = workspaceNames.slice(resolved.length + inline.length);
+        const fileWorkspaceNames = workspaceNames.slice(resolved.length + inline.length);
         // Storage keys for rollback — the workspace names are the on-disk /
-        // object-store segments (`{runId}/documents/<workspaceName>`).
-        docNames = workspaceNames;
+        // object-store segments (`{runId}/files/<workspaceName>` — see
+        // `runWorkspaceFileKey`, whose `files/` segment is storage layout, not vocabulary).
+        fileNames = workspaceNames;
 
         // Stream each upload straight from the uploads bucket into the run
         // workspace — validating size + MIME on the fly — so the platform never
-        // buffers a whole document in memory. Bounded concurrency keeps the
-        // streaming memory floor flat regardless of document count.
+        // buffers a whole file in memory. Bounded concurrency keeps the
+        // streaming memory floor flat regardless of file count.
         const consumed = await mapWithConcurrency(
           resolved,
           DOC_STREAM_CONCURRENCY,
@@ -809,48 +812,44 @@ export async function parseRequestInput(
             // `.fileType` once the head has been read — available after the pipe
             // drains. The counting passthrough yields the size the size-check
             // (and manifest) needs.
-            const meta = await consumeUploadStream(
-              id,
-              { orgId, applicationId, actor },
-              async (src) => {
-                const detection = await fileTypeStream(src);
-                let bytes = 0;
-                // Hash the streamed bytes too, so consume can compare against a
-                // client-declared upload sha256 and reject a mismatch at this
-                // FIRST consume (fails fast, before the run is created).
-                const hasher = new Bun.CryptoHasher("sha256");
-                const counter = new TransformStream<Uint8Array, Uint8Array>({
-                  transform(chunk, controller) {
-                    bytes += chunk.byteLength;
-                    // Abort the moment the stream overshoots the declared size,
-                    // rather than copying a declared-small / uploaded-huge object
-                    // into the run workspace in full just to delete it after the
-                    // post-drain size check. Errors the stream → the S3 multipart
-                    // upload aborts (or the FS write stops) → consume releases the
-                    // claim and the run workspace is rolled back. The post-drain
-                    // `bytes === size` check in consume still catches the
-                    // under-size case (and is the correctness backstop for any
-                    // sink that does not abort early).
-                    if (bytes > declaredSize) {
-                      controller.error(
-                        invalidRequest(
-                          `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
-                        ),
-                      );
-                      return;
-                    }
-                    hasher.update(chunk);
-                    controller.enqueue(chunk);
-                  },
-                });
-                await streamRunDocument(runId, docName, detection.pipeThrough(counter));
-                return {
-                  bytes,
-                  sniffedMime: detection.fileType?.mime,
-                  sha256: hasher.digest("hex"),
-                };
-              },
-            );
+            const meta = await consumeUploadStream(id, { orgId, spaceId, actor }, async (src) => {
+              const detection = await fileTypeStream(src);
+              let bytes = 0;
+              // Hash the streamed bytes too, so consume can compare against a
+              // client-declared upload sha256 and reject a mismatch at this
+              // FIRST consume (fails fast, before the run is created).
+              const hasher = new Bun.CryptoHasher("sha256");
+              const counter = new TransformStream<Uint8Array, Uint8Array>({
+                transform(chunk, controller) {
+                  bytes += chunk.byteLength;
+                  // Abort the moment the stream overshoots the declared size,
+                  // rather than copying a declared-small / uploaded-huge object
+                  // into the run workspace in full just to delete it after the
+                  // post-drain size check. Errors the stream → the S3 multipart
+                  // upload aborts (or the FS write stops) → consume releases the
+                  // claim and the run workspace is rolled back. The post-drain
+                  // `bytes === size` check in consume still catches the
+                  // under-size case (and is the correctness backstop for any
+                  // sink that does not abort early).
+                  if (bytes > declaredSize) {
+                    controller.error(
+                      invalidRequest(
+                        `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
+                      ),
+                    );
+                    return;
+                  }
+                  hasher.update(chunk);
+                  controller.enqueue(chunk);
+                },
+              });
+              await streamRunFile(runId, docName, detection.pipeThrough(counter));
+              return {
+                bytes,
+                sniffedMime: detection.fileType?.mime,
+                sha256: hasher.digest("hex"),
+              };
+            });
             return {
               fieldName: ref.fieldName,
               name: meta.name,
@@ -867,7 +866,7 @@ export async function parseRequestInput(
         for (let i = 0; i < inline.length; i++) {
           const { ref, file } = inline[i]!;
           const docName = inlineWorkspaceNames[i]!;
-          await streamRunDocument(runId, docName, new Blob([file.bytes]).stream());
+          await streamRunFile(runId, docName, new Blob([file.bytes]).stream());
           inlined.push({
             fieldName: ref.fieldName,
             name: inlineDisplayNames[i]!,
@@ -877,25 +876,25 @@ export async function parseRequestInput(
           });
         }
 
-        // Stream each `document://` reference straight from the durable
-        // documents bucket into the run workspace (same path as uploads — the
-        // runtime is unchanged). No re-materialization: the document already
+        // Stream each `appfile://` reference straight from the durable
+        // files bucket into the run workspace (same path as uploads — the
+        // runtime is unchanged). No re-materialization: the file already
         // exists and its bytes were validated when it was created.
         //
         // Same bounded concurrency as the upload pass above, and for the same
         // reason: each copy is store-bound, so a sequential loop paid the full
-        // round-trip once per referenced document while the memory floor stayed
+        // round-trip once per referenced file while the memory floor stayed
         // flat either way. `mapWithConcurrency` preserves input order in its
         // result and aborts the remaining items on the first failure, so the
         // rollback path below is unchanged.
-        const documentFiles: FileReference[] = await mapWithConcurrency(
+        const uriFiles: FileReference[] = await mapWithConcurrency(
           resolvedDocs,
           DOC_STREAM_CONCURRENCY,
           async ({ ref, doc }, j) => {
-            const docName = documentWorkspaceNames[j]!;
-            const src = await streamDocumentContent(doc.storageKey);
-            if (!src) throw notFound(`Document '${doc.id}' content is missing`);
-            await streamRunDocument(runId, docName, src);
+            const docName = fileWorkspaceNames[j]!;
+            const src = await streamFileContent(doc.storageKey);
+            if (!src) throw notFound(`File '${doc.id}' content is missing`);
+            await streamRunFile(runId, docName, src);
             return {
               fieldName: ref.fieldName,
               name: doc.name,
@@ -921,27 +920,27 @@ export async function parseRequestInput(
         }
 
         // Materialization (D1): each consumed upload becomes a durable
-        // `documents` row. Mint the id now, rewrite the persisted input value
-        // `upload://upl_x` → `document://doc_y` (durable source of truth — a
-        // rerun re-resolves the document, no upload retention window needed),
+        // `files` row. Mint the id now, rewrite the persisted input value
+        // `upload://upl_x` → `appfile://file_y` (durable source of truth — a
+        // rerun re-resolves the file, no upload retention window needed),
         // and defer the row insert to `prepareAndExecuteRun` (after `createRun`,
-        // because `documents.run_id` is a hard FK).
-        pendingDocuments = resolved.map(({ ref, id }) => {
-          const documentId = prefixedId("doc");
-          const uri = documentUri(documentId);
+        // because `files.run_id` is a hard FK).
+        pendingFiles = resolved.map(({ ref, id }) => {
+          const fileId = prefixedId("file");
+          const uri = fileUri(fileId);
           if (ref.index === undefined) {
             input[ref.fieldName] = uri;
           } else {
             (input[ref.fieldName] as unknown[])[ref.index] = uri;
           }
-          return { uploadId: id, documentId };
+          return { uploadId: id, fileId };
         });
 
-        // Write the documents manifest once every document has streamed — it
+        // Write the files manifest once every file has streamed — it
         // doubles as the agent's enumeration index and the run-workspace
         // deletion index on teardown.
-        const allFiles = [...consumed, ...inlined, ...documentFiles];
-        await writeRunDocumentsManifest(
+        const allFiles = [...consumed, ...inlined, ...uriFiles];
+        await writeRunFilesManifest(
           runId,
           allFiles.map((d) => ({ name: d.name, workspace_name: d.workspaceName, size: d.size })),
         );
@@ -950,70 +949,23 @@ export async function parseRequestInput(
       }
 
       // Validate the JSON input shape — once, whether or not the run carries
-      // documents. A failure here still rolls back any streamed documents.
+      // files. A failure here still rolls back any streamed files.
       assertInputValid(input, inputSchema);
     } catch (err) {
-      if (docNames.length > 0) await deleteRunDocuments(runId, docNames);
+      if (fileNames.length > 0) await deleteRunFiles(runId, fileNames);
       throw err;
     }
   }
 
-  // `config` in the body is a partial override that is *deep-merged* with
-  // `application_packages.config` by the run route. We pass it through as
-  // an opaque object — validation against the manifest schema runs after
-  // the merge so a client can omit keys the persisted state already
-  // satisfies.
-  //
-  // Reject `null` explicitly: at top-level the merge short-circuits on a
-  // falsy override (`null` would silently inherit defaults) which conflicts
-  // with the schedule-update semantics where `null` clears the override.
-  // Force callers to pick: omit `config` to inherit defaults, send `{}` for
-  // an explicit empty override, send a populated object for a real override.
-  if (
-    body.config !== undefined &&
-    (body.config === null || typeof body.config !== "object" || Array.isArray(body.config))
-  ) {
-    throw invalidRequest(
-      "`config` must be a JSON object — omit the field to inherit persisted defaults",
-      "config",
-    );
-  }
-
-  // `connection_overrides` shape guard. Flat map: integrationId → connectionId.
-  // Invalid bodies produce a 400 with a precise param so the picker UI can
-  // highlight the offender.
-  if (body.connection_overrides !== undefined) {
-    if (
-      body.connection_overrides === null ||
-      typeof body.connection_overrides !== "object" ||
-      Array.isArray(body.connection_overrides)
-    ) {
-      throw invalidRequest("`connection_overrides` must be a JSON object", "connection_overrides");
-    }
-    for (const [intId, connId] of Object.entries(body.connection_overrides)) {
-      if (typeof connId !== "string" || connId.length === 0) {
-        throw invalidRequest(
-          `\`connection_overrides["${intId}"]\` must be a non-empty connection id`,
-          `connection_overrides.${intId}`,
-        );
-      }
-    }
-  }
-
-  // `dependency_overrides` shape + value guard (#666). Flat map:
-  // packageId → "draft" | "<semver|dist-tag>". Each value must be a valid
-  // run-scoped override so a typo'd pin 400s here instead of silently doing
-  // nothing — the per-dependency analogue of the `connection_overrides` gate.
+  // `dependency_overrides` VALUE guard (#666). Flat map:
+  // packageId → "draft" | "<semver|dist-tag>". The map shape (object of
+  // strings) is already guaranteed by the calling surface's schema; what a
+  // shape check cannot express is whether each value is a resolvable
+  // run-scoped override, so a typo'd pin 400s here instead of silently doing
+  // nothing.
   if (body.dependency_overrides !== undefined) {
-    if (
-      body.dependency_overrides === null ||
-      typeof body.dependency_overrides !== "object" ||
-      Array.isArray(body.dependency_overrides)
-    ) {
-      throw invalidRequest("`dependency_overrides` must be a JSON object", "dependency_overrides");
-    }
     for (const [depId, spec] of Object.entries(body.dependency_overrides)) {
-      if (typeof spec !== "string" || !isValidDependencyOverride(spec)) {
+      if (!isValidDependencyOverride(spec)) {
         throw invalidRequest(
           `\`dependency_overrides["${depId}"]\` must be "draft" or a valid version spec (semver range or dist-tag)`,
           `dependency_overrides.${depId}`,
@@ -1031,16 +983,12 @@ export async function parseRequestInput(
       ? body.dependency_overrides
       : undefined;
 
-  const generationResult = modelGenerationSettingsSchema.safeParse(body.generation ?? {});
-  if (!generationResult.success) {
-    throw invalidRequest(
-      `Invalid generation settings: ${generationResult.error.issues[0]?.message ?? "validation failed"}`,
-      "generation",
-    );
-  }
+  // `generation` is validated by the calling surface's schema (both launch
+  // surfaces parse it with `modelGenerationSettingsSchema`); an all-empty
+  // object carries no override and collapses to `undefined`.
   const generationConfigOverride =
-    body.generation !== undefined && Object.keys(generationResult.data).length > 0
-      ? generationResult.data
+    body.generation !== undefined && Object.keys(body.generation).length > 0
+      ? body.generation
       : undefined;
 
   // An effectively-empty input (no fields, no files) carries no information —
@@ -1050,19 +998,20 @@ export async function parseRequestInput(
   // for a `rerun_from` replay of an already-empty input too: replaying nothing
   // means the same thing. No reader distinguishes `{}` from NULL — the prompt
   // builder normalizes both to `{}` (run-context-builder), the run DTO hides
-  // the input card for both (run-info-tab), and `resolveRerunInput` coalesces
+  // the input card for both (run-execution-tab), and `resolveRerunInput` coalesces
   // NULL back to `{}` on the next replay.
   const normalizedInput = Object.keys(input).length > 0 ? input : undefined;
 
   return {
     input: normalizedInput,
     uploadedFiles: uploadedFiles.length > 0 ? uploadedFiles : undefined,
-    pendingDocuments: pendingDocuments.length > 0 ? pendingDocuments : undefined,
-    consumedDocumentIds: consumedDocumentIds.length > 0 ? consumedDocumentIds : undefined,
-    modelIdOverride: body.modelId,
+    pendingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
+    consumedFileIds: consumedFileIds.length > 0 ? consumedFileIds : undefined,
+    // `?? undefined` normalises the inline surface's nullable form (`null` ==
+    // "no override") onto the one representation every consumer reads.
+    modelIdOverride: body.modelId ?? undefined,
     generationConfigOverride,
-    proxyIdOverride: body.proxyId,
-    configOverride: body.config,
+    proxyIdOverride: body.proxyId ?? undefined,
     connectionOverrides: body.connection_overrides,
     dependencyOverrides,
   };

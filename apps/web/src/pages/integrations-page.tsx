@@ -227,7 +227,7 @@ function CataloguePanel({
 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { data, isLoading, error } = useAllIntegrations();
   const location = useLocation();
   const navigate = useNavigate();
@@ -236,7 +236,7 @@ export function IntegrationsPage() {
   const setView = useIntegrationViewStore((state) => state.setView);
   const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const creation = useCreationHandoff("integration", isAdmin);
+  const creation = useCreationHandoff("integration", can("integrations:read"));
 
   const statuses = list.values("status", INTEGRATION_STATUSES);
   const origins = list.values("origin", INTEGRATION_ORIGINS);
@@ -324,7 +324,7 @@ export function IntegrationsPage() {
               <LibraryBig />
               {t("integrations.catalogue.browse")}
             </DropdownMenuItem>
-            {isAdmin && (
+            {can("integrations:read") && (
               <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
                 <Plus />
                 {t("integrations.create")}

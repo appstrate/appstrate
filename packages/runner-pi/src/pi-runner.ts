@@ -34,16 +34,18 @@ import {
   type Api,
   type KnownApi,
   type Model,
+  type PiSdkAgentSessionEvent,
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
+import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
-  anthropicReasoningBudgetTokens,
-  type ModelNativeReasoningLevel,
+  anthropicThinkingBudgets,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
+import { classifyModelError } from "@appstrate/core/model-error";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildError,
@@ -56,11 +58,9 @@ import {
   finalizeThrownFailure,
   reduceEvents,
   truncateToolResult,
-  toolResultByteLimit,
   zeroTokenUsage,
   type RunError,
   type RunOptions,
-  type Runner,
   type RunResult,
   type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
@@ -68,42 +68,68 @@ import {
 /**
  * Pi model configuration. Mirrors the Pi SDK's `Model<Api>` shape so
  * callers familiar with the Pi ecosystem get a drop-in fit; kept as its
- * own alias so we can evolve the Runner contract without tracking every
+ * own alias so we can evolve the runner contract without tracking every
  * Pi SDK type move.
  */
 export type PiModelConfig = Model<Api>;
 
 /**
- * Pi treats `xhigh` as unsupported unless a model-level mapping exists and
- * silently clamps it to `high`. Appstrate's catalog deliberately permits
- * unknown capabilities so the provider can remain the final authority; add a
- * pass-through mapping when no explicit model mapping exists so an attempted
- * xhigh request reaches the provider instead of being silently weakened.
+ * The two levels Pi refuses to consider supported without an explicit
+ * per-model mapping: `getSupportedThinkingLevels` (`pi-ai/models.js`) admits
+ * `off`…`high` for any reasoning model but requires
+ * `thinkingLevelMap[level] !== undefined` for these two, and
+ * `AgentSession` clamps an unsupported request DOWN (`agent-session.js` →
+ * `clampThinkingLevel`).
+ */
+const LEVELS_NEEDING_EXPLICIT_MAP = ["xhigh", "max"] as const;
+
+function needsExplicitMap(
+  level: ModelReasoningLevel,
+): level is (typeof LEVELS_NEEDING_EXPLICIT_MAP)[number] {
+  return (LEVELS_NEEDING_EXPLICIT_MAP as readonly string[]).includes(level);
+}
+
+/**
+ * Keep a top-end thinking request intact instead of letting Pi silently
+ * weaken it.
+ *
+ * Appstrate's catalog deliberately permits unknown capabilities so the
+ * provider stays the final authority. Pi's default is the opposite for
+ * {@link LEVELS_NEEDING_EXPLICIT_MAP}: absent a mapping it clamps down. A
+ * pass-through entry (`xhigh → "xhigh"`, `max → "max"`) restores the platform's
+ * intent — the request reaches the provider, which answers for itself.
+ *
+ * Two cases are left alone, both deliberate:
+ *  - an explicit native mapping (`max → "high"`): the catalog already answered.
+ *  - an explicit refusal (`max → null`): the catalog says the model cannot do
+ *    it, so Pi's clamp is the correct outcome — forcing a pass-through here
+ *    would override a fact the platform itself published.
  */
 export function preserveRequestedThinkingLevel(
   model: PiModelConfig,
   level: PiRunnerOptions["thinkingLevel"],
 ): PiModelConfig {
-  if (level !== "xhigh" || !model.reasoning || model.thinkingLevelMap?.xhigh !== undefined) {
-    return model;
-  }
+  if (level === undefined || !needsExplicitMap(level) || !model.reasoning) return model;
+  // `?? undefined`-free on purpose: `null` (explicit refusal) is NOT `undefined`
+  // and must fall through to "leave the model alone".
+  if (model.thinkingLevelMap?.[level] !== undefined) return model;
   return {
     ...model,
-    thinkingLevelMap: { ...model.thinkingLevelMap, xhigh: "xhigh" },
+    thinkingLevelMap: { ...model.thinkingLevelMap, [level]: level },
   };
 }
 
-type PiThinkingLevel = Exclude<ModelReasoningLevel, "max">;
-type PiThinkingBudgetLevel = Exclude<PiThinkingLevel, "off" | "xhigh">;
+type PiThinkingBudgetLevel = Exclude<ModelReasoningLevel, "off" | "xhigh" | "max">;
 type PiThinkingBudgets = Partial<Record<PiThinkingBudgetLevel, number>>;
 
 function prepareAnthropicThinkingBudgets(
   model: PiModelConfig,
   level: ModelReasoningLevel,
 ): PiThinkingBudgets | undefined {
-  if (model.api !== "anthropic-messages" || level === "off") return undefined;
-  const piLevel: PiThinkingBudgetLevel = level === "xhigh" || level === "max" ? "high" : level;
-  return { [piLevel]: anthropicReasoningBudgetTokens(level) };
+  if (model.api !== "anthropic-messages") return undefined;
+  // The rule lives in core: the sidecar applies the identical one when it
+  // re-originates an aliased run, whose container never reaches this branch.
+  return anthropicThinkingBudgets(level);
 }
 
 /**
@@ -119,42 +145,38 @@ function prepareProviderBaseUrl(model: PiModelConfig): PiModelConfig {
 }
 
 /**
- * Adapt Appstrate's complete LiteLLM vocabulary to Pi's six-level selector.
- * Pi has no first-class `max` selector, but its `xhigh` slot can map to the
- * provider-native `max` value. Classic Anthropic requests also receive a
- * request-scoped token budget because Pi otherwise clamps both levels to its
- * `high` budget. Models that support both values therefore stay distinct.
+ * Adapt a requested reasoning level to what Pi's session expects.
+ *
+ * Appstrate's portable vocabulary and Pi's `ThinkingLevel`
+ * (`pi-agent-core`: `off | minimal | low | medium | high | xhigh | max`) are
+ * the SAME seven values since Pi 0.84 — the level passes through unchanged.
+ * Two adaptations remain, both about what Pi does with it afterwards:
+ *
+ *  - {@link preserveRequestedThinkingLevel} — stop Pi clamping a top-end
+ *    request away for want of an explicit mapping.
+ *  - {@link prepareAnthropicThinkingBudgets} — classic (non-adaptive)
+ *    Anthropic requests need a request-scoped budget, because Pi's own table
+ *    collapses `xhigh` AND `max` onto its `high` budget
+ *    (`pi-ai/api/simple-options.js` → `clampReasoning`).
+ *
+ * Pre-0.84 this function also routed `max` through Pi's `xhigh` slot, since
+ * `max` did not exist as a selector. It does now; the disguise is gone —
+ * it clobbered the model's own `xhigh` mapping for the duration of the turn,
+ * which the adaptive-Anthropic path reads back (`mapThinkingLevelToEffort`).
  */
 export function prepareRequestedThinkingLevel(
   model: PiModelConfig,
   level: ModelReasoningLevel,
 ): {
   model: PiModelConfig;
-  thinkingLevel: PiThinkingLevel;
+  thinkingLevel: ModelReasoningLevel;
   thinkingBudgets?: PiThinkingBudgets;
 } {
   const preparedModel = prepareProviderBaseUrl(model);
   const thinkingBudgets = prepareAnthropicThinkingBudgets(preparedModel, level);
-  if (level !== "max") {
-    return {
-      model: preserveRequestedThinkingLevel(preparedModel, level),
-      thinkingLevel: level,
-      ...(thinkingBudgets ? { thinkingBudgets } : {}),
-    };
-  }
-
-  const levelMap = preparedModel.thinkingLevelMap as
-    Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel | null>> | undefined;
-  const nativeLevel = levelMap?.max ?? "max";
   return {
-    model: {
-      ...preparedModel,
-      thinkingLevelMap: {
-        ...preparedModel.thinkingLevelMap,
-        xhigh: nativeLevel,
-      } as PiModelConfig["thinkingLevelMap"],
-    },
-    thinkingLevel: "xhigh",
+    model: preserveRequestedThinkingLevel(preparedModel, level),
+    thinkingLevel: level,
     ...(thinkingBudgets ? { thinkingBudgets } : {}),
   };
 }
@@ -166,12 +188,25 @@ export function prepareRequestedThinkingLevel(
  * deliberately refuses it. Appstrate already resolves and refreshes that
  * OAuth bearer outside Pi; a process-local provider overlay exposes the token
  * as request auth without persisting it or replacing Codex's native serializer.
+ *
+ * {@link ALIAS_PI_PROVIDER_KEY} needs `registerProvider` for a different
+ * reason: `setRuntimeApiKey` only overlays an EXISTING provider, so a canonical
+ * key pi knows no vendor for is dropped and `prepareRequest` later throws.
  */
 export async function setPiRuntimeCredential(
   modelRuntime: ModelRuntime,
   provider: string,
   apiKey: string,
 ): Promise<void> {
+  if (provider === ALIAS_PI_PROVIDER_KEY) {
+    // Provider-config headers are the only ones `pi-messages` puts on the wire.
+    // Alias-only: this header must never reach `openai-codex`.
+    modelRuntime.registerProvider(provider, {
+      apiKey,
+      headers: { [PI_SDK_VERSION_HEADER]: PI_SDK_VERSION },
+    });
+    return;
+  }
   if (provider === "openai-codex") {
     modelRuntime.registerProvider(provider, { apiKey });
     return;
@@ -182,11 +217,14 @@ export async function setPiRuntimeCredential(
 export interface PiRunnerOptions {
   /** LLM model configuration passed to the Pi SDK. Required. */
   model: PiModelConfig;
-  /**
-   * LLM API key. Registered on a {@link ModelRuntime} under `model.provider`.
-   * Callers can also pass a pre-built `modelRuntime` to wire multi-provider auth.
-   */
+  /** LLM API key. Registered on the runner's {@link ModelRuntime} under `model.provider`. */
   apiKey?: string;
+  /**
+   * No per-token rates for {@link model}; its zero rates are a placeholder the
+   * Pi SDK's required `Model.cost` forced, so the runner omits cost entirely
+   * rather than reporting a fabricated `0`. Token counts are unaffected.
+   */
+  unpriced?: boolean;
   /**
    * Agent's system prompt. This is the static instruction Pi SDK stores
    * on every session; in Appstrate it is the full enriched prompt built
@@ -207,20 +245,14 @@ export interface PiRunnerOptions {
   /** Directory Pi SDK uses for per-session scratch. Defaults to `/tmp/pi-agent`. */
   agentDir?: string;
   /**
-   * Tool extension factories to load into the Pi SDK session. The AFPS
-   * {@link Runner} contract does not mandate where tools come from — in
-   * AFPS tools come from spawned `mcp-server` packages and
-   * integrations; callers map those to Pi extension factories before
-   * constructing the Runner. Default: empty (no extensions).
+   * Tool extension factories to load into the Pi SDK session. AFPS does
+   * not mandate where tools come from — in AFPS tools come from spawned
+   * `mcp-server` packages and integrations; callers map those to Pi
+   * extension factories before constructing the runner. Default: empty
+   * (no extensions).
    */
   extensionFactories?: ExtensionFactory[];
-  /**
-   * Custom {@link ModelRuntime}. When provided, the runner will not
-   * register `apiKey` under a derived provider — callers control all
-   * auth state.
-   */
-  modelRuntime?: ModelRuntime;
-  /** Path where the default credential store persists. Ignored if `modelRuntime` is set. */
+  /** Path where the credential store persists. Defaults to `/tmp/pi-auth/auth.json`. */
   authStoragePath?: string;
   /** Pi SDK thinking level. Defaults to `"medium"`. */
   thinkingLevel?: ModelReasoningLevel;
@@ -271,9 +303,15 @@ const KEEP_RECENT_FRACTION = 0.1;
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * Operators can disable compaction entirely with
- * `MODEL_COMPACTION_ENABLED=false` (mirrors the existing
- * `MODEL_RETRY_ENABLED` pattern) — useful when stacking external
- * compaction middleware. See appstrate#445.
+ * `MODEL_COMPACTION_ENABLED=false`, read from this process's env. Two things
+ * put it there and nothing else does: for a platform-launched run,
+ * `buildRuntimePiEnv`'s `disableModelCompaction` option is the only writer of
+ * the key (`packages/runner-pi/src/container-env.ts`); an embedder driving
+ * `PiRunner` in its own process sets the variable directly. Same plumbing as
+ * `MODEL_RETRY_ENABLED` — which this comment used to claim it mirrored while
+ * the key had no writer at all, so the claim held for the pattern and not for
+ * the wiring. Useful when stacking external compaction middleware. See
+ * appstrate#445.
  *
  * Returns TWO members, and the split is load-bearing. `compaction` is exactly
  * the Pi SDK's `CompactionSettings` and is what gets handed to it. `contextWindow`
@@ -314,18 +352,50 @@ export function derivePiCompactionSettings(
   return { compaction: { enabled: true, reserveTokens, keepRecentTokens }, contextWindow };
 }
 
-// The `MODEL_API` → provider-key map lives in `provider-map.ts` (no Pi SDK
-// import) so boot-critical callers can pull it without dragging this module's
-// SDK graph. Re-exported here so the historical `pi-runner.ts` import path
-// keeps resolving.
-export { PROVIDER_BY_API, deriveProviderFromApi } from "./provider-map.ts";
+/**
+ * Two caps on the SAME provider failure string, because the timeout watchdog
+ * puts it on two channels with very different budgets. Kept adjacent, and the
+ * second derived from the first, so the relationship is structural rather than
+ * two unexplained numbers a reader has to reconcile.
+ *
+ * A provider failure string is data we do not control: an HTML error page or a
+ * JSON stack dump runs to hundreds of KiB, so both channels must be bounded.
+ *
+ * - `UPSTREAM_MESSAGE_MAX_CHARS` bounds the ARCHIVAL copy in
+ *   `RunError.context` — the structured channel, documented as bounded ("sinks
+ *   may truncate large payloads"), which lands in a `run_logs.data` jsonb.
+ *   2000 chars is well past any real provider error.
+ * - `UPSTREAM_SUMMARY_MAX_CHARS` bounds the HUMAN copy appended to
+ *   `RunError.message` — a tenth of the archival budget, because that channel
+ *   is ONE line of a log-viewer row and the `runs.error` text column, not an
+ *   archive. The full-length copy always remains in `context.upstream.message`,
+ *   so tightening this loses nothing.
+ */
+const UPSTREAM_MESSAGE_MAX_CHARS = 2000;
+const UPSTREAM_SUMMARY_MAX_CHARS = UPSTREAM_MESSAGE_MAX_CHARS / 10;
+
+/**
+ * Collapse a provider failure string to ONE bounded line for the human
+ * channel. The collapse is not cosmetic: the log viewer renders a row's
+ * message with `whitespace-pre-wrap` (apps/web/src/components/log-viewer.tsx),
+ * so an embedded newline becomes a real line break — a multi-line JSON error
+ * body would turn one log row into forty — and the viewer's copy/export path
+ * joins entries by line, which a multi-line message would desynchronise.
+ * Collapsing runs of whitespace (not just newlines) also strips the indentation
+ * of a pretty-printed JSON body, which is what makes 200 chars enough to carry
+ * the meaningful part. Collapse BEFORE slicing so the cap counts visible
+ * characters rather than indentation.
+ */
+function summarizeUpstreamMessage(message: string): string {
+  return message.replace(/\s+/g, " ").trim().slice(0, UPSTREAM_SUMMARY_MAX_CHARS).trimEnd();
+}
 
 // Compile error if appstrate ever declares an apiShape Pi does not know.
 type _ApiShapeSubsetOfPi = ModelApiShape extends KnownApi ? true : never;
 const _assertApiShapeSubsetOfPi: _ApiShapeSubsetOfPi = true;
 void _assertApiShapeSubsetOfPi;
 
-export class PiRunner implements Runner {
+export class PiRunner {
   readonly name = "pi-runner";
 
   protected readonly opts: PiRunnerOptions;
@@ -430,10 +500,55 @@ export class PiRunner implements Runner {
           eventSink,
           usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
           terminalStatus: "timeout",
-          buildError: () => ({
-            code: "timeout",
-            message: `Run timed out after ${timeoutSeconds}s`,
-          }),
+          buildError: () => {
+            // The watchdog knows only that the budget ran out; the BRIDGE
+            // knows why the run was making no headway. Ask it for the last
+            // failed model turn so a run that spent its whole budget on
+            // provider 503s stops finalizing as a bare `timeout` with no
+            // cause the user can act on. Deliberately NOT `getTerminalError()`:
+            // that is the verdict on the FINAL turn and returns undefined for
+            // exactly the shape seen here — a run cut off mid-retry-loop,
+            // whose last turn never settled into a terminal error.
+            const upstream = bridge?.getLastUpstreamError();
+            // The cause has to travel the HUMAN channel too, not just
+            // `context`. `RunError.message` is the only field that reaches
+            // both the `runs.error` text column and the log viewer without a
+            // schema migration — `context` is durable (it rides the
+            // `appstrate.error` event into `run_logs.data`) but nothing on
+            // screen projects an unknown `data` key, so a cause carried only
+            // there leaves the user reading a bare "timed out" exactly as
+            // before. The existing sentence stays as the PREFIX, verbatim:
+            // it is the run's own verdict and readers may match on it, so a
+            // run with no upstream cause produces a byte-identical message.
+            // The wording names the provider explicitly so a non-expert reads
+            // "something upstream broke", not "my agent is buggy".
+            const cause = upstream
+              ? ` — the model provider returned an error during the run: ${summarizeUpstreamMessage(upstream.message)}`
+              : "";
+            return {
+              // Unchanged on purpose: `timeout` is the documented stable
+              // branch key sinks and webhooks match on. The cause is additive
+              // supplementary data, never a new code.
+              code: "timeout",
+              message: `Run timed out after ${timeoutSeconds}s${cause}`,
+              // Omitted ENTIRELY when no turn ever errored — an empty
+              // `context` would read as "we looked upstream and it was fine",
+              // which is not what "we never saw a failed turn" means. Keys
+              // inside `context` are snake_case: this is data on the wire (it
+              // rides the finalize body and the `appstrate.error` event into a
+              // `run_logs.data` jsonb), not a TS-internal shape.
+              ...(upstream
+                ? {
+                    context: {
+                      upstream: {
+                        stop_reason: upstream.stopReason,
+                        message: upstream.message.slice(0, UPSTREAM_MESSAGE_MAX_CHARS),
+                      },
+                    },
+                  }
+                : {}),
+            };
+          },
           stamp: (result) => {
             if (bridge) result.cost = bridge.getCost();
             result.durationMs = Date.now() - runStart;
@@ -538,30 +653,28 @@ export class PiRunner implements Runner {
       SettingsManager,
     } = await loadPiCodingAgentSdk();
 
-    const modelRuntime =
-      this.opts.modelRuntime ??
-      (await ModelRuntime.create({
-        authPath: this.opts.authStoragePath ?? "/tmp/pi-auth/auth.json",
-        modelsPath: null,
-        allowModelNetwork: false,
-      }));
-    if (!this.opts.modelRuntime && apiKey) {
+    const modelRuntime = await ModelRuntime.create({
+      authPath: this.opts.authStoragePath ?? "/tmp/pi-auth/auth.json",
+      modelsPath: null,
+      allowModelNetwork: false,
+    });
+    if (apiKey) {
       // `model.provider` is the Pi SDK's credential key the SDK resolves
       // credentials against; register the key under the same value.
       await setPiRuntimeCredential(modelRuntime, model.provider, apiKey);
-    } else if (!this.opts.modelRuntime && !apiKey) {
-      // No injected ModelRuntime AND no runtime key — the SDK will call the
-      // provider unauthenticated and 401/retry silently (the platform's
-      // kickoff fail-fast should prevent this, so reaching here means a
-      // run bypassed that guard). Surface a line on the surprising path.
-      // runner-pi intentionally avoids a logger dep — same console.error
-      // JSON convention as the compaction-wait + sink-heartbeat paths.
-      console.error(
-        JSON.stringify({
+    } else {
+      // No runtime key — the SDK will call the provider unauthenticated and
+      // 401/retry silently (the platform's kickoff fail-fast should prevent
+      // this, so reaching here means a run bypassed that guard). Surface a
+      // line on the surprising path.
+      // runner-pi intentionally avoids a logger dep — same JSON-line-on-stderr
+      // convention as the compaction-wait + sink-heartbeat paths.
+      process.stderr.write(
+        `${JSON.stringify({
           level: "warn",
           msg: "[pi-runner] no API key for model — provider calls will be unauthenticated",
           provider: model.provider,
-        }),
+        })}\n`,
       );
     }
 
@@ -609,9 +722,17 @@ export class PiRunner implements Runner {
         // `server_error`, which the Codex/Responses adapter surfaces as a
         // failed turn. 4 attempts (was 2) rides out the short upstream
         // blips that 2 retries occasionally exhausted, before the agent
-        // loop has to self-recover. Operators can opt out by setting
-        // `MODEL_RETRY_ENABLED=false` on the runtime env when stacking
-        // external retry middleware.
+        // loop has to self-recover.
+        //
+        // The opt-out is `MODEL_RETRY_ENABLED=false` in THIS process's env.
+        // Two things put it there, and nothing else does: for a
+        // platform-launched run, `buildRuntimePiEnv`'s `disableModelRetry`
+        // option is the only writer of the key
+        // (`packages/runner-pi/src/container-env.ts`); an embedder driving
+        // `PiRunner` in its own process sets the variable directly. Worth
+        // reaching for when an outer layer already retries — the sidecar's
+        // aliased `/llm` path does, `ALIAS_UPSTREAM_MAX_RETRIES` attempts
+        // per call, which multiplies with this one rather than replacing it.
         retry:
           process.env.MODEL_RETRY_ENABLED === "false"
             ? { enabled: false }
@@ -627,6 +748,7 @@ export class PiRunner implements Runner {
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
       contextWindow: budget.contextWindow,
+      ...(this.opts.unpriced ? { unpriced: true } : {}),
       // Early-stop: abort the SDK loop as soon as a terminal tool has
       // executed successfully. `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
@@ -702,7 +824,7 @@ export class PiRunner implements Runner {
     // the compaction LLM call has a chance to start, and the next run
     // turn re-encounters the same prompt-too-long 400. Polling
     // `isCompacting` here lets that recovery actually drain.
-    await waitForCompactionToSettle(session as unknown as { isCompacting?: boolean }, signal);
+    await waitForCompactionToSettle(session, signal);
   }
 }
 
@@ -736,7 +858,7 @@ const OUTPUT_REPROMPT_EVENT = "output_reprompt";
  * and already paid for; it is not research.
  *
  * Everything else stays out: no `bash`, no `edit`/`write`, no
- * `publish_document`, no memory write, no integration tool.
+ * `publish_file`, no memory write, no integration tool.
  */
 const OUTPUT_REPROMPT_TOOLS = [OUTPUT_TERMINAL_TOOL, "read"];
 
@@ -749,6 +871,15 @@ const OUTPUT_REPROMPT_INSTRUCTION =
   "yourself (your `outputs/` directory) if their contents are no longer in " +
   "context; do not call any other tool, do not research anything new, and do not " +
   "reply with plain text.";
+
+/**
+ * `run_logs` event name carried in the compaction breadcrumb's `data`, so the
+ * hidden cost of auto-compaction is queryable rather than inferred
+ * (`SELECT count(*), sum((data->>'outputTokens')::int) FROM run_logs WHERE
+ * data->>'event' = 'compaction'`). Mirrors the `output_reprompt` /
+ * `deadline_nudge` discriminators.
+ */
+const COMPACTION_EVENT = "compaction";
 
 /** Minimal Pi SDK session surface needed to issue the corrective turn. */
 export interface PromptableSession {
@@ -967,11 +1098,10 @@ const COMPACTION_POLL_INTERVAL_MS = 100;
  * @internal
  */
 export async function waitForCompactionToSettle(
-  session: { isCompacting?: boolean },
+  session: { isCompacting: boolean },
   signal?: AbortSignal,
   options: { timeoutMs?: number; pollIntervalMs?: number } = {},
 ): Promise<void> {
-  if (typeof session.isCompacting !== "boolean") return; // SDK older than 0.70 — best-effort no-op.
   if (!session.isCompacting) return;
   const timeoutMs = options.timeoutMs ?? COMPACTION_WAIT_TIMEOUT_MS;
   const pollMs = options.pollIntervalMs ?? COMPACTION_POLL_INTERVAL_MS;
@@ -981,14 +1111,14 @@ export async function waitForCompactionToSettle(
     if (Date.now() >= deadline) {
       // Only surface a line on the surprising path — happy-path
       // compactions resolve silently. runner-pi intentionally avoids
-      // a logger dep, so the existing console.error convention from
-      // sink-heartbeat applies.
-      console.error(
-        JSON.stringify({
+      // a logger dep, so the existing JSON-line-on-stderr convention
+      // from sink-heartbeat applies.
+      process.stderr.write(
+        `${JSON.stringify({
           level: "warn",
           msg: "[pi-runner] compaction wait timed out",
           timeoutMs,
-        }),
+        })}\n`,
       );
       return;
     }
@@ -1024,8 +1154,11 @@ export interface SessionBridgeHandle {
   readonly terminalToolCompleted: boolean;
   /** Snapshot of token usage accumulated across the session so far. */
   getUsage(): TokenUsage;
-  /** Snapshot of total LLM cost in USD accumulated across the session so far. */
-  getCost(): number;
+  /**
+   * Snapshot of total LLM cost in USD accumulated so far, or `undefined` on an
+   * {@link SessionBridgeOptions.unpriced} session (the total is placeholder zeros).
+   */
+  getCost(): number | undefined;
   /**
    * Wait until every fire-and-forget `sink.emit(event)` dispatched from
    * the Pi SDK subscribe callback has settled. The Pi SDK callback runs
@@ -1049,6 +1182,21 @@ export interface SessionBridgeHandle {
    * `RunResult.status`.
    */
   getTerminalError(): RunError | undefined;
+  /**
+   * The last assistant turn that FAILED at ANY point in the run — not
+   * necessarily the final one — or `undefined` if none ever did.
+   *
+   * Deliberately distinct from {@link getTerminalError}, and the two answer
+   * different questions. That one is the terminal VERDICT on the FINAL turn:
+   * an errored turn the agent later recovered from is invisible to it, and
+   * must be, because the run went on to succeed. This one survives that
+   * recovery. It exists for the paths that cut the run off BEFORE it can
+   * settle into a verdict — the wall-clock watchdog above all, where the loop
+   * may have burnt the whole budget retrying provider 503s and the turn it
+   * happened to be mid-way through says nothing at all. Without it such a run
+   * finalizes as a bare `timeout` carrying zero cause.
+   */
+  getLastUpstreamError(): { stopReason: string; message: string } | undefined;
 }
 
 /**
@@ -1072,6 +1220,7 @@ export interface BridgeableSession {
  *   - `message_end`    (stopReason=error)      → `appstrate.error`
  *   - `tool_execution_start`                   → `appstrate.progress` + data { tool, args }
  *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError, durationMs? }
+ *   - `compaction_end` (summarisation usage)   → `appstrate.progress` + data { event: "compaction", … } + `appstrate.metric`
  *   - `agent_end` (last turn usage aggregate)  → `appstrate.metric`
  *
  * The bridge deliberately does NOT forward `message_update` / `text_delta`
@@ -1093,6 +1242,29 @@ interface PiUsage {
   cacheWrite?: number;
   cost?: { total?: number };
 }
+
+/**
+ * Project Pi's legacy `{ input, output, cacheRead, cacheWrite }` counters onto
+ * the canonical snake_case {@link TokenUsage}, so every downstream emit — and
+ * the platform's server-side cost recompute — reads the same four numbers.
+ *
+ * Exported for `apps/api/test/unit/runner-cost-parity.test.ts`, which pins that
+ * recompute against pi-ai's own `calculateCost`. The two cache buckets are
+ * priced an order of magnitude apart (3.75 vs 0.30 USD/Mtok at Claude-class
+ * rates), so crossing them here re-prices every platform run — and a parity
+ * test carrying its own copy of this mapping would agree with itself either
+ * way. NOT re-exported from `index.ts`: nothing outside this package imports
+ * it, and the barrel there lists only what does.
+ */
+export function toReportedUsage(usage: PiUsage): TokenUsage {
+  return {
+    input_tokens: usage.input ?? 0,
+    output_tokens: usage.output ?? 0,
+    cache_creation_input_tokens: usage.cacheWrite ?? 0,
+    cache_read_input_tokens: usage.cacheRead ?? 0,
+  };
+}
+
 interface PiTextContent {
   type: "text";
   text?: string;
@@ -1120,6 +1292,61 @@ interface PiToolExecutionStartEvent {
   toolCallId?: string;
   args?: unknown;
 }
+/**
+ * Auto-compaction settled. Its `usage` is the summarisation LLM call — real
+ * spend the run must account for, and the only paid call in a LINEAR Pi
+ * session that never appears as an assistant `message_end`: it is written to a
+ * dedicated `compaction` session entry instead (`agent-session.js` →
+ * `appendCompaction`). Pi's own `getSessionStats()` counts one sibling,
+ * `branch_summary`, which no Appstrate path can produce — branch
+ * summarisation runs only on an explicit tree/branch operation, and both the
+ * runner and the chat drive a single linear session.
+ */
+interface PiCompactionResult {
+  /** Optional on the vendor too: an extension-supplied summary may report none. */
+  usage?: PiUsage;
+  tokensBefore: number;
+  estimatedTokensAfter?: number;
+}
+interface PiCompactionEndEvent {
+  type: "compaction_end";
+  reason: string;
+  aborted: boolean;
+  /** Key always present; `undefined` when the pass was aborted or failed. */
+  result: PiCompactionResult | undefined;
+}
+/**
+ * Compile-time pin: Pi's own `compaction_end` variant must still satisfy
+ * everything {@link installSessionBridge} reads off it. The bridge subscribes
+ * with an untyped callback (the SDK value graph stays behind
+ * `loadPiCodingAgentSdk()`), so nothing else would catch a renamed field —
+ * and a miss here is silent under-accounting, not a crash. Type-only, erased
+ * at runtime. Same idiom as `_assertApiShapeSubsetOfPi` above.
+ *
+ * TWO assertions, because assignability alone is not enough. A structural
+ * check only bites on REQUIRED members: a vendor object that dropped or
+ * renamed an OPTIONAL field still satisfies a view that declares it optional.
+ * `usage` — the whole reason this event is handled — is optional on both
+ * sides, so its key is pinned by name separately.
+ */
+type VendorCompactionEnd = Extract<PiSdkAgentSessionEvent, { type: "compaction_end" }>;
+type VendorCompactionResult = NonNullable<VendorCompactionEnd["result"]>;
+
+type Conforms<Vendor, Ours> = [Vendor] extends [Ours]
+  ? true
+  : { error: "Pi's compaction_end no longer fits the bridge's view"; vendor: Vendor; ours: Ours };
+
+type HasKey<T, K extends string> = K extends keyof T
+  ? true
+  : { error: "Pi's CompactionResult no longer carries this field"; missing: K; vendor: T };
+
+type _CompactionEndConforms = Conforms<VendorCompactionEnd, PiCompactionEndEvent> &
+  HasKey<VendorCompactionResult, "usage"> &
+  HasKey<VendorCompactionResult, "estimatedTokensAfter">;
+
+const _assertCompactionEndConforms: _CompactionEndConforms = true;
+void _assertCompactionEndConforms;
+
 interface PiToolExecutionEndEvent {
   type: "tool_execution_end";
   toolName?: string;
@@ -1133,7 +1360,7 @@ type PiSubscribedEvent = { type: string } & Record<string, unknown>;
 // lives in `@appstrate/afps-runtime/runner` (imported above for the bridge's
 // own use). Re-exported here for this package's existing test imports + public
 // surface.
-export { truncateToolResult, toolResultByteLimit };
+export { truncateToolResult };
 
 /**
  * True when a settled assistant turn's `stopReason` represents a terminal
@@ -1174,7 +1401,26 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
   return normalized === "the operation was aborted" || normalized === "this operation was aborted";
 }
 
-export interface SessionBridgeOptions {
+/**
+ * True when a terminal `aborted` (or provider-normalized abort) turn is the
+ * runner's OWN early-stop rather than a failure: the run already produced a
+ * successful terminal tool, and `onTerminalTool` aborted the SDK loop to stop
+ * paying for turns nobody will read. Extracted so all three readers — the live
+ * `appstrate.error` emit, `getTerminalError()` and the sticky upstream recorder
+ * — apply one definition instead of copies that can drift apart: they must
+ * agree on what is NOT a failure.
+ */
+function isRunnerEarlyStopAbort(
+  stopReason: string | undefined,
+  errorMessage: string | undefined,
+  terminalToolCompleted: boolean,
+): boolean {
+  return (
+    terminalToolCompleted && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage))
+  );
+}
+
+interface SessionBridgeOptions {
   /**
    * Tool names whose first successful `tool_execution_end` marks the run
    * as complete. See {@link PiRunnerOptions.terminalTools}.
@@ -1193,6 +1439,8 @@ export interface SessionBridgeOptions {
    * it.
    */
   contextWindow?: number;
+  /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
+  unpriced?: boolean;
 }
 
 export function installSessionBridge(
@@ -1209,9 +1457,31 @@ export function installSessionBridge(
   // read-only on the handle so `executeSession` can tell "the agent still
   // owes an `output`" from "the run already delivered".
   let terminalToolCompleted = false;
-  // Token usage accumulator across all assistant turns (shared zero-shape).
+  // Token usage accumulator across every paid call of the session (shared
+  // zero-shape) — assistant turns AND compaction passes.
   const totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
+  // Single place the unpriced decision is applied: every emit path reads through
+  // this, so none can leak the placeholder zero. `undefined` omits the field.
+  const reportedCost = (): number | undefined => (options.unpriced ? undefined : totalCost);
+
+  /**
+   * Fold one Pi `Usage` into the run totals and report its deltas. `cost` is
+   * Pi's own (`calculateCost` against the model's rates) — never recomputed.
+   */
+  const accumulateUsage = (usage: PiUsage): { inputDelta: number; outputDelta: number } => {
+    const delta = toReportedUsage(usage);
+    const inputDelta = delta.input_tokens ?? 0;
+    const outputDelta = delta.output_tokens ?? 0;
+    totalUsage.input_tokens = (totalUsage.input_tokens ?? 0) + inputDelta;
+    totalUsage.output_tokens = (totalUsage.output_tokens ?? 0) + outputDelta;
+    totalUsage.cache_creation_input_tokens =
+      (totalUsage.cache_creation_input_tokens ?? 0) + (delta.cache_creation_input_tokens ?? 0);
+    totalUsage.cache_read_input_tokens =
+      (totalUsage.cache_read_input_tokens ?? 0) + (delta.cache_read_input_tokens ?? 0);
+    totalCost += usage.cost?.total ?? 0;
+    return { inputDelta, outputDelta };
+  };
 
   // Terminal verdict tracking. Updated on every assistant `message_end`,
   // so after the loop settles these hold the LAST assistant turn's outcome
@@ -1220,6 +1490,17 @@ export function installSessionBridge(
   // surface instead. Read via `getTerminalError()`.
   let lastAssistantStopReason: string | undefined;
   let lastAssistantErrorMessage: string | undefined;
+
+  // Last FAILED assistant turn — kept separate from the two fields above on
+  // purpose, not folded into them. Those are overwritten on every
+  // `message_end`, so a single clean turn after an errored one erases the
+  // cause; that is correct for the terminal verdict (the agent recovered, the
+  // run succeeded) and exactly wrong for a run the watchdog cuts short, where
+  // the errored turns ARE the story. These two are written only on a terminal
+  // error stop and never cleared, so `getLastUpstreamError()` can still name
+  // the provider failure after any number of intervening clean turns.
+  let lastUpstreamStopReason: string | undefined;
+  let lastUpstreamErrorMessage: string | undefined;
 
   // Pending fire-and-forget emits. `fire()` dispatches each sink.emit
   // call without awaiting (the Pi SDK callback is synchronous), and
@@ -1289,21 +1570,29 @@ export function installSessionBridge(
         lastAssistantStopReason = last.stopReason;
         lastAssistantErrorMessage = last.errorMessage;
 
-        // Accumulate token usage. Pi SDK exposes the legacy
-        // `{ input, output, cacheRead, cacheWrite }` shape on
-        // `message.usage`; map once into the canonical snake_case
-        // total so every downstream emit reads the same fields.
+        // Sticky record of the last FAILED turn (see the declaration). Gated
+        // on `isTerminalErrorStop` — the same predicate the live
+        // `appstrate.error` emit and `getTerminalError()` use — so a clean
+        // turn leaves it standing instead of blanking it.
+        // Also skips the runner's own early-stop abort, mirroring
+        // `getTerminalError()`: that turn is a success artefact, and latching
+        // it would make a watchdog firing afterwards (a terminal tool ran, then
+        // the output re-prompt hung) blame a provider that never failed. The
+        // suppression is applied HERE, at latch time, not at read time: a
+        // benign abort must not be recorded, but neither may it ERASE a real
+        // 503 latched earlier in the run — which a read-time guard would do.
+        if (
+          isTerminalErrorStop(last.stopReason) &&
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, terminalToolCompleted)
+        ) {
+          lastUpstreamStopReason = last.stopReason;
+          lastUpstreamErrorMessage = last.errorMessage;
+        }
+
+        // Accumulate this turn's token usage into the run totals.
         const u = last.usage;
         if (u) {
-          const inputDelta = u.input ?? 0;
-          const outputDelta = u.output ?? 0;
-          totalUsage.input_tokens = (totalUsage.input_tokens ?? 0) + inputDelta;
-          totalUsage.output_tokens = (totalUsage.output_tokens ?? 0) + outputDelta;
-          totalUsage.cache_creation_input_tokens =
-            (totalUsage.cache_creation_input_tokens ?? 0) + (u.cacheWrite ?? 0);
-          totalUsage.cache_read_input_tokens =
-            (totalUsage.cache_read_input_tokens ?? 0) + (u.cacheRead ?? 0);
-          totalCost += u.cost?.total ?? 0;
+          const { inputDelta, outputDelta } = accumulateUsage(u);
 
           // Mid-run cumulative snapshot — fires after every assistant
           // turn so the platform can stream live cost to the UI. The
@@ -1315,7 +1604,7 @@ export function installSessionBridge(
           // payload would be identical to the previous one and waste
           // a NOTIFY round-trip.
           if (inputDelta > 0 || outputDelta > 0) {
-            fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+            fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
 
             // Per-turn context-growth breadcrumb. Shares the metric's gate on
             // purpose — a turn the SDK reported with no counters has nothing to
@@ -1359,14 +1648,20 @@ export function installSessionBridge(
         // status stay consistent).
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !(
-            terminalToolCompleted &&
-            (last.stopReason === "aborted" || isProviderNormalizedAbort(last.errorMessage))
-          )
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, terminalToolCompleted)
         ) {
-          fire(
-            buildError({ runId, timestamp: Date.now() }, terminalErrorMessage(last.errorMessage)),
-          );
+          // The classification rides the event's `data`, which the platform
+          // writes to `run_logs.data` (jsonb) — the same route the watchdog's
+          // `upstream` block takes, and the ONLY one that reaches durable
+          // storage: the finalize body's `RunError` is parsed by a closed
+          // schema and persisted by its `message` alone. Keys are snake_case
+          // because this is data on the wire.
+          const errorMessage = terminalErrorMessage(last.errorMessage);
+          const classified = classifyModelError({ message: errorMessage });
+          fire({
+            ...buildError({ runId, timestamp: Date.now() }, errorMessage),
+            data: { error_category: classified.category, error_retryable: classified.retryable },
+          });
         }
 
         // Full assistant text (for progress display)
@@ -1380,6 +1675,48 @@ export function installSessionBridge(
             fire(buildProgress({ runId, timestamp: Date.now() }, text));
           }
         }
+        break;
+      }
+
+      // Auto-compaction is a real LLM call the run pays for, and the only one
+      // that never surfaces as an assistant `message_end` — Pi appends it to a
+      // dedicated `compaction` session entry (which is why its own
+      // `getSessionStats()` counts it and a message-only accumulator does
+      // not). Without this the tokens are invisible to `RunResult.usage` /
+      // `.cost`, and on a run with no llm-proxy rows to fall back on (a
+      // no-sidecar run against a static key) they are missing from
+      // `runs.cost` outright.
+      case "compaction_end": {
+        const e = event as unknown as PiCompactionEndEvent;
+        const usage = e.result?.usage;
+        // An aborted or failed pass carries no `result`: nothing was billed.
+        if (!usage) break;
+        accumulateUsage(usage);
+
+        // Breadcrumb BEFORE the metric: a reader scanning `run_logs` sees the
+        // cause next to the cost step it explains — the alternative is a cost
+        // curve that jumps for no visible reason, since compaction produces no
+        // turn row of its own.
+        const before = e.result?.tokensBefore;
+        const after = e.result?.estimatedTokensAfter;
+        fire({
+          type: "appstrate.progress",
+          timestamp: Date.now(),
+          runId,
+          message:
+            before !== undefined && after !== undefined
+              ? `Context compacted — ${before} → ${after} tokens`
+              : "Context compacted",
+          data: {
+            event: COMPACTION_EVENT,
+            ...(e.reason !== undefined ? { reason: e.reason } : {}),
+            ...(before !== undefined ? { tokensBefore: before } : {}),
+            ...(after !== undefined ? { estimatedTokensAfter: after } : {}),
+            inputTokens: usage.input ?? 0,
+            outputTokens: usage.output ?? 0,
+          },
+        });
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
         break;
       }
 
@@ -1442,7 +1779,7 @@ export function installSessionBridge(
       }
 
       case "agent_end": {
-        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
         break;
       }
 
@@ -1458,8 +1795,8 @@ export function installSessionBridge(
     getUsage(): TokenUsage {
       return { ...totalUsage };
     },
-    getCost(): number {
-      return totalCost;
+    getCost(): number | undefined {
+      return reportedCost();
     },
     getTerminalError(): RunError | undefined {
       // Verdict on the LAST assistant turn. `isTerminalErrorStop` /
@@ -1469,16 +1806,36 @@ export function installSessionBridge(
       // A trailing "aborted" turn AFTER a successful terminal tool is the
       // runner's own early-stop, not a failure.
       if (
-        terminalToolCompleted &&
-        (lastAssistantStopReason === "aborted" ||
-          isProviderNormalizedAbort(lastAssistantErrorMessage))
+        isRunnerEarlyStopAbort(
+          lastAssistantStopReason,
+          lastAssistantErrorMessage,
+          terminalToolCompleted,
+        )
       ) {
         return undefined;
       }
       if (!isTerminalErrorStop(lastAssistantStopReason)) {
         return undefined;
       }
-      return { code: "adapter_error", message: terminalErrorMessage(lastAssistantErrorMessage) };
+      const message = terminalErrorMessage(lastAssistantErrorMessage);
+      // `message` stays the RAW provider text: the run surface is a debugging
+      // surface and the operator reading `runs.error` wants the upstream
+      // sentence verbatim (the chat surface deliberately does the opposite and
+      // ships only the class). The CLASSIFICATION of this same turn travels the
+      // `appstrate.error` event emitted above, never this `RunError`: the
+      // finalize body is parsed by a closed schema (`message`/`stack`/`code`),
+      // so a `context` here would be dropped at ingestion and reach no reader.
+      return { code: "adapter_error", message };
+    },
+    getLastUpstreamError(): { stopReason: string; message: string } | undefined {
+      if (lastUpstreamStopReason === undefined) return undefined;
+      // Same message resolution as the terminal verdict (`terminalErrorMessage`
+      // is shared) so the two can never describe one failed turn with two
+      // different strings.
+      return {
+        stopReason: lastUpstreamStopReason,
+        message: terminalErrorMessage(lastUpstreamErrorMessage),
+      };
     },
     async drainPending(): Promise<void> {
       // Snapshot the current pending set: events fired AFTER drainPending

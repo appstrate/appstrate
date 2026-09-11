@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { BrainCircuit, Braces, FileOutput, LoaderCircle } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
-import { useDocuments } from "../../hooks/use-documents";
+import { useFiles } from "../../hooks/use-files";
 import { classifyRunResults } from "../../lib/run-results";
 import { AgentDetailSectionHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { DocumentListPanel } from "../document-list-panel";
@@ -13,6 +13,7 @@ import { JsonView } from "../json-view";
 import { EmptyState } from "../page-states";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { RailButton } from "../settings/rail-link";
+import { featuredRunFile } from "../../lib/files";
 import { RunDeliverableTab } from "../run-deliverable-tab";
 
 const keepUnavailableDocumentVisible = () => undefined;
@@ -34,7 +35,7 @@ export function RunResultsView({
 }) {
   const { t } = useTranslation("agents");
   const [requestedSection, setRequestedSection] = useState<ResultsSectionId>("production");
-  const documentsQuery = useDocuments({ runId: run.id, limit: 100 });
+  const documentsQuery = useFiles({ runId: run.id, limit: 100 });
   const outputDocuments = useMemo(
     () =>
       (documentsQuery.data?.data ?? []).filter((document) => document.purpose === "agent_output"),
@@ -44,12 +45,15 @@ export function RunResultsView({
     classifyRunResults({
       status: run.status,
       output,
-      expectedDocumentCount: run.document_counts.output,
+      expectedDocumentCount: run.file_counts.output,
       loadedDocumentCount: outputDocuments.length,
       documentsLoading: documentsQuery.isLoading,
       documentsError: Boolean(documentsQuery.error),
       hasRunMemory,
-      hasPrimaryDocument: Boolean(run.primary_document_id),
+      // `primary_document_id` a disparu du run avec #1193 : la mise en avant
+      // est désormais DÉRIVÉE — un run qui a produit exactement un fichier le
+      // met en avant, zéro ou plusieurs n'en mettent aucun.
+      hasPrimaryDocument: Boolean(featuredRunFile(documentsQuery.data?.data ?? [], run.id)),
     });
   const sections = [
     ...(shouldRenderDocuments
@@ -105,7 +109,7 @@ export function RunResultsView({
       if (outputDocuments.length === 1 && !documentsQuery.error) {
         return (
           <RunDeliverableTab
-            documentId={outputDocuments[0]!.id}
+            fileId={outputDocuments[0]!.id}
             onUnavailable={keepUnavailableDocumentVisible}
           />
         );

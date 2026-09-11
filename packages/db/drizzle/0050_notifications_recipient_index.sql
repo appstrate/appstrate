@@ -1,0 +1,112 @@
+-- One non-partial recipient index on `notifications`, so deleting a member or
+-- an end-user stops seq-scanning the table inside a write transaction.
+--
+-- ═══ THE GAP ═══
+--
+-- `notifications` has exactly one recipient-keyed index today
+-- (`src/schema/notifications.ts:102-111`):
+--
+--   idx_notifications_unread
+--     (org_id, application_id, recipient_type, recipient_id,
+--      created_at DESC, id DESC)   WHERE read_at IS NULL
+--
+-- Partial, and correctly so — the bell only ever reads unread rows, and the
+-- table's own doc explains that the non-partial twin was dropped to cut
+-- maintenance on the fan-out write path. But the deletion paths are not bell
+-- reads, and neither of them carries the `read_at IS NULL` predicate:
+--
+--   apps/api/src/services/organizations.ts:309-316   member removal
+--     DELETE FROM notifications
+--     WHERE org_id = ? AND recipient_type = 'user' AND recipient_id = ?
+--
+--   apps/api/src/services/end-users.ts:353-362       end-user deletion
+--     DELETE FROM notifications
+--     WHERE recipient_type = 'end_user' AND recipient_id = ?
+--       AND org_id = ? AND application_id = ?
+--
+-- The planner cannot prove a partial index's predicate from a query that does
+-- not state it — the DELETE must remove READ rows too — so `idx_notifications_unread`
+-- is unusable for both, and both fall back to a sequential scan of the whole
+-- table. Each runs inside a transaction that is already holding the
+-- `org_members` / `end_users` row lock, so the scan's duration is lock hold
+-- time on the member row, not merely a slow query.
+--
+-- ═══ COLUMN ORDER: NOT THE OBVIOUS ONE ═══
+--
+-- The obvious choice is to mirror the partial index's prefix,
+-- `(org_id, application_id, recipient_type, recipient_id)`. That is the WRONG
+-- order here, because the member-removal caller does not filter
+-- `application_id` at all — member removal is org-wide by design. Under that
+-- order the scan could only be BOUNDED by `org_id`, with the recipient quals
+-- applied as filters across every application in the org.
+--
+--   (org_id, recipient_type, recipient_id, application_id)
+--
+-- inverts that: member removal seeks on the first THREE columns, and end-user
+-- deletion seeks on all FOUR. Every predicate involved is equality, so the
+-- order of the columns in the `WHERE` clause is irrelevant — only which of them
+-- form a usable index PREFIX matters, and this order gives both callers one.
+--
+-- Non-partial by necessity, not by preference: a predicate is what makes the
+-- existing index unusable for these two queries in the first place.
+--
+-- ═══ COST OF ADDING IT ═══
+--
+-- One more index maintained on the fan-out INSERT path — the cost the table's
+-- doc deliberately declined to pay for a full-history feed that has no reader.
+-- The trade is different here: this index is not speculative capacity for a
+-- feature that may ship, it is the access path for two writers that exist and
+-- run today, and it is bounded (four equality columns, no `created_at` tail).
+--
+-- A third, cheaper option was rejected: adding `read_at IS NULL` to the two
+-- DELETEs so they could use the existing index. That would leave read
+-- notifications behind on every member removal — rows referencing a person no
+-- longer in the org, with no path that ever collects them.
+--
+-- ═══ LOCK AND COST ═══
+--
+-- `CREATE INDEX` (never CONCURRENTLY — Postgres forbids it inside a transaction
+-- block, and drizzle wraps the whole pending batch in one; see 0041's header)
+-- takes SHARE on `notifications`. SHARE does not conflict with ACCESS SHARE, so
+-- readers are unaffected in both directions; it DOES conflict with ROW
+-- EXCLUSIVE, so it blocks the notification fan-out WRITE path. Locks are held
+-- to COMMIT and drizzle commits the batch as a whole, so that write block lasts
+-- the rest of the batch, not just this build.
+--
+-- ═══ THE TWO FENCES ═══
+--
+-- `lock_timeout` alone is not "the fence", whatever an earlier revision of this
+-- header called it. It bounds ACQUISITION — how long the build waits for SHARE
+-- on `notifications` — so a build that takes its lock in a millisecond and then
+-- scans and sorts for twenty minutes never trips it. That is the confusion 0047
+-- spends six lines debunking, and it matters here more than in most files:
+-- `notifications` is a fan-out table with NO retention policy, so the size of
+-- the scan is whatever history has accumulated.
+--
+-- So there are two, both `SET LOCAL`, both reset to DEFAULT after — same
+-- instrument as 0039/0041/0047-0049; see 0039's header for `SET LOCAL` rather
+-- than `SET`:
+--
+--   lock_timeout      = '3s'    bounds ACQUISITION
+--   statement_timeout = '60s'   bounds EXECUTION
+--
+-- 60s is 0047's budget. One btree build over four equality columns with no
+-- `created_at` tail is a scan plus a sort; a minute is generous for any
+-- `notifications` anyone has reasoned about, and a build that exceeds it means
+-- the table is far past that size — in which case blocking the fan-out write
+-- path for the rest of the batch is not a trade worth making silently, and the
+-- deploy should stop.
+--
+-- Neither fence bounds the HOLD; only COMMIT does, and the batch commits as a
+-- whole. On expiry of either, the statement errors and aborts the single
+-- transaction wrapping the batch: `migrate` throws, boot fails, the deploy
+-- fails its health gate. Right trade for a non-urgent index (fail fast, retry),
+-- but a failed deploy, not a silent skip.
+--
+-- `IF NOT EXISTS` so a partially-applied environment converges — an index that
+-- is already present IS the intended end state (same reasoning as 0041).
+SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+SET LOCAL statement_timeout = '60s';--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_notifications_recipient" ON "notifications" USING btree ("org_id","recipient_type","recipient_id","application_id");--> statement-breakpoint
+SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
+SET LOCAL lock_timeout = DEFAULT;

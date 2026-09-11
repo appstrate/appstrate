@@ -17,7 +17,7 @@
  *
  * Persistence model (Phase 4+): a single row in `model_provider_credentials`
  * carrying a `kind: "oauth"` blob — no more triple-table dance with
- * `userProviderConnections` + `applicationProviderCredentials`.
+ * `userProviderConnections` + `spaceProviderCredentials`.
  *
  * Edge cases under test:
  *   - Happy path: persists row with provided access/refresh tokens.

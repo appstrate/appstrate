@@ -12,10 +12,10 @@
  *     BEFORE issuing the request (proactive refresh), OR
  *   - the request returns `401` (reactive refresh + single retry).
  *
- * Inject `X-Org-Id` + `X-Application-Id` when the profile is pinned to a
- * specific organization / application — matches the dashboard SPA's
+ * Inject `X-Org-Id` + `X-Space-Id` when the profile is pinned to a
+ * specific organization / space — matches the dashboard SPA's
  * header contract (`apps/web/src/lib/api.ts`) so routes that use
- * `requireOrgMembership` + `requireAppContext` work identically from
+ * `requireOrgMembership` + `requireSpaceContext` work identically from
  * the CLI.
  */
 
@@ -140,11 +140,11 @@ async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
   return profile;
 }
 
-export interface AuthContext {
+interface AuthContext {
   instance: string;
   accessToken: string;
   orgId?: string;
-  applicationId?: string;
+  spaceId?: string;
 }
 
 /**
@@ -165,7 +165,7 @@ export async function resolveAuthContext(profileName: string): Promise<AuthConte
     instance: normalizeInstance(profile.instance),
     accessToken: token,
     orgId: profile.orgId,
-    applicationId: profile.applicationId,
+    spaceId: profile.spaceId,
   };
 }
 
@@ -241,8 +241,10 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
   }
 }
 
-export interface ApiFetchInit extends Omit<RequestInit, "headers"> {
+interface ApiFetchInit extends Omit<RequestInit, "headers"> {
   headers?: Record<string, string>;
+  /** Explicit space selection without changing the active profile. */
+  spaceId?: string;
 }
 
 /**
@@ -266,6 +268,7 @@ export async function apiFetchRaw(
   const profile = await resolveProfileOrThrow(profileName);
   const token = await resolveAccessToken(profileName, profile);
 
+  const { spaceId: explicitSpaceId, ...requestInit } = init;
   const doFetch = async (bearer: string): Promise<Response> => {
     const headers: Record<string, string> = {
       ...(init.headers ?? {}),
@@ -280,8 +283,9 @@ export async function apiFetchRaw(
       headers["Content-Type"] = "application/json";
     }
     if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
-    if (profile.applicationId) headers["X-Application-Id"] = profile.applicationId;
-    return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...init, headers });
+    const spaceId = explicitSpaceId ?? profile.spaceId;
+    if (spaceId) headers["X-Space-Id"] = spaceId;
+    return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...requestInit, headers });
   };
 
   const res = await doFetch(token);

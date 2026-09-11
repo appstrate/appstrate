@@ -312,42 +312,42 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("**report**");
   });
 
-  it("renders the Documents section from uploads", () => {
+  it("renders the Files section from uploads", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       uploads: [
-        { name: "report.pdf", path: "./documents/report.pdf", size: 2048, type: "application/pdf" },
+        { name: "report.pdf", path: "./files/report.pdf", size: 2048, type: "application/pdf" },
       ],
     });
-    expect(out).toContain("## Documents");
-    expect(out).toContain("**report.pdf** (application/pdf, 2.0 KB) → `./documents/report.pdf`");
-    // Neutral wording — an input document may come from a sibling run
-    // (`context_documents`), not only from a human upload.
-    expect(out).toContain("The following documents are available on the local filesystem:");
+    expect(out).toContain("## Files");
+    expect(out).toContain("**report.pdf** (application/pdf, 2.0 KB) → `./files/report.pdf`");
+    // Neutral wording — an input file may come from a sibling run
+    // (`context_files`), not only from a human upload.
+    expect(out).toContain("The following files are available on the local filesystem:");
     expect(out).not.toContain("have been uploaded");
   });
 
-  it("mentions `./documents/` in the Workspace bullet when uploads are wired", () => {
+  it("mentions `./files/` in the Workspace bullet when uploads are wired", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
-      uploads: [{ name: "r.pdf", path: "./documents/r.pdf", size: 100, type: "application/pdf" }],
+      uploads: [{ name: "r.pdf", path: "./files/r.pdf", size: 100, type: "application/pdf" }],
     });
-    // Workspace bullet should reference ./documents/ exactly when uploads exist
-    // — paired with the `## Documents` section gated on the same condition.
+    // Workspace bullet should reference ./files/ exactly when uploads exist
+    // — paired with the `## Files` section gated on the same condition.
     expect(out).toContain("**Workspace**");
-    expect(out).toContain("./documents/");
-    expect(out).toContain("`## Documents` section");
+    expect(out).toContain("./files/");
+    expect(out).toContain("`## Files` section");
   });
 
-  it("omits the `./documents/` mention from the Workspace bullet when no uploads are wired", () => {
+  it("omits the `./files/` mention from the Workspace bullet when no uploads are wired", () => {
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
     // Workspace bullet itself must still render — only the uploads sentence is gated.
     expect(out).toContain("**Workspace**");
     expect(out).toContain("filesystem for temporary processing");
-    expect(out).not.toContain("./documents/");
-    expect(out).not.toContain("## Documents");
+    expect(out).not.toContain("./files/");
+    expect(out).not.toContain("## Files");
   });
 
   describe("Checkpoint section", () => {

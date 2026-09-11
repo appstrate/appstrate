@@ -5,9 +5,11 @@
  *
  * The chat owns no LLM key. It lists the org's configured models
  * (`GET /api/models`) and picks the row the turn binds to; the binding itself
- * is built by `pi-chat/model-binding.ts`, which points the engine at the
- * platform **llm-proxy** (real provider key injected server-side, call metered
- * there). The only change from the satellite: instead of an OAuth inference
+ * is built by `pi-chat/model-binding.ts`. For an API-key model that binding
+ * points the engine at the platform **llm-proxy** (real provider key injected
+ * server-side); for an OAuth subscription it points at the provider's own base
+ * URL with the access token held in memory. Usage is metered server-side on
+ * both paths. The only change from the satellite: instead of an OAuth inference
  * token against a remote instance, we forward the caller's own headers on a
  * loopback request (see self.ts).
  */
@@ -67,7 +69,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   const usable = models.filter((m) => m.enabled !== false && CHAT_USABLE_FAMILIES.has(m.apiShape));
   if (usable.length === 0 && models.some((m) => m.enabled !== false)) {
     throw invalidRequest(
-      "Aucun modèle utilisable par le chat n'est configuré. Connectez un modèle par clé API (Anthropic, OpenAI, Mistral) ou un abonnement Claude Code dans Settings → Models.",
+      "No chat-usable model is configured. Connect an API-key model (Anthropic, OpenAI, Mistral) or a Claude Code subscription in Settings → Models.",
     );
   }
   // Liveness is the second gate, on top of enabled + chat-usable family:
@@ -88,7 +90,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
       : usable.length > 0;
     if (dead) {
       throw invalidRequest(
-        "Le modèle sélectionné ne peut plus servir l'inférence : sa connexion doit être rétablie dans Settings → Models.",
+        "The selected model can no longer serve inference: its connection must be re-established in Settings → Models.",
       );
     }
     throw invalidRequest(
@@ -98,56 +100,4 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
     );
   }
   return chosen;
-}
-
-/**
- * App-scoped operations (agents, runs, …) need an application context. A
- * session carries none by default, so resolve the org's default application
- * and forward it as `X-Application-Id` on the MCP request. Cached per org —
- * the default app rarely changes.
- */
-// Only RESOLVED ids are cached — never a miss. A miss (transient failure OR an
-// empty 200) is left uncached so the next turn retries: an empty
-// `/api/applications` is anomalous (every org normally has a default app), so
-// caching it would strip app-scoped MCP tools org-wide.
-const appCache = new Map<string, string>();
-
-export async function resolveDefaultApplicationId(
-  origin: string,
-  headers: Record<string, string>,
-  orgId: string,
-  // Required (no default): callers must pass the platform's in-process dispatch
-  // so the default-application lookup rides the loopback-auth seam. A plain
-  // `fetch` default would silently bypass it — symmetry with listModels.
-  fetchImpl: typeof fetch,
-): Promise<string | undefined> {
-  const cached = appCache.get(orgId);
-  if (cached !== undefined) return cached;
-  try {
-    const res = await fetchImpl(`${origin}/api/applications`, { headers });
-    if (!res.ok) {
-      // A persistent miss silently strips every app-scoped MCP tool for the
-      // turn — leave a breadcrumb so it isn't invisible.
-      logger.warn("chat: default-application lookup returned non-ok", {
-        orgId,
-        status: res.status,
-      });
-      return undefined; // transient — don't cache
-    }
-    interface App {
-      id: string;
-      isDefault?: boolean;
-    }
-    const body = (await res.json()) as { data?: App[] } | App[];
-    const apps = Array.isArray(body) ? body : (body.data ?? []);
-    const id = (apps.find((a) => a.isDefault) ?? apps[0])?.id;
-    if (id) {
-      appCache.set(orgId, id);
-      return id;
-    }
-    return undefined; // empty 200 — anomalous, don't cache
-  } catch (err) {
-    logger.warn("chat: default-application lookup failed", { orgId, err: String(err) });
-    return undefined; // network error — transient, don't cache
-  }
 }

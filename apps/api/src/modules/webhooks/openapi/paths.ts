@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { SPACE_ID_RE } from "../../../lib/ids.ts";
+
 /** Shared webhook creation properties (DRY across oneOf variants). */
 const sharedCreateProps = {
   url: { type: "string", format: "uri" },
@@ -29,9 +31,10 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "Create a webhook",
       description:
-        "Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.",
+        "Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. The secret is returned once in the response. Max 20 webhooks per org.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
       ],
       requestBody: {
@@ -47,22 +50,28 @@ export const webhooksPaths = {
                     level: { type: "string", enum: ["org"] },
                     ...sharedCreateProps,
                   },
+                  additionalProperties: false,
                 },
                 {
                   type: "object",
-                  required: ["level", "applicationId", "url", "events"],
+                  required: ["level", "spaceId", "url", "events"],
                   properties: {
-                    level: { type: "string", enum: ["application"] },
-                    applicationId: { type: "string", description: "Application ID (app_ prefix)" },
+                    level: { type: "string", enum: ["space"] },
+                    spaceId: {
+                      type: "string",
+                      pattern: SPACE_ID_RE.source,
+                      description: "Space ID (spc_ prefix)",
+                    },
                     ...sharedCreateProps,
                   },
+                  additionalProperties: false,
                 },
               ],
               discriminator: { propertyName: "level" },
             },
             examples: {
               orgLevel: {
-                summary: "Org-level webhook (fires for all apps)",
+                summary: "Org-level webhook (fires for all spaces)",
                 value: {
                   level: "org",
                   url: "https://api.example.com/webhooks/appstrate",
@@ -71,11 +80,11 @@ export const webhooksPaths = {
                   enabled: true,
                 },
               },
-              applicationLevel: {
-                summary: "Application-level webhook (pinned to one app)",
+              spaceLevel: {
+                summary: "Space-level webhook (pinned to one space)",
                 value: {
-                  level: "application",
-                  applicationId: "app_cm4jkl013",
+                  level: "space",
+                  spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                   url: "https://api.example.com/webhooks/appstrate",
                   events: ["run.success", "run.failed"],
                   packageId: null,
@@ -119,8 +128,8 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
-                level: "application",
-                applicationId: "app_cm4jkl013",
+                level: "space",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,
@@ -136,6 +145,7 @@ export const webhooksPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/IdempotencyInProgress" },
         "422": { $ref: "#/components/responses/IdempotencyConflict" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -146,15 +156,16 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "List webhooks",
       description:
-        "List webhooks visible to the current organization. When `applicationId` is passed, returns org-level + application-level webhooks pinned to that app. When `all=true`, returns every webhook in the org regardless of level.",
+        "List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
-          name: "applicationId",
+          name: "spaceId",
           in: "query",
           required: false,
           schema: { type: "string" },
-          description: "Filter — include webhooks pinned to this application (plus org-level).",
+          description: "Filter — include webhooks pinned to this space (plus org-level).",
         },
         {
           name: "all",
@@ -162,7 +173,7 @@ export const webhooksPaths = {
           required: false,
           schema: { type: "string", enum: ["true"] },
           description:
-            "When `true`, return all webhooks in the org (org-level + every application-level). Overrides `applicationId`.",
+            "When `true`, span every space in the org (org-level + every space-level). Requires `org-webhooks:read`. Overrides `spaceId`.",
         },
       ],
       responses: {
@@ -189,8 +200,8 @@ export const webhooksPaths = {
                   {
                     id: "wh_cm1abc123",
                     object: "webhook",
-                    level: "application",
-                    applicationId: "app_cm4jkl013",
+                    level: "space",
+                    spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                     url: "https://example.com/webhooks/appstrate",
                     events: ["run.success", "run.failed"],
                     packageId: null,
@@ -207,6 +218,7 @@ export const webhooksPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -219,6 +231,7 @@ export const webhooksPaths = {
       description: "Get a single webhook by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -234,8 +247,8 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
-                level: "application",
-                applicationId: "app_cm4jkl013",
+                level: "space",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,
@@ -261,6 +274,7 @@ export const webhooksPaths = {
         "Update webhook URL, events, filters, or enabled status. Cannot change the secret or the scoping level.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -288,6 +302,7 @@ export const webhooksPaths = {
                 payloadMode: { type: "string", enum: ["full", "summary"] },
                 enabled: { type: "boolean" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -305,8 +320,8 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
-                level: "application",
-                applicationId: "app_cm4jkl013",
+                level: "space",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,
@@ -332,6 +347,7 @@ export const webhooksPaths = {
       description: "Delete a webhook and all its delivery history.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -356,6 +372,7 @@ export const webhooksPaths = {
       description: "Send a synthetic test.ping event to verify webhook connectivity.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -397,6 +414,7 @@ export const webhooksPaths = {
         "Stage a new signing secret and open a dual-signature delivery window. During the window, every delivery is signed with BOTH the previous and new secrets in a space-separated `webhook-signature` header (Standard Webhooks multi-signature spec) so consumers can migrate without dropping events. After `rotationWindowEndsAt`, the next delivery promotes the new secret inline and the previous one is retired.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -413,6 +431,7 @@ export const webhooksPaths = {
                     "Override the default 7-day rotation window. Capped server-side at 30 days.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -472,6 +491,7 @@ export const webhooksPaths = {
       description: "List recent delivery attempts for a webhook (status, latency, response code).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",

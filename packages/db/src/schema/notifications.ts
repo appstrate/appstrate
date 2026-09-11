@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./organizations.ts";
-import { applications } from "./applications.ts";
+import { spaces } from "./spaces.ts";
 import { runs } from "./runs.ts";
 
 /**
@@ -35,8 +35,8 @@ import { runs } from "./runs.ts";
  *
  * Trade-off: `recipientId` cannot carry a foreign key (it points at two
  * tables), so there is no per-recipient `ON DELETE CASCADE`. The `orgId` /
- * `applicationId` FKs still cascade (deleting an org/app drops its
- * notifications); the narrower "delete one user/end-user but keep the app"
+ * `spaceId` FKs still cascade (deleting an org/space drops its
+ * notifications); the narrower "delete one user/end-user but keep the space"
  * case is handled by explicit cleanup at the deletion sites
  * (`deleteEndUser`, org member removal). This is the standard polymorphic
  * recipient posture — dedicated notification systems (Knock, Novu) treat
@@ -54,14 +54,14 @@ export const notifications = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    // Same app-scoping as runs. NOT NULL: every notification is app-scoped
-    // (the `scopedWhere` reader always filters `application_id = ?`, so a NULL
+    // Same space-scoping as runs. NOT NULL: every notification is space-scoped
+    // (the `scopedWhere` reader always filters `space_id = ?`, so a NULL
     // would be unreachable). A future org-global notification type would need
     // both a nullable column and a scopedWhere change — deferred until it
     // exists (YAGNI) rather than shipping an unqueryable NULL today.
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, {
+      .references(() => spaces.id, {
         onDelete: "cascade",
       }),
     // Recipient — polymorphic. `recipientType` is the actor kind,
@@ -76,7 +76,7 @@ export const notifications = pgTable(
     // Notification kind. "run_completed" today; extensible.
     type: text("type").notNull(),
     // Originating entity (the run, for "run_completed"). Null for types
-    // that have no run. `runs.id` is a text (`exec_`-prefixed) id, so this
+    // that have no run. `runs.id` is a text (`run_`-prefixed) id, so this
     // is text too. ON DELETE CASCADE: deleting a run drops its notifications.
     runId: text("run_id").references(() => runs.id, { onDelete: "cascade" }),
     // Render-without-join payload: { agent_id, status }.
@@ -87,8 +87,8 @@ export const notifications = pgTable(
   (table) => [
     // The bell only ever queries unread rows (count, unread feed, unread
     // counts-by-agent), so a single PARTIAL index keyed
-    // `(org, app, recipient_type, recipient_id, created_at DESC, id DESC)
-    // WHERE read_at IS NULL` backs every hot read: the (org, app, recipient)
+    // `(org, space, recipient_type, recipient_id, created_at DESC, id DESC)
+    // WHERE read_at IS NULL` backs every hot read: the (org, space, recipient)
     // prefix serves the unread count, the created_at/id tail serves the unread
     // keyset feed. The recipient is one (type, id) tuple, so this is a single
     // composite seek — no bitmap-OR.
@@ -102,7 +102,7 @@ export const notifications = pgTable(
     index("idx_notifications_unread")
       .on(
         table.orgId,
-        table.applicationId,
+        table.spaceId,
         table.recipientType,
         table.recipientId,
         table.createdAt.desc(),
@@ -112,6 +112,43 @@ export const notifications = pgTable(
     // Backs the run_id FK ON DELETE CASCADE + by-run lookups
     // (markNotificationReadByRun).
     index("idx_notifications_run").on(table.runId),
+    // Recipient-keyed, NON-partial (migration 0050). The partial index above
+    // cannot serve the two delete-by-recipient callers — member removal
+    // (`services/organizations.ts`) and end-user deletion
+    // (`services/end-users.ts`) — because neither carries `read_at IS NULL`
+    // (they must remove read rows too), and the planner cannot prove a partial
+    // index's predicate from a query that does not state it. Without this,
+    // both seq-scan the whole table inside a transaction already holding the
+    // member / end-user row lock.
+    //
+    // Column ORDER is deliberate and differs from the partial index's prefix:
+    // member removal is org-wide and does NOT filter `space_id`, so
+    // `space_id` goes LAST. That way member removal seeks on the first
+    // three columns and end-user deletion seeks on all four. All four
+    // predicates are equality, so only prefix-ability matters.
+    index("idx_notifications_recipient").on(
+      table.orgId,
+      table.recipientType,
+      table.recipientId,
+      table.spaceId,
+    ),
+    // Space-LEADING, single column (migration 0055). `space_id` is the FK
+    // target of `ON DELETE CASCADE`, and Postgres indexes only the REFERENCED
+    // side of a foreign key — so `DELETE FROM spaces WHERE id = ?`
+    // (`services/spaces.ts`) had to seq-scan this whole table to find the rows
+    // to cascade. Neither index above can serve it: `idx_notifications_unread`
+    // is partial on `read_at IS NULL` (the cascade removes read rows too) and
+    // both are org-LEADING, while the cascade's only qual is `space_id`.
+    //
+    // Same class as `idx_notifications_recipient` (0050), which covered the
+    // member / end-user deletes and stopped there. And the same cost: the
+    // scan runs inside the transaction that already took `FOR UPDATE` on the
+    // organizations row, so its duration is lock hold time, not just a slow
+    // statement.
+    //
+    // One column, not a composite: the cascade states `space_id` and nothing
+    // else, and every other read path here is already org-leading.
+    index("idx_notifications_space").on(table.spaceId),
     // Defense-in-depth against a double fan-out: at most one notification of
     // a given type per (run, recipient). The fan-out path is already
     // exactly-once (finalizeRun CAS winner), so this never fires in practice

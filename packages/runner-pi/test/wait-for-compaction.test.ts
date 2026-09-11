@@ -27,19 +27,6 @@ describe("waitForCompactionToSettle", () => {
     expect(Date.now() - start).toBeLessThan(50);
   });
 
-  it("returns immediately when isCompacting is not a boolean (older SDK)", async () => {
-    // Defends against feeding the function an SDK version that does
-    // not expose `isCompacting`. The wait is best-effort — older SDKs
-    // simply opt out.
-    const session: { isCompacting?: boolean } = {};
-    const start = Date.now();
-    await waitForCompactionToSettle(session, undefined, {
-      timeoutMs: 5_000,
-      pollIntervalMs: 5,
-    });
-    expect(Date.now() - start).toBeLessThan(50);
-  });
-
   it("waits until isCompacting flips to false", async () => {
     const session = { isCompacting: true };
     const settleAfterMs = 80;

@@ -3,9 +3,11 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import { DataTable } from "./data-table";
 import { ListToolbar } from "./list-toolbar";
 import { EmptyState, ErrorState } from "./page-states";
@@ -17,6 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
+import { translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { ConfirmModal } from "./confirm-modal";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
@@ -182,10 +185,20 @@ export function VersionHistory({ packageId, type, isOwned }: VersionHistoryProps
           if (confirmState.type === "restore") {
             restoreVersion.mutate(confirmState.version, {
               onSuccess: () => setConfirmState(null),
+              // A restore WRITES a draft, so it can answer 400; with no
+              // `onError` the modal hung on its spinner.
+              onError: (err) => {
+                setConfirmState(null);
+                toast.error(translateSkillFrontmatterError(err, t) ?? getErrorMessage(err));
+              },
             });
           } else {
             deleteVersion.mutate(confirmState.version, {
               onSuccess: () => setConfirmState(null),
+              onError: (err) => {
+                setConfirmState(null);
+                toast.error(getErrorMessage(err));
+              },
             });
           }
         }}

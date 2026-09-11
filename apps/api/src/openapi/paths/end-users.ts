@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const endUsersPaths = {
   "/api/end-users": {
     post: {
@@ -7,10 +9,10 @@ export const endUsersPaths = {
       tags: ["End Users"],
       summary: "Create an end-user",
       description:
-        "Create a new end-user within an application. At least one of name, email, or externalId should be provided for identification.",
+        "Create a new end-user within a space. At least one of name, email, or externalId should be provided for identification.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
       ],
       requestBody: {
@@ -37,11 +39,15 @@ export const endUsersPaths = {
                 },
                 metadata: {
                   type: "object",
-                  additionalProperties: { type: ["string", "number", "boolean", "null"] },
+                  additionalProperties: {
+                    type: ["string", "number", "boolean", "null"],
+                    maxLength: 500,
+                  },
                   description:
                     "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
               },
+              additionalProperties: false,
             },
             example: {
               name: "Alice Martin",
@@ -56,8 +62,7 @@ export const endUsersPaths = {
         "201": {
           description: "End-user created",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
@@ -68,7 +73,7 @@ export const endUsersPaths = {
               example: {
                 id: "eu_cm4jkl012",
                 object: "end_user",
-                applicationId: "app_cm4jkl013",
+                spaceId: "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                 name: "Alice Martin",
                 email: "alice@example.com",
                 externalId: "usr_12345",
@@ -85,7 +90,7 @@ export const endUsersPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the application (external_id_taken)",
+            "Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the space (external_id_taken)",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -108,7 +113,7 @@ export const endUsersPaths = {
                     type: "https://docs.appstrate.dev/errors/external-id-taken",
                     title: "Conflict",
                     status: 409,
-                    detail: "An end-user with this externalId already exists in the application.",
+                    detail: "An end-user with this externalId already exists in the space.",
                     code: "external_id_taken",
                     requestId: "req_abc123",
                   },
@@ -126,14 +131,14 @@ export const endUsersPaths = {
       tags: ["End Users"],
       summary: "List end-users",
       description:
-        "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.\n\n" +
+        "List end-users with cursor-based pagination. Filter by spaceId, externalId, or email.\n\n" +
         "**Pagination**: `startingAfter` and `endingBefore` are mutually exclusive — pass at most " +
         "one. Encoded via the `x-mutually-exclusive` extension below for client generators that " +
         "honour it; the server enforces the constraint at runtime regardless.",
       "x-mutually-exclusive": ["startingAfter", "endingBefore"],
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "externalId",
           in: "query",
@@ -175,8 +180,7 @@ export const endUsersPaths = {
         "200": {
           description: "Paginated end-user list",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
           },
@@ -207,7 +211,7 @@ export const endUsersPaths = {
                   {
                     id: "eu_cm4jkl012",
                     object: "end_user",
-                    applicationId: "app_cm4jkl013",
+                    spaceId: "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                     name: "Alice Martin",
                     email: "alice@example.com",
                     externalId: "usr_12345",
@@ -237,23 +241,20 @@ export const endUsersPaths = {
       description: "Get a single end-user by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
           description: "End-user detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
               example: {
                 id: "eu_cm4jkl012",
                 object: "end_user",
-                applicationId: "app_cm4jkl013",
+                spaceId: "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                 name: "Alice Martin",
                 email: "alice@example.com",
                 externalId: "usr_12345",
@@ -277,7 +278,7 @@ export const endUsersPaths = {
       description: "Update end-user name, email, externalId, or metadata.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -304,11 +305,15 @@ export const endUsersPaths = {
                 },
                 metadata: {
                   type: "object",
-                  additionalProperties: { type: ["string", "number", "boolean", "null"] },
+                  additionalProperties: {
+                    type: ["string", "number", "boolean", "null"],
+                    maxLength: 500,
+                  },
                   description:
                     "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -316,17 +321,14 @@ export const endUsersPaths = {
       responses: {
         "200": {
           description: "End-user updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/EndUserObject" },
               example: {
                 id: "eu_cm4jkl012",
                 object: "end_user",
-                applicationId: "app_cm4jkl013",
+                spaceId: "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                 name: "Alice Martin Updated",
                 email: "alice@example.com",
                 externalId: "usr_12345",
@@ -342,7 +344,7 @@ export const endUsersPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "The externalId is already in use by another end-user in the application",
+          description: "The externalId is already in use by another end-user in the space",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -350,7 +352,7 @@ export const endUsersPaths = {
                 type: "https://docs.appstrate.dev/errors/external-id-taken",
                 title: "Conflict",
                 status: 409,
-                detail: "An end-user with this externalId already exists in the application.",
+                detail: "An end-user with this externalId already exists in the space.",
                 code: "external_id_taken",
                 requestId: "req_abc123",
               },
@@ -367,15 +369,13 @@ export const endUsersPaths = {
       description: "Permanently delete an end-user.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": {
           description: "End-user deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

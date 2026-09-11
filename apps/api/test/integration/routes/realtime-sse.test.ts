@@ -19,57 +19,22 @@ import {
   createTestUser,
   addOrgMember,
   authHeaders,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedApplication, seedApiKey } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedRun,
+  seedSpace,
+  seedApiKey,
+  seedSpaceMember,
+  seedSpaceRole,
+} from "../../helpers/seed.ts";
 import { sql } from "drizzle-orm";
 import { initRealtime, activeSubscriberCount } from "../../../src/services/realtime.ts";
-import { collectSSEEvents } from "../../helpers/sse.ts";
+import { collectSSEEvents, pgNotify } from "../../helpers/sse.ts";
 
 const app = getTestApp();
-
-/**
- * Per-channel required-field defaults so a NOTIFY payload matches the real
- * producer shape the realtime service validates against (the
- * `runUpdateEventSchema` / `runLogEventSchema` in @appstrate/shared-types — a
- * payload missing a required key fails `safeParse` and is silently dropped,
- * never reaching the SSE stream). Tests override only the fields they assert
- * on. Mirrors NOTIFY_DEFAULTS in services/realtime.test.ts.
- */
-const NOTIFY_DEFAULTS: Record<string, Record<string, unknown>> = {
-  run_update: {
-    operation: "UPDATE",
-    id: "exec-default",
-    package_id: null,
-    status: "running",
-    user_id: null,
-    end_user_id: null,
-    org_id: "org-default",
-    application_id: "app-default",
-    schedule_id: null,
-    error: null,
-    started_at: null,
-    completed_at: null,
-    duration: null,
-  },
-  run_log_insert: {
-    id: 1,
-    run_id: "exec-default",
-    org_id: "org-default",
-    application_id: "app-default",
-    type: "progress",
-    level: "info",
-    event: null,
-    message: null,
-    created_at: "2026-01-01T00:00:00.000Z",
-  },
-};
-
-/** Fire a PG NOTIFY on a channel with a JSON payload (required fields filled). */
-async function pgNotify(channel: string, payload: Record<string, unknown>) {
-  const full = { ...(NOTIFY_DEFAULTS[channel] ?? {}), ...payload };
-  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(full)})`);
-}
 
 /** Small delay to let PG LISTEN dispatch events to subscribers. */
 function wait(ms = 150): Promise<void> {
@@ -86,7 +51,7 @@ async function sseRequest(
   extra?: Record<string, string>,
 ): Promise<Response> {
   const separator = path.includes("?") ? "&" : "?";
-  const url = `${path}${separator}orgId=${ctx.orgId}&applicationId=${ctx.defaultAppId}`;
+  const url = `${path}${separator}orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}`;
   return await app.request(url, {
     headers: {
       Cookie: ctx.cookie,
@@ -112,7 +77,10 @@ describe("realtime SSE routes (integration)", () => {
     run = await seedRun({
       packageId: agentPkg.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
+      // The run channels are gated on `runs:read-all` OR ownership, so the
+      // fixture run belongs to the context driving these streams.
+      userId: ctx.user.id,
     });
   });
 
@@ -137,7 +105,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -185,7 +153,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -255,41 +223,98 @@ describe("realtime SSE routes (integration)", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 401 without applicationId query param", async () => {
+    it("returns 401 without spaceId query param", async () => {
       const res = await app.request(`/api/realtime/runs/${run.id}?orgId=${ctx.orgId}`, {
         headers: { Cookie: ctx.cookie },
       });
       expect(res.status).toBe(401);
     });
 
-    it("app-scoped SSE — events from other apps are filtered out", async () => {
-      const appB = await seedApplication({ orgId: ctx.orgId, name: "SSE AppB" });
-      const appBRun = await seedRun({
+    it("a cookie caller whose space role lacks runs:read is refused", async () => {
+      // The floor the API-key branch has always had, now on both branches: a
+      // custom space role can reach the space and still hold nothing that
+      // reads runs. Before this, reaching the space was the whole check and
+      // the stream opened.
+      const closed = await seedSpace({
+        orgId: ctx.orgId,
+        name: "SSE NoRunsRead",
+        visibility: "closed",
+      });
+      const roleWithoutRuns = await seedSpaceRole({
+        orgId: ctx.orgId,
+        key: "sse-no-runs-read",
+        permissions: ["agents:read"],
+      });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      await seedSpaceMember({
+        spaceId: closed.id,
+        userId: member.id,
+        presetRole: null,
+        customRoleId: roleWithoutRuns.id,
+      });
+      const scopedRun = await seedRun({
         packageId: agentPkg.id,
         orgId: ctx.orgId,
-        applicationId: appB.id,
+        spaceId: closed.id,
+        // The custom role holds `runs:read` and not `read-all`, so the control
+        // below reads this run by owning it.
+        userId: member.id,
       });
 
-      // Subscribe from default app (AppA)
+      const denied = await app.request(
+        `/api/realtime/runs/${scopedRun.id}?orgId=${ctx.orgId}&spaceId=${closed.id}`,
+        { headers: { Cookie: member.cookie, Accept: "text/event-stream" } },
+      );
+      expect(denied.status).toBe(403);
+
+      // Control: the same caller, same space, with a role that DOES carry
+      // `runs:read` — so the 403 is about the permission, not the membership.
+      const roleWithRuns = await seedSpaceRole({
+        orgId: ctx.orgId,
+        key: "sse-with-runs-read",
+        permissions: ["agents:read", "runs:read"],
+      });
+      await db.execute(
+        sql`UPDATE space_members SET custom_role_id = ${roleWithRuns.id}
+             WHERE space_id = ${closed.id} AND user_id = ${member.id}`,
+      );
+      const allowed = await app.request(
+        `/api/realtime/runs/${scopedRun.id}?orgId=${ctx.orgId}&spaceId=${closed.id}`,
+        { headers: { Cookie: member.cookie, Accept: "text/event-stream" } },
+      );
+      expect(allowed.status).toBe(200);
+      await allowed.body?.cancel();
+    });
+
+    it("space-scoped SSE — events from other spaces are filtered out", async () => {
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SSE SpaceB" });
+      const spaceBRun = await seedRun({
+        packageId: agentPkg.id,
+        orgId: ctx.orgId,
+        spaceId: spaceB.id,
+      });
+
+      // Subscribe from default space (SpaceA)
       const res = await sseRequest(`/api/realtime/runs`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
 
-      // Fire event for AppB — should NOT be received by AppA subscriber
+      // Fire event for SpaceB — should NOT be received by SpaceA subscriber
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: appB.id,
-        id: appBRun.id,
+        space_id: spaceB.id,
+        id: spaceBRun.id,
         status: "running",
         package_id: agentPkg.id,
       });
       await wait();
 
-      // Fire event for AppA — should be received
+      // Fire event for SpaceA — should be received
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -307,7 +332,7 @@ describe("realtime SSE routes (integration)", () => {
       const otherExec = await seedRun({
         packageId: agentPkg.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
       });
 
       const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
@@ -318,7 +343,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for a different run — should be filtered out
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: otherExec.id,
         status: "running",
         package_id: agentPkg.id,
@@ -328,7 +353,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for the target run — should be received
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -356,7 +381,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -382,7 +407,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "processing",
@@ -411,7 +436,7 @@ describe("realtime SSE routes (integration)", () => {
       await pgNotify("run_update", {
         operation: "UPDATE",
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -449,7 +474,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "step completed",
@@ -467,6 +492,52 @@ describe("realtime SSE routes (integration)", () => {
       const data = JSON.parse(frame!.data);
       expect(data.data).toEqual({ detail: "full-info" });
     });
+
+    // `run_metric` is the live cost/token channel the run page reads. It was
+    // exercised at the service level only: the fixture defaults this file used
+    // to carry had no `run_metric` entry, so a metric NOTIFY fired from here
+    // was missing the required `cost_pricing_status` key, failed the service's
+    // `safeParse`, and was dropped before it ever reached an SSE frame — the
+    // test would have timed out rather than failed loudly. With the defaults
+    // shared, the channel's framing is asserted end to end.
+    it("receives run_metric events in SSE format", async () => {
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
+      expect(res.status).toBe(200);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await pgNotify("run_metric", {
+        org_id: ctx.orgId,
+        space_id: ctx.defaultSpaceId,
+        run_id: run.id,
+        package_id: agentPkg.id,
+        token_usage: { input_tokens: 10, output_tokens: 5 },
+        cost_so_far: 0.0042,
+      });
+
+      // Skip the initial run_update snapshot; assert on the injected metric.
+      const events = await collectSSEEvents(res.body!, 2, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      const frame = events.find((e) => e.event === "run_metric");
+      expect(frame).toBeDefined();
+      // Every frame carries an `id:` — the metric channel is no exception.
+      expect(frame!.id).toMatch(/^.+:\d+$/);
+
+      // Wire shape: shallow-camelized by the service, `token_usage` inner keys
+      // deliberately left snake_case.
+      const data = JSON.parse(frame!.data);
+      expect(data).toEqual({
+        runId: run.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        packageId: agentPkg.id,
+        tokenUsage: { input_tokens: 10, output_tokens: 5 },
+        costSoFar: 0.0042,
+        costPricingStatus: null,
+      });
+    });
   });
 
   // ── GET /api/realtime/agents/:packageId/runs ───────────
@@ -483,7 +554,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -515,7 +586,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for a different agent — should be filtered
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: "exec-other",
         status: "running",
         package_id: otherAgent.id,
@@ -525,7 +596,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for the target agent — should be received
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -560,7 +631,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -579,7 +650,7 @@ describe("realtime SSE routes (integration)", () => {
       const exec2 = await seedRun({
         packageId: agent2.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
       });
 
       const res = await sseRequest("/api/realtime/runs", ctx);
@@ -590,7 +661,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire events for two different agents
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -598,7 +669,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait(50);
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: exec2.id,
         status: "success",
         package_id: agent2.id,
@@ -635,7 +706,6 @@ describe("realtime SSE routes (integration)", () => {
         },
         body: JSON.stringify({
           name: "SSE Test Key",
-          applicationId: ctx.defaultAppId,
         }),
       });
       expect(res.status).toBe(201);
@@ -667,7 +737,7 @@ describe("realtime SSE routes (integration)", () => {
     async function seedSseKey(opts: { createdBy: string; scopes: string[] }): Promise<string> {
       const key = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: opts.createdBy,
         scopes: opts.scopes,
       });
@@ -706,14 +776,13 @@ describe("realtime SSE routes (integration)", () => {
       }
     });
 
-    it("a non-admin subscriber does NOT receive debug-level run_log frames", async () => {
-      // Key created by a plain MEMBER → creatorRole "member" → isAdmin false.
-      // Pre-fix, the routes passed `isAdmin: true` for every subscriber, so
-      // the debug frame below reached this stream and the first collected
-      // event would be "debug-secret" — failing the assertion.
-      const member = await createTestUser();
-      await addOrgMember(ctx.orgId, member.id, "member");
-      const token = await seedSseKey({ createdBy: member.id, scopes: ["runs:read"] });
+    it("a key without `runs:delete` does NOT receive debug-level run_log frames", async () => {
+      // Debug visibility is `runs:delete` on the CEILINGED set — the key's
+      // scopes ∩ its creator's authority — not on the creator's authority
+      // alone. This key is minted by the org OWNER, who holds `runs:delete`,
+      // and asks for `runs:read` only: reading the grant instead of the ceiling
+      // is what would leak the debug frame below to it.
+      const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["runs:read"] });
 
       // `/api/realtime/runs` — no initial snapshot frame, keeps ordering simple.
       const res = await app.request(`/api/realtime/runs?token=${token}`);
@@ -724,8 +793,9 @@ describe("realtime SSE routes (integration)", () => {
       // Debug frame first — must be filtered for a non-admin subscriber.
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
+        user_id: ctx.user.id,
         level: "debug",
         message: "debug-secret",
       });
@@ -734,8 +804,9 @@ describe("realtime SSE routes (integration)", () => {
       // the debug frame was dropped, not merely delayed).
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
+        user_id: ctx.user.id,
         level: "info",
         message: "info-visible",
       });
@@ -749,9 +820,13 @@ describe("realtime SSE routes (integration)", () => {
       expect(JSON.parse(events[0]!.data).message).toBe("info-visible");
     });
 
-    it("an admin subscriber DOES receive debug-level run_log frames", async () => {
-      // Key created by the org OWNER → creatorRole "owner" → isAdmin true.
-      const token = await seedSseKey({ createdBy: ctx.user.id, scopes: ["runs:read"] });
+    it("a key WITH `runs:delete` DOES receive debug-level run_log frames", async () => {
+      // Same creator, same route, one extra scope — so the pair discriminates
+      // on the ceiling and on nothing else.
+      const token = await seedSseKey({
+        createdBy: ctx.user.id,
+        scopes: ["runs:read", "runs:delete"],
+      });
 
       const res = await app.request(`/api/realtime/runs?token=${token}`);
       expect(res.status).toBe(200);
@@ -760,8 +835,9 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
+        user_id: ctx.user.id,
         level: "debug",
         message: "debug-for-admin",
       });
@@ -789,7 +865,7 @@ describe("realtime SSE routes (integration)", () => {
       // the first collected frame and the assertion below would catch it.
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "filtered-out",
@@ -797,7 +873,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -820,7 +896,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "still-delivered",
@@ -841,7 +917,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "fallback-delivered",
@@ -865,7 +941,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "declared",
@@ -911,7 +987,7 @@ describe("realtime SSE routes (integration)", () => {
           'user_id', NULL,
           'end_user_id', NULL,
           'org_id', ${ctx.orgId}::text,
-          'application_id', ${ctx.defaultAppId}::text,
+          'space_id', ${ctx.defaultSpaceId}::text,
           'schedule_id', NULL,
           'error', NULL,
           'started_at', NULL,
@@ -952,7 +1028,7 @@ describe("realtime SSE routes (integration)", () => {
           'user_id', NULL,
           'end_user_id', NULL,
           'org_id', ${ctx.orgId}::text,
-          'application_id', ${ctx.defaultAppId}::text,
+          'space_id', ${ctx.defaultSpaceId}::text,
           'schedule_id', NULL,
           'error', NULL,
           'started_at', NULL,
@@ -968,6 +1044,98 @@ describe("realtime SSE routes (integration)", () => {
     });
   });
 
+  // ── Run visibility on the wire ──────────────────────────────
+  //
+  // `runs:read` is ownership on this transport too: an operator's streams
+  // carry the runs it launched, and the single-run stream refuses one it may
+  // not read with the same 404 `GET /api/runs/{id}` answers.
+
+  describe("run visibility (runs:read vs runs:read-all)", () => {
+    let operator: TestContext;
+    let ownRun: Awaited<ReturnType<typeof seedRun>>;
+
+    beforeEach(async () => {
+      operator = await memberContext(ctx, "member", "operator");
+      ownRun = await seedRun({
+        packageId: agentPkg.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: operator.user.id,
+      });
+    });
+
+    /**
+     * Fire a colleague's frame then the operator's own on `channel`, and
+     * report what the org-wide stream delivered. Ordering is what makes the
+     * absence provable: the second frame arriving alone means the first was
+     * dropped, not merely late.
+     */
+    async function ownAndColleagueFrames(
+      channel: "run_update" | "run_log_insert" | "run_metric",
+    ): Promise<string[]> {
+      const res = await sseRequest("/api/realtime/runs", operator);
+      expect(res.status).toBe(200);
+      await wait();
+
+      for (const [label, runId, userId] of [
+        ["colleague", run.id, ctx.user.id],
+        ["mine", ownRun.id, operator.user.id],
+      ] as const) {
+        const common = { org_id: ctx.orgId, space_id: ctx.defaultSpaceId, user_id: userId };
+        if (channel === "run_update") {
+          await pgNotify("run_update", { ...common, id: runId, status: "running", error: label });
+        } else if (channel === "run_log_insert") {
+          await pgNotify("run_log_insert", {
+            ...common,
+            run_id: runId,
+            level: "info",
+            message: label,
+          });
+        } else {
+          await pgNotify("run_metric", {
+            ...common,
+            run_id: runId,
+            package_id: agentPkg.id,
+            token_usage: null,
+            cost_so_far: 0,
+          });
+        }
+      }
+
+      const events = await collectSSEEvents(res.body!, 1, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      return events.map((e) => {
+        const data = JSON.parse(e.data) as { error?: string; message?: string; runId?: string };
+        return data.error ?? data.message ?? data.runId ?? "";
+      });
+    }
+
+    it("delivers the operator's own run_update and drops a colleague's", async () => {
+      expect(await ownAndColleagueFrames("run_update")).toEqual(["mine"]);
+    });
+
+    it("delivers no run_log or run_metric for a colleague's run", async () => {
+      expect(await ownAndColleagueFrames("run_log_insert")).toEqual(["mine"]);
+      expect(await ownAndColleagueFrames("run_metric")).toEqual([ownRun.id]);
+    });
+
+    it("refuses the per-run stream of a run the operator may not read", async () => {
+      const denied = await sseRequest(`/api/realtime/runs/${run.id}`, operator);
+      expect(denied.status).toBe(404);
+
+      // Two controls: the same caller on its OWN run, and an admin on the
+      // refused one — so the 404 is the run's visibility and nothing else.
+      const own = await sseRequest(`/api/realtime/runs/${ownRun.id}`, operator);
+      expect(own.status).toBe(200);
+      await own.body?.cancel();
+      const asAdmin = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
+      expect(asAdmin.status).toBe(200);
+      await asAdmin.body?.cancel();
+    });
+  });
+
   // ── Cross-org isolation ─────────────────────────────────────
 
   describe("cross-org isolation", () => {
@@ -975,7 +1143,7 @@ describe("realtime SSE routes (integration)", () => {
       // Create a second org context
       const ctxB = await createTestContext();
       const agentB = await seedAgent({ orgId: ctxB.orgId });
-      await seedRun({ packageId: agentB.id, orgId: ctxB.orgId, applicationId: ctxB.defaultAppId });
+      await seedRun({ packageId: agentB.id, orgId: ctxB.orgId, spaceId: ctxB.defaultSpaceId });
 
       // Open SSE for org B (all runs)
       const resB = await sseRequest("/api/realtime/runs", ctxB);
@@ -986,7 +1154,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for org A — org B should NOT receive it
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -996,7 +1164,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for org B — org B SHOULD receive it
       await pgNotify("run_update", {
         org_id: ctxB.orgId,
-        application_id: ctxB.defaultAppId,
+        space_id: ctxB.defaultSpaceId,
         id: "exec-b",
         status: "success",
         package_id: agentB.id,

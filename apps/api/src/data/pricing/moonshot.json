@@ -46,21 +46,23 @@
     "contextWindow": 262144,
     "maxTokens": null,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -75,21 +77,23 @@
     "contextWindow": 262144,
     "maxTokens": null,
     "capabilities": [
-      "text"
+      "text",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -126,21 +130,23 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -156,21 +162,23 @@
     "maxTokens": null,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -178,6 +186,70 @@
       "input": 0.95,
       "output": 4,
       "cacheRead": 0.16
+    }
+  },
+  "kimi-k2.7-code": {
+    "label": "Kimi K2.7 Code",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.95,
+      "output": 4,
+      "cacheRead": 0.19
+    }
+  },
+  "kimi-k3": {
+    "label": "Kimi K3",
+    "contextWindow": 1048576,
+    "maxTokens": null,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "supported",
+        "temperatureCompatible": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 3,
+      "output": 15,
+      "cacheRead": 0.3
     }
   },
   "kimi-latest": {

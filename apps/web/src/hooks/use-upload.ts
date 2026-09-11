@@ -6,7 +6,7 @@
  *
  * Why the invalidation lives here: uploading is the only user action that ADDS
  * bytes, and the gauge (`use-org-storage.ts`) + the "quota reached" alert are
- * read from the org detail. `used_bytes` counts durable documents, which the
+ * read from the org detail. `used_bytes` counts durable files, which the
  * server materializes from the staged upload slightly later (when the chat
  * message is sent, or when the run starts), so this refresh is what folds in
  * everything materialized so far rather than an exact after-image of this one
@@ -17,7 +17,7 @@ import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { UploadFn } from "@appstrate/ui/schema-form";
 import { uploadClient } from "../api/uploads";
-import { invalidateOrgStorage } from "./use-documents";
+import { invalidateOrgStorage } from "./use-files";
 
 export function useUploadClient(): UploadFn {
   const queryClient = useQueryClient();

@@ -1,27 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Service layer for `integration_pins` + the per-(app, integration)
+ * Service layer for `integration_pins` + the per-(space, integration)
  * `block_user_connections` toggle + connection metadata edits
  * (label, sharedWithOrg). Consumed by the routes in `routes/integrations.ts`.
  *
- * Pin model (flat): one pin per (application, agent, integration, scope).
+ * Pin model (flat): one pin per (space, agent, integration, scope).
  * Scope = admin (`user_id IS NULL`) OR member (`user_id = caller.id`).
  * The pin row carries a `connection_id`; the connection's own `auth_key`
  * is denormalised on the PinSummary for display but never part of the
  * uniqueness key — OAuth and api_key connections are interchangeable at
  * runtime.
  *
- * All admin-only operations — the route layer enforces
- * `requirePermission("integrations", "install")` plus an org admin/owner check
- * (`assertOrgAdmin` in `routes/integrations.ts`); this layer assumes the caller
- * already has the role.
+ * All governance operations — the route layer enforces
+ * `requirePermission("integrations", "configure")`; this layer assumes the
+ * caller already holds it.
  */
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
 import {
-  applicationPackages,
+  spacePackages,
   integrationConnections,
   integrationPins,
   integrationOrgDefaults,
@@ -47,12 +46,12 @@ import {
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { isSystemIntegration } from "./integration-client-registry.ts";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
-import { fetchIntegrationManifest } from "./integration-service.ts";
+import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
@@ -60,19 +59,20 @@ import {
   translateResolutionError,
   isUserConnectionCreationBlocked,
 } from "./integration-connection-resolver.ts";
+import type { ConnectionResolutionResult } from "@appstrate/core/integration";
+import type { IntegrationManifestCache } from "./integration-service.ts";
 
 // Canonical wire shapes live in @appstrate/shared-types so the frontend
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
 // the existing call sites readable.
-export type PinSummary = IntegrationPin;
-export type { ConsumingAgentSummary };
+type PinSummary = IntegrationPin;
 
 // ─────────────────────────── block_user_connections toggle ────────────────────
 
 /**
- * Toggle the per-(application, integration) lock.
+ * Toggle the per-(space, integration) lock.
  *
- * An existing `application_packages` row is updated in place. With NO row, a
+ * An existing `space_packages` row is updated in place. With NO row, a
  * SYSTEM integration is auto-active without an explicit install (see
  * `isIntegrationActive`) — materialize the row so the toggle persists, rather
  * than 404ing the operator out of a setting they can legitimately reach.
@@ -81,41 +81,37 @@ export type { ConsumingAgentSummary };
  * non-system integration still 404s (unchanged).
  */
 export async function setBlockUserConnections(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
   blocked: boolean,
 ): Promise<{ blocked: boolean }> {
   const result = await db
-    .update(applicationPackages)
+    .update(spacePackages)
     .set({ blockUserConnections: blocked, updatedAt: new Date() })
     .where(
-      and(
-        eq(applicationPackages.applicationId, scope.applicationId),
-        eq(applicationPackages.packageId, integrationId),
-      ),
+      and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, integrationId)),
     )
-    .returning({ blockUserConnections: applicationPackages.blockUserConnections });
+    .returning({ blockUserConnections: spacePackages.blockUserConnections });
   if (result.length > 0) {
     return { blocked: result[0]!.blockUserConnections };
   }
   // No row. Only a system integration is auto-active without one; anything else
   // is genuinely not installed.
   if (!isSystemIntegration(integrationId)) {
-    throw notFound(`Integration '${integrationId}' is not installed in this application`);
+    throw notFound(`Integration '${integrationId}' is not installed in this space`);
   }
   const [inserted] = await db
-    .insert(applicationPackages)
+    .insert(spacePackages)
     .values({
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       packageId: integrationId,
-      config: {},
       blockUserConnections: blocked,
     })
     .onConflictDoUpdate({
-      target: [applicationPackages.applicationId, applicationPackages.packageId],
+      target: [spacePackages.spaceId, spacePackages.packageId],
       set: { blockUserConnections: blocked, updatedAt: new Date() },
     })
-    .returning({ blockUserConnections: applicationPackages.blockUserConnections });
+    .returning({ blockUserConnections: spacePackages.blockUserConnections });
   return { blocked: inserted!.blockUserConnections };
 }
 
@@ -137,49 +133,47 @@ function toPinSummary(row: PinJoinRow): PinSummary {
   };
 }
 
-async function listPinsBy(conditions: Parameters<typeof and>): Promise<PinSummary[]> {
-  const rows = await db
-    .select({ pin: integrationPins, conn: integrationConnections })
-    .from(integrationPins)
-    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
-    .where(and(...conditions));
-  return rows.map(toPinSummary);
-}
-
 /**
- * List every admin pin governing a (app, integration). Used by the admin UI
+ * List every admin pin governing a (space, integration). Used by the admin UI
  * to render the per-agent pin section + by the runtime resolver via the
  * dedicated `loadPins` helper (private to the resolver, see
  * integration-connection-resolver.ts).
  */
 export async function listIntegrationPins(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
 ): Promise<PinSummary[]> {
-  return listPinsBy([
-    eq(integrationPins.applicationId, scope.applicationId),
-    eq(integrationPins.integrationId, integrationId),
-    isNull(integrationPins.userId),
-  ]);
+  const rows = await db
+    .select({ pin: integrationPins, conn: integrationConnections })
+    .from(integrationPins)
+    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
+    .where(
+      and(
+        eq(integrationPins.spaceId, scope.spaceId),
+        eq(integrationPins.integrationId, integrationId),
+        isNull(integrationPins.userId),
+      ),
+    );
+  return rows.map(toPinSummary);
 }
 
 /**
- * R2 — agents installed in the application that declare the given integration
+ * R2 — agents installed in the space that declare the given integration
  * in their dependencies. Powers the centralised pin management table on the
  * integration detail page (so the admin can pick which installed agent to
  * pin without leaving the integration view).
  */
 export async function listAgentsConsumingIntegration(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
 ): Promise<ConsumingAgentSummary[]> {
   const rows = toRows<{ package_id: string; display_name: string | null }>(
     await db.execute(sql`
       SELECT p.id AS package_id,
              p.draft_manifest->>'display_name' AS display_name
-      FROM ${applicationPackages} ap
+      FROM ${spacePackages} ap
       INNER JOIN ${packages} p ON p.id = ap.package_id
-      WHERE ap.application_id = ${scope.applicationId}
+      WHERE ap.space_id = ${scope.spaceId}
         AND p.type = 'agent'
         AND (p.draft_manifest -> 'dependencies' -> 'integrations') ? ${integrationId}
       ORDER BY p.id ASC
@@ -191,7 +185,7 @@ export async function listAgentsConsumingIntegration(
   }));
 }
 
-export interface SetPinInput {
+interface SetPinInput {
   agentPackageId: string;
   connectionId: string;
   createdBy: string | null;
@@ -199,18 +193,18 @@ export interface SetPinInput {
 
 /**
  * Upsert an admin pin. Validates that the pinned connection:
- *   1. exists in the same application,
+ *   1. exists in the same space,
  *   2. references the integration this pin governs,
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
  *      leak the admin's identity to other members at run time).
  *
- * Flat model: one pin per (app, agent, integration, admin-scope).
+ * Flat model: one pin per (space, agent, integration, admin-scope).
  * The connection carries its own authKey — pinning a PAT connection
  * overrides the agent's oauth-by-default just by virtue of being the
  * picked connection.
  */
 export async function upsertIntegrationPin(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
   input: SetPinInput,
 ): Promise<PinSummary> {
@@ -229,11 +223,11 @@ export async function upsertIntegrationPin(
 /**
  * Shared upsert for admin (`userId IS NULL`) and member (`userId = actor`)
  * pins. Both scopes select-then-update/insert on the same flat key
- * `(application, agent, integration, scope)`, differing only by the userId
+ * `(space, agent, integration, scope)`, differing only by the userId
  * predicate, the connection validation opts, and `createdBy`.
  */
 async function upsertPin(args: {
-  scope: AppScope;
+  scope: SpaceScope;
   agentPackageId: string;
   integrationId: string;
   connectionId: string;
@@ -259,7 +253,7 @@ async function upsertPin(args: {
     .from(integrationPins)
     .where(
       and(
-        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.spaceId, scope.spaceId),
         eq(integrationPins.packageId, agentPackageId),
         eq(integrationPins.integrationId, integrationId),
         userPredicate,
@@ -278,7 +272,7 @@ async function upsertPin(args: {
       .where(eq(integrationPins.id, existing.id));
   } else {
     await db.insert(integrationPins).values({
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       packageId: agentPackageId,
       integrationId,
       userId: userIdValue,
@@ -300,7 +294,7 @@ async function upsertPin(args: {
 }
 
 export async function deleteIntegrationPin(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
   agentPackageId: string,
 ): Promise<{ deleted: boolean }> {
@@ -308,7 +302,7 @@ export async function deleteIntegrationPin(
     .delete(integrationPins)
     .where(
       and(
-        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.spaceId, scope.spaceId),
         eq(integrationPins.integrationId, integrationId),
         eq(integrationPins.packageId, agentPackageId),
         isNull(integrationPins.userId),
@@ -318,22 +312,19 @@ export async function deleteIntegrationPin(
   return { deleted: result.length > 0 };
 }
 
-async function assertAgentInstalled(scope: AppScope, agentPackageId: string): Promise<void> {
+async function assertAgentInstalled(scope: SpaceScope, agentPackageId: string): Promise<void> {
   const [row] = await db
-    .select({ id: applicationPackages.packageId })
-    .from(applicationPackages)
+    .select({ id: spacePackages.packageId })
+    .from(spacePackages)
     .where(
-      and(
-        eq(applicationPackages.applicationId, scope.applicationId),
-        eq(applicationPackages.packageId, agentPackageId),
-      ),
+      and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, agentPackageId)),
     )
     .limit(1);
-  if (!row) throw notFound(`Agent '${agentPackageId}' is not installed in this application`);
+  if (!row) throw notFound(`Agent '${agentPackageId}' is not installed in this space`);
 }
 
 export async function validatePinTarget(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
   connectionId: string,
   opts: { requireShared?: boolean; allowOwnedBy?: string },
@@ -344,8 +335,8 @@ export async function validatePinTarget(
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
   if (!conn) throw notFound(`Connection '${connectionId}' not found`);
-  if (conn.applicationId !== scope.applicationId) {
-    throw invalidRequest("Pinned connection belongs to a different application");
+  if (conn.spaceId !== scope.spaceId) {
+    throw invalidRequest("Pinned connection belongs to a different space");
   }
   if (conn.integrationId !== integrationId) {
     throw invalidRequest(
@@ -371,7 +362,7 @@ export async function validatePinTarget(
 
 // ─────────────────────────── Member-pin CRUD ─────────────────────────────────
 
-export interface UpsertMemberPinInput {
+interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationId: string;
   connectionId: string;
@@ -386,7 +377,7 @@ export interface UpsertMemberPinInput {
  * cascade).
  */
 export async function upsertMemberPin(
-  scope: AppScope,
+  scope: SpaceScope,
   input: UpsertMemberPinInput,
 ): Promise<PinSummary> {
   return upsertPin({
@@ -402,7 +393,7 @@ export async function upsertMemberPin(
 }
 
 export async function deleteMemberPin(
-  scope: AppScope,
+  scope: SpaceScope,
   agentPackageId: string,
   integrationId: string,
   userId: string,
@@ -411,7 +402,7 @@ export async function deleteMemberPin(
     .delete(integrationPins)
     .where(
       and(
-        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.spaceId, scope.spaceId),
         eq(integrationPins.packageId, agentPackageId),
         eq(integrationPins.integrationId, integrationId),
         eq(integrationPins.userId, userId),
@@ -426,13 +417,13 @@ export async function deleteMemberPin(
  * picker — UI checks "is this integration already pinned by me?" and
  * renders the collapsed "Using: X" row pointing at the pinned connection.
  */
-export interface MemberPinSummary {
+interface MemberPinSummary {
   integration_package_id: string;
   connection_id: string;
 }
 
 export async function listMemberPinsForAgent(
-  scope: AppScope,
+  scope: SpaceScope,
   agentPackageId: string,
   userId: string,
 ): Promise<MemberPinSummary[]> {
@@ -444,7 +435,7 @@ export async function listMemberPinsForAgent(
     .from(integrationPins)
     .where(
       and(
-        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.spaceId, scope.spaceId),
         eq(integrationPins.packageId, agentPackageId),
         eq(integrationPins.userId, userId),
       ),
@@ -454,7 +445,7 @@ export async function listMemberPinsForAgent(
 
 // ─────────────────────────── Connection metadata edits ────────────────────────
 
-export interface UpdateConnectionMetadataInput {
+interface UpdateConnectionMetadataInput {
   label?: string | null;
   sharedWithOrg?: boolean;
 }
@@ -518,13 +509,13 @@ export async function updateConnectionMetadata(
 
 /** Used by route handlers to enforce ownership before metadata edits. */
 export async function loadConnectionOwnership(connectionId: string): Promise<{
-  applicationId: string;
+  spaceId: string;
   userId: string | null;
   endUserId: string | null;
 } | null> {
   const [row] = await db
     .select({
-      applicationId: integrationConnections.applicationId,
+      spaceId: integrationConnections.spaceId,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
     })
@@ -538,7 +529,7 @@ export async function loadConnectionOwnership(connectionId: string): Promise<{
 
 /**
  * List the connections an actor can pick from for a given
- * (application, integration). Used by the UI picker:
+ * (space, integration). Used by the UI picker:
  * own + shared, with caller-facing labels.
  *
  * Same set — and now the same predicate — as `listIntegrationConnections`
@@ -548,7 +539,7 @@ export async function loadConnectionOwnership(connectionId: string): Promise<{
  * two surfaces cannot drift on what "accessible" means.
  */
 export async function listAccessibleConnections(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
   actor: Actor,
 ): Promise<AccessibleIntegrationConnection[]> {
@@ -557,7 +548,7 @@ export async function listAccessibleConnections(
     .from(integrationConnections)
     .where(
       and(
-        eq(integrationConnections.applicationId, scope.applicationId),
+        eq(integrationConnections.spaceId, scope.spaceId),
         eq(integrationConnections.integrationId, integrationId),
         actorOrSharedFilter(actor, integrationConnections),
       ),
@@ -613,19 +604,43 @@ function pickStatusForSource(source: ConnectionResolutionSource): IntegrationPic
  * fallback) + scope check the runtime uses — so the UI never re-implements
  * it. Per-candidate `missingScopes` are an additional display annotation
  * (the resolver only scope-checks the one resolved connection).
+ *
+ * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
+ * load-bearing rather than stylistic. This function used to load the package
+ * itself and read `agent.manifest` — always the DRAFT — while its only caller
+ * had already resolved the manifest for the requested `version`. On
+ * `?version=<pinned>` the response therefore described the pinned version in
+ * `blocks_run` and the draft in every `integrations[].resolution`, defeating
+ * the reason #770 introduced the selector. Taking both as parameters makes
+ * that divergence unrepresentable: there is no manifest in scope here to read
+ * the wrong one from. It also removes an N+1 — the cascade ran once per
+ * declared integration, each time re-fetching the package and every manifest.
  */
-export async function resolveAgentIntegrationPick(args: {
-  scope: AppScope;
+async function resolveAgentIntegrationPick(args: {
+  scope: SpaceScope;
   agentPackageId: string;
   integrationId: string;
   actor: Actor;
-  isAdmin: boolean;
+  canConfigureIntegrations: boolean;
+  /** The manifest of the version under inspection — never re-read from the package. */
+  agentManifest: Record<string, unknown>;
+  /** Agent-level `includeInert: true` cascade, resolved once for every integration. */
+  resolution: ConnectionResolutionResult;
+  /** Agent-level member pins, fetched once. */
+  memberPins: MemberPinSummary[];
+  /** Shared integration-manifest memo, so N integrations cost N fetches, not N². */
+  manifestCache: IntegrationManifestCache;
 }): Promise<IntegrationAgentResolution> {
-  const { scope, agentPackageId, integrationId, actor, isAdmin } = args;
+  const {
+    scope,
+    agentPackageId,
+    integrationId,
+    actor,
+    canConfigureIntegrations,
+    agentManifest,
+    resolution,
+  } = args;
 
-  const agent = await getPackage(agentPackageId, scope.orgId);
-  if (!agent) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
-  const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
   // AFPS §4.4 — preserve the wildcard literal `"*"` so `missingScopesForConnection`
   // can route through the default-scopes branch of `requiredScopesForAgent`.
@@ -634,33 +649,17 @@ export async function resolveAgentIntegrationPick(args: {
   const agentTools: readonly string[] | "*" = agentEntry?.tools ?? [];
   const agentScopes = agentEntry?.scopes ?? [];
 
-  const manifestRes = await fetchIntegrationManifest(integrationId);
+  const manifestRes = await fetchIntegrationManifest(integrationId, args.manifestCache);
   const manifest = manifestRes.ok ? manifestRes.manifest : null;
 
-  const userId = actor.type === "user" ? actor.id : null;
+  const memberPins = args.memberPins;
 
-  const [candidatesRaw, adminPins, memberPins, blocked, orgDefault, resolution] = await Promise.all(
-    [
-      listAccessibleConnections(scope, integrationId, actor),
-      listIntegrationPins(scope, integrationId),
-      userId
-        ? listMemberPinsForAgent(scope, agentPackageId, userId)
-        : Promise.resolve([] as MemberPinSummary[]),
-      isUserConnectionCreationBlocked(scope.applicationId, integrationId),
-      getOrgDefault(scope, integrationId),
-      resolveConnectionsForRun({
-        agentManifest,
-        packageId: agentPackageId,
-        actor,
-        scope: { orgId: scope.orgId, applicationId: scope.applicationId },
-        // The picker manages connections for EVERY declared integration, incl.
-        // inert ones (auth_key but no tools/scopes). Opting in here makes the
-        // cascade honour their pins too — so we reuse its verdict + `source`
-        // rather than re-deriving the precedence in this service.
-        includeInert: true,
-      }),
-    ],
-  );
+  const [candidatesRaw, adminPins, blocked, orgDefault] = await Promise.all([
+    listAccessibleConnections(scope, integrationId, actor),
+    listIntegrationPins(scope, integrationId),
+    isUserConnectionCreationBlocked(scope.spaceId, integrationId),
+    getOrgDefault(scope, integrationId),
+  ]);
 
   const adminPinnedConnectionId =
     adminPins.find((p) => p.packageId === agentPackageId)?.connection_id ?? null;
@@ -744,13 +743,13 @@ export async function resolveAgentIntegrationPick(args: {
     member_pinned_connection_id: memberPinnedConnectionId,
     org_default_connection_id: orgDefaultConnectionId,
     org_default_enforced: orgDefaultEnforced,
-    can_add_connection: isAdmin || !blocked,
+    can_add_connection: canConfigureIntegrations || !blocked,
     candidates,
   };
 }
 
 /** Bulk per-agent connection readiness — one call covering badge, picker, and pre-run check. */
-export interface AgentConnectionReadiness {
+interface AgentConnectionReadiness {
   /** True iff the run-kickoff would reject with 412 (run semantics — identical authority). */
   blocks_run: boolean;
   /** The integration portion of the 412 envelope (same `field: integrations.<id>` shape). */
@@ -764,21 +763,23 @@ export interface AgentConnectionReadiness {
 }
 
 /**
- * Bulk connection readiness for an agent. Replaces the N per-integration
- * `resolveAgentIntegrationPick` round-trips with a single agent-level call.
+ * Bulk connection readiness for an agent. Resolves the manifest ONCE for the
+ * requested version and runs each cascade once for the whole agent, so a page
+ * load costs two cascades regardless of how many integrations are declared.
  *
  * `blocks_run` / `errors` come from `resolveConnectionsForRun` with the RUN
  * semantics (`includeInert: false` + the required-auth carve-out) — the exact
  * resolver call the run-kickoff 412 uses — so the UI's pre-run signal can never
- * disagree with the actual gate. The per-integration `resolution` DTOs use
- * `includeInert: true` (inside `resolveAgentIntegrationPick`) so every declared
- * integration, even an inert one, stays manageable in the Connexions tab.
+ * disagree with the actual gate. The per-integration `resolution` DTOs come
+ * from a second `includeInert: true` cascade over the same manifest, so every
+ * declared integration, even an inert one, stays manageable in the Connexions
+ * tab. Both are handed to the picks; nothing downstream re-reads the package.
  */
 export async function resolveAgentConnectionReadiness(args: {
-  scope: AppScope;
+  scope: SpaceScope;
   agentPackageId: string;
   actor: Actor;
-  isAdmin: boolean;
+  canConfigureIntegrations: boolean;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag).
    * Omitted ⇒ `draft` — preserves the launch-badge default. Any other value
@@ -787,7 +788,7 @@ export async function resolveAgentConnectionReadiness(args: {
    */
   version?: string;
 }): Promise<AgentConnectionReadiness> {
-  const { scope, agentPackageId, actor, isAdmin, version } = args;
+  const { scope, agentPackageId, actor, canConfigureIntegrations, version } = args;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
   // Resolve the effective definition for the selected version. `draft`/omitted
@@ -797,16 +798,67 @@ export async function resolveAgentConnectionReadiness(args: {
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);
 
-  // Authoritative run-blocking verdict — the same resolver call the run gate runs.
-  const runResolution = await resolveConnectionsForRun({
+  // One memo shared by BOTH cascades and every per-integration pick below.
+  // Without it each pick re-fetched every integration manifest, so an agent
+  // declaring N integrations paid O(N²) manifest reads for one page load.
+  const manifestCache: IntegrationManifestCache = new Map();
+
+  // Seed that memo with each declared integration's PINNED manifest BEFORE
+  // either cascade reads it — the same seeding the run performs at kickoff
+  // (run-pipeline Step 2a / run-creation, both via
+  // `freezeRunSpawnDependencies` → `resolveRunIntegrationVersions`). Unseeded,
+  // `buildRequirement` falls through to `fetchIntegrationManifest`, which reads
+  // `packages.draft_manifest`: the readiness verdict would then judge auth keys
+  // and required scopes against the integration author's LIVE DRAFT while the
+  // run-kickoff 412 judges them against the pinned published version — exactly
+  // the disagreement this function's contract above forbids. (#1178 closed the
+  // agent-manifest half of it; this is the integration-manifest half.)
+  //
+  // The result is deliberately ignored. An unsatisfiable pin is a
+  // `dependency_unresolved` (422) the kickoff raises on its own, not a
+  // connection verdict this endpoint can express; the ids it leaves unseeded
+  // keep the pre-existing draft fallback rather than blanking the Connexions
+  // tab. Every id that DID resolve is seeded either way.
+  //
+  // Independent of the `version` selector: that selector picks the AGENT
+  // manifest, and a run of the draft agent still freezes its integration pins
+  // against published versions. Seeding unconditionally is what keeps the two
+  // aligned for `?version=draft` as well.
+  await resolveRunIntegrationVersions({
     agentManifest,
-    packageId: agent.id,
-    actor,
-    scope: { orgId: scope.orgId, applicationId: scope.applicationId },
+    orgId: scope.orgId,
+    manifestCache,
   });
+
+  const userId = actor.type === "user" ? actor.id : null;
+
+  // Two cascades, deliberately — they answer different questions over the SAME
+  // resolved manifest. The run gate excludes inert integrations (and applies
+  // the required-auth carve-out); the management DTO includes them so an inert
+  // integration stays pinnable in the Connexions tab. Neither is derivable from
+  // the other, but both are agent-level: one call each, not one per integration.
+  const [runResolution, pickResolution, memberPins] = await Promise.all([
+    resolveConnectionsForRun({
+      agentManifest,
+      packageId: agent.id,
+      actor,
+      scope: { orgId: scope.orgId, spaceId: scope.spaceId },
+      manifestCache,
+    }),
+    resolveConnectionsForRun({
+      agentManifest,
+      packageId: agent.id,
+      actor,
+      scope: { orgId: scope.orgId, spaceId: scope.spaceId },
+      includeInert: true,
+      manifestCache,
+    }),
+    userId
+      ? listMemberPinsForAgent(scope, agent.id, userId)
+      : Promise.resolve([] as MemberPinSummary[]),
+  ]);
   const blockingIds = new Set(runResolution.errors.map((e) => e.integrationId));
 
-  // Per-integration management DTO (includeInert:true inside the pick).
   const resolutions = await Promise.all(
     declared.map((e) =>
       resolveAgentIntegrationPick({
@@ -814,7 +866,11 @@ export async function resolveAgentConnectionReadiness(args: {
         agentPackageId: agent.id,
         integrationId: e.id,
         actor,
-        isAdmin,
+        canConfigureIntegrations,
+        agentManifest,
+        resolution: pickResolution,
+        memberPins,
+        manifestCache,
       }),
     ),
   );

@@ -72,7 +72,7 @@ describe("compactInlineRuns", () => {
     const run = await seedRun({
       packageId: shadowId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
     await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "old log 1" });
@@ -149,7 +149,7 @@ describe("compactInlineRuns", () => {
     const runningRun = await seedRun({
       packageId: runningShadow,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
     await seedRunLog({ runId: runningRun.id, orgId: ctx.orgId, message: "live log" });
@@ -157,7 +157,7 @@ describe("compactInlineRuns", () => {
     const pendingRun = await seedRun({
       packageId: pendingShadow,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "pending",
     });
     await seedRunLog({ runId: pendingRun.id, orgId: ctx.orgId, message: "queued log" });
@@ -196,7 +196,7 @@ describe("compactInlineRuns", () => {
     const run = await seedRun({
       packageId: shadowId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
     await seedRunLog({ runId: run.id, orgId: ctx.orgId, message: "log" });

@@ -247,7 +247,7 @@ describe("assertDocsWithinCap", () => {
     expect(() => assertDocsWithinCap([{ size: 600 }, { size: 400 }], 1000)).not.toThrow();
   });
 
-  it("passes with no documents", () => {
+  it("passes with no files", () => {
     expect(() => assertDocsWithinCap([], 1000)).not.toThrow();
   });
 

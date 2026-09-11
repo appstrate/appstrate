@@ -45,7 +45,6 @@ on:
       - "bun.lock"
       - "bunfig.toml"
       - "package.json"
-      - "patches/**"
       - ".github/actions/bun-setup/**"
       - ".github/workflows/firecracker.yml"
   pull_request:
@@ -78,7 +77,6 @@ on:
       - "bun.lock"
       - "bunfig.toml"
       - "package.json"
-      - "patches/**"
       - ".github/actions/bun-setup/**"
       - ".github/workflows/firecracker.yml"
   workflow_dispatch:

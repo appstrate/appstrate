@@ -30,7 +30,7 @@ type Has<K extends PropertyKey, U extends PropertyKey> = K extends U ? true : fa
 type _HasOrgs = Assert<Has<"/api/orgs", _Paths>>;
 type _HasRuns = Assert<Has<"/api/runs/{id}", _Paths>>;
 type _HasRunLogs = Assert<Has<"/api/runs/{id}/logs", _Paths>>;
-type _HasApplications = Assert<Has<"/api/applications", _Paths>>;
+type _HasSpaces = Assert<Has<"/api/spaces", _Paths>>;
 type _HasUploads = Assert<Has<"/api/uploads", _Paths>>;
 
 // Load-bearing component schemas consumed by hooks/components by name.
@@ -56,7 +56,7 @@ export type _SchemaAssertions = [
   _HasOrgs,
   _HasRuns,
   _HasRunLogs,
-  _HasApplications,
+  _HasSpaces,
   _HasUploads,
   _HasProblemDetail,
   _HasRunLog,

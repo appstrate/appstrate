@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import * as React from "react";
-import * as TogglePrimitive from "@radix-ui/react-toggle";
-import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "../cn.ts";
+// Toggle styling only. The standalone `Toggle` component was removed: nothing
+// imported it — `toggle-group.tsx` consumes just these variants.
+
+import { cva } from "class-variance-authority";
 
 const toggleVariants = cva(
   "ring-offset-background hover:bg-muted hover:text-muted-foreground focus-visible:ring-ring inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
@@ -26,17 +26,4 @@ const toggleVariants = cva(
   },
 );
 
-const Toggle = React.forwardRef<
-  React.ElementRef<typeof TogglePrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof TogglePrimitive.Root> & VariantProps<typeof toggleVariants>
->(({ className, variant, size, ...props }, ref) => (
-  <TogglePrimitive.Root
-    ref={ref}
-    className={cn(toggleVariants({ variant, size, className }))}
-    {...props}
-  />
-));
-Toggle.displayName = TogglePrimitive.Root.displayName;
-
-// eslint-disable-next-line react-refresh/only-export-components
-export { Toggle, toggleVariants };
+export { toggleVariants };

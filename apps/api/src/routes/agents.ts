@@ -15,51 +15,88 @@ import {
   scopeFromActor,
   type PersistenceScope,
 } from "../services/state/package-persistence.ts";
-import { validateConfig } from "../services/schema.ts";
+import { validateAgainstSchema } from "../services/schema.ts";
+import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
+import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import {
   listAccessiblePackages,
   updateInstalledPackage,
-  getPackageConfig,
+  getInstalledPackageSettings,
   hasPackageAccess,
-} from "../services/application-packages.ts";
+} from "../services/space-packages.ts";
 import { getPackage } from "../services/package-catalog.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { readAgentAppearance } from "../lib/agent-appearance.ts";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
-import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
-import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
-import { getAppScope } from "../lib/scope.ts";
+import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
+import { asJSONSchemaObject } from "@appstrate/core/form";
+import { getSpaceScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import { getAgentDiagnostics } from "../services/agent-diagnostics.ts";
-import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
+import {
+  assertExplicitModelExists,
+  resolveModel,
+  validateGenerationOverride,
+} from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
   resolveExportVersion,
 } from "../services/bundle-assembly.ts";
-import { writeBundleToBuffer, type Bundle } from "@appstrate/afps-runtime/bundle";
+import {
+  agentReadIsSummary,
+  assertCatalogPackageAccess,
+  packageAccessSpaces,
+  requireAgentRead,
+} from "../lib/package-access.ts";
+import {
+  writeBundleToBuffer,
+  parsePackageIdentity,
+  type Bundle,
+} from "@appstrate/afps-runtime/bundle";
 import { toBundleApiError } from "../services/run-launcher/bundle-error-mapping.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
-  ModelGenerationError,
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
-  resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
-export const modelIdSchema = z.object({
-  modelId: z.string().nullable(),
-  generation: modelGenerationSettingsSchema.nullable().optional(),
-});
+export const proxyIdSchema = z.object({ proxyId: z.string().nullable() }).strict();
+export const modelIdSchema = z
+  .object({
+    modelId: z.string().nullable(),
+    generation: modelGenerationSettingsSchema.nullable().optional(),
+  })
+  .strict();
+
+/**
+ * Body of `PUT /api/agents/{scope}/{name}/input-settings` — the agent's stored
+ * input settings for this space.
+ *
+ * `values` are layer 2 of the input resolution (editor defaults, partial by
+ * design); `locked_fields` names the input fields no caller may set at
+ * launch. Both are full replacements, not patches: the editor form owns the
+ * whole document, so an omitted key means "cleared", never "unchanged".
+ *
+ * Both members are therefore MANDATORY and the object is `.strict()`: a body
+ * that omits one, or that carries an unknown key, is a 400 rather than a
+ * silent erasure of the stored values and locks.
+ */
+export const agentInputSettingsSchema = z
+  .object({
+    values: z.record(z.string(), z.unknown()),
+    locked_fields: z.array(z.string().min(1)),
+  })
+  .strict();
 
 /**
  * Parse the `actor_type` / `actor_id` query-param pair shared by the
@@ -103,7 +140,7 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * (`DraftPackageCatalog.fetch` reads `downloadPackageFiles` whole,
  * `DbPackageCatalog.fetch` extracts the whole published artifact). A bundle
  * carrying a skill therefore hands out exactly the bytes
- * `GET /api/packages/skills/{id}/files[/content]` serves — and #1123/#1124
+ * `GET /api/packages/{scope}/{name}/files[/content]` serves — and #1123/#1124
  * settled that those need `skills:read`, resolved per package TYPE rather than
  * one blanket scope. Without this guard the export is a looser door to the same
  * bytes: an `agents:read`-only credential is 403'd on the file explorer and
@@ -112,48 +149,55 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * Checked against the ASSEMBLED bundle, not the root manifest, so transitive
  * deps and any future widening of `depTypes` are covered by construction.
  *
- * Visibility is deliberately NOT re-derived here. Dependency resolution is
- * org-scoped in every catalog, which is what lets a run reach a skill that is
- * not installed in the current application; re-checking `hasPackageAccess` over
- * the dep set would make the export stricter than the run it mirrors and break
- * `appstrate run @scope/agent` where clicking Run in the dashboard succeeds.
- * Scope, not visibility, is what this route was missing.
+ * Every dependency also needs live catalog reachability. This allows a readable
+ * source in another accessible space while hiding packages confined to private
+ * spaces.
  */
 async function requireBundleDependencyReadPermissions(
   c: Context<AppEnv>,
   bundle: Bundle,
 ): Promise<void> {
   const checked = new Set<string>();
+  const accessible = await packageAccessSpaces(c);
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const rawType = asRecord(pkg.manifest).type;
     const type = typeof rawType === "string" ? rawType : "";
-    if (checked.has(type)) continue;
-    checked.add(type);
-    const guard = BUNDLE_DEPENDENCY_READ_GUARDS.get(type);
-    if (!guard) {
-      throw forbidden(
-        `Insufficient permissions: the bundle carries a '${type || "unknown"}' dependency and no read scope is defined for that type`,
-      );
+    const parsed = parsePackageIdentity(identity);
+    if (!parsed) throw invalidRequest(`Invalid package identity: ${identity}`);
+    // The read scope is per TYPE, so it is proven once; reachability is per
+    // PACKAGE and runs for every dependency. The scope comes first so a caller
+    // holding none of it is told which permission it lacks rather than which
+    // packages exist.
+    if (!checked.has(type)) {
+      checked.add(type);
+      const guard = BUNDLE_DEPENDENCY_READ_GUARDS.get(type);
+      if (!guard) {
+        throw forbidden(
+          `Insufficient permissions: the bundle carries a '${type || "unknown"}' dependency and no read scope is defined for that type`,
+        );
+      }
+      // `requirePermission` is middleware; invoking it with a no-op `next`
+      // reuses the same 403 shape, denial audit hook, and fail-closed semantics
+      // as every route-level RBAC call site.
+      await guard(c, async () => {});
     }
-    // `requirePermission` is middleware; invoking it with a no-op `next`
-    // reuses the same 403 shape, denial audit hook, and fail-closed semantics
-    // as every route-level RBAC call site.
-    await guard(c, async () => {});
+    await assertCatalogPackageAccess(c, parsed.packageId, accessible);
   }
 }
 
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/agents — list agents accessible to the current application
-  router.get("/", async (c) => {
-    const scope = getAppScope(c);
+  // GET /api/agents — list agents accessible to the current space
+  router.get("/", requireAgentRead, async (c) => {
+    const scope = getSpaceScope(c);
+    const summaryOnly = agentReadIsSummary(c);
 
     // Single query: system packages + installed packages via LEFT JOIN
     const [rows, runningCounts] = await Promise.all([
       listAccessiblePackages(scope, "agent"),
-      getRunningRunCounts(scope),
+      getRunningRunCounts(scope, runVisibilityFilter(c)),
     ]);
 
     const agentList = rows.map((row) => {
@@ -168,9 +212,18 @@ export function createAgentsRouter() {
         schema_version: manifest.schema_version,
         author: manifest.author,
         keywords: manifest.keywords ?? [],
+        // `skills` and `mcp_servers` say what the agent is BUILT FROM — the
+        // one thing in this list a summary read withholds. `integrations` says
+        // which SaaS it talks to, which is what a launcher connects, so it
+        // answers every caller. Everything else is how the launcher names and
+        // picks an agent, which `agents:run` is entitled to.
         dependencies: {
-          skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
-          mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
+          ...(summaryOnly
+            ? {}
+            : {
+                skills: (manifest.dependencies?.skills ?? {}) as Record<string, string>,
+                mcp_servers: (manifest.dependencies?.mcp_servers ?? {}) as Record<string, string>,
+              }),
           integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },
         running_runs: runningCounts[row.id] ?? 0,
@@ -189,66 +242,130 @@ export function createAgentsRouter() {
     return c.json(listResponse(agentList));
   });
 
-  // PUT /api/agents/:scope/:name/config — save agent configuration (admin-only)
+  // PUT /api/agents/:scope/:name/input-settings — save the agent's stored
+  // input defaults + field locks (admin-only).
   router.put(
-    `/${SCOPED_PACKAGE_ROUTE}/config`,
+    `/${SCOPED_PACKAGE_ROUTE}/input-settings`,
     requireAgent(),
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("package");
 
-      const body = await readJsonBody(c, z.record(z.string(), z.unknown()));
-      const schema = agent.manifest.config?.schema ?? { type: "object" as const, properties: {} };
+      const body = await readJsonBody(c, agentInputSettingsSchema);
+      const schema = asJSONSchemaObject(
+        agent.manifest.input?.schema ?? { type: "object" as const, properties: {} },
+      );
 
-      // Validate config with AJV
-      const validation = validateConfig(body, asJSONSchemaObject(schema));
+      // `values` is the WHOLE stored document, and the editor form that owns it
+      // only ever renders the properties `input.schema` declares. A key naming
+      // no declared property is therefore invisible in the UI and un-removable:
+      // the settings form re-submits what it was handed, and the launch form
+      // seeds it as caller input on every run. Prune it to the declared keys.
+      //
+      // This is NOT the "silent drop of a caller value"
+      // `@appstrate/core/input-resolution`'s `assertFieldsUnlocked` refuses: that
+      // rule protects a value a CALLER sent for a field that
+      // exists. Here the editor is replacing the entire stored document, and a
+      // key that matches no declared property has nothing to resolve into —
+      // keeping it only poisons every launch.
+      //
+      // Pruning BEFORE validation is also what keeps an
+      // `additionalProperties: false` schema saveable: an orphan key left in
+      // place would 400 here forever, locking the editor out of its own row.
+      const declaredProperties = new Set(Object.keys(schema.properties ?? {}));
+      const values = Object.fromEntries(
+        Object.entries(body.values).filter(([key]) => declaredProperties.has(key)),
+      );
+
+      // Stored values are a partial layer: a required field the editor leaves
+      // empty is legitimately asked at launch. Validate types/formats against
+      // the input schema with `required` dropped, so a wrong-typed default is
+      // still rejected here rather than at every run.
+      const validation = validateAgainstSchema(values, { ...schema, required: [] });
       if (!validation.valid) {
-        throw invalidRequest("Invalid configuration");
+        throw validationFailed(
+          validation.errors.map((e) => ({
+            field: e.field ? `values.${e.field}` : "values",
+            code: "invalid_input",
+            title: "Invalid Input",
+            message: e.message,
+          })),
+        );
       }
 
-      const config = mergeWithDefaults(asJSONSchemaObject(schema), body);
+      // A required field locked with no value behind it is invisible at launch
+      // AND unsatisfiable — every run would fail and nobody could see why.
+      assertLockedFieldsSatisfiable(schema, body.locked_fields, values);
 
-      const scope = getAppScope(c);
-      await updateInstalledPackage(scope, agent.id, { config });
-
-      await recordAuditFromContext(c, {
-        action: "agent.config_updated",
-        resourceType: "agent",
-        resourceId: agent.id,
+      const scope = getSpaceScope(c);
+      await updateInstalledPackage(scope, agent.id, {
+        inputSettings: { values, locked: body.locked_fields },
       });
 
-      // 200 + the bare persisted configuration document (merged with schema
-      // defaults) — the resource itself, no `validation` echo (#657):
-      // validation failures are 400s, a 200 needs no valid:true scrap.
-      return c.json(config);
+      // Reconcile the schedules the new lock set just invalidated. A schedule
+      // that froze a now-locked field would otherwise fail `locked_input_field`
+      // on every tick forever — the schedule is not disabled by a failed fire.
+      // Its frozen value is dropped so the field re-resolves from the editor
+      // value, which is what a fresh launch does.
+      await dropLockedFieldsFromSchedules(scope, agent.id, body.locked_fields);
+
+      await recordAuditFromContext(c, {
+        action: "agent.input_settings_updated",
+        resourceType: "agent",
+        resourceId: agent.id,
+        after: { locked: body.locked_fields },
+      });
+
+      // 200 + the bare persisted resource (#657): validation failures are
+      // 400s, so a 200 needs no valid:true scrap.
+      return c.json({ values, locked_fields: body.locked_fields });
     },
   );
 
-  // GET /api/agents/:scope/:name/proxy — get agent proxy configuration
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/proxy`, requireAgent(), async (c) => {
-    const agent = c.get("package");
-    const applicationId = c.get("applicationId");
-    const { proxyId } = await getPackageConfig(applicationId, agent.id);
+  // GET /api/agents/:scope/:name/proxy — get agent proxy configuration.
+  // Permission BEFORE `requireAgent()`: that middleware 404s on an unknown
+  // agent, so the reverse order answers "does this agent exist?" to a caller
+  // that is not allowed to read agents at all.
+  router.get(
+    `/${SCOPED_PACKAGE_ROUTE}/proxy`,
+    requirePermission("agents", "read"),
+    requireAgent(),
+    async (c) => {
+      const agent = c.get("package");
+      const spaceId = c.get("spaceId");
+      const { proxyId } = await getInstalledPackageSettings(spaceId, agent.id);
 
-    return c.json({ proxyId, resolved: proxyId !== "none" });
-  });
+      return c.json({ proxyId, resolved: proxyId !== "none" });
+    },
+  );
 
   // GET /api/agents/:scope/:name/connection-readiness — bulk integration
-  // connection readiness for the agent: authoritative run-blocking verdict
-  // (identical to the run-kickoff 412) + per-integration management DTO.
+  // connection readiness for the agent: run-blocking CONNECTION verdict + the
+  // per-integration management DTO.
+  //
+  // Same resolver, same pinned manifests as the run-kickoff 412 — but not the
+  // whole kickoff gate: readiness also refuses an integration that is not
+  // installed/enabled in the space and excludes those ids from the resolver
+  // (`skipIntegrationIds`). This endpoint runs no install/enable gate, so such
+  // an integration surfaces here as a connection problem. Adding the skip alone
+  // would make it worse (the item would drop out of `blocks_run` while the run
+  // still refuses it); closing the gap means giving this DTO the install/enable
+  // verdict too — a wire change to the Connexions tab. The kickoff remains the
+  // authority; this is what the badge renders.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/connection-readiness`,
     requireAgent(),
     requirePermission("integrations", "read"),
     async (c) => {
       const agent = c.get("package");
-      const role = c.get("orgRole");
       return c.json(
         await resolveAgentConnectionReadiness({
-          scope: getAppScope(c),
+          scope: getSpaceScope(c),
           agentPackageId: agent.id,
           actor: getActor(c),
-          isAdmin: role === "owner" || role === "admin",
+          // Drives `can_add_connection`: the same exemption the connect route
+          // applies, so the badge cannot promise what the mutation refuses.
+          canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           version: c.req.query("version"),
         }),
       );
@@ -266,7 +383,7 @@ export function createAgentsRouter() {
       const role = c.get("orgRole");
       return c.json(
         await getAgentDiagnostics({
-          scope: getAppScope(c),
+          scope: getSpaceScope(c),
           agent,
           actor: getActor(c),
           isAdmin: role === "owner" || role === "admin",
@@ -283,7 +400,7 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("package");
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const data = await readJsonBody(c, proxyIdSchema);
 
       await updateInstalledPackage(scope, agent.id, { proxyId: data.proxyId });
@@ -296,17 +413,20 @@ export function createAgentsRouter() {
       });
 
       // Return the bare proxy-setting resource — same shape and read path
-      // (`getPackageConfig`) as GET /agents/:scope/:name/proxy (#657).
-      const { proxyId } = await getPackageConfig(scope.applicationId, agent.id);
+      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/proxy (#657).
+      const { proxyId } = await getInstalledPackageSettings(scope.spaceId, agent.id);
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
   );
 
-  // GET /api/agents/:scope/:name/model — get agent model configuration
-  router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgent(), async (c) => {
+  // GET /api/agents/:scope/:name/model — get agent model configuration.
+  // Permission-first, same reason as `…/proxy` above. `agents:run` opens it
+  // too: this is where the launch form reads the model a run will resolve to,
+  // and the body carries no manifest and no prompt.
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgentRead, requireAgent(), async (c) => {
     const agent = c.get("package");
-    const applicationId = c.get("applicationId");
-    const { modelId, generationConfig } = await getPackageConfig(applicationId, agent.id);
+    const spaceId = c.get("spaceId");
+    const { modelId, generationConfig } = await getInstalledPackageSettings(spaceId, agent.id);
 
     return c.json({ modelId, generation: generationConfig });
   });
@@ -318,33 +438,21 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("package");
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const data = await readJsonBody(c, modelIdSchema);
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
-      const current = await getPackageConfig(scope.applicationId, agent.id);
+      const current = await getInstalledPackageSettings(scope.spaceId, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
       let generation = data.generation;
       if (generation && Object.keys(generation).length > 0) {
-        if (!selectedModel) {
-          throw invalidRequest(
-            "A model must be configured before generation settings can be saved",
-          );
-        }
-        try {
-          generation = resolveModelGenerationSettings({
-            capabilities: selectedModel.generation,
-            override: generation,
-          });
-        } catch (error) {
-          if (error instanceof ModelGenerationError) {
-            throw invalidRequest(error.message, "generation");
-          }
-          throw error;
-        }
+        generation = validateGenerationOverride(generation, selectedModel, "generation");
       } else if (generation === undefined && current.generationConfig) {
+        // `modelId` is REQUIRED on this body, so "the model may have changed"
+        // — the precondition the other two routes spell out as
+        // `modelId !== undefined` — always holds here. See `spaces.ts`.
         generation = reconcileModelGenerationSettings(
           current.generationConfig,
           selectedModel?.generation,
@@ -364,8 +472,11 @@ export function createAgentsRouter() {
       });
 
       // Return the bare model-setting resource — same shape and read path
-      // (`getPackageConfig`) as GET /agents/:scope/:name/model (#657).
-      const { modelId, generationConfig } = await getPackageConfig(scope.applicationId, agent.id);
+      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/model (#657).
+      const { modelId, generationConfig } = await getInstalledPackageSettings(
+        scope.spaceId,
+        agent.id,
+      );
       return c.json({ modelId, generation: generationConfig });
     },
   );
@@ -382,7 +493,7 @@ export function createAgentsRouter() {
     requirePermission("persistence", "read"),
     async (c) => {
       const agent = c.get("package");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const kindParam = c.req.query("kind");
       const actorTypeParam = c.req.query("actor_type");
       const actorIdParam = c.req.query("actor_id");
@@ -393,13 +504,15 @@ export function createAgentsRouter() {
       // their own actor's view through this endpoint.
       const callerScope = scopeFromActor(getActor(c));
 
-      // Optional explicit scope override (admin only — the requirePermission
-      // gate above gates the route; a member who somehow had `persistence:read`
-      // would still see only their own data because we don't honour overrides
-      // for members. Guard:
-      const isAdmin = c.get("orgRole") === "admin" || c.get("orgRole") === "owner";
+      // Optional explicit scope override. `persistence:read` gates the route
+      // and every role holds it, so the cross-actor view is gated on
+      // `persistence:delete` instead — the admin-grade action of this family.
+      // Everyone else stays narrowed to their own actor scope.
+      const canReadEveryActor = c.get("permissions")?.has("persistence:delete") ?? false;
 
-      const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
+      const scopeOverride = canReadEveryActor
+        ? scopeFromQueryParams(actorTypeParam, actorIdParam)
+        : null;
       const scope = scopeOverride ?? callerScope;
 
       const wantsPinned = !kindParam || kindParam === "pinned";
@@ -408,17 +521,16 @@ export function createAgentsRouter() {
         throw invalidRequest("kind must be 'pinned' or 'memory'");
       }
 
-      // Admins inspecting at agent-level (no scope override, no runId) see
-      // every actor's pinned slots; everyone else is narrowed to their scope.
-      const pinnedScope = isAdmin && !scopeOverride ? undefined : scope;
+      // A cross-actor reader inspecting at agent-level (no scope override, no
+      // runId) sees every actor's pinned slots; everyone else is narrowed to
+      // their scope.
+      const pinnedScope = canReadEveryActor && !scopeOverride ? undefined : scope;
 
       const [pinned, memories] = await Promise.all([
         wantsPinned
-          ? listPinnedSlots(agent.id, applicationId, pinnedScope, runIdParam)
+          ? listPinnedSlots(agent.id, spaceId, pinnedScope, runIdParam)
           : Promise.resolve([]),
-        wantsMemory
-          ? listMemories(agent.id, applicationId, scope, runIdParam)
-          : Promise.resolve([]),
+        wantsMemory ? listMemories(agent.id, spaceId, scope, runIdParam) : Promise.resolve([]),
       ]);
 
       return c.json({
@@ -456,12 +568,12 @@ export function createAgentsRouter() {
     requirePermission("persistence", "delete"),
     async (c) => {
       const agent = c.get("package");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
       if (!result.success) {
         throw invalidRequest("Invalid memory id", "id");
       }
-      const deleted = await deleteMemory(result.data, agent.id, applicationId);
+      const deleted = await deleteMemory(result.data, agent.id, spaceId);
       if (!deleted) {
         throw notFound("Memory not found");
       }
@@ -482,12 +594,12 @@ export function createAgentsRouter() {
     requirePermission("persistence", "delete"),
     async (c) => {
       const agent = c.get("package");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
       if (!result.success) {
         throw invalidRequest("Invalid pinned slot id", "id");
       }
-      const deleted = await deletePinnedSlotById(result.data, agent.id, applicationId);
+      const deleted = await deletePinnedSlotById(result.data, agent.id, spaceId);
       if (!deleted) {
         throw notFound("Pinned slot not found");
       }
@@ -503,39 +615,41 @@ export function createAgentsRouter() {
 
   // DELETE /api/agents/:scope/:name/persistence?kind=&actor_type=&actor_id=
   // Bulk delete: by default wipes every memory + checkpoint for the agent
-  // in this app. Narrow with query params.
+  // in this space. Narrow with query params.
   router.delete(
     `/${SCOPED_PACKAGE_ROUTE}/persistence`,
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
       const agent = c.get("package");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const kindParam = c.req.query("kind");
       const actorTypeParam = c.req.query("actor_type");
       const actorIdParam = c.req.query("actor_id");
 
-      // Same actor-override guard the GET path applies: only admins/owners may
-      // target another actor's rows (or omit the scope to bulk-wipe every
-      // actor). A member — even one holding `persistence:delete` — is narrowed
-      // to their own actor scope, so they cannot delete another actor's
+      // Same actor-override guard the GET path applies: only a holder of
+      // `persistence:delete` may target another actor's rows (or omit the
+      // scope to bulk-wipe every actor). Everyone else is narrowed to their
+      // own actor scope, so they cannot delete another actor's
       // memories/checkpoints by supplying an arbitrary actor_type / actor_id.
       const callerScope = scopeFromActor(getActor(c));
-      const isAdmin = c.get("orgRole") === "admin" || c.get("orgRole") === "owner";
-      const scopeOverride = isAdmin ? scopeFromQueryParams(actorTypeParam, actorIdParam) : null;
-      const scope = isAdmin ? (scopeOverride ?? undefined) : callerScope;
+      const canTouchEveryActor = c.get("permissions")?.has("persistence:delete") ?? false;
+      const scopeOverride = canTouchEveryActor
+        ? scopeFromQueryParams(actorTypeParam, actorIdParam)
+        : null;
+      const scope = canTouchEveryActor ? (scopeOverride ?? undefined) : callerScope;
 
       let memoriesDeleted = 0;
       let checkpointDeleted = false;
 
       if (!kindParam || kindParam === "memory") {
-        memoriesDeleted = await deleteAllMemories(agent.id, applicationId, scope);
+        memoriesDeleted = await deleteAllMemories(agent.id, spaceId, scope);
       }
       if ((!kindParam || kindParam === "pinned") && scope) {
         // Checkpoint slot is upserted per-scope; require an explicit scope here.
         // (Bulk-delete of every pinned slot key is intentionally not exposed —
         // each named slot must be deleted individually via DELETE /pinned/:id.)
-        checkpointDeleted = await deleteCheckpoint(agent.id, applicationId, scope);
+        checkpointDeleted = await deleteCheckpoint(agent.id, spaceId, scope);
       }
 
       await recordAuditFromContext(c, {
@@ -562,11 +676,11 @@ export function createAgentsRouter() {
   // (multi-package archive with pinned versions of every transitive dep).
   //
   // We deliberately don't use `requireAgent()` here: that middleware folds
-  // "doesn't exist in org" and "exists in org but not installed in app"
+  // "doesn't exist in org" and "exists in org but not installed in space"
   // into a single opaque 404. The CLI's run-by-id flow needs to tell the
   // two cases apart so it can prompt the user to install rather than
   // suggest the package is mistyped. Inline check below distinguishes
-  // them via `agent_not_installed_in_app`.
+  // them via `agent_not_installed_in_space`.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
@@ -576,7 +690,7 @@ export function createAgentsRouter() {
       const nameParam = c.req.param("name")!;
       const packageId = `${scopeParam}/${nameParam}`;
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId")!;
+      const spaceId = c.get("spaceId")!;
       const versionSpec = c.req.query("version") ?? null;
       const sourceQuery = c.req.query("source");
       // `source=draft` mirrors the dashboard "Run" button: bundle the
@@ -613,17 +727,17 @@ export function createAgentsRouter() {
           detail: `Agent '${packageId}' not found in this organization`,
         });
       }
-      if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+      if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
         throw new ApiError({
           status: 404,
-          code: "agent_not_installed_in_app",
+          code: "agent_not_installed_in_space",
           title: "Agent Not Installed",
           detail:
-            `Agent '${packageId}' exists in this organization but is not installed in application '${applicationId}'. ` +
-            `Install it via POST /api/applications/${applicationId}/packages, or pick a different application.`,
+            `Agent '${packageId}' exists in this organization but is not installed in space '${spaceId}'. ` +
+            `Install it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
         });
       }
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
 
       // Omit time-varying metadata (createdAt) so two exports of the same
       // (package, version) produce byte-identical archives — this makes

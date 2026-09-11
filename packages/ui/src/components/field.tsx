@@ -3,7 +3,6 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../cn.ts";
-import { Label } from "./label.tsx";
 
 function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
@@ -43,19 +42,6 @@ function Field({
   );
 }
 
-function FieldLabel({ className, ...props }: React.ComponentProps<typeof Label>) {
-  return (
-    <Label
-      data-slot="field-label"
-      className={cn(
-        "flex w-fit items-center gap-2 leading-snug group-data-[disabled=true]/field:opacity-50",
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
 function FieldTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -79,4 +65,4 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
   );
 }
 
-export { Field, FieldDescription, FieldGroup, FieldLabel, FieldTitle };
+export { Field, FieldDescription, FieldGroup, FieldTitle };

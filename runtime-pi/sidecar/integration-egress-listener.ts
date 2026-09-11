@@ -44,7 +44,7 @@ export interface EgressListenerEvent {
   reason?: string;
 }
 
-export interface CreateEgressListenerOptions {
+interface CreateEgressListenerOptions {
   /** Bind host — adapter-chosen (0.0.0.0 bridged / 127.0.0.1 shared NS). */
   host?: string;
   /** Telemetry sink (host:port + outcome only — never request contents). */

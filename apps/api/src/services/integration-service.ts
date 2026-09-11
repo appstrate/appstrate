@@ -24,8 +24,6 @@ import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
 import { formatZodIssues } from "../lib/zod-format.ts";
 
-export type { IntegrationSummary };
-
 // ---------------------------------------------------------------------------
 // Manifest loading
 // ---------------------------------------------------------------------------
@@ -158,7 +156,7 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
  * (a leaked diagnosis cycle in prod traced to the silent stale-draft/latest-bytes
  * split; see issue #588).
  */
-export type PublishedManifestFailure =
+type PublishedManifestFailure =
   | "not_found"
   | "wrong_type"
   | "invalid_manifest"
@@ -198,10 +196,13 @@ async function resolvePublishedManifest(
   orgId: string,
   pin?: string | null,
 ): Promise<PublishedManifestResolution> {
-  // System packages are loaded once at boot and served from the in-memory
-  // registry by id — there is no `package_versions` row to pin against, and the
-  // byte route resolves them the same way (issue #588 only concerns
-  // separately-versioned local packages).
+  // System packages are loaded once at boot and answered from the in-memory
+  // registry by id, which holds ONE version per id — so there is no version to
+  // pin, and this returns `version: null`. (They do get `package_versions`
+  // rows, written by `syncSystemPackagesToDb`; this path simply never consults
+  // them.) The byte route short-circuits on the same registry, so issue #588 —
+  // manifest and bytes drawn from different versions — cannot arise here; it
+  // only concerns separately-versioned local packages.
   const sys = getSystemPackages().get(packageId);
   if (sys) {
     return { ok: true, rawManifest: sys.manifest, version: null, source: "system" };
@@ -277,14 +278,14 @@ async function resolvePublishedManifest(
  * {@link PublishedManifestFailure} with the mcp-server-specific `not_mcp_server`
  * name preserved for existing call-site logging.
  */
-export type McpServerResolveFailure =
+type McpServerResolveFailure =
   | "not_found"
   | "not_mcp_server"
   | "invalid_manifest"
   | "unsatisfiable_pin"
   | "no_published_version";
 
-export type McpServerResolution =
+type McpServerResolution =
   | {
       ok: true;
       manifest: McpServerManifest;
@@ -342,7 +343,7 @@ export async function resolveMcpServerForSpawn(
  *   - `system`  → the in-memory boot registry (system integrations).
  *   - `version` → a published `package_versions` row (the pinned version).
  */
-export type SpawnVersionDescriptor =
+type SpawnVersionDescriptor =
   { kind: "draft" } | { kind: "system" } | { kind: "version"; version: string };
 
 /** Frozen resolution recorded on `runs.resolved_integration_versions`. */
@@ -461,7 +462,7 @@ export function readIntegrationManifestForRun(
     : fetchIntegrationManifest(packageId, cache);
 }
 
-export type RunIntegrationVersionsResult =
+type RunIntegrationVersionsResult =
   | { ok: true; versions: ResolvedIntegrationVersionMap }
   | { ok: false; unresolved: Array<{ name: string; versionSpec: string }> };
 
@@ -611,7 +612,7 @@ export async function getIntegration(
  * (AFPS §3.5) parsed at install time and persisted on
  * `packages.draftContent`. Either may be absent.
  */
-export interface IntegrationPromptDoc {
+interface IntegrationPromptDoc {
   packageId: string;
   description?: string;
   doc?: string;

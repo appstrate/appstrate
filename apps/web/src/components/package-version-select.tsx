@@ -12,7 +12,7 @@ import { usePackageVersions } from "../hooks/use-packages";
 import type { PackageType } from "@appstrate/shared-types";
 
 /** A context-specific option shown above the published version list. */
-export interface VersionLeadingOption {
+interface VersionLeadingOption {
   value: string;
   label: string;
 }

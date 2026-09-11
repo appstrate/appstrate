@@ -61,6 +61,11 @@ export function getRedisConnection(): Redis {
   return publisher;
 }
 
+/** True while the shared request-path client exists — {@link closeRedis} drops it. */
+export function hasRedisConnection(): boolean {
+  return publisher !== null;
+}
+
 /**
  * Dedicated client for BullMQ, which requires `maxRetriesPerRequest: null`.
  *

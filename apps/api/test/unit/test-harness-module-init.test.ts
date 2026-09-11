@@ -8,7 +8,7 @@
  * discovered module (issue #989). Modules that carried a no-context fallback
  * then served requests against a degraded dependency baseline — for chat that
  * meant the #968/#971 admission gate answering `null` (fail-open) and the #965
- * document teardown resolving to a no-op. Any test that believed it exercised
+ * file teardown resolving to a no-op. Any test that believed it exercised
  * those guards exercised nothing, and would have kept passing if either guard
  * were deleted outright.
  *

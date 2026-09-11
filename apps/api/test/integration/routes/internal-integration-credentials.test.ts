@@ -10,7 +10,7 @@
  * is authorised by the per-run Bearer token AND
  * `assertAgentDeclaresIntegration`, which verifies the running agent
  * declares the integration as a dependency AND it is installed in the
- * run's application. A leaked run token must not be able to enumerate
+ * run's space. A leaked run token must not be able to enumerate
  * arbitrary integration secrets across the org.
  *
  * Mirrors the structure of `internal-mcp-server-bundle.test.ts`. Deep
@@ -26,7 +26,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -95,7 +95,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       draftManifest: buildIntegrationManifest(id),
     });
     if (installed) {
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
   }
 
@@ -110,7 +110,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
         integrationId: integrationId,
         authKey: opts.authKey ?? "primary",
         accountId: "acct-test",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted:
@@ -153,12 +153,12 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     const run = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -200,8 +200,8 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(JSON.stringify(body)).toMatch(/not a dependency/i);
   });
 
-  it("DENY: 404 when the integration is declared but NOT installed in the app", async () => {
-    // The dep is declared, but `application_packages` row is absent.
+  it("DENY: 404 when the integration is declared but NOT installed in the space", async () => {
+    // The dep is declared, but `space_packages` row is absent.
     // The gate refuses — install is a separate authorization layer.
     await seedIntegration(INTEGRATION, false);
     await seedConnection(INTEGRATION);
@@ -212,7 +212,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
 
     expect(res.status).toBe(404);
     const body = await res.json();
-    expect(JSON.stringify(body)).toMatch(/not installed in this application/i);
+    expect(JSON.stringify(body)).toMatch(/not installed in this space/i);
   });
 
   // ─── Happy path ────────────────────────────────────────
@@ -283,7 +283,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     const pinnedRun = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
       resolvedConnections: { [INTEGRATION]: { connectionId, source: "member_pin" } },
@@ -353,7 +353,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       draftManifest: buildIntegrationManifest(id),
     });
     if (installed) {
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
   }
 
@@ -363,7 +363,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       integrationId: integrationId,
       authKey: "primary",
       accountId: "acct-test",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: ciphertext,
@@ -381,12 +381,12 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     const run = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -420,7 +420,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(res.status).toBe(404);
   });
 
-  it("DENY: 404 when the integration is declared but NOT installed in the app", async () => {
+  it("DENY: 404 when the integration is declared but NOT installed in the space", async () => {
     await seedIntegration(INTEGRATION, false);
     await seedConnection(INTEGRATION);
 
@@ -484,13 +484,13 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       source: "local",
       draftManifest: buildIntegrationManifest(id),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
     await db.insert(integrationConnections).values({
       integrationId: id,
       authKey: "primary",
       accountId: "acct-test",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: ciphertext,
@@ -502,7 +502,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     const run = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
       versionRef,
@@ -528,7 +528,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedPackageVersion({
       packageId: AGENT,
       version: "1.0.0",
@@ -555,7 +555,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedPackageVersion({
       packageId: AGENT,
       version: "1.0.0",
@@ -584,7 +584,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     const token = await seedPinnedRun("9.9.9");
 
@@ -613,7 +613,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedPackageVersion({
       packageId: AGENT,
       version: "1.0.0",

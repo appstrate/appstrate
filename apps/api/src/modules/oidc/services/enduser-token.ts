@@ -3,39 +3,28 @@
 /**
  * End-user token verification service.
  *
- * Verifies ES256-signed JWT access tokens issued by the Better Auth
- * `oauth-provider` plugin. Fetches the JWKS directly from the Better Auth
- * singleton via `auth.api.getJwks()` (in-process) instead of doing an HTTP
- * round-trip to `${APP_URL}/api/auth/jwks`. This keeps the hot path fast,
- * removes any dependency on the platform being reachable over HTTP at
- * verify time (tests, Hono's `app.request()`, air-gapped deployments),
- * and guarantees the keys we verify against are exactly the keys the
- * local plugin just minted with — no staleness window.
+ * Verifies the ES256-signed JWT access tokens the Better Auth `oauth-provider`
+ * plugin issues, through `verifyJwsAccessToken`. The key set is read from the
+ * Better Auth singleton in-process (`auth.api.getJwks()`) rather than over HTTP
+ * to `${APP_URL}/api/auth/jwks`, so verification works under Hono's
+ * `app.request()`, in tests and in air-gapped deployments, and always sees the
+ * keys the local plugin mints with.
  *
- * ## Rotation safety
- *
- * The Better Auth `jwt` plugin rotates ES256 keys every 90 days with a
- * 7-day grace window. If we cached the JWKS indefinitely, rotation would
- * silently break verification until the process restarts. Two mechanisms
- * guard against that:
- *
- * 1. **TTL-based refresh** — the cached keyset expires after
- *    `JWKS_CACHE_TTL_MS` (5 minutes). The next verify after expiry
- *    re-fetches in-process, picking up any newly published key.
- * 2. **Unknown-kid refetch** — if `jose.jwtVerify` throws
- *    `JWKSNoMatchingKey` (the token header carries a `kid` we don't know
- *    about — i.e. a key rotated in since our last fetch), we refresh the
- *    cache eagerly once and retry. Repeated unknown-kid failures still
- *    fail closed so a bogus token doesn't trigger a DOS refetch loop.
+ * Rotation safety is upstream's: it trusts a cached key set for 300 s under
+ * `jwksCacheKey`, and a token whose `kid` that set does not carry forces one
+ * refetch before the token is refused. The `jwt` plugin rotates its ES256
+ * keypair every 90 days with a 7-day grace window; both halves of the window
+ * therefore verify within a single call, with no process restart.
  */
 
 import * as jose from "jose";
+import { verifyJwsAccessToken } from "@better-auth/core/oauth2";
 import { getEnv } from "@appstrate/env";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getEndUserVerifyAudiences } from "../../mcp/audiences.ts";
+import { getEndUserVerifyAudiences } from "../../../lib/audiences.ts";
 
 /** Normalize a JWT `aud` (string | string[] | undefined) to a string array. */
 function normalizeAudiences(aud: unknown): string[] {
@@ -48,7 +37,7 @@ function normalizeAudiences(aud: unknown): string[] {
  * Polymorphic access-token claim shape. Every OIDC-minted token carries
  * `actor_type` as the discriminant. Dashboard-user tokens additionally
  * carry `org_id` + `org_role`; end-user tokens additionally carry
- * `application_id` + `end_user_id`. `sub` is always present (Better Auth
+ * `space_id` + `end_user_id`. `sub` is always present (Better Auth
  * `user.id`).
  */
 export interface AccessTokenClaims {
@@ -67,10 +56,10 @@ export interface AccessTokenClaims {
   scope?: string;
   /** Org scope for dashboard users and (derived) for end-users. */
   orgId?: string;
-  /** Dashboard flow: `owner` / `admin` / `member` / `viewer`. */
+  /** Dashboard flow: `owner` / `admin` / `member` / `guest`. */
   orgRole?: OrgRole;
-  /** End-user flow: owning application id. */
-  applicationId?: string;
+  /** End-user flow: owning space id. */
+  spaceId?: string;
   /** End-user flow: `eu_…` id of the impersonated end-user. */
   endUserId?: string;
   /** CLI flow: refresh-token family id this access token was issued
@@ -79,75 +68,26 @@ export interface AccessTokenClaims {
   cliFamilyId?: string;
 }
 
-export type JwksResolver = (
-  protectedHeader?: jose.JWSHeaderParameters,
-  token?: jose.FlattenedJWSInput,
-) => Promise<jose.CryptoKey>;
-
-interface JwksCacheEntry {
-  resolver: JwksResolver;
-  /** Epoch ms at which this resolver must be refetched. */
-  expiresAt: number;
-}
-
-/** 5 minutes — short enough to propagate rotations quickly, long enough that
- *  steady-state verification never touches Better Auth. */
-const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
-
-let _cache: JwksCacheEntry | null = null;
-let _pendingRefresh: Promise<JwksResolver> | null = null;
+/** Supplies the key set access tokens are verified against. */
+export type JwksFetch = () => Promise<jose.JSONWebKeySet>;
 
 /**
- * Build an in-process JWKS resolver by fetching keys from the Better Auth
- * singleton's `jwt` plugin endpoint.
+ * Production source: the Better Auth singleton's `jwt` plugin endpoint, called
+ * in-process. Empty is an error — a keyless set would refuse every token.
  */
-async function buildLocalJwks(): Promise<JwksResolver> {
+const fetchLocalJwks: JwksFetch = async () => {
   const api = getOidcAuthApi();
   const result = await api.getJwks({ headers: new Headers() });
   const keys = result?.keys;
   if (!Array.isArray(keys) || keys.length === 0) {
     throw new Error("oidc: jwks endpoint returned no keys");
   }
-  return jose.createLocalJWKSet({ keys }) as unknown as JwksResolver;
-}
+  return { keys };
+};
 
-/**
- * Returns the cached JWKS resolver, refetching if the TTL has elapsed.
- * Concurrent callers share a single in-flight refetch so the Better Auth
- * API is not hammered under load.
- */
-async function getJwks(options?: { forceRefresh?: boolean }): Promise<JwksResolver> {
-  const now = Date.now();
-  const fresh = _cache && _cache.expiresAt > now;
-  if (!options?.forceRefresh && fresh) return _cache!.resolver;
-
-  if (_pendingRefresh) return _pendingRefresh;
-
-  _pendingRefresh = (async () => {
-    try {
-      const resolver = await buildLocalJwks();
-      _cache = { resolver, expiresAt: Date.now() + JWKS_CACHE_TTL_MS };
-      return resolver;
-    } finally {
-      _pendingRefresh = null;
-    }
-  })();
-  return _pendingRefresh;
-}
-
-/**
- * Narrow detection for `jose`'s `JWKSNoMatchingKey` error — the signal that
- * the token header carries a `kid` our cached keyset does not know. We
- * cannot `instanceof JWKSNoMatchingKey` because jose's error classes are
- * stable via `.code` only.
- */
-function isUnknownKidError(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    "code" in err &&
-    (err as { code?: string }).code === "ERR_JWKS_NO_MATCHING_KEY"
-  );
-}
+let jwksFetch: JwksFetch = fetchLocalJwks;
+/** Stable identity the upstream verifier caches this source's key set under. */
+let jwksCacheKey: object = {};
 
 /**
  * Verify a Bearer access token and return its claims, or `null` if the token
@@ -155,14 +95,13 @@ function isUnknownKidError(err: unknown): boolean {
  * checks. Never throws — designed to be called from the auth middleware hot
  * path where the token is just as likely to be a random opaque string.
  *
- * Pass `deps.jwks` to inject a pre-built resolver (unit tests that pin a
- * specific keypair without rebuilding the Better Auth singleton). Production
- * callers pass nothing and get the TTL-cached in-process resolver, with an
- * automatic one-shot refresh if jose reports an unknown `kid`.
+ * Pass `deps.jwks` to inject a key-set source (unit tests that pin a specific
+ * keypair without rebuilding the Better Auth singleton). Production callers
+ * pass nothing and read the singleton through the cached module source.
  */
 export async function verifyEndUserAccessToken(
   token: string,
-  deps?: { jwks?: JwksResolver },
+  deps?: { jwks?: JwksFetch },
 ): Promise<AccessTokenClaims | null> {
   const env = getEnv();
   // Better Auth's oauth-provider plugin mints tokens with `iss` set to
@@ -170,59 +109,38 @@ export async function verifyEndUserAccessToken(
   // (see `packages/db/src/auth.ts` basePath). Verifying against `APP_URL`
   // alone rejects every real token.
   const issuer = `${env.APP_URL}/api/auth`;
-  // Audience validation matches `validAudiences` in `auth/plugins.ts` —
-  // RFC 8707 enforcement already happens at the token endpoint via
-  // `oidcGuardsPlugin`, but the local verifier adds defense-in-depth so
-  // a future plugin update that mints tokens with an unexpected `aud`
-  // cannot slip through unchecked.
+  // Audience validation mirrors what the AS will mint (its `oauth_resources`
+  // rows) — RFC 8707 enforcement already happens at the token endpoint, but the
+  // local verifier adds defense-in-depth so a future plugin update that mints
+  // tokens with an unexpected `aud` cannot slip through unchecked.
   //
   // The platform + AS base audiences plus one per-org MCP resource URI each
-  // (`…/api/mcp/o/:org`, the same set the AS mints against), so an RFC 8707
-  // audience-bound MCP token (`resource=<…>/api/mcp/o/<id>` → `aud:
-  // <…>/api/mcp/o/<id>`) verifies here. The list is owned + cached by the
-  // audiences module (base computed locally, not from `mcpValidAudiences`, so
-  // verification never depends on the AS plugin having run; cache rebuilt only
-  // when the org set changes, so this hot path stays O(1)). jose passes when the
-  // token's `aud` intersects the list; the per-org MCP resource server then
-  // additionally requires ITS exact URI in `aud` (RFC 8707 MUST), confining the
-  // token to that one org, and an MCP-scoped token reaching other routes is
-  // contained by the outbound audience guard + RBAC.
+  // (`…/api/mcp/o/:org`), so an RFC 8707 audience-bound MCP token
+  // (`resource=<…>/api/mcp/o/<id>` → `aud: <…>/api/mcp/o/<id>`) verifies here.
+  // The list is owned + cached by the audiences module (base computed locally,
+  // so verification never depends on the AS plugin having run; cache rebuilt
+  // only when the org set changes, so this hot path stays O(1)). jose passes
+  // when the token's `aud` intersects the list; the per-org MCP resource server
+  // then additionally requires ITS exact URI in `aud` (RFC 8707 MUST),
+  // confining the token to that one org, and an MCP-scoped token reaching other
+  // routes is contained by the outbound audience guard + RBAC.
   const audience = getEndUserVerifyAudiences();
-
-  const tryVerify = async (jwks: JwksResolver) =>
-    jose.jwtVerify(token, jwks, { issuer, audience, algorithms: ["ES256"] });
 
   let payload: jose.JWTPayload;
   try {
-    const jwks = deps?.jwks ?? (await getJwks());
-    ({ payload } = await tryVerify(jwks));
+    payload = await verifyJwsAccessToken(token, {
+      jwksFetch: deps?.jwks ?? jwksFetch,
+      // An injected source belongs to its caller: keep it out of the cache the
+      // module source owns, so neither can serve the other's keys.
+      jwksCacheKey: deps?.jwks ? undefined : jwksCacheKey,
+      verifyOptions: { issuer, audience, algorithms: ["ES256"] },
+    });
   } catch (err) {
-    // Unknown-kid path: refresh the keyset once and retry. Handles the
-    // 7-day rotation grace window — after rotation, clients continue to
-    // present tokens signed by the old key for a few minutes until the
-    // new kid propagates through our TTL, so a single refetch restores
-    // steady-state verification without waiting on the TTL expiry.
-    //
-    // Skipped when the caller injected their own `deps.jwks` (tests) —
-    // they own their key lifecycle and a refetch would defeat the DI.
-    if (!deps?.jwks && isUnknownKidError(err)) {
-      try {
-        const refreshed = await getJwks({ forceRefresh: true });
-        ({ payload } = await tryVerify(refreshed));
-      } catch (retryErr) {
-        logger.debug("oidc: verifyEndUserAccessToken retry-after-refresh failed", {
-          module: "oidc",
-          error: getErrorMessage(retryErr),
-        });
-        return null;
-      }
-    } else {
-      logger.debug("oidc: verifyEndUserAccessToken failed", {
-        module: "oidc",
-        error: getErrorMessage(err),
-      });
-      return null;
-    }
+    logger.debug("oidc: verifyEndUserAccessToken failed", {
+      module: "oidc",
+      error: getErrorMessage(err),
+    });
+    return null;
   }
 
   if (!payload.sub) return null;
@@ -238,7 +156,7 @@ export async function verifyEndUserAccessToken(
     (extra.org_role === "owner" ||
       extra.org_role === "admin" ||
       extra.org_role === "member" ||
-      extra.org_role === "viewer")
+      extra.org_role === "guest")
       ? (extra.org_role as OrgRole)
       : undefined;
   return {
@@ -252,23 +170,20 @@ export async function verifyEndUserAccessToken(
     scope: typeof extra.scope === "string" ? extra.scope : undefined,
     orgId: typeof extra.org_id === "string" ? extra.org_id : undefined,
     orgRole,
-    applicationId: typeof extra.application_id === "string" ? extra.application_id : undefined,
+    spaceId: typeof extra.space_id === "string" ? extra.space_id : undefined,
     endUserId: typeof extra.end_user_id === "string" ? extra.end_user_id : undefined,
     cliFamilyId: typeof extra.cli_family_id === "string" ? extra.cli_family_id : undefined,
   };
 }
 
 /**
- * Test harness override — install a pre-built JWKS resolver, or pass `null`
- * to clear the cache. Integration tests that rebuild the Better Auth
- * singleton between runs call this with `null` so the next verify
- * re-fetches the fresh ES256 keys. Tests that need to bypass the real
- * singleton entirely (e.g. a module-loaded preload with a different
- * keypair than the test's own mint key) call this with their own
- * `jose.createLocalJWKSet(...)`. Not intended for production callers —
- * use the `deps.jwks` param on `verifyEndUserAccessToken` for DI.
+ * Test harness override — install the key set access tokens verify against, or
+ * pass `null` to restore the Better Auth singleton as the source. Either way
+ * the cached key set is dropped, so a test that rebuilds the singleton sees its
+ * fresh ES256 keys on the next verify. Production callers use the `deps.jwks`
+ * parameter instead.
  */
-export function overrideJwksResolver(resolver: JwksResolver | null): void {
-  _cache = resolver ? { resolver, expiresAt: Date.now() + JWKS_CACHE_TTL_MS } : null;
-  _pendingRefresh = null;
+export function overrideJwks(fetch: JwksFetch | null): void {
+  jwksFetch = fetch ?? fetchLocalJwks;
+  jwksCacheKey = {};
 }

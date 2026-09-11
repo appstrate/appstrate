@@ -10,7 +10,6 @@ import {
   CHAT_TURN_SAFETY_MARGIN_MS,
   computeTurnRunBudget,
   formatBudgetDuration,
-  isFinalChatStep,
   mergeTurnMetadata,
   turnLimitReached,
   turnMetadataFromMessage,
@@ -90,6 +89,45 @@ describe("chat turn metadata", () => {
     expect(message.metadata.source).toBe("test");
   });
 
+  it("answers from `maxStepsReached` alone — the retired second arm is gone", () => {
+    // `turnLimitReached` used to read `maxStepsReached || toolStepBudgetReached`
+    // for rows written before the chat unified on one engine. The divergent
+    // pair below is the ONLY shape that arm could ever speak for (a turn
+    // carrying `toolStepBudgetReached` alone never clears the shape gate), and
+    // `scripts/migration/0006-chat-turn-step-cap-fold.sql` moved those rows.
+    // One form written, the same one read.
+    const divergent = {
+      role: "assistant",
+      parts: [],
+      metadata: mergeTurnMetadata(undefined, {
+        finishReason: "stop",
+        stepCount: 16,
+        maxSteps: 16,
+        toolStepBudget: 15,
+        toolStepBudgetReached: true,
+        maxStepsReached: false,
+      }),
+    };
+    expect(turnLimitReached(divergent)).toBe(false);
+
+    // And the gate itself is what makes "carries the retired field alone"
+    // unreachable: no `maxStepsReached`, no decode at all.
+    expect(
+      turnMetadataFromMessage({
+        metadata: {
+          appstrate: {
+            turn: {
+              finishReason: "stop",
+              stepCount: 16,
+              maxSteps: 16,
+              toolStepBudgetReached: true,
+            },
+          },
+        },
+      }),
+    ).toBeNull();
+  });
+
   it("reads assistant-ui message metadata from the top-level message", () => {
     const message = {
       role: "assistant",
@@ -108,12 +146,9 @@ describe("chat turn metadata", () => {
     expect(turnLimitReached(message.content)).toBe(false);
   });
 
-  it("recognizes the final reserved step by zero-based step number", () => {
+  it("reserves exactly one step for the final, tool-less synthesis call", () => {
     expect(CHAT_MAX_STEPS).toBe(16);
     expect(CHAT_TOOL_STEP_BUDGET).toBe(15);
-    expect(isFinalChatStep(14)).toBe(false);
-    expect(isFinalChatStep(15)).toBe(true);
-    expect(isFinalChatStep(16)).toBe(true);
   });
 
   it("keeps a child call's budget strictly inside the turn that hosts it", () => {

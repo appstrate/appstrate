@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Zod validators for the JSONB columns that previously accepted any
  * `Record<string, unknown>` from internal callers. The columns store data
@@ -39,30 +41,32 @@ function withByteCap(maxBytes: number) {
   };
 }
 
-/** `runs.metadata` — opaque platform-written payload (e.g. `degraded_integrations`). */
-export const runMetadataSchema = z
-  .record(z.string(), jsonValueSchema)
-  .superRefine(withByteCap(8 * KB));
-
-/** `runs.config` — snapshot of the effective agent config at run creation. */
-export const runConfigSchema = z
+/** `package_schedules.input` — JSON input replayed into every triggered run. */
+export const scheduleInputSchema = z
   .record(z.string(), jsonValueSchema)
   .superRefine(withByteCap(16 * KB));
 
 /**
- * `runs.config_override` and `package_schedules.config_override` — raw
- * per-run / per-schedule config delta merged into the effective config.
- * Same shape and ceiling as the snapshot column above; sharing one schema
- * keeps the run + schedule write paths in lockstep so a value accepted by
- * one cannot blow up the other on materialisation.
+ * `space_packages.input_settings` — the agent's editor-set input
+ * defaults (`values`) plus the input fields the editor froze (`locked`), as one
+ * document. The wire pairs these as `values` / `locked_fields`; inside the
+ * column the name `input_settings` already supplies the noun, so `locked` is
+ * the member name here.
+ *
+ * Same 16 KB cap as {@link scheduleInputSchema}, the sibling holding the very
+ * same kind of payload — per-field values resolved against the agent's
+ * `input.schema`. Neither member was otherwise bounded: `values` is pruned to
+ * the schema's declared properties at the write route, but a declared string's
+ * LENGTH is not, and `locked` is stored verbatim without being pruned at all.
+ * The column is read on every run launch (`getInstalledPackageSettings`) and on
+ * every agent-detail load, so a bloated row is paid for on the hot path, not
+ * merely at rest.
  */
-export const runConfigOverrideSchema = z
-  .record(z.string(), jsonValueSchema)
-  .superRefine(withByteCap(16 * KB));
-
-/** `package_schedules.input` — JSON input replayed into every triggered run. */
-export const scheduleInputSchema = z
-  .record(z.string(), jsonValueSchema)
+export const inputSettingsSchema = z
+  .object({
+    values: z.record(z.string(), jsonValueSchema),
+    locked: z.array(z.string()),
+  })
   .superRefine(withByteCap(16 * KB));
 
 /**
@@ -70,9 +74,8 @@ export const scheduleInputSchema = z
  * `output` (runner-produced structured output) and nothing else. Unknown keys
  * are stripped and the byte cap bounds the row-sized JSONB column.
  *
- * Rows written before the `report` runtime tool was retired may still carry
- * `text` / `text_truncated`; those are read back verbatim from the column and
- * never re-validated — this is the WRITE boundary only.
+ * This is the WRITE boundary only; the column itself is jsonb and whatever a
+ * row already holds is read back verbatim without re-validation.
  */
 export const runResultSchema = z
   .object({

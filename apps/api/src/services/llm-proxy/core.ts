@@ -23,7 +23,11 @@ import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse } from "./response-cache.ts";
-import { parseProxyRequest } from "./helpers.ts";
+import {
+  LLM_FIRST_RESPONSE_TIMEOUT_MS,
+  LLM_NON_STREAMING_TIMEOUT_MS,
+  parseProxyRequest,
+} from "./helpers.ts";
 import { forwardMeteredResponse } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -35,7 +39,7 @@ import type { ModelSwap } from "@appstrate/core/sidecar-types";
 /** Maximum request body the proxy will accept before refusing up-front. */
 const DEFAULT_MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 
-export interface ProxyCallInputs {
+interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
   principal: LlmProxyPrincipal;
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
@@ -77,8 +81,15 @@ export interface ProxyCallInputs {
 }
 
 export class LlmProxyUnsupportedModelError extends Error {
-  constructor(presetId: string) {
-    super(`Model preset "${presetId}" is not enabled for this organization.`);
+  /**
+   * @param presetId - The preset the caller asked for
+   * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising
+   *   this from a `catch`. The message is a CONCLUSION ("not enabled"), and
+   *   the catch below reaches it for any `loadModel` failure — a DB outage
+   *   included. Without the cause that misdiagnosis is unfalsifiable.
+   */
+  constructor(presetId: string, options?: ErrorOptions) {
+    super(`Model preset "${presetId}" is not enabled for this organization.`, options);
     this.name = "LlmProxyUnsupportedModelError";
   }
 }
@@ -164,8 +175,19 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // dashboard `jwt_user`) never sees the backing. The request `model` was
   // already rewritten alias→real by `request.rewriteModel` above. This mirrors
   // the in-container sidecar path; both share `@appstrate/core/model-swap`.
+  //
+  // Both protocol fields carry the SAME shape here, and that is the honest
+  // statement of what this boundary does: unlike the sidecar (which terminates
+  // the container's canonical dialect and re-originates), the gateway PROXIES —
+  // its caller already speaks the backing's protocol, so there is no backing
+  // catalog to carry and no model record to rebuild.
   const swap: ModelSwap | null = resolved.aliased
-    ? { alias: presetId, real: resolved.modelId }
+    ? {
+        alias: presetId,
+        real: resolved.modelId,
+        clientApiShape: resolved.apiShape,
+        backingApiShape: resolved.apiShape,
+      }
     : null;
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,
@@ -244,10 +266,24 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     // redirect, and following one would replay the provider API key (in
     // `upstreamHeaders`) against whatever host the redirect names.
     //
-    // timeoutMs: 0 — disables the guard's 30 s first-byte default. A
-    // non-streaming completion legitimately holds the response headers past
-    // 30 s; the previous raw fetch here had no deadline either (behaviour
-    // preserved, the caller's disconnect remains the effective bound).
+    // timeoutMs — a real first-response (HEADERS) bound, chosen per request
+    // shape. The guard's timer is detached the moment the response returns, so
+    // it never touches a slow-but-healthy body; what it guarantees is that an
+    // upstream which never answers is reclaimed instead of hanging for as long
+    // as the caller keeps its socket open.
+    //
+    // This used to be `timeoutMs: 0` — no deadline at all — and the reason was
+    // sound: a NON-STREAMING completion legitimately holds its headers for the
+    // whole generation, so the guard's 30 s default would have cut off any
+    // completion longer than half a minute. That reason is preserved, not
+    // discarded: `stream: false` gets 10 min (the vendor SDKs' own
+    // non-streaming default), and only the streaming shape — which must emit
+    // its first SSE frame within seconds — gets the tight 60 s bound.
+    // Inter-chunk silence AFTER the headers is a different problem with a
+    // different instrument — the idle bound both `tee()` branches carry in
+    // `./metering.ts` (`guardSseTeardown` on the client branch, `tapSseUsage`
+    // on the metering one), which is what reclaims a stream that dies after
+    // its headers landed.
     upstream = await egressGuardedFetch(
       upstreamUrl,
       {
@@ -257,7 +293,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       },
       {
         maxRedirects: 0,
-        timeoutMs: 0,
+        timeoutMs: request.stream ? LLM_FIRST_RESPONSE_TIMEOUT_MS : LLM_NON_STREAMING_TIMEOUT_MS,
         logger,
         ...(inputs.fetchImpl ? { fetchImpl: inputs.fetchImpl } : {}),
       },
@@ -287,8 +323,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   }
 
   // Forward + meter, weaving in the alias-swap (every branch) and the
-  // response-cache write (non-streaming 2xx). Shared with the Claude Code
-  // subscription gateway, which forwards verbatim (no swap, no cache).
+  // response-cache write (non-streaming 2xx).
   return forwardMeteredResponse(
     upstream,
     inputs.adapter,
@@ -305,7 +340,6 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       cache: cacheKeyForWrite
         ? { cacheKey: cacheKeyForWrite, ttlSeconds: cacheConfig.ttlSeconds }
         : null,
-      logLabel: "llm-proxy",
     },
   );
 }
@@ -322,8 +356,12 @@ async function resolvePresetForOrg(
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
     loaded = await loadModel(orgId, presetId);
-  } catch {
-    throw new LlmProxyUnsupportedModelError(presetId);
+  } catch (err) {
+    // The comment above names ONE expected failure (a non-UUID presetId), but
+    // this catch swallows every other one too — a dropped connection, a
+    // migration mid-flight — and reports all of them to the operator as
+    // "preset not found". Keep what actually failed.
+    throw new LlmProxyUnsupportedModelError(presetId, { cause: err });
   }
   if (!loaded) {
     throw new LlmProxyUnsupportedModelError(presetId);

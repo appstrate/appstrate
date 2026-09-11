@@ -14,8 +14,13 @@ export default [
   "oauth_refresh_tokens",
   "oauth_consents",
   "oauth_clients",
+  // `oauth_resources` is DELIBERATELY absent. It is the AS's protected-resource
+  // catalog, seeded once per process at plugin init (`resources` in
+  // `auth/plugins.ts`) and never re-seeded — wiping it between tests would make
+  // every platform-audience mint 400 `invalid_target` for the rest of the run.
+  // A test that needs its own resource row owns that row's lifecycle.
   "oidc_end_user_profiles",
-  "application_smtp_configs",
-  "application_social_providers",
+  "space_smtp_configs",
+  "space_social_providers",
   "jwks",
 ] as const;

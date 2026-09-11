@@ -17,7 +17,7 @@ export const agentMapPaths = {
         "Projects the agent's manifest into positioned nodes and edges (triggers and schedules on the left, the agent in the middle, toolbox / skills / mcp servers on the right) crossed with the installation state: resolved versions against declared ranges, per-integration connection status, admin pins, active schedules. `diagnostics[]` carries the readiness failures routed to the node and row they belong to, sourced from the same readiness gate and connection resolver as the run-kickoff 412 — so the map cannot disagree with what a run would do. Read-only: it owns no data and computes no verdict of its own. Every card is emitted even when empty: the card set is the inventory of what an AFPS manifest can hold, and an empty card is where the missing piece gets added.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {

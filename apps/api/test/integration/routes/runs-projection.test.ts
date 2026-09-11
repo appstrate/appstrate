@@ -61,7 +61,7 @@ describe("Enriched run projection", () => {
     const run = await seedRun({
       packageId: agent.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "success",
       runNumber: 7,
@@ -69,8 +69,6 @@ describe("Enriched run projection", () => {
       result: { output: { ok: true } },
       checkpoint: { step: 2 },
       metadata: { source: "test" },
-      config: { a: 1 },
-      configOverride: { a: 2 },
       contextSnapshot: { tokens: 10 },
       error: null,
       duration: 1234,
@@ -113,8 +111,6 @@ describe("Enriched run projection", () => {
     expect(body.result).toEqual({ output: { ok: true } });
     expect(body.checkpoint).toEqual({ step: 2 });
     expect(body.metadata).toEqual({ source: "test" });
-    expect(body.config).toEqual({ a: 1 });
-    expect(body.config_override).toEqual({ a: 2 });
     expect(body.contextSnapshot).toEqual({ tokens: 10 });
     expect(body.duration).toBe(1234);
     expect(body.cost).toBe(0.25);
@@ -134,10 +130,10 @@ describe("Enriched run projection", () => {
     expect(body.dependency_overrides).toEqual({ "@acme/skill": "draft" });
     expect(body.started_at).toBeString();
     expect(body.orgId).toBe(ctx.orgId);
-    expect(body.applicationId).toBe(ctx.defaultAppId);
+    expect(body.spaceId).toBe(ctx.defaultSpaceId);
     expect(body.userId).toBe(ctx.user.id);
     // Enrichment computed alongside the projection.
-    expect(body.document_counts).toEqual({ input: 0, output: 0 });
+    expect(body.file_counts).toEqual({ input: 0, output: 0 });
     expect(body.unread).toBeBoolean();
     // `resolvedConnections` reaches the client only in its display-safe form.
     expect(body.connections_used).toEqual([

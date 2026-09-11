@@ -43,6 +43,9 @@ const testOAuthProvider: ModelProviderDefinition = {
   // Synthetic provider — no catalog, so featured stays empty. The OAuth
   // identity/refresh tests under this fixture don't exercise the picker.
   featuredModels: [],
+  // Required of every oauth2 provider: the platform never enumerates a
+  // subscription token's models.
+  modelDiscovery: { mode: "static" },
 };
 
 /**
@@ -76,6 +79,7 @@ const testOAuthHooksProvider: ModelProviderDefinition = {
     pkce: "S256",
   },
   featuredModels: [],
+  modelDiscovery: { mode: "static" },
   requiredIdentityClaims: ["accountId"],
   hooks: {
     extractTokenIdentity(accessToken) {
@@ -107,7 +111,7 @@ export function mintTestOAuthHooksToken(payload: { accountId?: string; email?: s
  * resolvable providerId for a static system key therefore seed against THIS
  * provider, not `test-oauth`.
  */
-export const TEST_API_KEY_PROVIDER_ID = "test-apikey";
+const TEST_API_KEY_PROVIDER_ID = "test-apikey";
 
 const testApiKeyProvider: ModelProviderDefinition = {
   providerId: TEST_API_KEY_PROVIDER_ID,

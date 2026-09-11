@@ -7,7 +7,7 @@
  *   bun scripts/audit-empty-integration-selections.ts --json    # machine
  *
  * Read-only. Exits 1 only when an affected artifact is selected by a normal
- * application default or an enabled schedule. Drafts and historical versions
+ * space default or an enabled schedule. Drafts and historical versions
  * that require an explicit selector remain visible as warnings and exit 0.
  *
  * All logic lives in the service so it resolves its deps and stays testable —

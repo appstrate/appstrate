@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { paginatedRunsKeys } from "../lib/query-keys";
 import type { EnrichedRun, ListEnvelope, RunStatus } from "@appstrate/shared-types";
 
@@ -39,7 +39,7 @@ export function usePaginatedRuns({
   offset,
 }: UsePaginatedRunsOptions) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
 
   // Key segment only — the typed call below selects the matching spec path.
   // One value on the wire, so one value in the key: an array would key on its
@@ -56,7 +56,7 @@ export function usePaginatedRuns({
   // invalidate by the ["paginated-runs"] prefix.
   const currentKey = paginatedRunsKeys.list(
     orgId,
-    applicationId,
+    spaceId,
     endpoint,
     user,
     kind,
@@ -114,17 +114,17 @@ export function usePaginatedRuns({
         .every((segment, i) => segment === (currentKey[i] as unknown));
       return sameQuestion ? prev : undefined;
     },
-    enabled: !!applicationId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
+    enabled: !!spaceId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
   });
 }
 
 /** One server-side aggregate for the agent overview's fixed 30-day window. */
 export function useAgentRunActivity(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
 
   return useQuery({
-    queryKey: ["agent-run-activity", orgId, applicationId, packageId],
+    queryKey: ["agent-run-activity", orgId, spaceId, packageId],
     queryFn: async () => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/run-activity", {
@@ -132,6 +132,6 @@ export function useAgentRunActivity(packageId: string | undefined) {
       });
       return data!;
     },
-    enabled: !!orgId && !!applicationId && !!packageId,
+    enabled: !!orgId && !!spaceId && !!packageId,
   });
 }

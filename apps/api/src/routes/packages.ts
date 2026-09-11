@@ -2,6 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { makePermissionGuard } from "@appstrate/core/permissions";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
@@ -12,7 +13,7 @@ import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
-import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
+import { installPackage, hasPackageAccess } from "../services/space-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -32,8 +33,14 @@ import {
 } from "../services/package-items/crud.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { uploadPackageFiles, downloadPackageFiles } from "../services/package-items/storage.ts";
-import { CONFIG_BY_TYPE, type PackageTypeConfig } from "../services/package-items/config.ts";
+import {
+  CONFIG_BY_TYPE,
+  assertContentConforms,
+  assertArchiveContentConforms,
+  type PackageTypeConfig,
+} from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
+import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
 import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
 import { unzipPackageArchive } from "../services/package-archive.ts";
@@ -51,11 +58,22 @@ import {
   deletePackageVersion,
 } from "../services/package-versions.ts";
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import {
+  assertCatalogPackageAccess,
+  assertPackageDependenciesAccessible,
+  assertForkSourceAccess,
+  authorizeBundlePackages,
+  assertExistingPackageInstallAccess,
+  PACKAGE_WRITE_PERMISSIONS,
+  assertPackageMutationAccess,
+  packagePermission,
+  requireAgentRead,
+} from "../lib/package-access.ts";
 import { requirePackageInOrg } from "../middleware/guards.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -157,9 +175,9 @@ async function assertAgentIntegrationScopesValid(
 async function validateManifestForRoute(
   manifest: unknown,
   expectedType: PackageType,
-  orgId: string,
+  c: Context<AppEnv>,
   direction: "author" | "stored",
-  opts: { requireCallableTools?: boolean } = {},
+  opts: { requireCallableTools?: boolean; previous?: Record<string, unknown> } = {},
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
@@ -185,7 +203,9 @@ async function validateManifestForRoute(
     ]);
   }
 
-  await assertAgentIntegrationScopesValid(validated, orgId, opts.requireCallableTools);
+  if (direction === "author")
+    await assertPackageDependenciesAccessible(c, validated, opts.previous);
+  await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
   return validated;
 }
 
@@ -193,13 +213,17 @@ async function validateManifestForRoute(
 // Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
 
-export const githubImportSchema = z.object({
-  url: z.url("Missing 'url' field"),
-});
+export const githubImportSchema = z
+  .object({
+    url: z.url("Missing 'url' field"),
+  })
+  .strict();
 
-export const forkSchema = z.object({
-  name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
-});
+export const forkSchema = z
+  .object({
+    name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
+  })
+  .strict();
 
 /**
  * JSON-body create/update payloads for the manifest-driven package types
@@ -208,19 +232,62 @@ export const forkSchema = z.object({
  * (e.g. `content: 1`) are rejected as a 400 instead of blowing up downstream
  * as a 500.
  *
- * Both objects are non-strict, so an unknown key (a client still sending the
- * retired `source_code`, say) is silently stripped rather than rejected.
+ * All three bodies below are `.strict()`. They were open, and the retired
+ * `source_code` key was the reason: dropped when its last reader died with the
+ * `tool` package type, it kept being accepted here — stripped in silence, so a
+ * client still sending it got a 201 and a package without it, with nothing
+ * anywhere saying the field had gone. A retired name must fail loudly
+ * (`docs/NO_TRANSITIONAL_CODE.md` §1), which is the rule that closed the four
+ * launch surfaces in #1187; the barrier is generic and names no field.
  */
-const packageJsonCreateSchema = z.object({
-  manifest: z.record(z.string(), z.unknown()),
-  content: z.string().optional(),
-});
+export const packageJsonCreateSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()),
+    content: z.string().optional(),
+  })
+  .strict();
 
-const packageJsonUpdateSchema = z.object({
-  manifest: z.record(z.string(), z.unknown()).optional(),
-  content: z.string().optional(),
-  lock_version: z.number().optional(),
-});
+/**
+ * The create body of a type whose content file is MANDATORY — `agent` and
+ * `skill`, i.e. every {@link PackageRouteConfig} carrying `requireContent`.
+ *
+ * The requirement is spelled here rather than as a handler check so the
+ * published body can state it: the create schemas back the spec's request
+ * bodies through `zod-schema-registry.ts`, and a handler-only rule left
+ * `POST /api/packages/agents {"manifest": …}` documented as valid and
+ * answered with a 400. Blank-but-present content is refused by the same rule
+ * — an all-whitespace prompt is the empty prompt with extra characters — and
+ * it is a `refine` rather than `.min(1)` because "not blank" has no JSON
+ * Schema spelling, so the published body says `required` and nothing more.
+ */
+export const packageJsonCreateWithContentSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()),
+    content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
+  })
+  .strict();
+
+export const packageJsonUpdateSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()).optional(),
+    content: z.string().optional(),
+    /**
+     * Optimistic-lock token. Mandatory and integral — the value is a row version,
+     * never a fraction. This used to be `z.number().optional()` with a hand-rolled
+     * `null / typeof !== "number"` check in the handler restating both rules; the
+     * schema now carries them, so the spec's `required: ["lock_version"]` and
+     * `type: "integer"` have exactly one runtime counterpart.
+     */
+    lock_version: z.number().int(),
+  })
+  .strict();
+
+/**
+ * Body of `POST /api/packages/{type}/{scope}/{name}/versions`. The body itself
+ * is optional (`requestBody.required: false`) — the SPA omits it entirely when
+ * no override is chosen — so `version` is the only member and it is optional.
+ */
+export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
@@ -417,13 +484,22 @@ async function createVersionSafe(params: {
 
 interface PackageRouteConfig {
   cfg: PackageTypeConfig;
+  /**
+   * How this type names ONE of its packages in an error message ("Skill
+   * '@acme/x' not found"). Stated per entry, not derived: `cfg.label` is a
+   * plural display string, and deriving the singular from it by dropping its
+   * last character made "the label ends in a droppable s" an unwritten
+   * invariant of every label — one a plural like "MCP Bundles" (or any label
+   * whose singular is not the plural minus a letter) breaks silently, in the
+   * error text, where nothing type-checks it.
+   */
+  labelSingular: string;
   /** URL path segment used for routing (e.g. "skills", "integrations"). */
   path: string;
   parseOpts: {
     requiredFile: string | null;
     contentFileExt: string | null;
   };
-  validateContent?: (content: string) => { valid: boolean; errors: string[]; warnings: string[] };
   /**
    * Which storage file this type's editor `content` is written to — a per-type
    * editor-wiring fact.
@@ -454,7 +530,7 @@ interface PackageRouteConfig {
     packageId: string;
     orgId: string;
     manifest: Record<string, unknown>;
-    applicationId?: string;
+    spaceId?: string;
   }) => Promise<void>;
   /** Hook called after a package is updated. */
   afterUpdate?: (params: {
@@ -466,7 +542,12 @@ interface PackageRouteConfig {
   requireMutableForVersionOps?: boolean;
   /** If true, this type uses JSON body for create (not ZIP upload parsing). */
   jsonBodyCreate?: boolean;
-  /** If true, content is required when creating via JSON body. */
+  /**
+   * If true, this type's content file is mandatory: create refuses a body
+   * without a non-blank `content` (through
+   * {@link packageJsonCreateWithContentSchema}, so the published body says so
+   * too), and update refuses a save that would leave the stored content blank.
+   */
   requireContent?: boolean;
   /** Custom GET detail handler, replaces makeGetHandler when provided. */
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
@@ -491,6 +572,7 @@ interface PackageRouteConfig {
 const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
+    labelSingular: "Skill",
     path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     storageFileName: "SKILL.md",
@@ -499,6 +581,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   },
   agent: {
     cfg: CONFIG_BY_TYPE.agent,
+    labelSingular: "Agent",
     path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "prompt.md",
@@ -508,7 +591,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     getHandler: agentDetailHandler,
     // Mutating endpoints echo the full Agent detail (same serializer as the
     // GET). `requireAccess: false` — the caller just wrote this agent in their
-    // org, so the app-install gate must not 404 a successful write.
+    // org, so the space-install gate must not 404 a successful write.
     detailDto: (c, itemId) => buildAgentDetailDto(c, { itemId, requireAccess: false }),
   },
   // Integrations are authored via a JSON-body manifest editor (parity with
@@ -520,6 +603,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   // sources that need no server bundle.
   integration: {
     cfg: CONFIG_BY_TYPE.integration,
+    labelSingular: "Integration",
     path: "integrations",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "manifest.json",
@@ -532,6 +616,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   // Referenced by an integration's `source.kind: "local"`.
   "mcp-server": {
     cfg: CONFIG_BY_TYPE["mcp-server"],
+    labelSingular: "MCP Server",
     path: "mcp-servers",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "manifest.json",
@@ -544,10 +629,10 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
 function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    // `?active=true` narrows to packages active in this app (agent-editor
+    const spaceId = c.get("spaceId");
+    // `?active=true` narrows to packages active in this space (agent-editor
     // integration picker). For most types "active" means an installed +
-    // enabled `application_packages` row (generic SQL narrowing in
+    // enabled `space_packages` row (generic SQL narrowing in
     // `listOrgItems`). INTEGRATIONS additionally auto-activate env-backed
     // SYSTEM integrations that have no row — so they resolve through the
     // canonical activation rule (`resolveIntegrationActivations`), the single
@@ -555,14 +640,14 @@ function makeListHandler(rcfg: PackageRouteConfig) {
     // than the generic SQL filter (which would hide them).
     const wantActive = c.req.query("active") === "true";
     const isIntegration = rcfg.cfg.type === "integration";
-    const items = await listOrgItems(orgId, rcfg.cfg, applicationId, {
+    const items = await listOrgItems(orgId, rcfg.cfg, spaceId, {
       activeOnly: wantActive && !isIntegration,
     });
     let visible = items;
     if (wantActive && isIntegration) {
       const activations = await resolveIntegrationActivations(
         items.map((i) => i.id),
-        applicationId,
+        spaceId,
       );
       visible = items.filter((i) => activations.get(i.id)?.active);
     }
@@ -577,9 +662,17 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    // JSON body create path: { manifest, content?, source? }
+    // JSON body create path: { manifest, content? } — and nothing else.
     if (rcfg.jsonBodyCreate) {
-      const body = await readJsonBody(c, packageJsonCreateSchema);
+      // The two create bodies differ only in whether `content` is mandatory,
+      // which is what `requireContent` means. Selecting the schema here — as
+      // opposed to re-checking the parsed body afterwards — is what lets the
+      // spec publish the difference: `zod-schema-registry.ts` registers
+      // whichever of the two schemas this package type's route uses.
+      const body = await readJsonBody(
+        c,
+        rcfg.requireContent ? packageJsonCreateWithContentSchema : packageJsonCreateSchema,
+      );
 
       const manifest = body.manifest;
       const content = body.content ?? "";
@@ -587,27 +680,11 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       const validatedManifest = await validateManifestForRoute(
         manifest,
         rcfg.cfg.type,
-        orgId,
+        c,
         "author",
       );
 
-      if (rcfg.requireContent && !content.trim()) {
-        throw invalidRequest("Content cannot be empty", "content");
-      }
-
-      if (rcfg.validateContent) {
-        const validation = rcfg.validateContent(content);
-        if (!validation.valid) {
-          throw validationFailed(
-            validation.errors.map((message) => ({
-              field: "content",
-              code: "invalid_content",
-              title: "Invalid Content",
-              message,
-            })),
-          );
-        }
-      }
+      assertContentConforms(rcfg.cfg.type, content, "content");
 
       const packageId = validatedManifest.name;
 
@@ -650,7 +727,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           packageId,
           orgId,
           manifest: validatedManifest,
-          applicationId: c.get("applicationId"),
+          spaceId: c.get("spaceId"),
         });
       }
 
@@ -675,11 +752,11 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         normalizedFiles,
       });
 
-      // Auto-install in the current application (non-fatal)
-      const applicationId = c.get("applicationId");
-      if (applicationId && versionCreated) {
-        await installPackage({ orgId, applicationId }, packageId).catch((e: unknown) =>
-          logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
+      // Auto-install in the current space (non-fatal)
+      const spaceId = c.get("spaceId");
+      if (spaceId && versionCreated) {
+        await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+          logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
         );
       }
 
@@ -706,11 +783,11 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     if (isSystemPackage(parsed.id)) {
       throw forbidden(
-        `${rcfg.cfg.label.slice(0, -1)} '${parsed.id}' is a system package and cannot be modified`,
+        `${rcfg.labelSingular} '${parsed.id}' is a system package and cannot be modified`,
       );
     }
 
-    await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, orgId, "author");
+    await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, c, "author");
 
     // Run the canonical AFPS archive parser before the first write. It shares
     // companion-file enforcement with the runtime bundle loader, so a missing
@@ -733,19 +810,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     parsed.content = canonical.content;
     parsed.normalizedFiles = canonical.files;
 
-    if (rcfg.validateContent) {
-      const validation = rcfg.validateContent(parsed.content);
-      if (!validation.valid) {
-        throw validationFailed(
-          validation.errors.map((message) => ({
-            field: "content",
-            code: "invalid_content",
-            title: "Invalid Content",
-            message,
-          })),
-        );
-      }
-    }
+    assertContentConforms(rcfg.cfg.type, parsed.content, "content");
 
     let item;
     try {
@@ -779,7 +844,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         packageId: item.id,
         orgId,
         manifest: finalManifest,
-        applicationId: c.get("applicationId"),
+        spaceId: c.get("spaceId"),
       });
     }
 
@@ -793,11 +858,11 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       normalizedFiles: parsed.normalizedFiles ?? {},
     });
 
-    // Auto-install in the current application (non-fatal)
-    const applicationId = c.get("applicationId");
-    if (applicationId && versionCreated) {
-      await installPackage({ orgId, applicationId }, item.id).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId: item.id, applicationId, err: String(e) }),
+    // Auto-install in the current space (non-fatal)
+    const spaceId = c.get("spaceId");
+    if (spaceId && versionCreated) {
+      await installPackage({ orgId, spaceId }, item.id).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId: item.id, spaceId, err: String(e) }),
       );
     }
 
@@ -828,9 +893,28 @@ export function getItemId(c: Context<AppEnv>): string {
 }
 
 /**
+ * Load the org's package of this route's type, or 404 with the type's own
+ * wording ("Skill '@acme/x' not found").
+ *
+ * Seven handlers needed exactly this pair and each spelled it out again. It is
+ * a plain call, not a middleware like {@link requirePackageInOrg}: three of the
+ * seven run the lookup only AFTER their `isSystemPackage` 403 and their
+ * running-runs 409, and a middleware — which necessarily runs before the
+ * handler — would answer 404 where those answer 403/409 today. Keeping it a
+ * call keeps every handler's check order exactly where its author put it.
+ */
+async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId: string) {
+  const item = await getOrgItem(orgId, itemId, rcfg.cfg);
+  if (!item) {
+    throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
+  }
+  return item;
+}
+
+/**
  * Build the canonical package detail DTO for skills / integrations / mcp-servers
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
- * Org-scoped (no app-install gate): the GET handler applies that gate before
+ * Org-scoped (no space-install gate): the GET handler applies that gate before
  * calling this, while mutating endpoints (create / update / fork) reuse this
  * directly to echo what the caller just wrote (issue #646). Returns `null` when
  * the package is not found in the org.
@@ -880,17 +964,17 @@ function loadPackageDetailDto(
 function makeGetHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
     const itemId = getItemId(c);
 
-    // Enforce app-level access: all apps can only access installed packages
-    if (!(await hasPackageAccess({ orgId, applicationId }, itemId))) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
+    // Enforce space-level access: all spaces can only access installed packages
+    if (!(await hasPackageAccess({ orgId, spaceId }, itemId))) {
+      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
     const dto = await buildPackageDetailDto(rcfg, itemId, orgId);
     if (!dto) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
+      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
     return c.json(dto);
@@ -901,22 +985,16 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package and cannot be modified`);
+      throw forbidden(
+        `${rcfg.labelSingular} '${itemId}' is a system package and cannot be modified`,
+      );
     }
 
-    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing) {
-      throw notFound(`${label} '${itemId}' not found`);
-    }
+    const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
 
     const body = await readJsonBody(c, packageJsonUpdateSchema);
-
-    if (body.lock_version == null || typeof body.lock_version !== "number") {
-      throw invalidRequest("lock_version (integer) is required for updates", "lock_version");
-    }
 
     // A PUT that omits `manifest` is a content-only edit: the stored draft is
     // carried forward untouched. That makes this handler directional per
@@ -940,8 +1018,9 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     const validatedManifest = await validateManifestForRoute(
       manifest,
       rcfg.cfg.type,
-      orgId,
+      c,
       authoredManifest ? "author" : "stored",
+      { previous: asRecord(existing.manifest) },
     );
     const manifestText = JSON.stringify(validatedManifest, null, 2);
 
@@ -956,20 +1035,9 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       throw invalidRequest("Content cannot be empty", "content");
     }
 
-    // Content validation
-    if (rcfg.validateContent && content) {
-      const validation = rcfg.validateContent(content);
-      if (!validation.valid) {
-        throw validationFailed(
-          validation.errors.map((message) => ({
-            field: "content",
-            code: "invalid_content",
-            title: "Invalid Content",
-            message,
-          })),
-        );
-      }
-    }
+    // The RESOLVED content: the body's when supplied, the stored draft's when
+    // carried forward.
+    if (content) assertContentConforms(rcfg.cfg.type, content, "content");
 
     // A manifest-only integration PUT has no authored `content`. When the
     // overloaded column contains the manifest fallback (rather than a real
@@ -998,7 +1066,10 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     );
 
     if (!updated) {
-      throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
+      throw conflict(
+        "conflict",
+        `${rcfg.labelSingular} was modified concurrently. Reload and try again.`,
+      );
     }
 
     // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
@@ -1052,7 +1123,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
  * types that don't gate version/delete ops on running runs (skills/tools, where
  * `requireMutableForVersionOps` is unset). Shared by the delete / create-version
  * / restore-version / delete-version handlers so the conflict message + the
- * `(orgId, applicationId)` scoping stay identical across all four.
+ * `(orgId, spaceId)` scoping stay identical across all four.
  */
 async function assertNoRunningRuns(
   c: Context<AppEnv>,
@@ -1061,14 +1132,13 @@ async function assertNoRunningRuns(
 ): Promise<void> {
   if (!rcfg.requireMutableForVersionOps) return;
   const running = await getRunningRunsForPackage(
-    { orgId: c.get("orgId"), applicationId: c.get("applicationId") },
+    { orgId: c.get("orgId"), spaceId: c.get("spaceId") },
     itemId,
   );
   if (running > 0) {
-    const label = rcfg.cfg.label.slice(0, -1);
     throw conflict(
       "agent_in_use",
-      `${running} run(s) still running for this ${label.toLowerCase()}`,
+      `${running} run(s) still running for this ${rcfg.labelSingular.toLowerCase()}`,
     );
   }
 }
@@ -1077,10 +1147,11 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package and cannot be deleted`);
+      throw forbidden(
+        `${rcfg.labelSingular} '${itemId}' is a system package and cannot be deleted`,
+      );
     }
 
     await assertNoRunningRuns(c, rcfg, itemId);
@@ -1089,7 +1160,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
     if (!result.ok) {
       throw conflict(
         "in_use",
-        `${label} '${itemId}' is used by ${result.dependents!.length} package(s)`,
+        `${rcfg.labelSingular} '${itemId}' is used by ${result.dependents!.length} package(s)`,
       );
     }
 
@@ -1108,10 +1179,8 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!item) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
-    }
+    await loadOrgItemOr404(rcfg, orgId, itemId);
+    await assertCatalogPackageAccess(c, itemId);
     const versions = await listPackageVersions(itemId);
     return c.json({ versions });
   };
@@ -1162,10 +1231,8 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const versionSpec = c.req.param("version")!;
 
-    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
-    }
+    await loadOrgItemOr404(rcfg, orgId, itemId);
+    await assertCatalogPackageAccess(c, itemId);
 
     const dto = await buildVersionDetailDto(rcfg, itemId, versionSpec);
     if (!dto) {
@@ -1180,10 +1247,8 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!item) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
-    }
+    await loadOrgItemOr404(rcfg, orgId, itemId);
+    await assertCatalogPackageAccess(c, itemId);
     const info = await getVersionInfo(itemId, orgId);
     return c.json(info);
   };
@@ -1194,18 +1259,14 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
     }
 
     await assertNoRunningRuns(c, rcfg, itemId);
 
-    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!item) {
-      throw notFound(`${label} '${itemId}' not found`);
-    }
+    const item = await loadOrgItemOr404(rcfg, orgId, itemId);
 
     // Re-validate the draft manifest at the publish gate (defense in depth).
     // Save/import already validate, but cutting a version must not trust a
@@ -1223,7 +1284,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // `requireCallableTools` is ON here and NOT on the draft writes: this is
     // where the artifact stops being editable, and freezing an empty tool
     // selection produces a version that can only fail at boot.
-    await validateManifestForRoute(item.manifest, rcfg.cfg.type, orgId, "stored", {
+    await validateManifestForRoute(item.manifest, rcfg.cfg.type, c, "stored", {
       requireCallableTools: true,
     });
 
@@ -1233,7 +1294,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
     if (c.req.raw.body !== null) {
-      const body = await readJsonBody(c, z.object({ version: z.string().min(1).optional() }));
+      const body = await readJsonBody(c, createVersionBodySchema);
       versionOverride = body.version;
     }
 
@@ -1287,10 +1348,9 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
     }
 
     await assertNoRunningRuns(c, rcfg, itemId);
@@ -1301,9 +1361,9 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw notFound(`Version '${versionSpec}' not found`);
     }
 
-    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing || !existing.lock_version) {
-      throw notFound(`${label} '${itemId}' not found`);
+    const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
+    if (!existing.lock_version) {
+      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
     // Extract `packages.draft_content` from the version ZIP.
@@ -1325,10 +1385,20 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
         (contentEntryPath ? detail.content[contentEntryPath] : undefined) ??
         detail.content[rcfg.storageFileName];
       if (fileData) {
-        content = new TextDecoder().decode(fileData);
+        // BOM-preserving: gated below AND written back as the draft.
+        content = decodeSkillMarkdown(fileData);
       }
     }
 
+    // A restore WRITES authored content. Before `updateOrgItem`, so a
+    // violation writes nothing.
+    if (content) assertContentConforms(rcfg.cfg.type, content, "content");
+
+    await assertPackageDependenciesAccessible(
+      c,
+      asRecord(detail.manifest),
+      asRecord(existing.manifest),
+    );
     const updated = await updateOrgItem(
       orgId,
       itemId,
@@ -1393,17 +1463,13 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
     }
 
     // Verify org ownership before deletion
-    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing) {
-      throw notFound(`${label} '${itemId}' not found`);
-    }
+    await loadOrgItemOr404(rcfg, orgId, itemId);
 
     await assertNoRunningRuns(c, rcfg, itemId);
 
@@ -1456,7 +1522,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * Two gates that answer different questions, both required:
  *
  * - `hasPackageAccess` is VISIBILITY: "is this a system package, or installed
- *   in THIS application?" (it also excludes ephemeral shadows). It says
+ *   in THIS space?" (it also excludes ephemeral shadows). It says
  *   nothing about what the caller is ALLOWED to do — a credential with
  *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
  *   had to undo across the rest of the package surface.
@@ -1483,9 +1549,9 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
 async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileSource> {
   const packageId = getItemId(c);
   const orgId = c.get("orgId");
-  const applicationId = c.get("applicationId");
+  const spaceId = c.get("spaceId");
 
-  if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+  if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
     throw notFound("Package not found");
   }
 
@@ -1521,7 +1587,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * one, and that round-trip is what keeps authorization live. Any fresh window,
  * however short, is served by the browser with ZERO server contact: revoke
  * `<type>:read`, remove the member from the org, or uninstall the package from
- * the application, and the cached 200 keeps being handed out until it expires.
+ * the space, and the cached 200 keeps being handed out until it expires.
  * `Vary` cannot rescue that — revocation changes no request header. Forcing the
  * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
  * `requirePackageReadPermission` run on every hit.
@@ -1531,16 +1597,16 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * That is the entire reason it is split out from `readPackageSnapshot`.
  *
  * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
- * `X-Application-Id` (via `hasPackageAccess`) while the URL does not mention
- * either. Without it, switching applications in the SPA re-issues an identical
- * URL and the browser answers from cache — showing application B an artifact
- * that is only installed in application A.
+ * `X-Space-Id` (via `hasPackageAccess`) while the URL does not mention
+ * either. Without it, switching spaces in the SPA re-issues an identical
+ * URL and the browser answers from cache — showing space B an artifact
+ * that is only installed in space A.
  */
 function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string> {
   const headers: Record<string, string> = {
     ETag: etag,
     "Cache-Control": "private, no-cache",
-    Vary: "X-Org-Id, X-Application-Id",
+    Vary: "X-Org-Id, X-Space-Id",
   };
   if (yanked) headers["X-Yanked"] = "true";
   return headers;
@@ -1598,6 +1664,9 @@ async function requirePackageReadPermission(c: Context<AppEnv>, type: string): P
   await guard(c, async () => {});
 }
 
+/** Reject non-authors before parsing uploads or fetching a GitHub archive. */
+const requireAnyPackageWrite = requireAnyPermission(PACKAGE_WRITE_PERMISSIONS);
+
 // ═══════════════════════════════════════════════
 // Router
 // ═══════════════════════════════════════════════
@@ -1617,7 +1686,7 @@ export function createPackagesRouter() {
 
     // `readGuard` on every GET: the install/system visibility check inside the
     // handlers (`hasPackageAccess`) answers "is this package reachable from
-    // this application", never "may this caller read it". Without the guard a
+    // this space", never "may this caller read it". Without the guard a
     // credential scoped without `<type>:read` still gets the manifest and, on
     // the detail route, the full `content` (SKILL.md / prompt.md).
     router.get(`/${path}`, readGuard, makeListHandler(rcfg));
@@ -1648,7 +1717,7 @@ export function createPackagesRouter() {
     );
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version`,
-      requirePackageInOrg(),
+      requirePackageInOrg("delete"),
       deleteGuard,
       makeDeleteVersionHandler(rcfg),
     );
@@ -1660,7 +1729,10 @@ export function createPackagesRouter() {
     // Scoped IDs (@scope/name) — must be registered before unscoped to match first
     router.get(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
-      readGuard,
+      // `agents:run` opens the agent DETAIL too, in the summary projection the
+      // launch form reads its `input` from (§3.4). This route only: the
+      // listing above, the versions and the file explorer stay on `agents:read`.
+      rcfg.cfg.type === "agent" ? requireAgentRead : readGuard,
       rcfg.getHandler ?? makeGetHandler(rcfg),
     );
     router.put(
@@ -1671,18 +1743,31 @@ export function createPackagesRouter() {
     );
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
-      requirePackageInOrg(),
+      requirePackageInOrg("delete"),
       deleteGuard,
       makeDeleteHandler(rcfg),
     );
-    // Unscoped IDs
-    router.get(`/${path}/:id`, readGuard, rcfg.getHandler ?? makeGetHandler(rcfg));
-    router.put(`/${path}/:id`, requirePackageInOrg(), writeGuard, makeUpdateHandler(rcfg));
-    router.delete(`/${path}/:id`, requirePackageInOrg(), deleteGuard, makeDeleteHandler(rcfg));
+    // There is deliberately no unscoped `/:id` variant.
+    //
+    // There was one — GET/PUT/DELETE per package type, 12 endpoints — for an
+    // identifier shape that cannot be constructed. `buildPackageId()` returns
+    // `@${scope}/${name}` unconditionally (`@appstrate/core/naming`), inline
+    // runs mint `@scope/...` shadow ids, and `0000_init.sql` is a squashed
+    // init, so no pre-scope row survives anywhere and no backfill ever created
+    // one. Every `packages.id` in existence is scoped. The endpoints were
+    // reachable only by `%2F`-encoding a scoped id into the segment — which
+    // the SPA never emits (`apps/web/src/api/client.ts:31`) and no caller in
+    // this repo or its two out-of-tree consumers ever did.
+    //
+    // Removing them is an intentional contract deletion. `detect:breaking`
+    // has no waiver mechanism by design — the only way to accept a break is to
+    // regenerate `apps/api/src/openapi/baseline.json`, which is what the
+    // commit that removed these did, with the 12 flagged endpoints recorded in
+    // its message.
   }
 
   // --- Fork route ---
-  router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requirePermission("agents", "write"), async (c) => {
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requireAnyPackageWrite, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const orgSlug = c.get("orgSlug");
@@ -1693,6 +1778,8 @@ export function createPackagesRouter() {
     // while still 400ing on malformed JSON or a bad-shape `name`.
     const parsed = await readJsonBody(c, forkSchema, { allowEmpty: true });
     const customName = parsed.name;
+    const source = await assertForkSourceAccess(c, packageId);
+    await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
 
     const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);
 
@@ -1716,13 +1803,13 @@ export function createPackagesRouter() {
       }
     }
 
-    // Auto-install the forked package in the current application (non-fatal)
-    const applicationId = c.get("applicationId");
-    if (applicationId) {
-      await installPackage({ orgId, applicationId }, result.packageId).catch((e: unknown) =>
+    // Auto-install the forked package in the current space (non-fatal)
+    const spaceId = c.get("spaceId");
+    if (spaceId) {
+      await installPackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
         logger.debug("auto-install skipped", {
           packageId: result.packageId,
-          applicationId,
+          spaceId,
           err: String(e),
         }),
       );
@@ -1808,6 +1895,9 @@ export function createPackagesRouter() {
     const zipBytes = new Uint8Array(upload);
     try {
       const parsed = parsePackageZip(zipBytes, { retiredRuntimeTools: "reject" });
+      // `parsePackageZip` applies the lenient loader rule (it also reads
+      // already-published artifacts); an import is author input.
+      assertArchiveContentConforms(parsed.type, parsed.files, "file");
       return { parsed, artifact: upload };
     } catch (err) {
       if (err instanceof PackageZipError && err.code === "MISSING_MANIFEST") {
@@ -1859,6 +1949,7 @@ export function createPackagesRouter() {
     const user = c.get("user");
     const orgId = c.get("orgId");
     const { manifest, content, files, type: packageType, packageId } = parsed;
+    await makePermissionGuard(packagePermission(packageType, "write"))(c, async () => {});
 
     // System packages are immutable
     if (isSystemPackage(packageId)) {
@@ -1877,11 +1968,20 @@ export function createPackagesRouter() {
     // An import is a FINAL artifact, not an editing step — `postInstallPackage`
     // below cuts a version from it — so the declared-but-empty gate applies
     // here too.
-    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
 
+    if (existing?.orgId === orgId) {
+      await assertPackageMutationAccess(c, packageId, "write");
+      await assertExistingPackageInstallAccess(c, packageId, existing.type);
+    }
+    await assertPackageDependenciesAccessible(
+      c,
+      asRecord(manifest),
+      asRecord(existing?.draftManifest),
+    );
+    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
     if (existing) {
       if (existing.orgId !== orgId) {
         throw new ApiError({
@@ -1990,15 +2090,15 @@ export function createPackagesRouter() {
         packageId,
         orgId,
         manifest: manifest as Record<string, unknown>,
-        applicationId: c.get("applicationId"),
+        spaceId: c.get("spaceId"),
       });
     }
 
-    // Auto-install in the current application (non-fatal, skip if already installed)
-    const applicationId = c.get("applicationId");
-    if (applicationId) {
-      await installPackage({ orgId, applicationId }, packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
+    // Auto-install in the current space (non-fatal, skip if already installed)
+    const spaceId = c.get("spaceId");
+    if (spaceId) {
+      await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
       );
     }
 
@@ -2062,14 +2162,14 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import-bundle — import a multi-package .afps-bundle
   // (or a raw .afps, promoted to a bundle-of-one via the catalog).
-  router.post("/import-bundle", rateLimit(10), requirePermission("agents", "write"), async (c) => {
+  router.post("/import-bundle", rateLimit(10), requireAnyPackageWrite, async (c) => {
     let formData: FormData;
     try {
       formData = await c.req.formData();
     } catch {
       throw invalidRequest("Request must be multipart/form-data with a file field", "file");
     }
-    const file = formData.get("file") ?? formData.get("bundle");
+    const file = formData.get("file");
     if (!file || !(file instanceof File)) {
       throw invalidRequest("File is required", "file");
     }
@@ -2080,12 +2180,14 @@ export function createPackagesRouter() {
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
     const userId = c.get("user").id;
 
     let result: Awaited<ReturnType<typeof handleImportBundle>>;
     try {
-      result = await handleImportBundle(bytes, { orgId, applicationId }, userId);
+      result = await handleImportBundle(bytes, { orgId, spaceId }, userId, (bundle) =>
+        authorizeBundlePackages(c, bundle),
+      );
     } catch (err) {
       // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
       // A raw post-install/version-creation failure becomes the same clean 4xx
@@ -2114,7 +2216,7 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import — import any package type from ZIP
-  router.post("/import", rateLimit(10), requirePermission("agents", "write"), async (c) => {
+  router.post("/import", rateLimit(10), requireAnyPackageWrite, async (c) => {
     let formData: FormData;
     try {
       formData = await c.req.formData();
@@ -2137,8 +2239,8 @@ export function createPackagesRouter() {
   });
 
   // POST /api/packages/import-github — import a package from a GitHub URL
-  router.post("/import-github", rateLimit(10), requirePermission("agents", "write"), async (c) => {
-    const data = await readJsonBody(c, githubImportSchema, "url");
+  router.post("/import-github", rateLimit(10), requireAnyPackageWrite, async (c) => {
+    const data = await readJsonBody(c, githubImportSchema, { param: "url" });
 
     let zipBytes: Uint8Array;
     try {
@@ -2245,7 +2347,7 @@ export function createPackagesRouter() {
     // Always octet-stream + nosniff + attachment: package bytes are
     // author-controlled, so no response from here may be something a browser
     // decides to execute or render in this origin. `Referrer-Policy` +
-    // `Cross-Origin-Resource-Policy` mirror what `routes/documents.ts` applies
+    // `Cross-Origin-Resource-Policy` mirror what `routes/files.ts` applies
     // to comparable authenticated tenant bytes.
     return new Response(new Uint8Array(bytes), {
       status: 200,
@@ -2265,14 +2367,14 @@ export function createPackagesRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
     const versionSpec = c.req.param("version")!;
 
-    // Visibility first — "system package OR installed in THIS application",
+    // Visibility first — "system package OR installed in THIS space",
     // the same gate the rest of the package surface applies. Without it this
     // route served the artifact bytes of packages that are merely owned by the
     // org and installed nowhere the caller can reach.
-    if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+    if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
       throw notFound("Package not found");
     }
 

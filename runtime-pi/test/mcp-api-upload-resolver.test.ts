@@ -987,7 +987,11 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected failure");
       expect(result.status).toBe(0);
-      expect(result.error).toMatch(/exceeds streaming ceiling|MAX_STREAMED_BODY_SIZE/);
+      expect(result.error).toMatch(/exceeds the streaming ceiling of 104857600 bytes/);
+      // The message is read by the agent, so it must not point at a knob that
+      // does not exist: MAX_STREAMED_BODY_SIZE is a plain const in
+      // http-call-core.ts with no `process.env` read anywhere.
+      expect(result.error).not.toMatch(/Set MAX_STREAMED_BODY_SIZE/);
       // The resolver must reject before issuing any api_call.
       expect(apiCallCount).toBe(0);
     } finally {

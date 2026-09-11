@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for `parseRequestInput`'s streamed document consume — the
+ * Integration tests for `parseRequestInput`'s streamed file consume — the
  * glue that pipes each staged upload straight from the uploads bucket into the
- * run workspace (no full buffer in API memory), writes the documents manifest,
- * and rolls the workspace back when a document fails validation.
+ * run workspace (no full buffer in API memory), writes the files manifest,
+ * and rolls the workspace back when a file fails validation.
  *
  * Drives `parseRequestInput` directly with a minimal fake Hono context so the
  * run-trigger pipeline (Docker, LLM) is not involved. Real Postgres + FS
@@ -19,14 +19,11 @@ import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, addOrgMember } from "../../helpers/auth.ts";
 import { parseRequestInput, isStrippedInlineMarker } from "../../../src/services/input-parser.ts";
-import {
-  createDocumentFromUpload,
-  createDocumentFromStream,
-} from "../../../src/services/documents.ts";
+import { createFileFromUpload, createFileFromStream } from "../../../src/services/files.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
-  downloadRunDocumentStream,
-  downloadRunDocumentsManifest,
+  downloadRunFileStream,
+  downloadRunFilesManifest,
 } from "../../../src/services/run-workspace-storage.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { uploadFile as storagePut, fileExists as storageExists } from "@appstrate/db/storage";
@@ -44,15 +41,15 @@ const fileSchema: JSONSchemaObject = {
 };
 
 async function seedUpload(
-  ctx: { orgId: string; applicationId: string },
+  ctx: { orgId: string; spaceId: string },
   opts: { id: string; bytes: Buffer; mime?: string; sizeOverride?: number; name?: string },
 ): Promise<void> {
-  const storagePath = `${ctx.applicationId}/${opts.id}/file.pdf`;
+  const storagePath = `${ctx.spaceId}/${opts.id}/file.pdf`;
   await storagePut(UPLOAD_BUCKET, storagePath, opts.bytes);
   await db.insert(uploads).values({
     id: opts.id,
     orgId: ctx.orgId,
-    applicationId: ctx.applicationId,
+    spaceId: ctx.spaceId,
     createdBy: null,
     storageKey: `${UPLOAD_BUCKET}/${storagePath}`,
     name: opts.name ?? "file.pdf",
@@ -64,62 +61,76 @@ async function seedUpload(
 
 /**
  * Minimal Hono context stub — parseRequestInput reads the JSON body,
- * orgId/applicationId and the acting principal (end-user or dashboard user).
+ * orgId/spaceId and the acting principal (end-user or dashboard user).
  * A principal is ALWAYS present: the parser resolves it with the strict
  * `getActor`, mirroring the fact that every route reaching it sits behind
- * authentication, and it gates both the document ACL and the staged-upload
+ * authentication, and it gates both the file ACL and the staged-upload
  * ownership check. Tests that need a specific owner pass one explicitly.
  */
-function fakeCtx(
-  body: unknown,
-  ctx: { orgId: string; applicationId: string; endUser?: { id: string }; user?: { id: string } },
-): Context {
+function fakeCtx(ctx: {
+  orgId: string;
+  spaceId: string;
+  endUser?: { id: string };
+  user?: { id: string };
+  /** The caller's resolved grants — `runs:read-all` is what widens a run container. */
+  permissions?: ReadonlySet<string>;
+}): Context {
   const user = ctx.endUser ? undefined : (ctx.user ?? { id: "usr_input_parser_test" });
   return {
-    req: { json: async () => body },
     get: (key: string) =>
       key === "orgId"
         ? ctx.orgId
-        : key === "applicationId"
-          ? ctx.applicationId
+        : key === "spaceId"
+          ? ctx.spaceId
           : key === "endUser"
             ? ctx.endUser
             : key === "user"
               ? user
-              : undefined,
+              : key === "permissions"
+                ? ctx.permissions
+                : undefined,
   } as unknown as Context;
 }
 
-/** Insert a minimal prior-run row the rerun_from path can resolve. */
+/** A caller that reads every run in the space (space `admin`/`builder`). */
+const READS_EVERY_RUN: ReadonlySet<string> = new Set(["runs:read-all"]);
+
+/**
+ * Insert a minimal prior-run row the rerun_from path can resolve. `userId` is
+ * the principal that launched it: replaying a run is a run READ, so only its
+ * launcher (or a `runs:read-all` holder) gets its input back.
+ */
 async function seedRun(
-  scope: { orgId: string; applicationId: string },
-  opts: { id: string; input: Record<string, unknown> | null },
+  scope: { orgId: string; spaceId: string },
+  opts: { id: string; input: Record<string, unknown> | null; userId?: string },
 ): Promise<void> {
   await db.insert(runs).values({
     id: opts.id,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     packageId: null,
     status: "cancelled",
     input: opts.input,
+    userId: opts.userId ?? null,
   });
 }
 
-describe("parseRequestInput — streamed document consume", () => {
+describe("parseRequestInput — streamed file consume", () => {
   beforeEach(async () => {
     await truncateAll();
   });
 
   it("streams the upload into the run workspace + writes the manifest", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-ok" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_stream_ok_1";
-    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    const storagePath = `${ctx.defaultSpaceId}/${id}/file.pdf`;
     await seedUpload(scope, { id, bytes: PDF_BYTES });
 
     const runId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: `upload://${id}` } }, scope),
+      fakeCtx(scope),
+      { input: { doc: `upload://${id}` } },
       runId,
       fileSchema,
     );
@@ -135,14 +146,14 @@ describe("parseRequestInput — streamed document consume", () => {
     });
     expect("buffer" in file).toBe(false);
 
-    // Document landed in the run workspace + manifest enumerates it.
-    const docStream = await downloadRunDocumentStream(runId, "file.pdf");
+    // File landed in the run workspace + manifest enumerates it.
+    const docStream = await downloadRunFileStream(runId, "file.pdf");
     expect(docStream).not.toBeNull();
     expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
       new Uint8Array(PDF_BYTES),
     );
-    const manifest = await downloadRunDocumentsManifest(runId);
-    expect(manifest?.documents).toEqual([
+    const manifest = await downloadRunFilesManifest(runId);
+    expect(manifest?.files).toEqual([
       { name: "file.pdf", workspace_name: "file.pdf", size: PDF_BYTES.length },
     ]);
 
@@ -155,21 +166,21 @@ describe("parseRequestInput — streamed document consume", () => {
 
   it("rolls the workspace back + releases the claim on a size mismatch", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-size" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_stream_size_1";
     // Declared size larger than the bytes actually staged → mismatch at drain.
     await seedUpload(scope, { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 });
 
     const runId = `run_${crypto.randomUUID()}`;
     await expect(
-      parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
+      parseRequestInput(fakeCtx(scope), { input: { doc: `upload://${id}` } }, runId, fileSchema),
     ).rejects.toMatchObject({ status: 400 });
 
     // Workspace rolled back via the deletion outbox — draining the worker
-    // purges any streamed document + manifest (no orphaned object).
+    // purges any streamed file + manifest (no orphaned object).
     await processStorageDeletionJobs();
-    expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
-    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunFileStream(runId, "file.pdf")).toBeNull();
+    expect(await downloadRunFilesManifest(runId)).toBeNull();
     // Claim released so the client can re-upload + retry.
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row?.consumedAt).toBeNull();
@@ -177,7 +188,7 @@ describe("parseRequestInput — streamed document consume", () => {
 
   it("aborts mid-stream when an upload overshoots its declared size", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-overshoot" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_stream_overshoot_1";
     // Declares 5 bytes but stages ~64 KB — the declared-small / uploaded-huge
     // abuse the early-abort guard exists for. The counter must error the stream
@@ -187,21 +198,21 @@ describe("parseRequestInput — streamed document consume", () => {
 
     const runId = `run_${crypto.randomUUID()}`;
     await expect(
-      parseRequestInput(fakeCtx({ input: { doc: `upload://${id}` } }, scope), runId, fileSchema),
+      parseRequestInput(fakeCtx(scope), { input: { doc: `upload://${id}` } }, runId, fileSchema),
     ).rejects.toMatchObject({ status: 400 });
 
     // Workspace rolled back, claim released — same guarantees as any rejection
     // (the rollback purge runs through the deletion outbox).
     await processStorageDeletionJobs();
-    expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
-    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunFileStream(runId, "file.pdf")).toBeNull();
+    expect(await downloadRunFilesManifest(runId)).toBeNull();
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row?.consumedAt).toBeNull();
   });
 
   it("rolls the workspace back on a MIME mismatch", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-mime" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_stream_mime_1";
     // Declared application/pdf, but the bytes are plain text → magic-byte sniff fails.
     await seedUpload(scope, {
@@ -214,7 +225,8 @@ describe("parseRequestInput — streamed document consume", () => {
     let thrown: unknown;
     try {
       await parseRequestInput(
-        fakeCtx({ input: { doc: `upload://${id}` } }, scope),
+        fakeCtx(scope),
+        { input: { doc: `upload://${id}` } },
         runId,
         fileSchema,
       );
@@ -225,55 +237,52 @@ describe("parseRequestInput — streamed document consume", () => {
     expect((thrown as ApiError).status).toBe(400);
     // Rollback purge runs through the deletion outbox — drain it, then gone.
     await processStorageDeletionJobs();
-    expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
-    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunFileStream(runId, "file.pdf")).toBeNull();
+    expect(await downloadRunFilesManifest(runId)).toBeNull();
   });
 });
 
-describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
+describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
   beforeEach(async () => {
     await truncateAll();
   });
 
   async function seedRunningRun(
-    scope: { orgId: string; applicationId: string },
+    scope: { orgId: string; spaceId: string },
     id: string,
+    userId: string,
   ): Promise<void> {
     await db.insert(runs).values({
       id,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       packageId: null,
       status: "running",
+      userId,
     });
   }
 
   it("member B cannot deliver member A's user_upload into their own run (404)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-s2-upload" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const memberB = await createTestUser({ email: "b@s2.test" });
     await addOrgMember(ctx.orgId, memberB.id, "member");
 
     // Member A (ctx.user) materializes a run-contained user_upload.
     const runId = `run_${crypto.randomUUID()}`;
-    await seedRunningRun(scope, runId);
+    await seedRunningRun(scope, runId, ctx.user.id);
     await seedUpload(scope, { id: "upl_s2_up", bytes: PDF_BYTES });
-    const docA = await createDocumentFromUpload(
-      scope,
-      { type: "user", id: ctx.user.id },
-      "upl_s2_up",
-      { runId },
-    );
+    const docA = await createFileFromUpload(scope, { type: "user", id: ctx.user.id }, "upl_s2_up", {
+      runId,
+    });
 
-    // Member B references A's private upload — org-wide run visibility resolves
-    // the container, but the creator-only gate rejects it as not-found.
+    // Member B references A's private upload — the run is A's, so the container
+    // ACL already answers not-found, and the creator-only gate would too.
     const newRunId = `run_${crypto.randomUUID()}`;
     await expect(
       parseRequestInput(
-        fakeCtx(
-          { input: { doc: `document://${docA.id}` } },
-          { ...scope, user: { id: memberB.id } },
-        ),
+        fakeCtx({ ...scope, user: { id: memberB.id } }),
+        { input: { doc: `appfile://${docA.id}` } },
         newRunId,
         fileSchema,
       ),
@@ -282,11 +291,11 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
 
   it("member A CAN resolve their own user_upload", async () => {
     const ctx = await createTestContext({ orgSlug: "org-s2-own" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
-    await seedRunningRun(scope, runId);
+    await seedRunningRun(scope, runId, ctx.user.id);
     await seedUpload(scope, { id: "upl_s2_own", bytes: PDF_BYTES });
-    const docA = await createDocumentFromUpload(
+    const docA = await createFileFromUpload(
       scope,
       { type: "user", id: ctx.user.id },
       "upl_s2_own",
@@ -295,7 +304,8 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: `document://${docA.id}` } }, { ...scope, user: { id: ctx.user.id } }),
+      fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+      { input: { doc: `appfile://${docA.id}` } },
       newRunId,
       fileSchema,
     );
@@ -304,13 +314,13 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
 
   it("member B CAN resolve an agent_output of a run they can see (chaining, D6)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-s2-out" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const memberB = await createTestUser({ email: "b2@s2.test" });
     await addOrgMember(ctx.orgId, memberB.id, "member");
 
     const runId = `run_${crypto.randomUUID()}`;
-    await seedRunningRun(scope, runId);
-    const { row: agentDoc } = await createDocumentFromStream(
+    await seedRunningRun(scope, runId, ctx.user.id);
+    const { row: agentDoc } = await createFileFromStream(
       scope,
       runId,
       { userId: ctx.user.id, endUserId: null },
@@ -320,10 +330,10 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx(
-        { input: { doc: `document://${agentDoc.id}` } },
-        { ...scope, user: { id: memberB.id } },
-      ),
+      // The output hangs off A's run: B chains it by reading that run, which is
+      // `runs:read-all`. The output itself is freely chainable from there (D6).
+      fakeCtx({ ...scope, user: { id: memberB.id }, permissions: READS_EVERY_RUN }),
+      { input: { doc: `appfile://${agentDoc.id}` } },
       newRunId,
       fileSchema,
     );
@@ -336,26 +346,27 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     await truncateAll();
   });
 
-  it("replays a cancelled run's upload:// input — re-consumed, rewritten to document://", async () => {
+  it("replays a cancelled run's upload:// input — re-consumed, rewritten to appfile://", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-ok" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_rerun_ok_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
 
     // A prior run persisted an upload:// input (legacy / pre-materialization);
     // the upload stays re-consumable within its reuse window.
     const priorRunId = `run_${crypto.randomUUID()}`;
-    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` } });
+    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` }, userId: ctx.user.id });
 
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ rerun_from: priorRunId }, scope),
+      fakeCtx({ ...scope, user: ctx.user }),
+      { rerun_from: priorRunId },
       newRunId,
       fileSchema,
     );
 
     // upload:// stays replayable (backward compat) — re-consumed into the new
-    // workspace and rewritten to a durable document:// reference (with a pending
+    // workspace and rewritten to a durable appfile:// reference (with a pending
     // materialization the run pipeline commits once the run row exists).
     expect(result.uploadedFiles).toHaveLength(1);
     expect(result.uploadedFiles![0]).toMatchObject({
@@ -363,68 +374,70 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       name: "file.pdf",
       size: PDF_BYTES.length,
     });
-    expect(result.input!.doc as string).toStartWith("document://doc_");
-    expect(result.pendingDocuments).toHaveLength(1);
-    // The replayed document landed in the NEW run's workspace.
-    const docStream = await downloadRunDocumentStream(newRunId, "file.pdf");
+    expect(result.input!.doc as string).toStartWith("appfile://file_");
+    expect(result.pendingFiles).toHaveLength(1);
+    // The replayed file landed in the NEW run's workspace.
+    const docStream = await downloadRunFileStream(newRunId, "file.pdf");
     expect(docStream).not.toBeNull();
     expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
       new Uint8Array(PDF_BYTES),
     );
   });
 
-  it("resolves a document:// input into the run workspace; 404 cross-org and cross-app", async () => {
+  it("resolves an appfile:// input into the run workspace; 404 cross-org and cross-space", async () => {
     const ctx = await createTestContext({ orgSlug: "org-docref" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const actor = { type: "user" as const, id: ctx.user.id };
 
-    // Materialize a durable document from a staged upload on a run.
+    // Materialize a durable file from a staged upload on a run.
     const id = "upl_docref_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
     const runId = `run_${crypto.randomUUID()}`;
     await db.insert(runs).values({
       id: runId,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       status: "running",
+      userId: ctx.user.id,
     });
-    const doc = await createDocumentFromUpload(scope, actor, id, { runId });
+    const doc = await createFileFromUpload(scope, actor, id, { runId });
 
-    // A new run references it by document:// — resolved into the new workspace.
+    // A new run references it by appfile:// — resolved into the new workspace.
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: `document://${doc.id}` } }, { ...scope, user: { id: ctx.user.id } }),
+      fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+      { input: { doc: `appfile://${doc.id}` } },
       newRunId,
       fileSchema,
     );
     expect(result.uploadedFiles).toHaveLength(1);
-    expect(result.pendingDocuments).toBeUndefined(); // document:// is not re-materialized
-    const docStream = await downloadRunDocumentStream(newRunId, "file.pdf");
+    expect(result.pendingFiles).toBeUndefined(); // appfile:// is not re-materialized
+    const docStream = await downloadRunFileStream(newRunId, "file.pdf");
     expect(docStream).not.toBeNull();
     expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
       new Uint8Array(PDF_BYTES),
     );
 
-    // Cross-org: another org's run cannot resolve the document → 404.
+    // Cross-org: another org's run cannot resolve the file → 404.
     const other = await createTestContext({ orgSlug: "org-docref-other" });
     await expect(
       parseRequestInput(
-        fakeCtx(
-          { input: { doc: `document://${doc.id}` } },
-          { orgId: other.orgId, applicationId: other.defaultAppId, user: { id: other.user.id } },
-        ),
+        fakeCtx({
+          orgId: other.orgId,
+          spaceId: other.defaultSpaceId,
+          user: { id: other.user.id },
+        }),
+        { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
     ).rejects.toMatchObject({ status: 404 });
 
-    // Cross-app: same org, foreign application id → 404.
+    // Cross-space: same org, foreign space id → 404.
     await expect(
       parseRequestInput(
-        fakeCtx(
-          { input: { doc: `document://${doc.id}` } },
-          { orgId: ctx.orgId, applicationId: "app_not_this_one", user: { id: ctx.user.id } },
-        ),
+        fakeCtx({ orgId: ctx.orgId, spaceId: "spc_not_this_one", user: { id: ctx.user.id } }),
+        { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -433,7 +446,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("rejects an over-quota upload input synchronously (403) BEFORE the run is created", async () => {
     const ctx = await createTestContext({ orgSlug: "org-docquota" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_docquota_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
 
@@ -445,12 +458,13 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     try {
       await expect(
         parseRequestInput(
-          fakeCtx({ input: { doc: `upload://${id}` } }, { ...scope, user: { id: ctx.user.id } }),
+          fakeCtx({ ...scope, user: { id: ctx.user.id } }),
+          { input: { doc: `upload://${id}` } },
           `run_${crypto.randomUUID()}`,
           fileSchema,
         ),
       ).rejects.toMatchObject({ status: 403, code: "storage_limit_exceeded" });
-      // The upload was never consumed (rejected pre-stream) and no document exists.
+      // The upload was never consumed (rejected pre-stream) and no file exists.
       const [uploadRow] = await db.select().from(uploads).where(eq(uploads.id, id));
       expect(uploadRow!.consumedAt).toBeNull();
     } finally {
@@ -462,22 +476,11 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("rejects when both input and rerun_from are sent", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-both" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     await expect(
       parseRequestInput(
-        fakeCtx({ input: {}, rerun_from: "run_x" }, scope),
-        `run_${crypto.randomUUID()}`,
-        fileSchema,
-      ),
-    ).rejects.toMatchObject({ status: 400 });
-  });
-
-  it("rejects a non-string rerun_from", async () => {
-    const ctx = await createTestContext({ orgSlug: "org-rerun-shape" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
-    await expect(
-      parseRequestInput(
-        fakeCtx({ rerun_from: 42 }, scope),
+        fakeCtx(scope),
+        { input: {}, rerun_from: "run_x" },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -489,16 +492,14 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const other = await createTestContext({ orgSlug: "org-rerun-other" });
     const priorRunId = `run_${crypto.randomUUID()}`;
     await seedRun(
-      { orgId: owner.orgId, applicationId: owner.defaultAppId },
-      { id: priorRunId, input: { doc: "upload://upl_whatever1" } },
+      { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
+      { id: priorRunId, input: { doc: "upload://upl_whatever1" }, userId: owner.user.id },
     );
 
     await expect(
       parseRequestInput(
-        fakeCtx(
-          { rerun_from: priorRunId },
-          { orgId: other.orgId, applicationId: other.defaultAppId },
-        ),
+        fakeCtx({ orgId: other.orgId, spaceId: other.defaultSpaceId }),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -507,14 +508,15 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("rejects replaying a different agent's run with 409 rerun_agent_mismatch", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-agent" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const priorRunId = `run_${crypto.randomUUID()}`;
     // seedRun stamps packageId NULL — any concrete agent id mismatches.
-    await seedRun(scope, { id: priorRunId, input: {} });
+    await seedRun(scope, { id: priorRunId, input: {}, userId: ctx.user.id });
 
     await expect(
       parseRequestInput(
-        fakeCtx({ rerun_from: priorRunId }, scope),
+        fakeCtx({ ...scope, user: ctx.user }),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
         {
@@ -526,14 +528,15 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("end-users cannot replay runs that are not their own", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-eu" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const priorRunId = `run_${crypto.randomUUID()}`;
     // Prior run has no end-user → an end-user caller must not see it.
     await seedRun(scope, { id: priorRunId, input: {} });
 
     await expect(
       parseRequestInput(
-        fakeCtx({ rerun_from: priorRunId }, { ...scope, endUser: { id: "eu_someone" } }),
+        fakeCtx({ ...scope, endUser: { id: "eu_someone" } }),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -542,11 +545,11 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("reports 410 when the replayed upload's reuse window has elapsed", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-gone" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_rerun_gone_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
     const priorRunId = `run_${crypto.randomUUID()}`;
-    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` } });
+    await seedRun(scope, { id: priorRunId, input: { doc: `upload://${id}` }, userId: ctx.user.id });
     // The upload was consumed long ago — past the 24h reuse window.
     await db
       .update(uploads)
@@ -555,7 +558,8 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
     await expect(
       parseRequestInput(
-        fakeCtx({ rerun_from: priorRunId }, scope),
+        fakeCtx({ ...scope, user: ctx.user }),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -564,7 +568,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("rejects replaying materialized inline data: inputs with 409 rerun_inline_input_unavailable", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-inline" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
 
     // The prior run's persisted input holds the payload-stripped marker the
     // consume path writes in place of inline bytes (empty payload + `name`
@@ -574,11 +578,13 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     await seedRun(scope, {
       id: priorRunId,
       input: { doc: "data:application/pdf;name=report.pdf;base64," },
+      userId: ctx.user.id,
     });
 
     await expect(
       parseRequestInput(
-        fakeCtx({ rerun_from: priorRunId }, scope),
+        fakeCtx({ ...scope, user: ctx.user }),
+        { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -589,11 +595,12 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // Marker detection is rerun-only — a direct request carrying an
     // empty-payload data URI keeps today's invalid_request contract.
     const ctx = await createTestContext({ orgSlug: "org-rerun-fresh" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
 
     await expect(
       parseRequestInput(
-        fakeCtx({ input: { doc: "data:application/pdf;name=report.pdf;base64," } }, scope),
+        fakeCtx(scope),
+        { input: { doc: "data:application/pdf;name=report.pdf;base64," } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -602,12 +609,13 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("replays a run with null input as no input (collapsed to undefined)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-null" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const priorRunId = `run_${crypto.randomUUID()}`;
-    await seedRun(scope, { id: priorRunId, input: null });
+    await seedRun(scope, { id: priorRunId, input: null, userId: ctx.user.id });
 
     const result = await parseRequestInput(
-      fakeCtx({ rerun_from: priorRunId }, scope),
+      fakeCtx({ ...scope, user: ctx.user }),
+      { rerun_from: priorRunId },
       `run_${crypto.randomUUID()}`,
       // No file fields required — empty input passes an empty schema.
       { type: "object", properties: {} },
@@ -619,7 +627,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
   });
 });
 
-describe("parseRequestInput — colliding document names (workspace-name hardening)", () => {
+describe("parseRequestInput — colliding file names (workspace-name hardening)", () => {
   beforeEach(async () => {
     await truncateAll();
   });
@@ -635,24 +643,25 @@ describe("parseRequestInput — colliding document names (workspace-name hardeni
     },
   };
 
-  it("gives colliding upload/document/inline inputs unique workspace names, preserving display names", async () => {
+  it("gives colliding upload/file/inline inputs unique workspace names, preserving display names", async () => {
     const ctx = await createTestContext({ orgSlug: "org-collide" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const actor = { type: "user" as const, id: ctx.user.id };
 
     // An upload named report.pdf.
     const uploadId = "upl_collide_1";
     await seedUpload(scope, { id: uploadId, bytes: PDF_BYTES, name: "report.pdf" });
 
-    // A durable agent_output document ALSO named report.pdf.
+    // A durable agent_output file ALSO named report.pdf.
     const producerRunId = `run_${crypto.randomUUID()}`;
     await db.insert(runs).values({
       id: producerRunId,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       status: "running",
+      userId: ctx.user.id,
     });
-    const { row: doc } = await createDocumentFromStream(
+    const { row: doc } = await createFileFromStream(
       scope,
       producerRunId,
       { userId: ctx.user.id, endUserId: null },
@@ -665,34 +674,28 @@ describe("parseRequestInput — colliding document names (workspace-name hardeni
 
     const runId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
-      fakeCtx(
-        { input: { docs: [`upload://${uploadId}`, `document://${doc.id}`, inlineUri] } },
-        { ...scope, user: { id: actor.id } },
-      ),
+      fakeCtx({ ...scope, user: { id: actor.id } }),
+      { input: { docs: [`upload://${uploadId}`, `appfile://${doc.id}`, inlineUri] } },
       runId,
       arrayFileSchema,
     );
 
-    // All three documents surfaced, all keeping their human display name.
+    // All three files surfaced, all keeping their human display name.
     expect(result.uploadedFiles).toHaveLength(3);
     expect(result.uploadedFiles!.every((f) => f.name === "report.pdf")).toBe(true);
 
     // The manifest served to the container carries three UNIQUE workspace names,
     // display names preserved — no silent overwrite.
-    const manifest = await downloadRunDocumentsManifest(runId);
-    expect(manifest?.documents).toHaveLength(3);
-    expect(manifest!.documents.map((d) => d.name)).toEqual([
-      "report.pdf",
-      "report.pdf",
-      "report.pdf",
-    ]);
-    const workspaceNames = manifest!.documents.map((d) => d.workspace_name);
+    const manifest = await downloadRunFilesManifest(runId);
+    expect(manifest?.files).toHaveLength(3);
+    expect(manifest!.files.map((d) => d.name)).toEqual(["report.pdf", "report.pdf", "report.pdf"]);
+    const workspaceNames = manifest!.files.map((d) => d.workspace_name);
     expect(new Set(workspaceNames).size).toBe(3);
     expect(workspaceNames).toEqual(["report.pdf", "report-2.pdf", "report-3.pdf"]);
 
-    // Each document is independently fetchable at its own workspace name.
+    // Each file is independently fetchable at its own workspace name.
     for (const name of workspaceNames) {
-      const stream = await downloadRunDocumentStream(runId, name);
+      const stream = await downloadRunFileStream(runId, name);
       expect(stream).not.toBeNull();
       expect(new Uint8Array(await new Response(stream!).arrayBuffer())).toEqual(
         new Uint8Array(PDF_BYTES),

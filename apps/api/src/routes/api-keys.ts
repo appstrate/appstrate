@@ -1,35 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
 import { ApiError, internalError, notFound } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
-import { validateScopes, roleScopes, getApiKeyAllowedScopes } from "../lib/permissions.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
+import { validateScopes, getApiKeyAllowedScopes } from "../lib/permissions.ts";
 import {
   generateApiKey,
   hashApiKey,
   extractKeyPrefix,
   createApiKeyRecord,
+  findApiKeySpace,
   listApiKeys,
   revokeApiKey,
 } from "../services/api-keys.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getAppScope, getOrgScope } from "../lib/scope.ts";
+import { getSpaceScope, getOrgScope } from "../lib/scope.ts";
+import { validateSpaceInOrg } from "../lib/space-lookup.ts";
+import { applySpacePermissions } from "../middleware/space-context.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-export const createApiKeySchema = z.object({
-  name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
-  expiresAt: z.iso
-    .datetime({ message: "expiresAt must be a valid ISO 8601 date" })
-    .refine((d) => new Date(d) > new Date(), { message: "expiresAt must be in the future" })
-    .nullable()
-    .optional(),
-  scopes: z.array(z.string()).optional(),
-});
+export const createApiKeySchema = z
+  .object({
+    name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
+    expiresAt: z.iso
+      .datetime({ message: "expiresAt must be a valid ISO 8601 date" })
+      .refine((d) => new Date(d) > new Date(), { message: "expiresAt must be in the future" })
+      .nullable()
+      .optional(),
+    scopes: z.array(z.string()).optional(),
+  })
+  .strict();
+
+/**
+ * The caller's effective permissions for this request. Non-empty by
+ * construction — every route below is behind an `api-keys:*` guard, which
+ * reads the same Set — so the fallback is a fail-closed backstop, not a branch.
+ */
+function callerEffectivePermissions(c: Context<AppEnv>): ReadonlySet<string> {
+  return c.get("permissions") ?? new Set<string>();
+}
 
 export function createApiKeysRouter() {
   const router = new Hono<AppEnv>();
@@ -37,32 +52,40 @@ export function createApiKeysRouter() {
   // GET /api/api-keys/available-scopes — list scopes available for the current user's role
   // MUST be registered BEFORE /:id routes
   router.get("/available-scopes", requirePermission("api-keys", "read"), async (c) => {
-    const orgRole = c.get("orgRole");
-    const rolePerms = roleScopes(orgRole);
-    const available = [...getApiKeyAllowedScopes()].filter((s) => rolePerms.has(s));
+    // The caller's EFFECTIVE set in this space — `/api/api-keys` is
+    // space-scoped, so `permissions` already is it. A `builder` sees no
+    // `api-keys:*` here, which is the same answer `POST` gives.
+    const effective = callerEffectivePermissions(c);
+    const available = [...getApiKeyAllowedScopes()].filter((s) => effective.has(s));
     return c.json(listResponse(available));
   });
 
-  // GET /api/api-keys — list active keys for the current application
+  // GET /api/api-keys — list active keys for the current space
   router.get("/", requirePermission("api-keys", "read"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const keys = await listApiKeys(scope);
     return c.json(listResponse(keys));
   });
 
   // POST /api/api-keys — create a new key (returns raw key ONCE)
   router.post("/", requirePermission("api-keys", "create"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const user = c.get("user");
     const data = await readJsonBody(c, createApiKeySchema);
 
     const { name, expiresAt } = data;
-    const orgRole = c.get("orgRole");
-    // If scopes omitted or empty, grant all API-key-allowed scopes for the creator's role
+    // A key delegates its creator's effective set IN THIS SPACE (RBAC spec
+    // §7.1). The request that mints it is space-scoped, so `permissions` IS
+    // that set — recomputing it would be a second, drift-prone derivation.
+    const creatorEffective = callerEffectivePermissions(c);
+    // If scopes omitted or empty, grant all API-key-allowed scopes the creator
+    // holds. That branch hands `validateScopes` the allowlist itself, so it
+    // cannot trip the refusal — only the caller-supplied branch can, and only
+    // on a scope no API key could ever carry.
     const validatedScopes =
       data.scopes && data.scopes.length > 0
-        ? validateScopes(data.scopes, orgRole)
-        : validateScopes([...getApiKeyAllowedScopes()], orgRole);
+        ? validateScopes(data.scopes, creatorEffective)
+        : validateScopes([...getApiKeyAllowedScopes()], creatorEffective);
 
     const rawKey = generateApiKey();
     const keyHash = await hashApiKey(rawKey);
@@ -98,14 +121,32 @@ export function createApiKeysRouter() {
   // DELETE /api/api-keys/:id — revoke a key (soft-delete)
   router.delete("/:id", requirePermission("api-keys", "revoke"), async (c) => {
     const keyId = c.req.param("id")!;
-    // Issue #172 (extension): API keys may only revoke keys within their
-    // own bound application. Sessions retain org-wide reach (admins manage
-    // all apps from the dashboard) — the scope's shape encodes the intent
-    // at the type level.
-    const scope = c.get("authMethod") === "api_key" ? getAppScope(c) : getOrgScope(c);
+    // `api-keys:revoke` is held PER SPACE (spec §3.4) and the key may live in a
+    // different space from the one this request entered, so authority is decided
+    // in the key's own space — behind that space's wall (404 when private).
+    const orgScope = getOrgScope(c);
+    const keySpaceId = await findApiKeySpace(orgScope, keyId);
+    if (!keySpaceId) {
+      throw notFound("API key not found or already revoked");
+    }
+    if (keySpaceId !== c.get("spaceId")) {
+      // A key delegates authority in exactly one space (spec §7.1).
+      if (c.get("authMethod") === "api_key") {
+        throw notFound("API key not found or already revoked");
+      }
+      const keySpace = await validateSpaceInOrg(keySpaceId, orgScope.orgId);
+      if (!keySpace) {
+        throw notFound("API key not found or already revoked");
+      }
+      await applySpacePermissions(c, keySpace);
+      // Downstream readers (the audit row, any later guard) must name the space
+      // the revocation acts in, not the one the request entered from.
+      c.set("spaceId", keySpaceId);
+      assertPermission(c, "api-keys", "revoke");
+    }
 
     try {
-      const revoked = await revokeApiKey(scope, keyId);
+      const revoked = await revokeApiKey({ ...orgScope, spaceId: keySpaceId }, keyId);
       if (!revoked) {
         throw notFound("API key not found or already revoked");
       }

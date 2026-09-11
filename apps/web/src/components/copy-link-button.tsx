@@ -7,10 +7,12 @@ import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 export function CopyLinkButton({ token }: { token: string }) {
   const { t } = useTranslation(["common"]);
   const { copied, copy } = useCopyToClipboard();
-  const link = `${window.location.origin}/invite/${token}`;
+  // Resolved on click, not on render: the origin is a browser fact and this
+  // button also renders on the no-DOM test harness.
+  const copyLink = () => copy(`${window.location.origin}/invite/${token}`);
 
   return (
-    <Button variant="outline" size="sm" onClick={() => copy(link)}>
+    <Button variant="outline" size="sm" onClick={copyLink}>
       {copied ? t("btn.copied") : t("btn.copyLink")}
     </Button>
   );

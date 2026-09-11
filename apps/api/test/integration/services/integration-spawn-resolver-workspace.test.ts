@@ -68,7 +68,7 @@ async function seedConnection(ctx: TestContext) {
     integrationId: INTEG,
     authKey: "oauth",
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
@@ -118,13 +118,13 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -140,13 +140,13 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedMcpServer(ctx); // no workspace declaration
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -162,13 +162,13 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedMcpServer(ctx, { mount: "/scratch" });
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -200,7 +200,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
         tools_policy: { clone_repo: {} },
       }),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     // Seed an mcp-server with the SAME name + a workspace declaration —
     // a remote integration must not consult it.
     await seedMcpServer(ctx, { mount: "/workspace", access: "rw" });
@@ -208,7 +208,7 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -224,13 +224,13 @@ describe("resolveIntegrationSpawns — _meta.workspace propagation", () => {
       source: "local",
       draftManifest: integrationManifest(),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedMcpServer(ctx, { access: "rw" });
     await seedConnection(ctx);
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });

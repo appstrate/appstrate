@@ -7,6 +7,1192 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New export `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`), the request header `X-Appstrate-Connect-Offers`, plus the matching `connectOffers?: boolean` option on `RunAndWaitClientOptions`. Set on the LAUNCH request only (never the poll), it asks the run-kickoff routes to mint a hosted-connect session per actor-actionable item of a `missing_integration_connection` 412 and return it as `connect_url` on that item, so a chat surface renders the connect card straight off the error with no second call. A minted link is a bearer capability to create a connection as the calling actor: only a caller that renders the card itself, or hands the link to the human who is that actor, may opt in — never a caller that logs, persists, or forwards its responses to a third party (the dashboard, the CLI, the GitHub Action, the scheduler and dry-run validation all leave it unset).
+
+- New export `partitionScopesByAuthCatalog` (`@appstrate/core/integration`): splits a scope list by membership of ONE auth's `scope_catalog` into `{ declared, undeclared }`, with the "an auth declaring no catalog declares no closed set" carve-out applied once. It is the single definition of catalog membership — `requiredScopesForAgent` filters its relayed scopes through `declared`, and the connect kickoffs refuse `undeclared` — replacing two independent implementations that were complements of each other.
+
+- New action `read-all` on the `runs` resource of `CoreResources` (`@appstrate/core/permissions`), hence the new permission string `runs:read-all`. `runs:read` narrows to the runs the principal launched — its own manual runs and its own schedules' — and `runs:read-all` is the space-wide view over every run, colleagues', end-users' and rows with no actor. A guard written `requireCorePermission("runs", "read")` keeps compiling and now gates the narrower thing; a module that wants the supervision view must ask for `read-all`.
+
+- New space-role preset `runner` in `SPACE_ROLE_PRESETS` (`@appstrate/core/permissions`), between `operator` and `viewer`: launch agents without reading them. Two consequences for a module that names presets. Any exhaustive `Record<SpaceRolePreset, …>` gains a fifth key — a compile error until it does. And the tuple stops being a strength ordering: `runner` and `viewer` are incomparable (a runner launches what it cannot read, a viewer reads what it cannot launch), so `SPACE_ROLE_PRESETS` is a display order and a `permissionsContribution` `presets` list is upward-closed under grant containment, not tuple position — naming `viewer` no longer implies `runner`, and naming `runner` requires `admin`, `builder` and `operator`.
+
+- New subpath `@appstrate/core/request-body` — `readJsonBody(c, schema, opts?)` and the type `ReadJsonBodyOptions`. The canonical JSON body reader: it catches an unparseable body as a 400 instead of letting the `SyntaxError` become a 500, then runs the schema through `parseBody` so a wrong-shape body answers RFC-9457 `errors[]` naming each offending field. `{ allowEmpty: true }` treats a missing or whitespace-only body as `{}` while still refusing malformed JSON. It moved here from `apps/api/src/lib/request-body.ts`, which a module cannot import: without it every module route re-derives the malformed/invalid split by hand, and each copy phrases its own 400. Hono stays an optional peer dependency — only its `Context` type is touched.
+
+- New exports `ORG_ROLES_WITH_FULL_ACCESS` (`["owner", "admin"]`) and its type `OrgRoleWithFullAccess` (`@appstrate/core/permissions`): the org roles that hold every org-level permission in every space without a `space_members` row. One name for a fact four call sites spelled out on their own. `VIEW_AS_ORG_ROLES` is now DERIVED as its complement (same value, `["member", "guest"]`, and the same `ViewAsOrgRole` union) — "a preview only removes" is exactly the statement that the previewable roles are the roles that do not already hold everything, so the two can no longer drift apart. Its declared type is `readonly [ViewAsOrgRole, ...ViewAsOrgRole[]]` rather than a literal `as const` tuple; `z.enum()` and array reads are unaffected, indexing a fixed position is not.
+
+- New exports `VIEW_AS_ORG_ROLES` (with its `ViewAsOrgRole` type), `VIEW_AS_HEADER`, `VIEW_AS_QUERY`, `VIEW_AS_ACTIVE_HEADER` and `VIEW_AS_REFUSAL_CODES` (`@appstrate/core/permissions`): the wire contract of the "view as role" preview — the org roles a preview may take (`member`, `guest`), the `X-View-As` header, the `view_as` query parameter the SSE routes take instead (`EventSource` sends no headers), the `X-View-As-Active` response marker, and the complete set of problem codes that mean "the persona was refused, drop the preview" (`invalid_view_as`, `view_as_unsupported`, `view_as_forbidden`, `view_as_not_found`). A plain `not_found` answered under an active persona is the previewed role's own wall, not a refusal. The preview crosses the platform, the SPA and the chat module, so a carrier renamed on one side only is a compile error rather than a persona silently dropped.
+
+- New export `reportPermissionDenial(c, required)` (`@appstrate/core/permissions`): fires the denial audit hook for a refusal decided outside `makePermissionGuard` (a disjunction of permission strings); `makePermissionGuard` now calls it.
+
+### Changed
+
+- `requiredScopesForAgent` (`@appstrate/core/integration`) now filters the
+  agent's explicit `agentScopes` to the ones the TARGET auth's `scope_catalog`
+  declares, instead of unioning them verbatim into every auth's requirement.
+  An agent's `integrations_configuration[id].scopes` names no auth and is
+  validated at publish against the UNION of every auth's catalog
+  (`getAvailableScopes`), while a connect kickoff is per-auth and refuses a
+  scope the target auth does not declare: on a multi-auth integration a scope
+  belonging to auth B was relayed as `required_scopes` for auth A and the
+  kickoff then rejected the platform's own value. An auth declaring no catalog
+  still requires everything asked of it (no closed set to filter against), and
+  tool-contributed scopes are unaffected — they are read per-auth out of
+  `tools_policy[tool].required_scopes[authKey]`. `missingScopesForConnection`
+  inherits the change, so a connection can no longer be judged under-scoped for
+  a scope its auth never advertised.
+
+- `ResolutionFieldError` (`@appstrate/core/api-errors`) gains three optional
+  members — `connect_url`, `expires_at` and `package_id` — carrying a
+  ready-to-open hosted-connect link for that item. Populated only on a
+  run-kickoff 412 whose caller sent `RUN_CONNECT_OFFERS_HEADER`, and only on
+  the items an oauth2 connect flow can clear for the calling actor:
+  `not_connected`, or `insufficient_scopes` / `needs_reconnection` on a
+  connection that actor OWNS (both re-consent that very row). The link is
+  single-use and short-lived; a consumer that sees one should open it (or
+  render it) rather than call the connect kickoff, which would mint a second.
+
+- `owned_by_actor` (`ResolutionFieldError`, `@appstrate/core/api-errors`) and
+  `ownedByActor` (`ConnectionResolutionError`, `@appstrate/core/integration`)
+  are now populated on `needs_reconnection` as well as `insufficient_scopes`.
+  The two codes share one remedy shape — re-consent an existing connection in
+  place — so a consumer deciding between "offer the repair" and "read-only,
+  it is a colleague's account" reads the same field for both.
+
+- `ConnectionResolutionError` (`@appstrate/core/integration`) gains two optional
+  members, `authKey` and `requiredScopes`, and `ResolutionFieldError`
+  (`@appstrate/core/api-errors`) gains their wire spellings `auth_key` and
+  `required_scopes`. Both are populated on every code a connect flow can clear
+  — `not_connected`, `needs_reconnection` and `insufficient_scopes`: they name
+  the manifest auth a connect flow must target and the FULL scope set the run's
+  selected tools require on it — not the diff. The connect kickoff computes no
+  scopes of its own (`body.scopes` is its only delta source), so without the
+  relay a fresh connect or a reconnect could only request the auth's
+  `default_scopes` and the very next resolution failed again on the tools that
+  needed more. Additive and optional, so no consumer has to change; a consumer
+  that renders a connect CTA from a 412 should forward them.
+
+- **BREAKING: `ChatAttachmentRequest.permissions` is required**
+  (`@appstrate/core/chat-contract`), a `ReadonlySet<string>`: the caller's
+  effective permission set in the space, as the platform auth pipeline resolved
+  it. It decides how wide the container ACL of an `appfile://` attachment
+  reads — with `runs:read-all` a file anchored to a colleague's run resolves,
+  which is the same set the file gallery the user picked it from answers, and
+  without it only the session owner's own runs. There is no default: a module
+  resolving attachments through `ctx.services.resolveChatAttachment` forwards
+  `c.get("permissions")` or fails to compile, instead of silently answering a
+  narrower ACL than the picker that offered the file.
+
+- **BREAKING: `invalidatePrincipalPermissions(orgId, userId)` requires
+  `userId`.** The org-wide clear is removed: a call names exactly one principal
+  and drops it on every replica. The cache is keyed by the `(orgId, userId)`
+  pair rather than prefixed by org, so the org-wide form dropped EVERY
+  organization's principals — every replica re-resolving every session's grants
+  because one module wrote one row. A module invalidates the principals its
+  write touched, one call each; `@appstrate/module-ee`'s billing managers do
+  exactly that. A caller passing one argument fails to compile.
+
+- **BREAKING: the mailer `ModuleInitContext.getSendMail` resolves is now
+  asynchronous** — `(to, subject, html) => Promise<void>` instead of
+  `=> void` (#1280). The platform always supplied an async mailer; the
+  declared type said otherwise, so `await ctx.getSendMail()(…)` awaited
+  nothing and no module could sequence on a send (send, then mark sent). It
+  also made the platform's own call site the one place needing an
+  `@typescript-eslint/no-misused-promises` suppression, for a contract defect
+  that was not local to it. A module that supplies its own `() => void` mailer
+  to a helper typed against this contract stops compiling; the fix is to make
+  that mailer `async`. Awaiting means the delivery ATTEMPT is over, not that
+  delivery succeeded: the platform's mailer logs transport failures and
+  settles. A module-supplied mailer MAY reject, so a caller fanning out over
+  several recipients should settle the fan-out rather than race to the first
+  rejection (`@appstrate/module-ee` does).
+
+- **BREAKING: `ModuleInitContext.getOrgAdminEmails` is REMOVED**, replaced by
+  two narrower queries. `getOrgOwnerEmails(orgId)` returns the emails of the
+  org's OWNERS only — the live fallback recipient for an unset billing contact,
+  and deliberately not owner-or-admin, since admin is an operational role and
+  billing mail is not an operational notification. `getOrgMembers(orgId,
+userIds)` resolves a module's own stored user ids to
+  `ModuleOrgMember[]` (`{ userId, email, role }`, also a new export), omitting
+  any id that is no longer a member of `orgId` rather than throwing — "which of
+  these still hold membership" is the question a module with its own principal
+  list actually asks. A module calling `getOrgAdminEmails` fails to compile;
+  the replacement is `getOrgOwnerEmails` when the answer wanted was "who is
+  responsible for this org", and an explicit id list through `getOrgMembers`
+  when it wanted a named audience. First consumer: `@appstrate/module-ee`'s billing
+  managers and billing contact.
+
+- **New subpath `@appstrate/core/principal-permissions` — org-level grants per
+  principal.** A module may now grant org-level permissions to ONE user in ONE
+  org instead of to a role, through the new optional `principalPermissions`
+  member on `AppstrateModule` (type `ModulePrincipalPermissions`: a `mayGrant`
+  allowlist plus a `resolve({ orgId, userId })`). The platform validates
+  `mayGrant` at boot — every entry must be a known org-level permission and
+  must not be API-key- or end-user-grantable — evaluates the resolver for
+  session-shaped callers only, filters each answer to that module's `mayGrant`
+  (an undeclared string is dropped and logged), and isolates a throwing
+  resolver. First consumer: `@appstrate/module-ee`'s billing managers.
+  New exports on the subpath: `resolvePrincipalPermissions`,
+  `invalidatePrincipalPermissions`, `setPrincipalPermissionsProviders`, and the
+  types `ModulePrincipalPermissions`, `PrincipalPermissionContext`,
+  `RegisteredPrincipalPermissions`. Results are cached per `(orgId, userId)`
+  with a 10s TTL and dropped across replicas by the cache bus, so a module that
+  declares the surface MUST call `invalidatePrincipalPermissions(orgId,
+userId)` after writing the table its resolver reads —
+  `setPrincipalPermissionsProviders` is the platform's own boot wiring and a
+  module never calls it. No behaviour change for a platform where no module
+  declares the member: the resolver short-circuits without touching the cache.
+
+- **`ApiError` can carry RFC 9457 extension members.** New optional
+  `extensions` on the constructor options, merged into the problem body by
+  `toProblemDetail()` — only into keys the standard fields do not own, so an
+  extension can never rewrite `status` or `code`. `conflict(code, detail)`
+  takes them as a third argument. First consumer: `DELETE /api/roles/{id}`
+  answering `role_in_use` with `member_count`, so a client acts on the number
+  instead of parsing it out of `detail`.
+
+- **The org role `viewer` is retired; `guest` replaces it (BREAKING).**
+  `ORG_ROLES` — and therefore the `OrgRole` union and the `org_role` pg enum
+  it mirrors — is now `["owner", "admin", "member", "guest"]`. Read-only
+  access to everything is a SPACE concern (preset `viewer`); an org role that
+  implicitly reads every space is exactly what space membership exists to
+  stop, so a `viewer` becomes a `guest` plus an explicit `viewer` row in each
+  space that existed at migration time. `ModulePermissionsSnapshot.byRole`
+  changes key accordingly (`viewer` → `guest`); a module whose
+  `permissionsContribution()` names `viewer` in `grantTo` must name `guest`
+  (no in-tree module did — `@appstrate/module-ee` grants `billing:read` to
+  owner/admin/member and needs no change, but a guest holding it would be a
+  deliberate decision, not a rename). Existing `viewer` rows are moved by
+  `scripts/migration/0008-org-viewer-to-guest.sql` (release notes).
+
+- **New exports for space visibility.** `SPACE_VISIBILITIES`
+  (`["open", "closed", "private"]`) and the type `SpaceVisibility`, read by
+  the space-role resolver and by the `spaces.visibility` column.
+
+- **New: the type `SpaceAssignment`.** One space membership an invitation
+  applies when it is accepted (`{ space_id, preset_role }` or
+  `{ space_id, custom_role_id }`), and the shape
+  `org_invitations.space_assignments` stores. Wire-shaped, so the invite body,
+  the stored column and every invitation response read the same object.
+
+- **New: a module can enter a space.** `enterSpaceContext(c, spaceId?)` and its
+  platform-side registration hook `setSpaceContextApplier()`. A module that
+  gates a SPACE-level resource on a route family the platform does not
+  space-scope (`chat`, `webhooks`, `mcp`) must call `enterSpaceContext` before
+  its guard: org-level permissions carry no space-level string, so the guard is
+  otherwise unsatisfiable. Same registration pattern as
+  `setModulePermissionsProvider` / `setPermissionDenialHandler` — the platform
+  wires the implementation at boot; calling it unwired throws rather than
+  silently no-op-ing.
+
+- **RBAC vocabulary gains a level (BREAKING for module authors).** Every
+  permission string now belongs to exactly one level, `org` or `space`
+  (`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4): an org role grants
+  org-level strings, a space role grants space-level ones. Changed exports:
+  `CoreResources` (`org` gains `settings`; `integrations` gains `configure`;
+  new resources `roles`, `space-settings`, `space-members`),
+  `CORE_RESOURCE_NAMES` (same shape, now derived from `CORE_RESOURCE_ACTIONS`),
+  `ModulePermissionContribution` (a discriminated union on a new required
+  `level` field: `{ level: "org"; grantTo }` | `{ level: "space"; presets }` —
+  there is no default and no compatibility reading of a bare `grantTo`), and
+  `ModulePermissionsSnapshot` (new required `byPreset` member). New exports:
+  `CORE_RESOURCE_ACTIONS`, `CORE_RESOURCE_LEVELS`, `ORG_LEVEL_PERMISSIONS`,
+  `SPACE_LEVEL_PERMISSIONS`, `SPACE_ROLE_PRESETS`,
+  `getModulePresetScopes()`, and the types `PermissionLevel`,
+  `OrgLevelPermission`, `SpaceLevelPermission`, `SpaceRolePreset`. Every
+  module contributing permissions must add `level` to each entry and swap
+  `grantTo` for `presets` on its space-level resources; `@appstrate/module-ee`'s
+  `billing` entries are org-level.
+
+- **`extractSkillMeta` no longer owns its own frontmatter parser.** It returns
+  exactly what it did for a conforming document and keeps its `warnings`, but
+  the PARSE now comes from `parseSkillFrontmatter`
+  (`@appstrate/afps-shared/companion-files`, raised to `^0.8.0`), which reads
+  the block with the **`yaml` library at the same major the skill runtime uses**
+  — so this function, the platform's write-path gate and the agent that loads
+  the skill can no longer disagree about what a `SKILL.md` declares.
+
+  Consequences of a real YAML parse: block scalars, folded scalars, plain
+  scalars continued on the following indented lines, quoted scalars with
+  escaped quotes, inline `# comments` and CRLF documents are all read the way
+  the runtime reads them — including a leading BOM, behind which the runtime
+  reads NO frontmatter, so neither does this. Forms YAML rejects
+  (`description: a: b`, `name:x`, a duplicate key, a non-mapping document, a
+  non-string field) now yield empty fields plus a warning instead of a
+  plausible-looking wrong value. It still **never throws**: a parse failure is
+  reported through `warnings`, this function's existing contract.
+
+  **`parsePackageZip` is unchanged, byte for byte.** It keeps applying the
+  LOADER-side companion rule — skill `SKILL.md` present with a frontmatter
+  `name`, decided by the same permissive substring probe as before — because it
+  is also how already-published, immutable artifacts are read.
+
+  **Requires `@appstrate/afps-shared@0.8.0` on npm before this release is
+  published.**
+
+- **`zod` dependency range moved to `^4.5.4`** (from `^4.4.3`). The floor a
+  consumer's install has to satisfy rises accordingly; core's own schemas and
+  exported types are unchanged.
+
+### Added
+
+- **`./map-with-concurrency`** — the bounded worker pool, moved into core from
+  `apps/api/src/lib/map-with-concurrency.ts` unchanged. `mapWithConcurrency<T,
+R>(items, limit, fn)` maps over `items` with at most `limit` callbacks in
+  flight, preserves input order in the result, and on the first rejection lets
+  in-flight callbacks settle while starting no new ones before propagating —
+  the abort semantics a caller that rolls back partial work depends on. Moved
+  because the CLI's `appstrate skills sync` needs the same pool against the
+  rate-limited package routes, and a per-workspace copy is how the two pools
+  this one replaced came to disagree in the first place. Additive, minor.
+
+- **`./cache`** — one read-through cache primitive for the platform and its
+  modules. `createCache<V>({ name, ttlMs, max })` (`CacheOptions`) returns a
+  `Cache<V>`: `get(key, loader, { store? })` (`CacheGetOptions` — read-through
+  with request coalescing, so concurrent loads of one key share a single
+  loader call, and an optional `store` predicate that answers a value without
+  keeping it), `peek`, `set`, `invalidate`, `clear`. `V` is constrained to
+  non-`undefined` values: a loader that answers `undefined` is answered but
+  never stored, so a miss is retried on the next call.
+  Caches register by `name`; a duplicate name throws. `invalidate`/`clear`
+  drop the local entry and publish a `CacheInvalidation` (`{ cache, key,
+origin }`) on the transport given to `configureCacheBus` (`CacheBus`);
+  `receiveCacheInvalidation` applies a frame from another process and ignores
+  this process's own echo by `origin`. An invalidation landing while a load is
+  in flight discards what that load would have stored. Test seams:
+  `setCacheClock` (one clock for every TTL), `clearAllCachesLocally` (drops
+  every registered cache without publishing).
+  No shared store: the bus carries names and keys, never values. Replaces the
+  hand-rolled TTL maps in the platform; additive, minor.
+
+- **`effectiveMcpServerType`** (`./mcp-server-meta`, re-exported from
+  `./mcp-server`) — the runtime an mcp-server actually spawns under: the
+  Appstrate `_meta["dev.appstrate/mcp-server"].runtime` override when present,
+  the MCPB `server.type` otherwise. `getMcpServerRuntime` is unchanged and still
+  exported; it reads the override alone, and every caller that needed a runtime
+  had to bolt the `?? server.type` fallback on by hand. Three did, and one of
+  them did it late: the connect-login spawn path forwarded the raw
+  `server.type`, so the same bun-native package ran under `bun` for an agent run
+  and under `node` for a connect login. The fallback now has one definition.
+  `server.type` is returned VERBATIM rather than narrowed to
+  `McpServerRuntime`, because the SPA reads unvalidated draft manifests where an
+  author's typo must still display as written; `undefined` means neither source
+  declared one, which for a spawn means "not runnable" and is the caller's to
+  fail closed on.
+  Additive — no existing export changes shape, so this is a minor.
+
+- **`formatErrorChain`** (`./errors`) — renders an error and every `cause`
+  beneath it as one `": "`-joined string. It exists because `{ cause }` was
+  threaded through this codebase with nothing on the other end to print it, and
+  both obvious renderers are blind to it: V8 builds `.stack` at construction and
+  never walks the chain (measured on Bun 1.3 —
+  `new Error(o, { cause: i }).stack.includes(i.message)` is `false`), and pino's
+  `err` serializer — which DOES walk it, with no configuration needed — only
+  fires for a property named `err` holding an `Error`, against 194 log sites in
+  this repo that pass `error: getErrorMessage(err)`, a pre-flattened string.
+  Bounded: at most five `cause` links past the outermost error, and an
+  identity-tracked walk so a cyclic chain terminates (`[circular cause]`) rather
+  than hanging. Returns exactly `getErrorMessage(err)` when there is no cause,
+  so it is a drop-in at any existing site.
+  The chain is OPERATOR-facing — a `cause` routinely carries SQL constraint
+  names, upstream URLs and credential-adjacent context — so it belongs in a log
+  and never in an HTTP response body. `ApiError.toProblemDetail` reads `message`
+  and never `cause`; that boundary is asserted by tests on both sides.
+  Additive — no existing export changes shape, so this is a minor.
+
+- **`SIDECAR_AUTH_HEADER`** (`./sidecar-types`) — the request header carrying the
+  per-run token that authenticates the agent container to its own sidecar,
+  `x-appstrate-sidecar-auth`. It exists because the sidecar's control surface
+  used to have no inbound auth at all, on the stated ground that "the security
+  boundary is the per-run Docker network" — which stopped being true once
+  integration runner containers were attached to that same network and handed
+  the `sidecar` hostname. A runner could therefore reach `/llm/*` and spend the
+  org's real provider credential unattributed. The surface now denies by
+  default, exempting only `/health`.
+  Published because both halves of the boundary must agree on the spelling and
+  they are built in different packages: the platform mints the token and stamps
+  it into the agent env, the sidecar reads it back. A literal in two places is
+  how that drifts.
+  Additive — no existing export changes shape, so this is a minor.
+
+### Removed
+
+- **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — a one-element array whose
+  only element was `PUBLISHED_FILE_LOG_EVENT`, which is exported beside it. It
+  existed to hold two spellings, the current `"file"` and the pre-#1177
+  `"document"`, so a reader could filter `run_logs` rows without knowing which
+  era each row was written in. The `"document"` arm went with the rest of that
+  rename and no row carries it any more, which left a list deriving its single
+  value from the constant next to it and no in-repo consumer for it: both
+  readers (the web shell's run page, the chat module's run card) compare
+  against `PUBLISHED_FILE_LOG_EVENT`, and so does the sink that writes the tag.
+  Consumers matching against the array should compare against
+  **`PUBLISHED_FILE_LOG_EVENT`** — same value, `"file"`, so nothing on the wire
+  moves and no row starts or stops being recognised.
+
+- **`ACCEPTED_RUNTIME_TOOL_IDS`** (`./runtime-tools-catalog`) — a second binding
+  for a list that was already exported. It was defined as
+  `[...SELECTABLE_RUNTIME_TOOLS]`, so the two sets were identical by
+  construction and could not drift; the sole reason its own docblock gave for
+  keeping it was a type one — that `z.enum()` needs a non-empty MUTABLE tuple
+  and would not take the `as const` readonly tuple. That stopped being true:
+  Zod 4's `z.enum` is declared `<const T extends readonly string[]>`, so
+  `z.enum(SELECTABLE_RUNTIME_TOOLS)` compiles and infers the same exact literal
+  union. With the reason gone the binding is transition scaffolding
+  (`docs/NO_TRANSITIONAL_CODE.md` §3) and is deleted rather than re-justified.
+  The two lists genuinely differed only while the retired `publish_document`
+  spelling (#1177) was resolved on read; that alias table is long gone, and a
+  stray retired id is DROPPED and reported by `canonicalizeRuntimeToolIds`,
+  never remapped. That history now lives on `canonicalizeRuntimeToolIds`, which
+  implements it.
+  Consumers should import **`SELECTABLE_RUNTIME_TOOLS`** — same five ids in the
+  same order, so no manifest, no wire enum and no generated JSON Schema moves.
+  Removing a published export is breaking, so this is a **major**.
+
+### Changed
+
+- **`parsePackageZip` no longer accepts a bare `number` as its second argument**
+  (`./zip`) — the retired positional `maxSize`, replaced by
+  `ParsePackageZipOptions` in 6.0.0. TypeScript callers now get a compile error;
+  a plain-JS caller that passes a number gets a `TypeError` naming the object
+  form and the value it passed. Pass `{ maxSize: N }`.
+  The check is a runtime throw and not a deletion on purpose: with the branch
+  simply gone, a number falls through `options ?? {}`, `maxSize` reads
+  `undefined`, and the DEFAULT 10 MB ceiling silently replaces the limit the
+  caller asked for — a caller requesting 1 MB would get 10 MB with no error at
+  all. A retired form that can still arrive from outside fails loudly, never
+  works (`docs/NO_TRANSITIONAL_CODE.md` step 5).
+  A `TypeError` rather than a `PackageZipError`: nothing is wrong with the
+  archive, the call is. Consumers catching `PackageZipError` around this call
+  will NOT catch it, which is the intent — a caller-API defect must not be
+  rendered into the 400 an uploader reads.
+  Breaking for any consumer still on the positional form, so this is a **major**.
+
+- **A rejected unknown body key now names ITSELF in `errors[].field`**
+  (`./api-errors`) — `zodIssuesToFieldErrors` previously rendered every
+  `unrecognized_keys` issue through the generic path, and Zod 4 gives that issue
+  an EMPTY `path`. The field therefore fell back to the caller's `param` option,
+  or to the placeholder `"body"` when there was none. A request carrying
+  `{"skillIds":["@a/b"],"extra":1}` came back blaming `skillIds` — a field that
+  was correct — and a body with no `param` came back blaming `"body"`, which
+  points at nothing. Both are now the offending key, taken from `issue.keys` and
+  prefixed with the issue's own path for a nested object.
+  A body with N unknown keys now yields N entries instead of one, each naming
+  its own key; a single key keeps Zod's exact message. `errors[].code` is still
+  `unknown_field` and the status is still `400`, so a consumer that branches on
+  the code is unaffected — one that branches on `field === "body"` is not.
+  Every other issue code is byte-identical, including the `param` fallback,
+  which still fires for a genuinely path-less issue such as a root-level
+  `invalid_type`.
+  This lands with ~65 request bodies closing at once across the platform, so it
+  is the difference between a 400 a caller can act on and one that sends them
+  to the wrong field.
+
+- **`integrationManifestSchema` refuses a bare auth-scheme
+  `delivery.http.prefix`** (`./integration`) — a new hard rejection of a
+  manifest that validated on 9.0.0, so an integration that installed before now
+  fails to install. AFPS §7.6 defines `prefix` as a LITERAL prepended to the
+  rendered credential, and the injector concatenates it verbatim, so
+  `prefix: "Bearer"` under `Authorization` (or `Proxy-Authorization`) sends
+  `Authorization: BearerTOKEN` — a malformed credential every upstream answers
+  with a 401 that names nothing. Appstrate used to splice the missing separator
+  in at request time; that read-time repair is gone, so the defect is caught
+  where the manifest author can still act on it, and the message names the fix
+  (`Write "Bearer ".`). The rejection is narrow: only a prefix that is nothing
+  but an RFC 9110 `token`, and only in those two header positions. A composite
+  (`"Token token="`), a cookie one (`"session="`), and any prefix on any other
+  header are untouched — there a bare token is an ordinary literal.
+
+  Manifests already stored are NOT revalidated on read, so this fixes nothing
+  that is already installed: `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`
+  moves `packages.draft_manifest` and `package_versions.manifest`, with a
+  `WHERE` that is exactly the condition the validator now refuses.
+
+- **`@appstrate/afps-shared` dependency range moved to `^0.7.0`.** Two things
+  moved it, and both are behaviour a core consumer receives only if the range
+  admits them.
+
+  First, `isBareAuthSchemePrefix` — the grammar behind the rule above —
+  is exported from `@appstrate/afps-shared/delivery-http`, the leaf that
+  already owns the `delivery.http` projection both core and
+  `@appstrate/afps-runtime` read. It lives there rather than here because the
+  runtime has a second authoring surface for the same value (a hand-written
+  local creds file, which no manifest validator ever sees) and must refuse the
+  identical form; a copy of the token grammar on each side is the shape this
+  change exists to retire, and the runtime deliberately carries no
+  `@appstrate/core` runtime dependency. That arrived in `afps-shared@0.6.0`,
+  which is on npm.
+
+  Second, the two `guardedFetch` changes below. `./ssrf` is a pure re-export
+  barrel over `@appstrate/afps-shared/guarded-fetch`, so what a consumer gets
+  from it is decided ENTIRELY by the version their install resolves — and the
+  published `0.6.0` still has `maxRedirects ?? 5`, the non-conformant 301/302
+  clause, and no `DEFAULT_MAX_REDIRECTS`. Those changes ship in
+  `afps-shared@0.7.0`; `0.x` puts breaking changes in the MINOR position, so
+  `^0.6.0` does not admit them and the floor had to rise. Nothing in core's own
+  surface moves for this, beyond the one re-export named below.
+
+  **Publish `afps-shared@0.7.0` before this release** (`git tag
+afps-shared@0.7.0`; see `packages/afps-shared/CHANGELOG.md`). Until it is on
+  npm, `bun scripts/verify-package-resolves.ts packages/core` fails — it packs
+  core and installs the real tarball outside the monorepo, so an unpublished
+  leaf fails HERE rather than in the first consumer's `npm install`. That is
+  the gate working, not a regression.
+
+- **`isMultipleFileField` now agrees with `isFileField`** (`./form`) — the two
+  predicates were two rules. `isFileField` asked "`format: "uri"` plus a
+  DECLARED `contentMediaType`"; `isMultipleFileField` tested
+  `!!items.contentMediaType`. `{ type: "array", items: { format: "uri",
+contentMediaType: "" } }` is the input that separated them — a file field that
+  was not multiple — and `mapAfpsToRjsf` therefore emitted `ui:widget: "file"`
+  WITHOUT `multiple` for it, i.e. a single-file picker bound to an array
+  property. Both are now derived from ONE single-file-node predicate, so an
+  empty-but-present `contentMediaType` is a file field on both. Whether the
+  media type is well-formed is the manifest validator's job, not a UI
+  predicate's; this is the reading `apps/api`'s inline-run synthesiser already
+  documents and relies on. No export was added or removed.
+
+  That predicate stays a copy of `@appstrate/afps-shared/file-field`'s rather
+  than an import of it, deliberately: core ships as source, so a consumer's
+  `tsc` compiles these files against whatever `@appstrate/afps-shared` their
+  own install resolves. The floor this window raises to is `^0.7.0`, and
+  `0.7.0` is the FIRST release to export `isMultipleFileField` from that
+  subpath — it is not on npm yet, so importing it today breaks every consumer
+  install, exactly as importing it at the previous `^0.6.0` floor would have
+  (published `0.6.0` exports only `isFileField` there; verified against the
+  tarball, not inferred). `packages/core/test/form.test.ts` asserts the two
+  agree table-wide so they cannot drift while they are apart. The remaining
+  step to merge them is now only the publish: once `afps-shared@0.7.0` is on
+  npm, this block can become
+  `export { isFileField, isMultipleFileField } from "@appstrate/afps-shared/file-field"`.
+  The three helpers underneath (`isSingleFileNode`, `resolveItems`,
+  `resolveType`) are private to the leaf on purpose and stay duplicated
+  regardless — they are implementation detail of those two predicates, not
+  surface.
+
+- **`guardedFetch` follows the WHATWG 301/302 method rule** (`./ssrf`, shipped
+  in `afps-shared@0.7.0` — see the range entry above) — the
+  downgrade clause read `(301 | 302) && method !== "HEAD" → GET`, so a 302'd
+  `PUT`/`PATCH`/`DELETE` was re-issued as a bodyless `GET`: a request the caller
+  never made, silently. WHATWG fetch (HTTP-redirect fetch step 11) and RFC 9110
+  §15.4.3 downgrade **POST only**; 303 still downgrades everything except
+  GET/HEAD, and 307/308 still preserve method and body. `GET` and `POST`
+  callers — every current one in this repo — are unaffected.
+
+- **`guardedFetch`'s default `maxRedirects` is 10, not 5** (`./ssrf`, shipped
+  in `afps-shared@0.7.0` — see the range entry above), and the constant is now
+  re-exported from `@appstrate/core/ssrf` as **`DEFAULT_MAX_REDIRECTS`**, so a
+  consumer calling `guardedFetch` from this package can name the ceiling
+  instead of copying the number. It was
+  one of two unrelated budgets for the same job (the credential-proxy follower
+  in `@appstrate/afps-runtime` hard-coded `10`), and 10 is the value with a
+  reason: multi-step OAuth/CAS chains do not always terminate within five hops.
+  The cap is a loop/DoS bound, not a trust boundary — every hop is still
+  independently DNS-checked, allowlist-checked and credential-stripped — so
+  nothing is weakened by the raise. Callers that want the old ceiling pass
+  `maxRedirects: 5`.
+
+- **`ApiError` accepts an optional `cause`** (`./api-errors`) — a new optional
+  member on the constructor's options object, forwarded to `Error`'s
+  `ErrorOptions`. ESLint's `preserve-caught-error` only inspects
+  `throw new <builtin Error>`, so it is structurally blind to custom subclasses;
+  repo-wide that leaves 62 `throw new <CustomClass>` sites inside `catch` blocks
+  carrying no cause, and `ApiError` is the most-thrown of them. Without this
+  parameter the obligation was not merely unenforced, it was inexpressible.
+  Purely additive: omitting it leaves the constructed error with no `cause` own
+  property at all (not one set to `undefined`), so nothing existing changes
+  shape, and `toProblemDetail` is untouched — the cause is log-only.
+
+- **`CreateUploadUrlOptions.maxSize` is required, and `Storage.createUploadUrl`
+  no longer takes `opts` optionally** (`./storage`) — a breaking type change
+  with no runtime behaviour change for any caller that already declared a size.
+  An omitted `maxSize` was signed into the proxy-upload token as `s: 0`, and `0`
+  meant "unbounded" — a form three separate accept-sites had to keep special-
+  casing (`maxSize > 0` in the FS/proxy sink's mid-stream ceiling and its
+  exact-size check, `payload.s > 0` in the `PUT /api/uploads/_content` route)
+  and that `createProxyUploadDescriptor` produced by default, so the retired
+  form had a producer keeping it alive. Nothing has minted such a token since
+  size became mandatory upstream: the platform's only caller rejects
+  `size <= 0` before signing and passes `min(size, declared)`, and the signed
+  expiry is clamped to at most an hour, so the last `s: 0` token expired long
+  ago. Making the field required moves the guarantee into the type, which is
+  what let all five accept-sites go — including the two on the S3 presign path
+  (`ContentLength` and the echoed `Content-Length` header), which are now
+  unconditional. Callers that omitted `maxSize` must pass the exact declared
+  byte count; the S3 presign path will now sign a `Content-Length` for them,
+  which the client must echo.
+
+## [9.0.0] — 2026-08-26
+
+Published from tag `core@9.0.0`. This window REMOVES an export, which is the
+major break that set the number — see **Removed** below for the one removal.
+
+### Removed
+
+- **`syntheticAliasErrorMessage`** (`./model-swap`) — interpolated the
+  org-chosen alias into the string both retry classifiers read, so an alias
+  containing `500`, `502` or `overloaded` turned a terminal failure into a
+  retried one. Replaced by **`syntheticAliasClassifierMessage`**, which takes no
+  `ModelSwap` and so has nothing org-controlled to interpolate; see the entry
+  under Added. The alias moved to `error.model` on the wire body, so operators
+  keep the "which model" signal.
+
+### Changed
+
+- **`completionMatches`** (`./connect-handshake`) — narrows on an identifier
+  BOTH sides carry. It was a first-match chain, so an identifier only one side
+  carried decided in a direction it must not: a completion carrying a `state`
+  and no `packageId` fell through to the permissive tail and was accepted by
+  EVERY target, including one that identifies nothing — the opposite of the
+  fail-closed rule the same doc comment promised. That is the shape the OAuth
+  callback emits on its early failures (`popupHtmlError(msg, { state })`, where
+  the package is only known once the signed state is decoded — the step that
+  failed), so a Gmail OAuth failure drove an unrelated ClickUp connect card into
+  its error state. Now a conjunction: a shared identifier that disagrees
+  rejects, at least one shared identifier must match, and only a completion
+  naming NEITHER a flow nor a package stays for everyone. Signature and origin
+  policy unchanged; strictly narrowing — 5 of the 36 target x completion cells
+  move accept to reject, none the other way. One accepted cost: a surface
+  holding only a `packageId` no longer mirrors the callback's state-only
+  failures; the fix for that is to widen the SENDER, not this predicate.
+
+- **`classifyModelError`** (`./model-error`) — behaviour change, name and
+  signature unchanged. A known status now decides the verdict over the prose it
+  travelled with — BELOW the two categories that are read first and are
+  unchanged: a dead credential (`401` `402` `403` → `credential_unavailable`)
+  and a throttle (`429` → `rate_limited`, which stays **retryable**). Under
+  those, a known 4xx is `invalid_request` (terminal) and a 5xx
+  `upstream_unavailable` (retryable). Previously only `400` was named, and the
+  generic `"Upstream model error"` this package emits at the alias boundary fell
+  through to the transient branch — so `404` `405` `408` `409` `413` `415`, six
+  of the fourteen statuses `projectAliasUpstreamStatus` forwards, read as
+  retryable while pi-ai read the same sentence as terminal. `413` makes it
+  concrete: an oversized prompt was offered a retry, on a request that can never
+  succeed. The two classifiers now agree on all fourteen, pinned by a test in
+  `@appstrate/runner-pi` (core may not import the SDK). Messages carrying NO
+  status are unchanged, the status-less `"Upstream model error"` included.
+
+- **`validateAgainstSchema`** (`./schema-validation`) — no longer throws on a
+  schema Ajv cannot compile; it returns `{ valid: false }` carrying the
+  compiler's message. `compileCached` stays the throwing path for callers that
+  want the compile error, and now strips a root `$schema`, so a document
+  declaring draft-04/06/07 or 2019-09 is validated on the 2020-12 dialect
+  instead of failing to compile. The server had this workaround and core did
+  not, which broke the server/CLI parity this module promises.
+
+- **`sanitizeFilename` truncates on whole code points** (`./naming`), and
+  `encodeFilenameHeader` / `attachmentDisposition` are now total. The cap was a
+  `slice` over UTF-16 code units, so a name whose 255th unit was the first half
+  of a surrogate pair became a LONE surrogate — a string `encodeURIComponent`
+  throws `URIError` on. That name is durable (`files.name`, part of the
+  `(run_id, sha256, name)` dedup identity), so every later download of the file
+  500'd on both serving branches. The orphaned half is now dropped, and an
+  unpaired surrogate reaching either encoder from any other producer becomes
+  U+FFFD instead of a throw. No signature changes; a well-formed name — emoji
+  and CJK included — encodes byte-identically to before.
+- **`PUBLISHED_FILE_LOG_EVENTS` is deprecated** (`./file-uri`) — both readers
+  (the web shell's run page, the chat module's run card) now compare against
+  the singular `PUBLISHED_FILE_LOG_EVENT` the sink writes, so the list has no
+  in-repo consumer left. It stays exported, unchanged and still `["file"]`,
+  because removing a published name is breaking; delete at the next major.
+  Nothing on the wire moves.
+- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
+  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
+  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
+  and the identity-return behaviour are unchanged, so this is not a surface
+  change. It moved because `packages/afps-runtime` carried a token-for-token
+  copy of the same algorithm, each pointing at the other and asking a human to
+  keep them aligned, with no parity test. That is the shape that had already
+  drifted three times for the MIME set, one of those corrupting every OOXML
+  download.
+
+  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
+  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
+  outside the monorepo and typechecks every subpath, so an unpublished leaf
+  fails the publish rather than the first consumer's `npm install`. Declaring
+  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
+  `ETARGET / no matching version` at install, which names the missing artifact,
+  instead of a `TS2307` three layers down inside `node_modules`.
+
+### Added
+
+- **`syntheticAliasClassifierMessage`** (`./model-swap`) — REPLACES
+  **`syntheticAliasErrorMessage`**, which is REMOVED. Same neutral prose, one
+  difference: it takes no `ModelSwap`, so an alias cannot be interpolated into
+  it. Both classifiers that read this string are substring matchers — pi-ai's
+  `isRetryableAssistantError` alternates over `429`/`500`/`502`/`503`/`504`/
+  `524`/`overloaded`/`rate.?limit`/the timeout family, and this package's own
+  `classifyModelError` reads a `\b[45]\d\d\b` out of it — while an alias is
+  ORG-CONTROLLED text. An alias named `gpt-500-fast` (not a contrived name)
+  made EVERY failure on it retryable, terminal `400` included, on both
+  classifiers. The status is still interpolated, and only from the enumerated
+  forwardable set, so the integers that can appear are a closed list of
+  fourteen. Callers of the old helper drop the swap argument and pass the
+  status alone.
+- **`syntheticAliasErrorBody`** (`./model-swap`) — **behaviour change**, name
+  and signature unchanged. The alias moved OUT of `error.message` and into a
+  new `error.model` field — `error.message` is now
+  `"Upstream model error (status 502)"` and `error.model` is `"<alias>"`. An
+  operator still reads which model failed; the sentence a classifier consumes
+  no longer carries org-controlled text. A consumer parsing the alias out of
+  `error.message` must read `error.model` instead.
+- **`projectAliasUpstreamStatus`**,
+  **`ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS`** and
+  **`ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS`** (`./model-swap`) — the
+  allowlist an aliased upstream status must pass before it is disclosed, and
+  the two codes the rest collapse to. A status describes the transaction, not
+  the backing, which is why forwarding one costs no opacity and buys back the
+  container's retry budget — but that reasoning holds only for GENERIC codes.
+  `529` is Anthropic's own overload code, `520`–`526` say the backing sits
+  behind Cloudflare, `402` is an aggregating gateway out of credit, `422` is
+  Mistral's validation verdict where Anthropic and OpenAI answer `400`, and
+  `431` is an edge code no model API emits: each names a backing as surely as
+  its prose does, so each is collapsed. The collapse target is chosen by the
+  status CLASS, because pi-ai's retry classifier reads the projected status out
+  of the message text and a single target would decide retryability for every
+  failure alike: a 4xx collapses to `400`
+  (`ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS`, matched by neither of pi-ai's
+  patterns, so a permanent failure fails fast) and everything else to `502`
+  (`ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS`, retryable). An allowlist, not a
+  denylist: the space of vendor- and CDN-specific codes is unenumerable, so a
+  new one must default to opaque — and the class-based target makes that
+  default right on the retry axis too. Both boundaries that replace an upstream
+  failure — the sidecar's re-originated `pi-messages` error event and the
+  platform gateway's synthesized response — now call it, so they cannot drift
+  apart. Additive; nothing removed or renamed.
+- **`isUnconstrainedSchema`** (`./schema-validation`) — "can this schema reject
+  any object at all?", the predicate the validators short-circuit on. Additive;
+  nothing is removed or renamed. It replaces the `!schema.properties ||
+Object.keys(schema.properties).length === 0` test that three validators
+  carried, which answered a DIFFERENT question: `properties` says what a named
+  key must look like, and a schema constrains plenty without naming one.
+  `{properties: {}, required: [...]}`, `{properties: {},
+additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
+  returned as `valid: true` before Ajv ran — under `strict: false` Ajv would
+  have enforced every one. **Behaviour change**: such a schema is now enforced,
+  so a value that used to pass may now be rejected. A schema carrying nothing
+  but `type` / `title` / `description` / `$schema` / `$comment` (and an empty
+  `properties`) still short-circuits exactly as before.
+- **`./model-error`** — `classifyModelError`, `ModelErrorCategory`,
+  `ModelErrorInput`, `ModelErrorClassification` and
+  `MODEL_ERROR_RETRYABLE_BY_CATEGORY`. THE rules that turn a raw provider
+  failure string into a provider-neutral verdict, moved out of the chat module
+  so the run surface classifies with the same ones. `ChatTurnErrorCategory`
+  (`./chat-turn-metadata`) is now an alias of `ModelErrorCategory` — same five
+  values, same persisted field, no behaviour change for any input.
+  `retryable` is derived from the category alone, so every path that rebuilds
+  one (live classification, stream marker, persisted turn) reaches the same
+  answer.
+- **`./connect-handshake`** — `INTEGRATION_CONNECT_CHANNEL`,
+  `INTEGRATION_CONNECT_MESSAGE_TYPE`, `IntegrationConnectCompletion`,
+  `buildIntegrationConnectCompletion`, `integrationConnectOrigin`,
+  `isIntegrationConnectCompletion`, `isIntegrationConnectMessage`,
+  `completionMatches` and `acceptsCompletionMessage`. The
+  completion handshake an integration-connect flow uses to tell the surface
+  that started it that the connection landed — the `BroadcastChannel` name, the
+  `postMessage` type, the payload, and the origin policy for both directions.
+  These were private constants duplicated across the API, the SPA and the chat
+  module, kept aligned by "must match" comments, and the two senders had
+  already drifted: one scoped its `postMessage` to the platform origin, the
+  other posted to `"*"`. Additive; nothing is removed or renamed. Out-of-tree
+  modules that render their own connect surface should read the constants from
+  here rather than re-declaring them, and MUST validate `event.origin` with
+  `isIntegrationConnectMessage` before acting on a `message` event.
+
+  `completionMatches` (which waiting surface a completion is addressed to, by
+  `state` and `packageId`) and `acceptsCompletionMessage` (that correlation
+  behind the origin check, for the `postMessage` carrier) are part of the same
+  contract and were added in the same unreleased window. They were briefly
+  declared inside `@appstrate/module-chat` instead, where the dashboard's own
+  connect popup could not import them — so it re-implemented the gate with no
+  correlation at all and any successful completion, for any integration,
+  settled it. Both carriers fan out (`BroadcastChannel` to every listener on
+  the origin, `postMessage` to every listener on the window), so a surface that
+  waits on a specific integration MUST correlate. `completionMatches` is a type
+  guard narrowing `unknown` to `IntegrationConnectCompletion`, so it can be
+  applied directly to a raw `event.data`.
+
+## [8.0.0] — 2026-08-25
+
+Breaking, batched per the release policy in `.github/workflows/publish-core.yml`:
+these changes accumulate here until a deliberate major. **This is that major —
+`8.0.0`** — and the version moved in `package.json` ahead of publication, which
+is the opposite of what this section said for most of the cycle. The reason it had to move is worth stating, because the argument for
+holding it at `7.0.0` was sound about the thing it was reasoning about and
+silent about the thing that actually breaks.
+
+`CORE_VERSION` (`src/module.ts`) is not documentation. It is the **only** input
+to the platform's module-compatibility gate: `enforceCoreVersionContract` reads
+the `@appstrate/core` range a module declares and calls
+`matchVersion([CORE_VERSION], declared)`, and a `null` result throws at boot
+under the default `MODULE_CONTRACT_ENFORCE=fail`. That check runs against the
+declared range regardless of how the module resolves core — so "cloud never
+resolves core from npm" (true, and stated below) does not exempt it. With
+`cloud` declaring `>=8.0.0` and the constant reading `7.0.0`,
+`maxSatisfying(["7.0.0"], ">=8.0.0")` is `null` and **Cloud mode does not
+boot**. `@appstrate/cloud` is not a built-in, and `>=8.0.0` matches none of
+`IN_TREE_RANGE_PREFIXES`, so no carve-out applies.
+
+The symmetric half is worse, because it is silent: a module declaring the
+`^7.0.0` this file recommended is **admitted** by the same comparison and then
+calls `services.setDocumentStorageLimit`, which the removals below deleted.
+That is verbatim the risk the gate's own message names — "a stale module can
+call a platform service whose signature moved under it — silently, without an
+error." Holding the constant at a version whose surface no longer exists is
+what produced both halves.
+
+Publishing `8.0.0` to npm was gated on the `core@8.0.0` tag, independent of the
+branch that wrote this; what moved here is the constant the platform compares
+against, plus the `version` field the drift guard
+(`test/core-version.test.ts`) pins it to.
+
+**Out-of-tree consumers.** The config removals below touch nothing `cloud` or
+`connect-helper` import. The `document` → `file` rename (#1177) does: both
+consume `module`, `api-errors`, `telemetry` and `permissions`, and the rename
+lands on all four — the symbols a consumer imports today are
+`PlatformServices.cleanupSessionDocuments` / `setDocumentStorageLimit`,
+`documentCountExceeded`, `recordDocument*` and `CoreResources.documents`.
+
+Holding the version at the published `7.0.0` would have protected them at the
+TYPE level only, which is the second reason it was the wrong lever. `cloud`
+also binds one of these off the LIVE services object the platform injects at
+runtime — until #1177 that read was
+`services.setDocumentStorageLimit.bind(services)`
+(`cloud/src/billing/storage-entitlement.ts`; it binds `setFileStorageLimit`
+today, see below) — and a compile-time pin does nothing for a property read at
+boot.
+
+That seam was held open for a while by a deprecated `setDocumentStorageLimit`
+alias declared beside the canonical `setFileStorageLimit`. **The alias is now
+gone**, and the two repos move in lockstep instead: `cloud` binds
+`setFileStorageLimit` and declares `@appstrate/core` `>=8.0.0`. That range is
+not cosmetic — the published `7.0.0` exposes ONLY the old name, so a cloud
+build resolving `7.0.0` would typecheck against a services object without the
+member it now reads. Local dev resolves core through a workspace symlink and
+would not have caught it.
+
+**Ship order is therefore fixed, and it is the platform FIRST**: platform
+release → `cloud` (appstrate/cloud#52) → npm publication of core `8.0.0`
+whenever it suits other consumers. The instinct is the opposite, so the reason
+is worth stating: the cloud image is built
+`FROM ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION}` and resolves core out
+of that image at `/app/packages/core`, so platform and cloud are ONE deployed
+artifact and cannot drift apart at runtime. What does gate cloud is its CI,
+which typechecks inside the newest PUBLISHED appstrate release — and
+`v1.0.0-beta.51` carries only the old name, so cloud stays red until a release
+ships the new one. Cloud never resolves core from npm at all.
+
+`cleanupSessionDocuments` → `cleanupSessionFiles` never had such an alias. Its
+only consumer is the in-tree `@appstrate/module-chat`, which ships in the same
+image and was renamed in the same commit, so an alias would have needed a
+ledger owner in `scripts/verify-module-contract.ts` that does not exist — a
+fiction rather than a contract. An out-of-tree module binding the old name off
+the live services object WILL break; that is the accepted cost, recorded here
+rather than left as an oversight. The same now goes for the storage-limit
+capability.
+
+`connect-helper` reads none of this surface and is unaffected either way.
+
+The eventual major release of this branch still requires a matching code change
+in `cloud`, not just a version bump.
+
+An AFPS agent manifest used to declare TWO parameter schemas — `input` (asked
+per run) and `config` (set once at setup). AFPS 0.3 removed `config`; whether a
+value is asked every time or stored once is a deployment policy, not a property
+of the package. Core no longer reads `manifest.config` at all.
+
+`document` is a false friend: the entity is any file an agent produced —
+Markdown, HTML, source code, a PDF, an image — but the word promises a Word or
+PDF document to every reader, the model included. The concept is renamed to
+`file` throughout (#1177).
+
+The rename first landed here with a read alias on every wire-visible and
+persisted spelling. **Those aliases are gone**, and they never reached npm: they
+were added and removed inside this same unreleased window, so relative to the
+published `7.0.0` they are not a deprecation, they simply never existed. What
+went with them is listed under Removed — the legacy permission-resource table,
+the retired runtime-tool event type, and the `document://` URI prefix.
+
+**No read alias survives this release.** The two that were argued for on the
+grounds that a RELEASED build had written values a current build still reads —
+the `"document"` tag in `PUBLISHED_FILE_LOG_EVENTS` (a `run_logs` row is
+immutable once written) and the `publish_document` runtime-tool id on a
+persisted manifest (a published package version is immutable) — are gone too:
+no such row and no such manifest exists. A deployment that held one would see
+that single log row render without its attachment, and that one tool id
+dropped from the manifest with the drop reported — never a silent
+reinterpretation. The platform-side environment variables moved too, with no alias
+(`FILE_MAX_BYTES`, `RUN_MAX_FILES`, `FILE_RETENTION_DAYS`,
+`WORKSPACE_MAX_FILES_BYTES`) — see the platform CHANGELOG; core reads none of
+them, it only names them in docblocks.
+
+### Added
+
+- **Alias-opacity surface** (`./model-swap`, #1202) — `ALIAS_CLIENT_API_SHAPE`,
+  `AliasBackingApiShape`, `isAliasBackingShape`, `isAliasClientShape`,
+  `isAliasInferenceCall`, `syntheticAliasErrorMessage`, and `ModelSwapBacking`
+  (`./sidecar-types`). Together they let a caller-facing surface answer about an
+  aliased model without naming the vendor behind it.
+- **`isImageMime`** (`./mime`) — the one image-media-type test, replacing four
+  copies.
+- **`runProducedFilesPath`** (`./run-and-wait-client`) — the run-scoped files
+  path, so callers stop building it by hand.
+- **`anthropicThinkingBudgets`** (`./model-generation`) — the reasoning-budget
+  table, published now that two runtimes read it.
+- **`MAX_CACHED_VALIDATORS`** (`./schema-validation`) and **`OCI_REVISION_LABEL`,
+  `ParsedImageRef`, `RuntimeImageMember`, `RuntimeImageTagMismatch`,
+  `RuntimeImageTrio`** (`./image-ref`) — the bounds and types behind the
+  compiled-validator cache and the image trio check.
+- **`authorDefaults(schema)`** (`./form`) — the top-level properties of a JSON
+  Schema that declare a `default`, as a plain value map. This is the author
+  layer of input resolution, published so the platform and the CLI compute it
+  identically: the same bundle must yield the same parameters whether the run
+  is launched locally or on a platform. A property with no `default` stays
+  ABSENT rather than becoming `null`, so a lower layer — or the schema's own
+  `required` check — sees the truth.
+- **`validateAgainstSchema` / `SchemaValidationResult`** (`./schema-validation`)
+  — `validateConfig` / `ConfigValidationResult` under a name that describes
+  what they do. Same signature, same verdict.
+- **`./file-uri`** — the URI helpers, renamed from `./document-uri`.
+  `appfile://<id>` is the only spelling written AND the only one read.
+  Deliberately NOT `file://` — that scheme already means the local filesystem
+  and MCP uses it for local resources, so an opaque platform id under it is
+  ambiguous to the model and to every MCP client. Exports `FILE_URI_PREFIX`,
+  `FILE_ID_RE`, `isFileUri`, `parseFileUri`, `fileUri`, `extractFileIds`,
+  `extractFileIdsFromText` (plus the unchanged `upload://` helpers).
+  `FILE_ID_RE` matches the `file_` row-id prefix — it was `doc_` until the
+  rename reached the physical layer, and the old shape is no longer accepted,
+  which is what made the `document://` prefix unreachable (see Removed).
+- **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — every `run_logs.event` tag
+  that announces a published file. It is `["file"]`: no retired spelling
+  survives, for the reason stated under "No read alias survives this release"
+  above. It lives beside `FILE_URI_PREFIX` because it is the same kind of
+  thing — pure data about a wire spelling that two independent readers (the web
+  shell's run page and the chat module's run card) must agree on, and two
+  copies of it is how one of them silently stops matching and a file list never
+  refreshes, with no error anywhere. It stays a list rather than a bare string
+  so a future second tag is a data change here, not a predicate change in both
+  readers.
+- **`isFileProducedByRun`, `AGENT_OUTPUT_FILE_PURPOSE`** (`./file-uri`) — the
+  one predicate answering "was this file row produced by this run, as opposed
+  to merely consumed by it". Both halves of the pair are load-bearing:
+  `GET /api/files?run_id=X` answers the run's whole CONTAINER, so a file
+  chained in from an earlier run still carries `purpose: "agent_output"`, while
+  an upload made FOR this run carries this run's id under
+  `purpose: "user_upload"`. It had three independent implementations (the run
+  page, the chat module's run card, the server-side `run_and_wait` payload) kept
+  in step by a comment naming the other two; they now share this one. Lives in
+  `./file-uri` for the same reason `PUBLISHED_FILE_LOG_EVENTS` does — a package
+  may not import from `apps/web`, but all three can import core.
+- **`./input-resolution`** — the platform's input resolution, previously
+  private to `apps/api` and re-implemented by the CLI down to a byte-identical
+  error message. `resolveEffectiveInput` collapses author defaults
+  (`authorDefaults`), the editor's stored values and an ordered list of
+  `overlays` into what a run executes with; `assertFieldsUnlocked` and
+  `withoutLockedFields` are the two rules around locked fields. The overlays are
+  a LIST rather than named fields because the hosts do not have the same layers:
+  the platform resolves a scheduled trigger's frozen values under the caller's
+  input, a local `appstrate run` has no schedules at all, and a named
+  `scheduleValues` would leave the CLI carrying a field it can never fill. The
+  refusal is injected (`lockedFieldError`) so each host keeps its own error
+  surface — `ApiError(400, "locked_input_field")` on the platform, a CLI error
+  type locally — without re-deriving the rule. The shape of all that is public
+  too: `InputLayers` (one run's layers in precedence order), `InputOverlay` and
+  `InputOverlayOrigin` (a layered source and the words the refusal quotes back —
+  "schedule input" or "input"), and `LockedFieldErrorFactory` (the host-supplied
+  error constructor).
+- **`compileCached`, `MAX_CACHED_VALIDATORS`** (`./schema-validation`) — the
+  module's compiled-validator cache, exported so `apps/api`'s three server-only
+  validators compile through it instead of standing up a second Ajv instance.
+  The second instance had diverged: no `removeSchema`, so its registry grew
+  unbounded in a long-lived process and a schema carrying `$id` threw the second
+  time it was compiled; and it evicted by clearing the whole map rather than
+  FIFO.
+- **`ACCEPTED_RUNTIME_TOOL_IDS`, `canonicalizeRuntimeToolIds`**
+  (`./runtime-tools-catalog`) — the set of `runtime_tools` ids a PERSISTED
+  manifest may carry, and the one helper every read path funnels stored ids
+  through. It drops ids the platform does not know, collapses duplicates,
+  preserves the author's order, and — the part that matters — REPORTS every
+  drop to its caller rather than swallowing it, through the published
+  `CanonicalizedRuntimeToolIds` result type.
+
+  An alias table (`LEGACY_RUNTIME_TOOL_ALIASES` and friends, mapping the
+  retired `publish_document` forward to `publish_file`) was drafted for this
+  release and removed again before it shipped, so it never reached npm and
+  needs no deprecation. Nothing carries the retired spelling: no system
+  package, no stored manifest. An unknown id is now refused on author input
+  and dropped-with-a-report on read — never guessed at.
+
+- **`./image-ref`** — the image-reference parser and the runtime-image version
+  contract, added after `7.0.0` was published and undocumented here until now.
+  `parseImageRef` splits a ref into repository / tag / digest;
+  `findRuntimeImageTagMismatch(trio)` compares the platform's own version
+  against the `PI_IMAGE` and `SIDECAR_IMAGE` tags and reports which member
+  stands alone; `OCI_REVISION_LABEL` is the label the complementary
+  same-tag-two-builds check reads. Types: `ParsedImageRef`, `RuntimeImageTrio`,
+  `RuntimeImageMember`, `RuntimeImageTagMismatch`. `packages/env` composes the
+  operator wording; the rule and both its carve-outs live here.
+
+- **`recordFileCreated`, `recordFileDeleted`, `recordFilePartialPublication`,
+  `recordFileStorageLimitRejection`** (`./telemetry`) — the file-lifecycle
+  counters behind `appstrate.files.created` / `.deleted` /
+  `.partial_publications` / `.storage_limit_rejections`. They are published
+  because the seam that calls each one is the caller's, not core's, which makes
+  that seam part of the contract — so it is documented on every function.
+  Three of the four are single-seam EVENT counters, where a second call site
+  would report a number nobody can interpret: `commitFileRow` for a create (so a
+  deduped agent-output republish, which never commits, is correctly not
+  counted), `assertWithinOrgQuota` for a rejection (it fires once per logical
+  refusal — the pre-flight reject OR the `FOR UPDATE` re-check, never both), and
+  the finalize CAS winner for a partial publication. `recordFileDeleted` is
+  deliberately the exception: it counts ROWS removed from the `files` table
+  rather than events, so every row-removing path calls it — explicit delete,
+  container-teardown detach-or-delete, and the retention GC sweep — and the sum
+  stays interpretable. Its docblock names all three.
+
+- **`CONTEXT_FREE_FILENAMES_PHRASE`** (`./naming`) — the six context-free
+  deliverable filenames (`report.md`, `summary.md`, …, `file.md`) rendered as a
+  prompt sentence fragment, to interpolate after "never use context-free names
+  such as ". Published so every prompt-assembling runtime discourages the same
+  six: the list and its rendering are one fact, and a second hand-written copy
+  is how one runtime keeps steering models toward a name #1177's vocabulary
+  made attractive. It supplies no trailing punctuation.
+
+### Changed
+
+- **`SubscriptionChatResolution` → `ChatModelResolution`** (`./chat-contract`),
+  and the `PlatformServices` member `resolveSubscriptionChatModel` →
+  `resolveChatModel` (`./module`). Both were named after ONE of the two arms
+  they describe. The type's own discriminant is `subscription: boolean` and its
+  `{ subscription: false }` arm is the API-key path, so the old name said the
+  opposite of what half its values mean — and since the Pi unification put every
+  chat turn on one engine, resolving the row is what the call does regardless of
+  which credential backs it.
+
+  `SubscriptionChatModel` deliberately keeps its name: it describes only the
+  oauth2 arm, which is what it is. The `subscription` discriminant keeps its
+  name too — it is accurate, and it is a shape crossing `ctx.services`.
+
+  This is the item `docs/plans/post-pi-unification-cleanup.md` parked "for the
+  next core major". That major came and went as 7.0.0 without it; doing it here
+  is what stops it waiting for 9.0.0. Neither out-of-tree consumer (`cloud`,
+  `connect-helper`) imports `./chat-contract`, and the only in-tree consumer is
+  `@appstrate/module-chat`, which ships in the same image.
+  `scripts/verify-module-contract.ts` pins the service name and was updated in
+  the same commit.
+
+- **`ModelSwap`** (`./sidecar-types`) gains two **required** members,
+  `clientApiShape` and `backingApiShape`. This is the one breaking change in
+  this release that hits a CONSTRUCTOR rather than a reader: code that builds a
+  `ModelSwap` against 7.0.0 does not compile against 8.0.0. Both are needed
+  because an aliased call is re-originated against the real backing — the
+  client speaks one protocol shape and the backing another, and the sidecar's
+  inbound allowlist keys on the CLIENT one (keying it on the backing would
+  refuse every aliased call). The optional `backing` member is additive.
+- **`./document-uri` → `./file-uri`**, symbol by symbol so a consumer can find
+  the name it is holding: `DOCUMENT_URI_PREFIX` → `FILE_URI_PREFIX`,
+  `DOCUMENT_ID_RE` → `FILE_ID_RE`, `isDocumentUri` → `isFileUri`,
+  `parseDocumentUri` → `parseFileUri`, `documentUri` → `fileUri`,
+  `extractDocumentIds` → `extractFileIds`, `extractDocumentIdsFromText` →
+  `extractFileIdsFromText`. The `upload://` helpers are unchanged.
+  No deprecated subpath alias is kept: the module is consumed in-tree only, and
+  both out-of-tree consumers stay on the published version.
+- **`findImageTagMismatch` → `findRuntimeImageTagMismatch`** (`./image-ref`),
+  and it now takes the whole trio — `{ platformVersion, piImage, sidecarImage }`
+  — rather than the two image refs. The old signature compared the pair to
+  itself, so a platform at version X with both runtime images at X−1 passed. A
+  platform version that is absent, empty or `dev` means "no release identity"
+  and drops out of the comparison, degrading the rule to exactly the pair rule;
+  a digest-pinned ref on either image still silences it entirely. The returned
+  `oddOneOut` names the member whose value stands alone, which is NOT
+  necessarily the thing to fix: a platform at X against a matched pair at X−1
+  reports `"platform"`, and the fix there is to move the two images. Both names
+  are post-`7.0.0`, so nothing published ever saw the old one.
+- **`publish_document` → `publish_file`** — the runtime tool id, with
+  `buildPublishDocumentDef` → `buildPublishFileDef`, `DocumentUploader` →
+  `FileUploader`, `PublishedDocument` → `PublishedFile`,
+  `DocumentPublishedEvent` → `FilePublishedEvent` (field `document_id` →
+  `file_id`), `documentPublishedEvent` → `filePublishedEvent`, and the canonical
+  event `document.published` → `file.published`. The legacy id is NOT accepted
+  and NOT normalized: `publish_document` is refused on author input and
+  dropped-with-a-report on read (`canonicalizeRuntimeToolIds`), never guessed
+  at. See the `ACCEPTED_RUNTIME_TOOL_IDS` note under Changed.
+- **`CoreResources.documents` → `CoreResources.files`** (`./permissions`), with
+  `documents` removed from `CORE_RESOURCE_NAMES`. A stored `documents:read` /
+  `documents:delete` scope no longer grants anything — see Removed.
+- **`documentCountExceeded` → `fileCountExceeded`** (`./api-errors`), problem
+  code `document_count_exceeded` → `file_count_exceeded`.
+- **`recordDocumentCreated`, `recordDocumentDeleted`,
+  `recordDocumentStorageLimitRejection`, `recordDocumentPartialPublication` →
+  `recordFile*`** (`./telemetry`), metrics `appstrate.documents.*` →
+  `appstrate.files.*`. Same rename on the `TelemetryProvider` interface.
+- **`PlatformServices.cleanupSessionDocuments` → `cleanupSessionFiles`** and
+  **`PlatformServices.setDocumentStorageLimit` → `setFileStorageLimit`**
+  (`./module`).
+- **`RunAndWaitDocument` → `RunAndWaitFile`**, **`fetchRunDocuments` →
+  `fetchRunFiles`**, **`runAndWaitStepsWithDocuments` →
+  `runAndWaitStepsWithFiles`** (`./run-and-wait-client`). The tool argument
+  `context_documents` becomes `context_files`, the terminal payload key
+  `documents` becomes `files`, the inline default `runtime_tools` selects
+  `publish_file`, and the client calls `GET /api/files`.
+- **`schema/agent.schema.json`** — the `runtime_tools` enum lists the canonical
+  ids only. `publish_document` is not among them: an author manifest naming it
+  fails validation, and a stored one has it dropped and reported.
+
+### Removed
+
+- **`mergeWithDefaults`** (`./form`) — replaced by `authorDefaults`. It
+  materialised `null` for every declared property without a `default` and
+  dropped undeclared caller keys, so a local `appstrate run` diverged from the
+  same bundle on a platform.
+- **`deepMergeConfig`** (`./schema-validation`) — nothing deep-merges any more.
+  Input resolution is a shallow per-property overlay of four layers, which is
+  what makes "which layer did this value come from" answerable at every call
+  site. Its prototype-pollution guard goes with it because the recursion it
+  guarded is gone, not because the concern was dismissed: a shallow spread of a
+  `JSON.parse`d object cannot write through `__proto__`.
+- **`validateConfig` / `ConfigValidationResult`** (`./schema-validation`) —
+  renamed, see Added.
+- **`LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
+  `canonicalPermissions`, `acceptedPermissionSpellings`** (`./permissions`) —
+  the retired permission-resource table and the normalizer for stored scope
+  strings, together with the second-chance branch inside `makePermissionGuard`
+  that accepted a retired spelling directly. All three permission guards
+  (`requirePermission`, `requireCorePermission`, `requireModulePermission`)
+  delegate to that guard, so the removal reaches every one of them: a
+  `documents:read` scope is now denied where `files:read` is required, along
+  with the near-misses `file:read`, `files` and `files:read:extra`, and the
+  denial is pinned unit-level for all three.
+
+  This one has a caller behind it and the trade is deliberate. The alias never
+  shipped — it was added and removed inside this unreleased window — but
+  `documents:*` **is** the spelling every released Appstrate advertised, so a
+  third-party OAuth client integrated against `v1.0.0-beta.51` holds it in
+  config and now gets `invalid_scope` rather than a silent rewrite. For a beta
+  with no production data a loud refusal is the right failure and a silently
+  under-granted scope is not. Read-time normalization is also a translation
+  layer that would have to be applied at every site forever, and each site that
+  forgets it degrades silently: the scope is not rejected, it is dropped, and
+  the credential merely does less than it was granted. Three platform tests
+  were passing only because of the alias, which is the finding that justifies
+  the removal on its own.
+
+- **`LEGACY_RUNTIME_TOOL_EVENT_TYPES`** (`./runtime-tool-defs`) — the
+  retired `document.published` runtime-tool event type. Its removal is safe for
+  a structural reason rather than a version one: the only producer of that name
+  is core's own `filePublishedEvent`, bundled into the SAME artifact as the
+  trust-boundary acceptor that consumes it, so there is no version boundary
+  between them and the retired name can now only arrive from a forged upstream
+  event — which is what that acceptor's drop is for. Also post-`7.0.0` on both
+  ends.
+- **`LEGACY_DOCUMENT_URI_PREFIX`, `ACCEPTED_FILE_URI_PREFIXES`**
+  (`./file-uri`) — the `document://` scheme and the accept-list that carried
+  it. It survived to read historical rows, and finishing the rename at the
+  physical layer made it unreachable: every URI ever written under the old
+  scheme addresses a `doc_` id, and `FILE_ID_RE` accepts only `file_`. The one
+  pair the accept path could still have matched — `document://` + `file_…` — is
+  a form no build has ever emitted, since the scheme was replaced while ids
+  were still `doc_`. A `document://` value now fails at `parseFileUri` instead
+  of one line later on the id, in the same rejection.
+- **`swapRequestModel`** (`./model-swap`) — the alias→real request-body rewrite.
+  Its last caller was deleted with the alias-opacity change (#1202); the
+  adaptive-Anthropic branch it still carried had become a second implementation
+  of the live `compat: { forceAdaptiveThinking: true }` path. Verified to have
+  no reader in this repo, in `cloud`, or in `connect-helper`.
+- **`ALIASABLE_API_SHAPES`, `isAliasableApiShape`** (`./model-swap`) — the
+  set of protocol shapes an alias could be backed by, and its membership test.
+  Replaced by `AliasBackingApiShape` + `isAliasBackingShape`, which name the
+  same concept from the side that matters at the sidecar's inbound allowlist.
+- **`canonicalizeApiToolName`** (`./integration`) — collapsed to the identity
+  function once the raw long-auth-key `api_call` aliases went, so its six call
+  sites now test the name directly. Not re-exported under another name: there
+  is nothing left to canonicalize.
+- **`NpmVendorInput`, `PypiVendorInput`, `PypiRegistryResponse`**
+  (`./mcp-server-bundle`) — un-exported, not deleted. They describe the vendor
+  helpers' internal inputs and had no reader outside their own modules.
+- **`InlineRunBody.config`** (`./platform-types`) — the inline-run routes no
+  longer accept the field.
+- **`publish_document.presentation`** (`./runtime-tool-defs`) — the
+  `presentation: "primary"` argument, the `presentation` field on
+  `PublishedDocument` / `DocumentPublishedEvent` (now `PublishedFile` /
+  `FilePublishedEvent`), and the primary-selection rule the tool description
+  carried. It conflated how important a file is with whether the UI opens it,
+  allowed at most one per run, and made the producing agent arbitrate a
+  presentation decision that was never its call — an agent writing three peer
+  files had to crown one or leave the run looking empty. Which file a run
+  features is now derived by the consumer from what the run produced (0 → none,
+  exactly 1 → that one, N → none), so core neither declares nor transports it.
+  `buildPublishFileDef` reads only `path` and `name`; an undeclared key, the
+  retired `presentation` included, is ignored rather than rejected — losing a
+  real deliverable over a dead argument would be the worse failure.
+
+## [7.0.0] — 2026-08-21
+
+Breaking release. Adds two names, and removes six with zero consumers anywhere — verified
+across this repo and both out-of-tree consumers (`cloud`, `connect-helper`),
+which import only `module`, `logger`, `api-errors`, `telemetry`, `permissions`
+and `pairing-token`. Neither needs a code change; the lockstep is a version
+bump on each side.
+
+### Added
+
+- `MODEL_API_SHAPES` (`./sidecar-types`) — the runtime array `ModelApiShape` is
+  now derived from. See the `Changed` note below for why the type-only union
+  was not enough.
+- `OrchestratorRegistration.appliesWorkspaceTmpfsCap?: boolean`
+  (`./platform-types`) — lets a backend declare that it enforces the workspace
+  tmpfs size cap itself, so the prompt builder can tell the agent whether the
+  cap is real. Optional, so existing out-of-tree registrations stay assignable.
+
+### Removed
+
+- `isFinalChatStep` (`./chat-turn-metadata`) — its only caller was the AI-SDK
+  step loop deleted in #1173.
+- `normalizeToolName` (`./naming`) — superseded by the
+  `normaliseMcpToolNamespace` / `normaliseMcpToolBody` pair this same module
+  already re-exports from `@appstrate/afps-shared`; the single-function
+  normalizer was a strictly weaker version of the split.
+- `isApiUploadToolName` (`./integration`) — the twin `isApiCallToolName` is
+  live; this one never had a caller.
+- `IntegrationUploadProtocol` (`./integration`) — an alias for a bare `string`,
+  referenced once. Use `string[]`.
+- `RunConnectionMissingError` (`./module`) — an alias of `ValidationFieldError`
+  used once, in its own file. Use `ValidationFieldError`.
+- `WorkloadResources.pidsLimit` (`./platform-types`) — no producer ever set it,
+  so the Docker backend's own 256 default was always the effective policy.
+
+### Changed
+
+- `RunOrchestrator.stopWorkload(handle, timeoutSeconds?)` →
+  `stopWorkload(handle)`, and `stopByRunId(runId, timeoutSeconds?)` →
+  `stopByRunId(runId)`. The parameter was `undefined` at every production entry
+  point, so every backend fell back to its own 5-second SIGTERM grace — now
+  stated once, as a single `SIGTERM_GRACE_SECONDS` the docker, process and
+  firecracker backends all read. Out-of-tree implementers stay
+  assignable: an implementation that still declares the optional parameter
+  satisfies the narrowed signature.
+- `ModelApiShape` (`./sidecar-types`) is now derived from a new exported
+  runtime array, `MODEL_API_SHAPES`. It was a type-only union, which forced
+  consumers needing a runtime list to hand-mirror it —
+  `runtime-pi/env.ts` did, guarded by `satisfies readonly ModelApiShape[]`.
+  That guard proves membership, never completeness, so adding a shape here and
+  emitting it from the platform typechecked green everywhere and then threw
+  `MODEL_API: unknown api` at every container boot.
+
+### Fixed
+
+- `getTraceContext` (`./logger`) kept, but its docstring no longer claims it is
+  "useful when forging child spans for outbound HTTP calls" — nothing ever did
+  that. It is the read counterpart of `runWithTraceContext` and the observation
+  port the observability module's tests use.
+
+### Release order
+
+`@appstrate/afps-shared@0.4.0` MUST be published before this release: core's
+`./mime` is now a verbatim re-export of the new `@appstrate/afps-shared/mime`
+subpath, which does not exist in the published 0.3.1. The dependency range here
+moved to `^0.4.0` accordingly.
+
 ## [6.2.0] — 2026-08-07
 
 Additive release. Four export subpaths landed in `packages/core/src` after

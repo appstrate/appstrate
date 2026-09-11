@@ -2,6 +2,10 @@
 
 import { z } from "zod";
 import { createEnvGetter } from "@appstrate/core/env";
+import {
+  findRuntimeImageTagMismatch,
+  type RuntimeImageTagMismatch,
+} from "@appstrate/core/image-ref";
 
 // Boolean-from-string env transform: `"true"`/`"1"` (case-insensitive) → true,
 // anything else → false. Shared by every on/off flag so the parse semantics
@@ -41,6 +45,19 @@ const jsonEnv = <T>(defaultValue: string) =>
 const isProductionSafeUrl = (v: string): boolean =>
   v.startsWith("https://") || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(v);
 
+// True when a base URL can only be reached through a reverse proxy: the
+// platform terminates no TLS of its own, so `https://` means something in
+// front does, and a non-loopback host means the request crossed the network
+// to arrive. The one layout that reaches the platform directly is plain-http
+// loopback — the same carve-out `isProductionSafeUrl` grants.
+const servedThroughReverseProxy = (v: string): boolean =>
+  !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(v);
+
+// Whether `TRUST_PROXY` trusts at least one forwarded hop, matching how
+// `apps/api/src/lib/client-ip.ts` parses it: `"false"` and `"0"` both leave
+// `X-Forwarded-For` ignored, `"true"` means one hop, `"N"` means N.
+const trustsForwardedChain = (v: string): boolean => v !== "false" && Number(v) !== 0;
+
 // Host of an absolute URL (lowercased by the URL parser, port and path
 // stripped), or null when the value does not parse. Refinements compare parsed
 // hosts rather than raw strings — `https://a.example.com` and
@@ -51,6 +68,42 @@ const urlHost = (v: string): string | null => {
   } catch {
     return null;
   }
+};
+
+// Boot error for a runtime-image version trio that disagrees. Built here rather
+// than in `@appstrate/core/image-ref` because the wording is operator-facing
+// boot copy, like every other message in this file; core owns the rule and
+// reports only what it compared.
+//
+// The message has to answer three questions the operator cannot answer from a
+// failed run: what each of the three currently claims, which one stands apart,
+// and what to set. The last one is not "pin both images to the same tag" any
+// more — it is "pin both images to the PLATFORM's version", and the shipped
+// compose files already do exactly that from one `APPSTRATE_VERSION`.
+const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
+  const observed = [
+    ...(m.platformVersion ? [`platform build ${m.platformVersion}`] : []),
+    `PI_IMAGE tag ${m.piTag}`,
+    `SIDECAR_IMAGE tag ${m.sidecarTag}`,
+  ].join(", ");
+
+  const outOfStep =
+    m.oddOneOut === "platform"
+      ? "the platform — PI_IMAGE and SIDECAR_IMAGE agree with each other but not with the build they are launched by, so BOTH images have to move"
+      : m.oddOneOut === "pi"
+        ? "PI_IMAGE"
+        : m.oddOneOut === "sidecar"
+          ? "SIDECAR_IMAGE"
+          : m.platformVersion
+            ? "all three — no two of them agree"
+            : "PI_IMAGE and SIDECAR_IMAGE, which disagree with each other";
+
+  return (
+    "The platform, PI_IMAGE and SIDECAR_IMAGE must all carry the same version — the agent runtime and the sidecar speak a wire protocol to each other, and both speak a container boundary to the platform, and all of it changes in the same commit. A trio that disagrees boots fine and then fails runs with an opaque upstream error naming none of the three (#1195 for the pair, #1177 for the platform boundary). " +
+    `Observed: ${observed}. Out of step: ${outOfStep}. ` +
+    "Pin both image refs to the platform's own version — the shipped docker-compose derives the platform image and both runtime images from a single ${APPSTRATE_VERSION}, which is the layout to copy — or rebuild both locally with `bun run docker:build:runtime` and run the platform from source. " +
+    "Exempt, deliberately: a digest-pinned ref (either half — a digest identifies an image by content, there is no version to compare), and any value that is not a release version — a platform with no release identity (a source run, an image built without APP_VERSION), or images pinned to one of the alias tag families the release publishes alongside the version (`latest`, `1.0`, `sha-<sha>`). In those the platform drops out of the comparison and the two images are still checked against each other."
+  );
 };
 
 // ─── Schema ──────────────────────────────────────────────────
@@ -64,7 +117,7 @@ const urlHost = (v: string): string | null => {
 // hand-maintained table is intentional: Zod defaults are entangled with
 // transforms/refinements that don't extract cleanly via static analysis.
 
-const envSchema = z
+export const envSchema = z
   .object({
     // Node environment — gates production-only invariants (e.g. APP_URL https)
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -258,7 +311,7 @@ const envSchema = z
     PLATFORM_RUN_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // Inline-run specific limits (caps on manifest size, skills/tools count,
-    // authorized URIs, retention). See docs/specs/INLINE_RUNS.md §6.
+    // authorized URIs, retention). Shape: `apps/api/src/services/run-limits.ts`.
     INLINE_RUN_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // LLM proxy limits — caps on `/api/llm-proxy/*` (per-call rate, body size).
@@ -272,8 +325,8 @@ const envSchema = z
     CREDENTIAL_PROXY_LIMITS: jsonEnv<Record<string, unknown>>("{}"),
 
     // Unified runner protocol — governs the event-ingestion surface shared
-    // by platform containers and remote CLIs. See
-    // docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md.
+    // by platform containers and remote CLIs. Shape:
+    // `apps/api/src/services/run-event-ingestion.ts`.
     //
     // Default sink TTL when the caller does not request one (remote CLI) or
     // cannot (platform container boot env). 2h is comfortably above the
@@ -382,6 +435,11 @@ const envSchema = z
     // personal subscription powering a product is an operator-owned grey-zone
     // (see docs/architecture/SUBSCRIPTION_COMPLIANCE.md), so the OSS default
     // ships neither. Append them to enable subscription providers.
+    // `@appstrate/module-ee` — the commercial module (Stripe billing, credit
+    // quotas, custom space roles) — is OPT-IN for a different reason: it is
+    // source-available, not Apache-2.0, and it needs PostgreSQL (it keeps its
+    // `ee_*` tables in the platform database) plus the `STRIPE_*` variables,
+    // which it reads straight from `process.env` (see docs/ENV.md).
     // `MODULES=none` boots with zero modules (the only sentinel — `""`
     // coalesces to unset, i.e. the default set, per the compose `${VAR:-}`
     // pattern).
@@ -451,6 +509,21 @@ const envSchema = z
      * when cache is off.
      */
     LLM_PROXY_CACHE_MAX_AGE: z.coerce.number().int().nonnegative().default(3600),
+    /**
+     * Operator overrides for the two `/api/llm-proxy/*` upstream deadlines.
+     * Unset → the compiled defaults in
+     * `apps/api/src/services/llm-proxy/helpers.ts` (60 s to the response
+     * HEADERS on a streaming call, 120 s of inter-chunk silence once it flows),
+     * which are sized for hosted vendors. An `org_models` row may instead point
+     * at a self-hosted `baseUrl` (Ollama / llama.cpp / vLLM) whose cold model
+     * load blocks the headers — and sometimes the next chunk — far longer than
+     * that. `optional()` rather than `default()` so the number lives in exactly
+     * one place: the sidecar's twin knobs share the same idle default from
+     * `@appstrate/connect/proxy-primitives`, which cannot be imported here
+     * (that package depends on this one).
+     */
+    LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+    LLM_PROXY_STREAM_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     // Global request body size cap enforced by the Hono `bodyLimit` middleware.
     // Per-route caps (LLM proxy, signed-token upload sink) still apply on top.
     API_BODY_LIMIT_BYTES: z.coerce
@@ -523,12 +596,12 @@ const envSchema = z
     // to the local volume driver (host disk, no built-in quota).
     WORKSPACE_TMPFS_SIZE_MB: z.coerce.number().int().min(0).max(8192).default(512),
 
-    // Ceiling on the total bytes of input documents a single run may carry
-    // into its workspace. Each document is delivered out-of-band (fetched
+    // Ceiling on the total bytes of input files a single run may carry
+    // into its workspace. Each file is delivered out-of-band (fetched
     // and streamed to disk by the agent), so this is a policy limit, not a
     // memory-safety floor — but it also bounds what the platform buffers
     // while consuming uploads. Default 256 MiB.
-    WORKSPACE_MAX_DOCS_BYTES: z.coerce
+    WORKSPACE_MAX_FILES_BYTES: z.coerce
       .number()
       .int()
       .positive()
@@ -551,42 +624,45 @@ const envSchema = z
     // consumed or expired upload frees the budget immediately.
     UPLOAD_MAX_ACTIVE_PER_ACTOR: z.coerce.number().int().positive().default(50),
 
-    // Ceiling on the summed DECLARED sizes of an org's ACTIVE (unconsumed,
-    // unexpired) staged uploads. A create whose declared size would push the
-    // org's active staging total over this is rejected (403
-    // `storage_limit_exceeded`). Bounds the ephemeral `uploads` bucket footprint
-    // per org before GC; distinct from the durable ORG_STORAGE_QUOTA_BYTES.
-    // Default 2 GiB.
+    // Ceiling on the summed DECLARED sizes of an org's RETAINED staged uploads
+    // — the ones whose storage object is still on disk: unconsumed and
+    // unexpired, PLUS consumed ones still inside the UPLOAD_RETENTION_HOURS
+    // reuse window. A create whose declared size would push that total over
+    // this is rejected (403 `storage_limit_exceeded`). Consuming an upload
+    // therefore does NOT free its bytes until the GC sweep may drop the object
+    // — that is the point: the ceiling tracks the bucket, not the row's status.
+    // Bounds the ephemeral `uploads` bucket footprint per org before GC;
+    // distinct from the durable ORG_STORAGE_QUOTA_BYTES. Default 2 GiB.
     UPLOAD_STAGING_MAX_BYTES_PER_ORG: z.coerce
       .number()
       .int()
       .positive()
       .default(2 * 1024 * 1024 * 1024),
 
-    // Max number of documents a single run may reference as input (uploads +
-    // inline + document:// refs) AND publish as output (agent_output rows).
-    // Bounds the per-run document COUNT the byte caps do not (thousands of
+    // Max number of files a single run may reference as input (uploads +
+    // inline + appfile:// refs) AND publish as output (agent_output rows).
+    // Bounds the per-run file COUNT the byte caps do not (thousands of
     // tiny files). Enforced platform-side at input-parse (413) and at
     // agent-output commit under the org FOR UPDATE lock (413
-    // `document_count_exceeded`). Default 200.
-    RUN_MAX_DOCUMENTS: z.coerce.number().int().positive().default(200),
+    // `file_count_exceeded`). Default 200.
+    RUN_MAX_FILES: z.coerce.number().int().positive().default(200),
 
-    // Per-file ceiling on a durable document (materialized upload or agent
+    // Per-file ceiling on a durable file (materialized upload or agent
     // output). Enforced synchronously at write time — over-cap writes 413.
     // Default 100 MiB, aligned with the staged-upload absolute ceiling.
-    DOCUMENT_MAX_FILE_BYTES: z.coerce
+    FILE_MAX_BYTES: z.coerce
       .number()
       .int()
       .positive()
       .default(100 * 1024 * 1024),
 
     // Per-org durable-storage quota in bytes. Checked synchronously against
-    // `organizations.documents_bytes_used` before a document write (403
+    // `organizations.files_bytes_used` before a file write (403
     // `storage_limit_exceeded` on over-cap). Absent ⇒ unlimited (OSS default);
-    // Cloud sets a plan value in the same column.
+    // the ee module (`@appstrate/module-ee`) sets a plan value in the same column.
     ORG_STORAGE_QUOTA_BYTES: z.coerce.number().int().positive().optional(),
 
-    // Ceiling on the total bytes of documents a single run may publish as
+    // Ceiling on the total bytes of files a single run may publish as
     // output (Phase 2 ingestion). Default 256 MiB.
     RUN_MAX_OUTPUT_BYTES: z.coerce
       .number()
@@ -594,11 +670,11 @@ const envSchema = z
       .positive()
       .default(256 * 1024 * 1024),
 
-    // Default retention for durable documents, in days. Applied as `expires_at`
+    // Default retention for durable files, in days. Applied as `expires_at`
     // at creation time so the operator sets an instance-wide policy (GitLab
-    // pattern). Absent ⇒ permanent (documents never auto-expire) — the OSS
+    // pattern). Absent ⇒ permanent (files never auto-expire) — the OSS
     // default; livrable expiry is the #1 complaint, so this stays opt-in.
-    DOCUMENT_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
+    FILE_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
 
     // Poll cadence for the transactional storage-deletion worker (the outbox
     // that physically purges S3/FS objects after their DB row is gone). Each
@@ -608,7 +684,7 @@ const envSchema = z
     STORAGE_DELETION_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
 
     // Separate origin for serving untrusted agent-generated HTML previews
-    // (Phase 4 / D5). When set, `GET /api/documents/:id` mints its
+    // (Phase 4 / D5). When set, `GET /api/files/:id` mints its
     // `preview_url` on THIS origin instead of `APP_URL` — the operator points a
     // second registrable domain (eTLD+1) at the same server. A distinct
     // registrable domain is the strongest isolation: the browser gives the
@@ -616,8 +692,8 @@ const envSchema = z
     // isolation), so untrusted script can never reach the app's session even if
     // the sandbox is somehow defeated. Absent ⇒ previews are served same-origin
     // on `APP_URL` (still hardened: opaque-sandbox iframe + strict CSP + injected
-    // meta CSP), which is defensible for render-only content. Cloud always sets
-    // it. No trailing slash required — it is trimmed when the URL is built.
+    // meta CSP), which is defensible for render-only content. Appstrate Cloud
+    // always sets it. No trailing slash required — it is trimmed when the URL is built.
     //
     // ENFORCED (boot fails, loudly): an absolute URL whose HOST differs from
     // `APP_URL`'s — plus https:// in production, the same rule `APP_URL`
@@ -631,7 +707,7 @@ const envSchema = z
     // claimed. A proxy stripping the response CSP does not put agent script on
     // the app's host with the SPA's localStorage and cookies: the only context
     // that renders active HTML is the SPA's `<iframe sandbox="allow-scripts">`,
-    // and that ATTRIBUTE survives header stripping, so the document stays
+    // and that ATTRIBUTE survives header stripping, so the file stays
     // opaque-origin either way. The residuals that are actually real, and that a
     // separate host is the only remaining layer against:
     //  - a user agent that ignores sandboxing altogether — it would ignore the
@@ -680,14 +756,7 @@ const envSchema = z
     // upstreams, org proxies, model tests, credential-proxy targets, remote MCP
     // servers, and the sidecar's own gates) skips ONLY the host blocklist for
     // these hosts so self-hosted deployments can reach internal upstreams.
-    //
-    // Accepts the legacy `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` name as an alias
-    // (the var outgrew its OAuth-only origin): the new name wins when both are
-    // set, the old name is honoured only here at the env-parse boundary.
-    EGRESS_ALLOW_INTERNAL_HOSTS: z.preprocess(
-      (v) => (v === undefined ? process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS || undefined : v),
-      z.string().optional(),
-    ),
+    EGRESS_ALLOW_INTERNAL_HOSTS: z.string().optional(),
 
     // Run token signing (required). Dedicated HMAC secret for run bearer
     // tokens — without a key, `Bun.CryptoHasher("sha256", undefined)`
@@ -882,6 +951,83 @@ const envSchema = z
     message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
     path: ["APP_URL"],
   })
+  // A production `APP_URL` that is not plain-http loopback is reached through a
+  // reverse proxy, and there `TRUST_PROXY=false` makes `lib/client-ip.ts`
+  // ignore `X-Forwarded-For` and hand every caller the proxy's own address:
+  // per-IP limiters and audit records collapse into one bucket per instance.
+  // The loopback carve-out is a topology the repo ships — the CLI's local tiers
+  // and `scripts/health-container-e2e.sh` both run this image, whose Dockerfile
+  // bakes in `NODE_ENV=production`, on `http://127.0.0.1` with nothing in front.
+  .refine(
+    (env) =>
+      env.NODE_ENV !== "production" ||
+      !servedThroughReverseProxy(env.APP_URL) ||
+      trustsForwardedChain(env.TRUST_PROXY),
+    {
+      message:
+        "TRUST_PROXY must name the reverse-proxy hop count in production (TRUST_PROXY=1 behind a single proxy): with TRUST_PROXY=false every client resolves to the proxy's own address and per-IP rate limits and audit records collapse to one bucket",
+      path: ["TRUST_PROXY"],
+    },
+  )
+  // The platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not
+  // three independent knobs: the agent runtime and the sidecar speak a wire
+  // protocol to each other, and both speak a container boundary to the
+  // platform, and all of it changes in the same commit. A trio that disagrees
+  // boots fine and then fails runs with an opaque upstream error naming none of
+  // the three (#1195 for the pair, #1177 for the platform boundary). Detectable
+  // here, before anything starts. The rule itself, both carve-outs and the
+  // worked examples live with the comparison in `@appstrate/core/image-ref`.
+  //
+  // The platform's own version is `APP_VERSION` — already declared above,
+  // already baked into the image by the Dockerfile (`ARG` → `ENV`, fed by the
+  // release workflow's `github.ref_name`), already surfaced on /health. No new
+  // variable, and no file read at boot: the root `package.json` carries no
+  // version field at all, and the release tag is the identity the image tags
+  // are cut from anyway. The platform only joins the comparison when all three
+  // values are release versions — `APP_VERSION` is a git ref name, so it can
+  // equal an image tag only in the one family the two namespaces share. Any
+  // other build stamp (`dev`, the Dockerfile ARG default and the source-run
+  // fallback; `health-container-e2e`, what the health e2e job builds with) or
+  // any alias tag family the release also publishes (`latest`, `1.0`,
+  // `sha-<sha>`) takes it out, which is what keeps dev boxes, preview
+  // deployments, that CI job and `:latest` consumers booting.
+  //
+  // Deliberately NOT conditioned on `RUN_ADAPTER`. The rule is a property of
+  // the values, and every backend that consumes them wants it: the docker
+  // orchestrator reads both at run time, and the firecracker rootfs build
+  // (`modules/firecracker/scripts/build-rootfs.sh`) reads both from this same
+  // environment to bake a guest image — a mismatched pair there produces the
+  // identical failure. Backends that ignore the vars (process) inherit the
+  // matching defaults, so the rule is a no-op for them rather than a hazard,
+  // and branching on a backend id would put a closed list of backends back in
+  // the codebase that the orchestrator registry exists to keep open.
+  //
+  // `superRefine`, not `refine`, because the message has to name which of the
+  // three is out of step and what each one currently claims — a fixed string
+  // cannot, and "one of your three images is wrong" is the opaque error this
+  // check exists to replace.
+  .superRefine((env, ctx) => {
+    const mismatch = findRuntimeImageTagMismatch({
+      platformVersion: env.APP_VERSION,
+      piImage: env.PI_IMAGE,
+      sidecarImage: env.SIDECAR_IMAGE,
+    });
+    if (!mismatch) return;
+    ctx.addIssue({
+      code: "custom",
+      message: describeRuntimeImageMismatch(mismatch),
+      // Anchor on a ref the operator can actually change. `oddOneOut` has
+      // THREE values, not two: when it is "platform" the two images agree with
+      // each other and disagree with the build launching them, so both have to
+      // move and neither is "the outlier". The previous two-way ternary sent
+      // that case to SIDECAR_IMAGE — naming the one variable the message says
+      // is not individually at fault. `APP_VERSION` is not the answer either:
+      // it is baked into the image by the Dockerfile, so an operator cannot
+      // set it. PI_IMAGE is where they start; `describeRuntimeImageMismatch`
+      // carries "BOTH images have to move".
+      path: [mismatch.oddOneOut === "sidecar" ? "SIDECAR_IMAGE" : "PI_IMAGE"],
+    });
+  })
   // The untrusted-preview origin must actually BE a different origin. See the
   // long note on USERCONTENT_URL above for what a same-host value costs: it is
   // not "a stripped header puts script on the app's host" (the SPA iframe's
@@ -899,7 +1045,7 @@ const envSchema = z
     },
     {
       message:
-        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The document-preview route serves agent-authored HTML as ACTIVE content only for a proven iframe load, in every mode, so a configured value buys no extra execution context; what it buys is the isolation of the execution that does happen. Today that execution happens in the SPA's `<iframe sandbox=\"allow-scripts\">`, whose sandbox attribute holds even if the response CSP is stripped in transit — so the host separation is not about a stripped header. It is about the cases where nothing else is left: a user agent that ignores sandboxing altogether (it ignores the attribute too), and a future app-origin page that frames the preview WITHOUT the attribute — `frame-ancestors` permits any app-origin embedder, so there the response header is the only control, and untrusted inline script that escapes it is then executing with a real origin on the app's own host. A separate host also buys the ordinary partition: its own cookie jar, storage and process. Enforced at boot rather than merely recommended because none of it is verifiable at runtime. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to serve previews same-origin.",
+        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The file-preview route serves agent-authored HTML as ACTIVE content only for a proven iframe load, in every mode, so a configured value buys no extra execution context; what it buys is the isolation of the execution that does happen. Today that execution happens in the SPA's `<iframe sandbox=\"allow-scripts\">`, whose sandbox attribute holds even if the response CSP is stripped in transit — so the host separation is not about a stripped header. It is about the cases where nothing else is left: a user agent that ignores sandboxing altogether (it ignores the attribute too), and a future app-origin page that frames the preview WITHOUT the attribute — `frame-ancestors` permits any app-origin embedder, so there the response header is the only control, and untrusted inline script that escapes it is then executing with a real origin on the app's own host. A separate host also buys the ordinary partition: its own cookie jar, storage and process. Enforced at boot rather than merely recommended because none of it is verifiable at runtime. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to serve previews same-origin.",
       path: ["USERCONTENT_URL"],
     },
   )

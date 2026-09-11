@@ -22,21 +22,12 @@
 import type { OpenApiDocument, OpenApiOperation } from "./openapi-cache.ts";
 
 /** Known HTTP methods we expose as operations — matches the OpenAPI spec. */
-export const HTTP_METHODS = [
-  "get",
-  "post",
-  "put",
-  "patch",
-  "delete",
-  "head",
-  "options",
-  "trace",
-] as const;
+const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options", "trace"] as const;
 
-export type HttpMethod = (typeof HTTP_METHODS)[number];
+type HttpMethod = (typeof HTTP_METHODS)[number];
 
 /** Flattened (path, method, op) triple — the primary unit `list` operates on. */
-export interface OperationEntry {
+interface OperationEntry {
   path: string;
   method: HttpMethod;
   op: OpenApiOperation;
@@ -216,7 +207,7 @@ export function matchesSearch(entry: OperationEntry, search: string | undefined)
 }
 
 /** All filters combined. The command file composes the flags. */
-export interface ListFilters {
+interface ListFilters {
   tag?: string;
   method?: string;
   path?: string;
@@ -274,7 +265,7 @@ export function formatList(entries: OperationEntry[], useColor: boolean): string
  * each item keyed so downstream tooling (jq, agent prompts) can
  * project easily.
  */
-export interface ListJsonEntry {
+interface ListJsonEntry {
   method: string;
   path: string;
   operationId?: string;

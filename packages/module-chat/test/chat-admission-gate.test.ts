@@ -34,7 +34,7 @@ import { createTestContext, type TestContext } from "../../../apps/api/test/help
 import { assertDbCount } from "../../../apps/api/test/helpers/assertions.ts";
 import { handleChatStream, type ChatEnv } from "../src/chat-stream.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
-import type { SubscriptionChatResolution } from "@appstrate/core/chat-contract";
+import type { ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
 import type { UIMessage } from "ai";
 
@@ -60,20 +60,37 @@ const MODELS_PAYLOAD = {
   ],
 };
 
+/**
+ * A minimal `/api/me/context` payload. The caller-context read is dispatched
+ * as soon as the space id is known — concurrently with the model list and
+ * ahead of the gate — so the fake must answer it. It is a READ; what a rejected
+ * turn must never do is written below (no MCP hop, no message, no usage row).
+ */
+const CONTEXT_PAYLOAD = {
+  user: { name: "U", email: "u@test.com" },
+  org: { role: "member", name: "chatgate", slug: "chatgate" },
+  connections: [],
+  agents: [],
+  skills: [],
+  recent_runs: [],
+};
+
 /** Fake Hono context exposing exactly the reads `handleChatStream` makes. */
 function fakeContext(opts: {
   orgId: string;
   user: { id: string; email: string; name: string };
-  applicationId: string;
+  spaceId: string;
   body: unknown;
 }): Context<ChatEnv> {
   const vars: Record<string, unknown> = {
     orgId: opts.orgId,
     user: opts.user,
+    // What `enterSpaceContext` writes on every `/api/chat/*` route.
+    space: { id: opts.spaceId },
     orgRole: "member",
     permissions: [],
   };
-  const headers = new Headers({ "x-application-id": opts.applicationId });
+  const headers = new Headers({ "x-space-id": opts.spaceId });
   return {
     get: (k: string) => vars[k],
     req: {
@@ -85,24 +102,27 @@ function fakeContext(opts: {
 
 interface DepsOverrides {
   checkUsageAllowed: ChatPlatformDeps["checkUsageAllowed"];
-  resolveSubscriptionChatModel?: ChatPlatformDeps["resolveSubscriptionChatModel"];
+  resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
   /** Collects every platform path the turn dispatched (proves no MCP handshake). */
   dispatchPaths?: string[];
 }
 
-/** Deps whose `dispatch` serves `/api/models`; everything else is scripted. */
+/**
+ * Deps whose `dispatch` serves the two preamble reads (`/api/models`,
+ * `/api/me/context`); everything else is scripted.
+ */
 function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
   return {
     dispatch: async (req) => {
       const path = new URL(req.url).pathname;
       o.dispatchPaths?.push(path);
       if (path === "/api/models") return Response.json(MODELS_PAYLOAD);
+      if (path === "/api/me/context") return Response.json(CONTEXT_PAYLOAD);
       return new Response("unexpected dispatch: " + path, { status: 500 });
     },
     rateLimit: () => async (_c, next) => next(),
-    resolveSubscriptionChatModel:
-      o.resolveSubscriptionChatModel ??
-      (async (): Promise<SubscriptionChatResolution> => ({ subscription: false })),
+    resolveChatModel:
+      o.resolveChatModel ?? (async (): Promise<ChatModelResolution> => ({ subscription: false })),
     recordChatUsage: async () => {},
     checkUsageAllowed: o.checkUsageAllowed,
   };
@@ -131,7 +151,7 @@ describe("chat admission gate (handleChatStream)", () => {
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       // No `id` → ephemeral turn: `ensureSession` never runs, so a rejected turn
       // is guaranteed to write ZERO rows (session AND message).
       body: { messages: [userTurn("u1", "hello")] },
@@ -164,7 +184,7 @@ describe("chat admission gate (handleChatStream)", () => {
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       body: { id: sessionId, messages: [userTurn("u1", "hello")] },
     });
     const res = await handleChatStream(c, fakeDeps({ checkUsageAllowed: async () => REJECTION }));
@@ -197,7 +217,7 @@ describe("chat admission gate (handleChatStream)", () => {
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       body: { messages: [userTurn("u1", "hello")] },
     });
     // A subscription model whose credential is dead short-circuits to the
@@ -210,7 +230,7 @@ describe("chat admission gate (handleChatStream)", () => {
           gateArgs.push(args);
           return null;
         },
-        resolveSubscriptionChatModel: async (): Promise<SubscriptionChatResolution> => ({
+        resolveChatModel: async (): Promise<ChatModelResolution> => ({
           subscription: true,
           needsReconnection: true,
         }),
@@ -236,7 +256,7 @@ describe("chat admission gate (handleChatStream)", () => {
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       body: { id: sessionId, messages: [userTurn("u1", "hello")] },
     });
     const res = await handleChatStream(
@@ -245,7 +265,7 @@ describe("chat admission gate (handleChatStream)", () => {
         checkUsageAllowed: async () => REJECTION,
         // A LIVE subscription binding: without the gate this turn would go on to
         // drive the in-process Pi engine on platform compute.
-        resolveSubscriptionChatModel: async (): Promise<SubscriptionChatResolution> => ({
+        resolveChatModel: async (): Promise<ChatModelResolution> => ({
           subscription: true,
           model: {
             modelId: "claude-sonnet-4-20250514",
@@ -266,9 +286,12 @@ describe("chat admission gate (handleChatStream)", () => {
     expect(res.status).toBe(402);
     expect((await res.json()) as { code: string }).toMatchObject({ code: "over_cap" });
 
-    // The only platform call made was the model list — no MCP handshake, and
-    // the Pi engine never started.
-    expect(dispatchPaths).toEqual(["/api/models"]);
+    // The only platform calls made were the preamble READS — the model list,
+    // and the caller-context block that overlaps it. No MCP hop: the Pi engine
+    // never started.
+    expect(dispatchPaths).toContain("/api/models");
+    expect(dispatchPaths.some((p) => p.startsWith("/api/mcp"))).toBe(false);
+    expect(dispatchPaths.filter((p) => p !== "/api/models" && p !== "/api/me/context")).toEqual([]);
     // No user message, no metered usage. (The session ROW shell is created
     // before the preamble on purpose — see the ai-sdk case above.)
     const messages = await db

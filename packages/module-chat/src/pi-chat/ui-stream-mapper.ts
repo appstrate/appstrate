@@ -25,6 +25,7 @@
  */
 
 import type { UIMessageChunk } from "ai";
+import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import type {
   AgentSessionEvent,
   PiAssistantMessageEvent,
@@ -63,7 +64,7 @@ interface OpenBlock {
  * `usage.cost` still carries pi-ai's own per-bucket figures verbatim — they are
  * informational and are never billed.
  */
-export interface PiChatResultMeta {
+interface PiChatResultMeta {
   usage: PiUsage;
   finishReason: PiFinishReason;
   errorText?: string;
@@ -75,7 +76,7 @@ const ZERO_USAGE: PiUsage = {
   cacheRead: 0,
   cacheWrite: 0,
   totalTokens: 0,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  cost: { ...ZERO_MODEL_COST, total: 0 },
 };
 
 function mapStopReason(stop: string | undefined): PiFinishReason {
@@ -94,11 +95,30 @@ function mapStopReason(stop: string | undefined): PiFinishReason {
   }
 }
 
+interface PiChatUiStreamMapperOptions {
+  /**
+   * Fired once per turn, on the first ASSISTANT `message_start`. pi-ai pushes
+   * its `start` event only after the provider's response headers have arrived
+   * (`pi-ai/dist/api/openai-completions.js`, `withResponse()` then `start`), and
+   * pi-agent-core turns that into the assistant `message_start` — so this is
+   * the turn's time-to-first-response, the point where waiting on the model
+   * begins to pay out. The user echo's `message_start` fires at `prompt()` and
+   * is not it.
+   */
+  onFirstModelEvent?: () => void;
+}
+
 /**
  * Stateful translator. One instance per chat turn; {@link map} is called for
  * each Pi session event in arrival order and returns the UI chunks to write.
  */
 export class PiChatUiStreamMapper {
+  private readonly onFirstModelEvent: (() => void) | undefined;
+
+  constructor(options: PiChatUiStreamMapperOptions = {}) {
+    this.onFirstModelEvent = options.onFirstModelEvent;
+  }
+
   /**
    * Id namespace for content blocks. Bumped on EVERY `message_start` — Pi emits
    * one per user, assistant AND tool-result message — which is what keeps
@@ -142,7 +162,10 @@ export class PiChatUiStreamMapper {
     switch (e.type) {
       case "message_start":
         this.blockSeq += 1;
-        if (assistantView(e.message)) this.modelCalls += 1;
+        if (assistantView(e.message)) {
+          this.modelCalls += 1;
+          if (this.modelCalls === 1) this.onFirstModelEvent?.();
+        }
         this.open.clear();
         return [{ type: "start-step" }];
       case "message_update":
@@ -164,7 +187,23 @@ export class PiChatUiStreamMapper {
         this.captureFailure(e.message);
         return [];
       case "agent_end":
-        for (const m of e.messages ?? []) this.captureFailure(m);
+        // Verdict on the LAST assistant message of the run, never on every
+        // entry in the list. `agent_end.messages` is the run's `newMessages` —
+        // everything it just produced — so replaying all of them through
+        // `captureFailure` re-asserts a failure a later call already recovered
+        // from, one event AFTER `captureMessageEnd` retired it, and drags
+        // `finishReason` back to "error" with it.
+        //
+        // Last-assistant is the rule this stack already states in two places,
+        // not a third one invented here: Pi's own retry decision scans back to
+        // the last assistant message (`AgentSession._willRetryAfterAgentEnd`),
+        // and the runner's terminal verdict is documented as "derived from the
+        // LAST assistant turn … a transient error the agent recovered from
+        // before a later clean turn" returns undefined (`getTerminalError` in
+        // `@appstrate/runner-pi`). It also keeps the reason this branch exists:
+        // a `handleRunFailure` message that never got a `message_end` is the
+        // only assistant entry in its list, so it is still captured.
+        this.captureFailure(lastAssistantMessage(e.messages ?? []));
         return [];
       default:
         return [];
@@ -259,7 +298,11 @@ export class PiChatUiStreamMapper {
       ];
     }
     return [
-      { type: "tool-output-available", toolCallId: ev.toolCallId, output: ev.result ?? null },
+      {
+        type: "tool-output-available",
+        toolCallId: ev.toolCallId,
+        output: persistedToolOutput(ev.result),
+      },
     ];
   }
 
@@ -268,6 +311,25 @@ export class PiChatUiStreamMapper {
     if (!m) return;
     if (m.usage) this.addUsage(m.usage);
     this.finishReason = mapStopReason(m.stopReason);
+    // A model call that SETTLED retires the previous failure. Pi retries inside
+    // one turn, so an early 503 the next call recovered from is no longer this
+    // turn's cause — and `lastError`, which used to be write-once, kept being
+    // reported as one. That is now visible: the client surfaces the persisted
+    // category on a DEADLINE turn too, so a stale text would name a cause that
+    // no longer applies for a turn that simply ran out of clock.
+    //
+    // Two stop reasons deliberately do NOT clear:
+    //  - "error": the call failed; `captureFailure` records it right below.
+    //  - "aborted": a stop / the deadline cut the call mid-flight, so it
+    //    settled nothing — an earlier failure is still the last thing that
+    //    actually went wrong and must keep reaching the user.
+    //
+    // Nothing genuine is silenced on the `error`-chunk path in `engine.ts`
+    // (`meta.errorText ?? (finishReason === "error" ? … )`): the two fields move
+    // together here — the same `message_end` that clears the text also moves
+    // `finishReason` off "error", so a turn still reporting "error" always has
+    // its text (or falls back to "unknown model error").
+    if (m.stopReason !== "error" && m.stopReason !== "aborted") this.lastError = undefined;
     this.captureFailure(message);
   }
 
@@ -332,6 +394,19 @@ function assistantView(message: unknown): PiAssistantView | null {
   return m.role === "assistant" ? m : null;
 }
 
+/**
+ * The run's terminal assistant message: the last one in arrival order, or
+ * `undefined` when the list holds none. Scanning back past the tail is what
+ * keeps trailing non-assistant entries (tool results, injected steering
+ * messages) from masking the message that actually decided the run.
+ */
+function lastAssistantMessage(messages: readonly unknown[]): unknown {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (assistantView(messages[i])) return messages[i];
+  }
+  return undefined;
+}
+
 interface PiToolCallBlock {
   type: "toolCall";
   id: string;
@@ -349,6 +424,28 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
     return block as PiToolCallBlock;
   }
   return undefined;
+}
+
+/**
+ * The tool output that crosses the wire and gets persisted: the Pi result
+ * WITHOUT `details`.
+ *
+ * A Pi `AgentToolResult` carries its payload twice — `content[0].text` is the
+ * JSON string the MODEL reads, `details` the same object for Pi's own in-memory
+ * UI channel. Nothing in this module's UI reads `details` (`src/ui/tool-result.ts`
+ * parses `content`; `src/ui/auth-offer.ts` reads the typed `connectOffers`),
+ * and every tool output is persisted, served by the history GET and re-uploaded
+ * by the client on every later turn — so the wire/persisted shape is the model
+ * channel plus the typed offers: `content`, `connectOffers`, `isError` and
+ * whatever else the result carries, minus `details`. The in-memory Pi result
+ * itself is untouched (`mcp-tools.ts` builds it with `details`).
+ */
+function persistedToolOutput(result: unknown): unknown {
+  if (result == null) return null;
+  if (typeof result !== "object" || Array.isArray(result)) return result;
+  if (!("details" in result)) return result;
+  const { details: _details, ...rest } = result as Record<string, unknown>;
+  return rest;
 }
 
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */

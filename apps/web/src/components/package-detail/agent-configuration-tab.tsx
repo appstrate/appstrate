@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useState } from "react";
 import { CircleSlash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Button } from "@appstrate/ui/components/button";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Label } from "@appstrate/ui/components/label";
 import {
   Select,
   SelectContent,
@@ -25,83 +28,175 @@ import { isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
-import { useSaveConfig } from "../../hooks/use-mutations";
-import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
+import { useSaveInputSettings } from "../../hooks/use-mutations";
+import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
+import { formatInputValue, hasInputFields, subsetWrapper } from "../../lib/agent-input";
 import {
   MODEL_REASONING_LEVELS,
   reconcileModelGenerationSettings,
   type ModelGenerationSettings,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
-import { JsonView } from "../json-view";
 import { SettingRow } from "../settings/setting-row";
 
-// ─── Config Section ─────────────────────────────────────────────────
+// ─── Input Settings Section ─────────────────────────────────────────
 
+/**
+ * The editor layer of input resolution, for one space: the value each
+ * parameter takes when the caller does not supply one, and whether the caller
+ * may supply one at all.
+ *
+ * Both halves are FULL replacements on the wire (`PUT .../input-settings` with
+ * `{ values, locked_fields }`), which is why the whole section saves at once
+ * rather than per field — a partial write would silently clear the rest.
+ *
+ * Values are validated server-side against `input.schema` with `required`
+ * dropped, and the form mirrors that: leaving a required field empty here is
+ * legitimate and means "ask it at launch". Locking a required field with
+ * nothing behind it is the one refused combination (400
+ * `locked_required_field_empty`), surfaced as a toast naming the field.
+ */
 /** Exported so the visual map can mount the same settings form in a dialog. */
-export function ConfigSection({
+export function InputSettingsSection({
   packageId,
-  schema,
+  wrapper,
+  initialValues,
+  initialLocked,
   isHistorical,
   showDescription = true,
 }: {
   packageId: string;
-  schema: JSONSchemaObject;
+  wrapper: SchemaWrapper;
+  initialValues: Record<string, unknown>;
+  initialLocked: string[];
   isHistorical?: boolean;
   showDescription?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { data: detail } = usePackageDetail("agent", packageId);
-
-  const current = detail?.config?.current ?? {};
-  const mutation = useSaveConfig(detail?.id ?? "");
-  const wrapper: SchemaWrapper = { schema };
-
-  const [values, setValues] = useState<Record<string, unknown>>(() => current);
-  const [hasEdited, setHasEdited] = useState(false);
-  const initialized = useRef(false);
+  const mutation = useSaveInputSettings(packageId);
   const labels = useSchemaFormLabels();
   const upload = useUploadClient();
+  const [values, setValues] = useState<Record<string, unknown>>(initialValues);
+  const [locked, setLocked] = useState<string[]>(initialLocked);
 
-  useEffect(() => {
-    if (!detail || initialized.current) return;
-    initialized.current = true;
-    setValues(detail.config.current ?? {});
-  }, [detail]);
+  const defaults = authorDefaults(wrapper.schema);
+  const keys = getOrderedKeys(wrapper.schema, wrapper.property_order);
 
-  useEffect(() => {
-    if (!hasEdited || isHistorical) return;
-    const timeout = window.setTimeout(() => {
-      setHasEdited(false);
-      mutation.mutate(values);
-    }, 650);
-    return () => window.clearTimeout(timeout);
-  }, [hasEdited, isHistorical, mutation, values]);
+  const setFieldValue = (key: string, next: unknown) => {
+    setValues((prev) => {
+      const out = { ...prev };
+      if (next === undefined) delete out[key];
+      else out[key] = next;
+      return out;
+    });
+  };
 
-  if (!schema?.properties || Object.keys(schema.properties).length === 0) return null;
+  const toggleLock = (key: string, on: boolean) =>
+    setLocked((prev) => (on ? [...prev, key] : prev.filter((k) => k !== key)));
 
   return (
-    <div className="max-w-2xl space-y-3 py-4">
+    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
+      <h3 className="text-sm font-medium">{t("detail.inputSettings.title")}</h3>
       {showDescription && (
-        <p className="text-muted-foreground text-sm">
-          {t("detail.configuration.inputsDescription")}
-        </p>
+        <p className="text-muted-foreground text-xs">{t("detail.inputSettings.hint")}</p>
       )}
+      <div className="space-y-4">
+        {keys.map((key) => (
+          <InputSettingRow
+            key={key}
+            fieldKey={key}
+            wrapper={wrapper}
+            value={values[key]}
+            authorDefault={defaults[key]}
+            locked={locked.includes(key)}
+            disabled={isHistorical}
+            labels={labels}
+            upload={upload}
+            onValueChange={(next) => setFieldValue(key, next)}
+            onLockChange={(on) => toggleLock(key, on)}
+          />
+        ))}
+      </div>
+      <div className="flex justify-end pt-2">
+        <Button
+          onClick={() => mutation.mutate({ values, locked_fields: locked })}
+          disabled={mutation.isPending || isHistorical}
+          size="sm"
+        >
+          {mutation.isPending ? "..." : t("btn.save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function InputSettingRow({
+  fieldKey,
+  wrapper,
+  value,
+  authorDefault,
+  locked,
+  disabled,
+  labels,
+  upload,
+  onValueChange,
+  onLockChange,
+}: {
+  fieldKey: string;
+  wrapper: SchemaWrapper;
+  value: unknown;
+  authorDefault: unknown;
+  locked: boolean;
+  disabled?: boolean;
+  labels: ReturnType<typeof useSchemaFormLabels>;
+  upload: ReturnType<typeof useUploadClient>;
+  onValueChange: (next: unknown) => void;
+  onLockChange: (locked: boolean) => void;
+}) {
+  const { t } = useTranslation(["agents"]);
+  const subset = subsetWrapper(wrapper, [fieldKey]);
+  if (!subset) return null;
+  // `required` is dropped exactly as the server drops it: an empty value here
+  // means "not decided — ask at launch", not "invalid".
+  const fieldWrapper: SchemaWrapper = {
+    ...subset,
+    schema: { type: "object", properties: subset.schema.properties },
+  };
+
+  return (
+    <div className="space-y-1.5" data-testid={`input-setting-${fieldKey}`}>
       <SchemaForm
-        wrapper={wrapper}
-        formData={values}
+        wrapper={fieldWrapper}
+        formData={value === undefined ? {} : { [fieldKey]: value }}
         upload={upload}
         labels={labels}
-        onChange={(e) => {
-          setValues(e.formData as Record<string, unknown>);
-          setHasEdited(true);
-        }}
+        disabled={disabled}
+        onChange={(e) => onValueChange((e.formData as Record<string, unknown>)[fieldKey])}
       />
-      <SaveFeedback
-        pending={mutation.isPending}
-        success={mutation.isSuccess}
-        error={mutation.isError}
-      />
+      <div className="flex items-center justify-between gap-3">
+        {authorDefault !== undefined ? (
+          <p className="text-muted-foreground text-xs">
+            {t("detail.inputSettings.authorDefault", { value: formatInputValue(authorDefault) })}
+          </p>
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id={`lock-${fieldKey}`}
+            checked={locked}
+            onCheckedChange={(checked) => onLockChange(Boolean(checked))}
+            disabled={disabled}
+          />
+          <Label
+            htmlFor={`lock-${fieldKey}`}
+            className="text-muted-foreground cursor-pointer text-xs font-normal whitespace-nowrap"
+            title={t("detail.inputSettings.lockHint")}
+          >
+            {t("detail.inputSettings.lock")}
+          </Label>
+        </div>
+      </div>
     </div>
   );
 }
@@ -431,50 +526,50 @@ function SaveFeedback({
 
 export function AgentConfigurationTab({
   packageId,
-  configSchemaOverride,
+  inputWrapperOverride,
   isHistorical,
   section,
   showSectionDescription = true,
 }: {
   packageId: string;
-  configSchemaOverride?: JSONSchemaObject;
+  /** The pinned version's input wrapper — the schema a historical view edits against. */
+  inputWrapperOverride?: SchemaWrapper;
   isHistorical?: boolean;
+  /** One section per settings entry: the rail decides which, this renders it. */
   section: "model" | "proxy" | "inputs";
   showSectionDescription?: boolean;
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: detail } = usePackageDetail("agent", packageId);
 
-  const schema = isHistorical
-    ? configSchemaOverride
-    : (configSchemaOverride ?? detail?.config?.schema);
-  const hasConfigSchema = !!(schema?.properties && Object.keys(schema.properties).length > 0);
-
-  if (isHistorical) {
-    return (
-      <div className="space-y-4">
-        <p className="text-muted-foreground text-sm">
-          {t("detail.configuration.historicalDefaultsUnavailable")}
-        </p>
-        {hasConfigSchema && schema && (
-          <div className="rounded-lg border p-4">
-            <h3 className="mb-3 text-sm font-medium">{t("detail.bundle.inputSchema")}</h3>
-            <JsonView data={schema} />
-          </div>
-        )}
-      </div>
-    );
-  }
+  const wrapper = inputWrapperOverride ?? detail?.input;
+  const showInputSettings = hasInputFields(wrapper);
 
   if (section === "model") return <ModelSection packageId={packageId} />;
   if (section === "proxy") return <ProxySection packageId={packageId} />;
-  if (!hasConfigSchema || !schema) {
-    return <p className="text-muted-foreground text-sm">{t("detail.emptyConfig")}</p>;
+
+  // section === "inputs" — a pinned version has no editable defaults: the
+  // settings belong to the installation, not to the frozen bundle.
+  if (isHistorical) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        {t("detail.configuration.historicalDefaultsUnavailable")}
+      </p>
+    );
   }
+
+  if (!showInputSettings || !wrapper || !detail) return null;
+
   return (
-    <ConfigSection
+    <InputSettingsSection
+      // Remounted when the saved settings change, so the editor's local
+      // state restarts from what the server now holds rather than from a
+      // stale snapshot taken before the write.
+      key={JSON.stringify([detail.input.values, detail.input.locked_fields])}
       packageId={packageId}
-      schema={schema}
+      wrapper={wrapper}
+      initialValues={detail.input.values}
+      initialLocked={detail.input.locked_fields}
       isHistorical={isHistorical}
       showDescription={showSectionDescription}
     />

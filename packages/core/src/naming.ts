@@ -118,12 +118,12 @@ export function toSlug(value: string, maxLen?: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Filenames (documents / uploads)
+// Filenames (files / uploads)
 // ---------------------------------------------------------------------------
 
 /**
  * Ceiling on a stored filename. One constant so every producer and consumer of
- * a document/upload `name` truncates at the same point.
+ * a file/upload `name` truncates at the same point.
  */
 export const MAX_FILENAME_LEN = 255;
 
@@ -142,8 +142,8 @@ export const MAX_FILENAME_LEN = 255;
  * the presign path's quote-stripping alone does not cover).
  *
  * Lives in core (not in `apps/api`) because BOTH ends of the run-to-platform
- * document channel must apply the exact same rule: the API sanitizes the
- * incoming `X-Document-Name` before it becomes `documents.name`, and therefore
+ * file channel must apply the exact same rule: the API sanitizes the
+ * incoming `X-File-Name` before it becomes `files.name`, and therefore
  * part of the `(run_id, sha256, name)` dedup identity, while the agent
  * container has to PREDICT that stored name to build a matching dedup key. When
  * the rule was only reachable from the server, the two keys silently diverged
@@ -157,7 +157,18 @@ export function sanitizeFilename(name: string): string {
     .replace(/\.\.+/g, ".")
     .trim();
   if (!cleaned) return "file";
-  return cleaned.slice(0, MAX_FILENAME_LEN);
+  if (cleaned.length <= MAX_FILENAME_LEN) return cleaned;
+  // `slice` counts UTF-16 code units, so a cut landing between the two halves
+  // of a surrogate pair emits a LONE high surrogate — a string that is not
+  // valid UTF-16 and that `encodeURIComponent` throws `URIError` on. That name
+  // is not transient: it becomes `files.name`, and therefore part of the
+  // `(run_id, sha256, name)` dedup identity, so every later download of the
+  // file 500s on both serving branches via {@link attachmentDisposition}.
+  // Drop the orphaned half rather than the whole tail — the name loses one
+  // character it could not have rendered anyway.
+  const cut = cleaned.slice(0, MAX_FILENAME_LEN);
+  const last = cut.charCodeAt(MAX_FILENAME_LEN - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, MAX_FILENAME_LEN - 1) : cut;
 }
 
 /**
@@ -177,15 +188,41 @@ const MAX_ENCODED_FILENAME_HEADER_LEN = 4096;
 const ENCODED_FILENAME_RE = /^[A-Za-z0-9\-_.!~*'()%]+$/;
 
 /**
+ * A surrogate with no partner: a high one not followed by a low, or a low one
+ * not preceded by a high.
+ */
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Make a name encodable.
+ *
+ * `encodeURIComponent` THROWS `URIError` on a lone surrogate — it has no UTF-8
+ * byte sequence to emit — and the two encoders below sit on the last line
+ * before a response header is written, where a throw is a 500 on a download
+ * that would otherwise have worked. Substituting U+FFFD is the standard
+ * WHATWG/Unicode replacement for an unpaired half; it is lossy only for input
+ * that was already not valid UTF-16, and it leaves every well-formed name —
+ * emoji and CJK included — byte-identical.
+ */
+function toWellFormedName(name: string): string {
+  return name.replace(LONE_SURROGATE_RE, "\uFFFD");
+}
+
+/**
  * Encode a filename for transport in an HTTP header value. HTTP field values
  * are ISO-8859-1 by spec, so a non-ASCII name sent raw is either REFUSED by the
  * sender (Bun's `Headers` throws on a CJK filename) or silently mojibaked (an
  * accented name written UTF-8, read back Latin-1). Percent-encoding always
  * lands inside {@link ENCODED_FILENAME_RE}, round-trips byte-for-byte, and
  * leaves a plain ASCII name unchanged so logs stay readable.
+ *
+ * Total: {@link toWellFormedName} runs first, so a name carrying an unpaired
+ * surrogate encodes to a U+FFFD instead of throwing. Only such a name fails to
+ * round-trip through {@link decodeFilenameHeader} — it had no UTF-8 form to
+ * come back from.
  */
 export function encodeFilenameHeader(name: string): string {
-  return encodeURIComponent(name);
+  return encodeURIComponent(toWellFormedName(name));
 }
 
 /**
@@ -207,7 +244,7 @@ export function decodeFilenameHeader(raw: string): string | null {
 
 /**
  * Canonical MIME → filename-extension table for the text-shaped and common
- * document formats the platform names files after. Values carry no leading dot.
+ * file formats the platform names files after. Values carry no leading dot.
  *
  * ONE table because the same question is asked on both sides of the run
  * boundary: the platform names an unnamed inline `data:` input
@@ -272,7 +309,7 @@ export function extensionForMime(mime: string | undefined): string | null {
  *    Compliant clients prefer it, so an accented or CJK name downloads intact.
  *
  * Lives here — next to {@link sanitizeFilename}, which is what keeps a CR/LF out
- * of the stored name in the first place — because the platform serves a document
+ * of the stored name in the first place — because the platform serves a file
  * through TWO code paths: the proxy stream sets this header itself, and the S3
  * backend binds it into the presigned GET as `response-content-disposition`.
  * When each path built its own value, the presigned branch degraded a non-ASCII
@@ -293,9 +330,13 @@ export function attachmentDisposition(name: string): string {
  * charset and language are the first two apostrophes, so a name like `don't.md`
  * puts a third one in the value region and invites a parser to split there.
  * `!` IS in `attr-char`, so it stays raw.
+ *
+ * Total for the same reason as {@link encodeFilenameHeader}: this is the last
+ * call before the `Content-Disposition` value reaches the response, on BOTH
+ * serving branches, so it must not throw on a name the store already holds.
  */
 function encodeExtValue(name: string): string {
-  return encodeURIComponent(name).replace(
+  return encodeURIComponent(toWellFormedName(name)).replace(
     /['()*]/g,
     (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
   );
@@ -324,22 +365,39 @@ export function isValidToolName(name: string): boolean {
 }
 
 /**
- * Normalise a raw tool name into the canonical snake_case `__`-joined
- * form. Returns the input unchanged when it's already valid.
+ * Deliverable filenames a model reaches for by reflex and that mean nothing
+ * once the file leaves the run that produced it.
  *
- * Mapping rules:
- * - Hyphens \u2192 underscores.
- * - Single-underscore separator \u2192 double-underscore boundary (only when
- *   no `__` is already present).
- * - Mixed-case \u2192 lower-case.
+ * Lives in core, not beside the prompt that first needed it, because THREE
+ * prompts issue this instruction and they do not share a package: the platform
+ * run prompt (`@appstrate/afps-runtime/bundle`), the MCP `run_and_wait` tool
+ * descriptions (`apps/api/src/modules/mcp/tools.ts`), and the chat system
+ * prompt (`@appstrate/module-chat`). `module-chat` does not depend on
+ * afps-runtime, which is how the third one came to hold a hand-copied literal
+ * of exactly these six names, in exactly this order — the drift the constant
+ * was created to end, reintroduced in the same range that ended it.
+ *
+ * The copies had already drifted once before: the MCP sites banned three of
+ * these six, omitting exactly the three (`result`, `document`, `file`) that
+ * #1177's vocabulary makes most attractive to a model.
  */
-export function normalizeToolName(raw: string): string {
-  if (typeof raw !== "string" || raw.length === 0) return raw;
-  let out = raw.toLowerCase();
-  out = out.replace(/[-]+/g, "_");
-  // If there's no `__` boundary yet, promote the first single underscore.
-  if (!out.includes("__")) {
-    out = out.replace(/_/, "__");
-  }
-  return out.slice(0, TOOL_NAME_MAX_LEN);
-}
+const CONTEXT_FREE_DELIVERABLE_FILENAMES: readonly string[] = [
+  "report.md",
+  "summary.md",
+  "output.md",
+  "result.md",
+  "document.md",
+  "file.md",
+];
+
+/**
+ * {@link CONTEXT_FREE_DELIVERABLE_FILENAMES} rendered for a prompt sentence:
+ * `` `report.md`, `summary.md`, …, or `file.md` ``. Interpolate it after
+ * "never use context-free names such as " — it supplies no trailing
+ * punctuation.
+ */
+export const CONTEXT_FREE_FILENAMES_PHRASE: string = (() => {
+  const quoted = CONTEXT_FREE_DELIVERABLE_FILENAMES.map((name) => `\`${name}\``);
+  const last = quoted[quoted.length - 1]!;
+  return quoted.length > 1 ? `${quoted.slice(0, -1).join(", ")}, or ${last}` : last;
+})();

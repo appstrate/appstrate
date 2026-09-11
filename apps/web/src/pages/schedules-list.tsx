@@ -26,7 +26,7 @@ const STATES = ["enabled", "disabled"] as const;
 
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const navigate = useNavigate();
   const { data: schedules, isLoading, isError } = useAllSchedules();
   const { data: agents } = useAgents();
@@ -95,7 +95,7 @@ export function SchedulesListPage() {
         title={t("schedules.title")}
         variant="collection"
         breadcrumbs={[{ label: t("schedules.title") }]}
-        actions={isAdmin ? actions : undefined}
+        actions={can("schedules:write") ? actions : undefined}
       />
 
       <ListToolbar

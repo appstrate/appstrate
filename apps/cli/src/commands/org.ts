@@ -12,35 +12,43 @@
  *   org current       — print pinned org id (scripts / prompts)
  *   org create [name] — create + auto-pin
  *
- * Cascade invariant (issue #217): the pinned `applicationId` is always scoped to
+ * Every subcommand takes a trailing `io: CommandIO = DEFAULT_IO`. It sits
+ * after `deps` rather than on it because `list` and `current` have no
+ * `deps` at all, and "io is always the last argument" is the only rule that
+ * holds for all four. `cli.ts` passes neither, so production keeps writing
+ * to the real streams; tests inject a per-test sink instead of swapping the
+ * process-wide ones (issue #1180).
+ *
+ * Cascade invariant (issue #217): the pinned `spaceId` is always scoped to
  * the pinned `orgId`. `org switch` and `org create` therefore clear the
- * stale app pin and re-pin the new org's default application in the same
+ * stale space pin and re-pin the new org's default space in the same
  * atomic operation — otherwise the next `appstrate api` call would 404
- * with "Application not found in this organization".
+ * with "Space not found in this organization".
  */
 
 import { resolveActiveProfile, requireLoggedIn, updateProfile } from "../lib/config.ts";
 import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
-import { listApplications, findDefaultApplication, type Application } from "../lib/applications.ts";
+import { listSpaces, findDefaultSpace, type Space } from "../lib/spaces.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
-export interface OrgBaseOptions {
+interface OrgBaseOptions {
   profile?: string;
 }
 
-export interface OrgSwitchOptions extends OrgBaseOptions {
+interface OrgSwitchOptions extends OrgBaseOptions {
   /** Positional `[id-or-slug]` — when absent, use interactive picker. */
   ref?: string;
 }
 
-export interface OrgCreateOptions extends OrgBaseOptions {
+interface OrgCreateOptions extends OrgBaseOptions {
   /** Positional `[name]` — when absent, prompt interactively. */
   name?: string;
   /** `--slug <slug>` (optional override — server derives from name if unset). */
   slug?: string;
 }
 
-export interface OrgCommandDeps {
+interface OrgCommandDeps {
   /** Return null when the picker cannot run (e.g. non-TTY). */
   pickOrg?: (orgs: Org[], currentOrgId?: string) => Promise<Org | null>;
   /** Return null when the prompt cannot run. */
@@ -70,51 +78,60 @@ const defaultDeps: Required<OrgCommandDeps> = {
   },
 };
 
-export async function orgListCommand(opts: OrgBaseOptions): Promise<void> {
+export async function orgListCommand(
+  opts: OrgBaseOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  requireLoggedIn(profileName, profile);
+  requireLoggedIn(profileName, profile, io);
 
   try {
     const orgs = await listOrgs(profileName);
     if (orgs.length === 0) {
-      process.stdout.write("(no organizations)\n");
+      io.stdout.write("(no organizations)\n");
       return;
     }
     for (const o of orgs) {
       const marker = o.id === profile.orgId ? "*" : " ";
-      process.stdout.write(`${marker} ${o.slug.padEnd(24)}  ${o.id}  ${o.name}\n`);
+      io.stdout.write(`${marker} ${o.slug.padEnd(24)}  ${o.id}  ${o.name}\n`);
     }
   } catch (err) {
-    exitWithError(err);
+    // `io` is forwarded so the terminal error and the exit go to the
+    // caller's sink; the default would fire the real `process.exit`.
+    exitWithError(err, io);
   }
 }
 
-export async function orgCurrentCommand(opts: OrgBaseOptions): Promise<void> {
+export async function orgCurrentCommand(
+  opts: OrgBaseOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   const { profile } = await resolveActiveProfile(opts.profile);
   if (!profile) {
-    process.stderr.write("Not logged in. Run: appstrate login\n");
-    process.exit(1);
+    io.stderr.write("Not logged in. Run: appstrate login\n");
+    io.exit(1);
   }
   if (!profile.orgId) {
-    process.stderr.write("No organization pinned. Run: appstrate org switch\n");
-    process.exit(1);
+    io.stderr.write("No organization pinned. Run: appstrate org switch\n");
+    io.exit(1);
   }
-  process.stdout.write(`${profile.orgId}\n`);
+  io.stdout.write(`${profile.orgId}\n`);
 }
 
 export async function orgSwitchCommand(
   opts: OrgSwitchOptions,
   deps: OrgCommandDeps = {},
+  io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  requireLoggedIn(profileName, profile);
+  requireLoggedIn(profileName, profile, io);
   const picker = { ...defaultDeps, ...deps };
 
   try {
     const orgs = await listOrgs(profileName);
     if (orgs.length === 0) {
-      process.stderr.write("No organizations — run `appstrate org create <name>` to create one.\n");
-      process.exit(1);
+      io.stderr.write("No organizations — run `appstrate org create <name>` to create one.\n");
+      io.exit(1);
     }
 
     let chosen: Org;
@@ -123,34 +140,35 @@ export async function orgSwitchCommand(
     } else {
       const picked = await picker.pickOrg(orgs, profile.orgId);
       if (!picked) {
-        process.stderr.write(
+        io.stderr.write(
           "Cannot prompt in non-TTY — pass an id or slug: `appstrate org switch <id-or-slug>`.\n",
         );
-        process.exit(1);
+        io.exit(1);
       }
       chosen = picked;
     }
 
-    // Clear the stale app pin first: it belongs to the previous org and
-    // would immediately 404 on the next app-scoped call. Re-pin the new
-    // org's default app in the same commit below.
-    await updateProfile(profileName, { orgId: chosen.id, applicationId: undefined });
-    const repinned = await repinAppAfterOrgChange(profileName);
-    const appSuffix = repinned ? ` / app "${repinned.name}" (${repinned.id})` : "";
-    process.stdout.write(
-      `Pinned "${chosen.name}" (${chosen.id})${appSuffix} on profile "${profileName}".\n`,
+    // Clear the stale space pin first: it belongs to the previous org and
+    // would immediately 404 on the next space-scoped call. Re-pin the new
+    // org's default space in the same commit below.
+    await updateProfile(profileName, { orgId: chosen.id, spaceId: undefined });
+    const repinned = await repinSpaceAfterOrgChange(profileName);
+    const spaceSuffix = repinned ? ` / space "${repinned.name}" (${repinned.id})` : "";
+    io.stdout.write(
+      `Pinned "${chosen.name}" (${chosen.id})${spaceSuffix} on profile "${profileName}".\n`,
     );
   } catch (err) {
-    exitWithError(err);
+    exitWithError(err, io);
   }
 }
 
 export async function orgCreateCommand(
   opts: OrgCreateOptions,
   deps: OrgCommandDeps = {},
+  io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  requireLoggedIn(profileName, profile);
+  requireLoggedIn(profileName, profile, io);
   const picker = { ...defaultDeps, ...deps };
 
   try {
@@ -161,44 +179,42 @@ export async function orgCreateCommand(
     } else {
       const prompted = await picker.promptCreateOrg();
       if (!prompted) {
-        process.stderr.write(
-          "Cannot prompt in non-TTY — pass a name: `appstrate org create <name>`.\n",
-        );
-        process.exit(1);
+        io.stderr.write("Cannot prompt in non-TTY — pass a name: `appstrate org create <name>`.\n");
+        io.exit(1);
       }
       input = prompted;
     }
     const created = await createOrg(profileName, input);
-    // Server auto-provisions a default application on org creation — clear
-    // any stale app pin from the previous org and re-pin the new default.
-    await updateProfile(profileName, { orgId: created.id, applicationId: undefined });
-    const repinned = await repinAppAfterOrgChange(profileName);
-    const appSuffix = repinned ? ` / app "${repinned.name}" (${repinned.id})` : "";
-    process.stdout.write(
-      `Created "${created.name}" (${created.id})${appSuffix} and pinned it on profile "${profileName}".\n`,
+    // Server auto-provisions a default space on org creation — clear
+    // any stale space pin from the previous org and re-pin the new default.
+    await updateProfile(profileName, { orgId: created.id, spaceId: undefined });
+    const repinned = await repinSpaceAfterOrgChange(profileName);
+    const spaceSuffix = repinned ? ` / space "${repinned.name}" (${repinned.id})` : "";
+    io.stdout.write(
+      `Created "${created.name}" (${created.id})${spaceSuffix} and pinned it on profile "${profileName}".\n`,
     );
   } catch (err) {
-    exitWithError(err);
+    exitWithError(err, io);
   }
 }
 
 /**
- * After the org pin changes, pick the new org's default application
- * and pin it on the profile. Returns the pinned app, or null when there
- * is nothing sensible to pin (no apps, or ≥2 without a default) — the
- * command continues regardless; the user can run `app switch` manually.
+ * After the org pin changes, pick the new org's default space
+ * and pin it on the profile. Returns the pinned space, or null when there
+ * is nothing sensible to pin (no spaces, or ≥2 without a default) — the
+ * command continues regardless; the user can run `space switch` manually.
  *
  * Swallows network errors: the org pin already succeeded and forcing the
- * user to re-run `org switch` over a transient `/api/applications` blip
- * would be a worse UX than an unpinned app.
+ * user to re-run `org switch` over a transient `/api/spaces` blip
+ * would be a worse UX than an unpinned space.
  */
-async function repinAppAfterOrgChange(profileName: string): Promise<Application | null> {
+async function repinSpaceAfterOrgChange(profileName: string): Promise<Space | null> {
   try {
-    const apps = await listApplications(profileName);
-    if (apps.length === 0) return null;
-    const chosen = findDefaultApplication(apps) ?? (apps.length === 1 ? apps[0]! : null);
+    const spaces = await listSpaces(profileName);
+    if (spaces.length === 0) return null;
+    const chosen = findDefaultSpace(spaces) ?? (spaces.length === 1 ? spaces[0]! : null);
     if (!chosen) return null;
-    await updateProfile(profileName, { applicationId: chosen.id });
+    await updateProfile(profileName, { spaceId: chosen.id });
     return chosen;
   } catch {
     return null;

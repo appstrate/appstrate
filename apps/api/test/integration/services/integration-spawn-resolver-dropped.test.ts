@@ -87,7 +87,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       integrationId: INTEG,
       authKey: "primary",
       accountId: "default",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-123" } }),
@@ -105,7 +105,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
   async function resolve() {
     return resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -153,7 +153,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: { schema_version: "0.2", type: "integration", name: INTEG },
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();
@@ -167,7 +167,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     expect(dropped[0]!.detail).toContain("version");
   });
 
-  it("reports `not_installed` when the integration exists but is not installed in the app", async () => {
+  it("reports `not_installed` when the integration exists but is not installed in the space", async () => {
     await seedServer();
     await seedPackage({
       id: INTEG,
@@ -177,7 +177,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       draftManifest: integManifest(SERVER),
     });
     await seedConnection();
-    // Deliberately NOT installed in the application.
+    // Deliberately NOT installed in the space.
 
     const { specs, dropped } = await resolve();
 
@@ -193,7 +193,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(MISSING_SERVER),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();
@@ -214,7 +214,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(SERVER),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     // No connection seeded.
 
     const { specs, dropped } = await resolve();
@@ -232,7 +232,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(SERVER),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();
@@ -255,7 +255,7 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
     const run = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
     return run.id;
   }

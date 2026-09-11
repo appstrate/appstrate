@@ -10,6 +10,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
+import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 import { FormField } from "../components/form-field";
@@ -83,7 +84,7 @@ function AgentEditorInner({
   initialTab = "general",
 }: {
   initialState: AgentEditorState;
-  resolvedDeps: { skills: unknown[] } | null;
+  resolvedDeps: { skills?: unknown[] } | null;
   packageId: string | undefined;
   isEdit: boolean;
   /**
@@ -162,9 +163,9 @@ function AgentEditorInner({
     manifestToSchemaFields(state.manifest),
   );
 
-  const getSchemaFields = (key: "input" | "output" | "config") => schemaFields[key] ?? [];
+  const getSchemaFields = (key: "input" | "output") => schemaFields[key] ?? [];
 
-  const onSchemaChange = (key: "input" | "output" | "config") => (fields: SchemaField[]) => {
+  const onSchemaChange = (key: "input" | "output") => (fields: SchemaField[]) => {
     setSchemaFields((prev) => ({ ...prev, [key]: fields }));
     const wrapper = fieldsToSchema(fields, key);
     if (wrapper) {
@@ -185,12 +186,16 @@ function AgentEditorInner({
   };
 
   // Sync resolved skill metadata from server (names, descriptions)
+  // Sync resolved skill metadata from server (names, descriptions). The group
+  // is absent from a summary read of the agent, and then there is nothing to
+  // sync — the editor keeps what the manifest declares.
+  const resolvedSkills = resolvedDeps?.skills;
   useEffect(() => {
-    if (!resolvedDeps) return;
+    if (!resolvedSkills) return;
     setState((prev) => {
       const m = { ...prev.manifest };
       const skills = (
-        resolvedDeps.skills as {
+        resolvedSkills as {
           id: string;
           version?: string;
           name?: string;
@@ -200,7 +205,7 @@ function AgentEditorInner({
       setResourceEntries(m, "skills", skills);
       return { ...prev, manifest: m };
     });
-  }, [resolvedDeps, setState]);
+  }, [resolvedSkills, setState]);
 
   const onSubmit = () =>
     handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));
@@ -320,10 +325,10 @@ function AgentEditorInner({
             surface={presentation === "panel-dialog" ? "settings" : "card"}
           />
           <SchemaSection
-            title={t("editor.configTitle")}
-            mode="config"
-            fields={getSchemaFields("config")}
-            onChange={onSchemaChange("config")}
+            title={t("editor.inputTitle")}
+            mode="input"
+            fields={getSchemaFields("input")}
+            onChange={onSchemaChange("input")}
             surface={presentation === "panel-dialog" ? "settings" : "card"}
           />
         </>
@@ -498,8 +503,14 @@ function PackageEditorInner({
           tab: "content",
         };
       }
+      // The same checker the write routes run — fixed here, not via a 400.
+      const frontmatter = skillFrontmatterError(s.content);
+      if (frontmatter) {
+        return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: "content" };
+      }
       return null;
     },
+    translateError: (err) => translateSkillFrontmatterError(err, t),
   });
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);

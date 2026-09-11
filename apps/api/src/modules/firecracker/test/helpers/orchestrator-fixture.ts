@@ -63,7 +63,12 @@ export function readyOrchestrator(
   exec: HostExec,
   deps: Omit<FirecrackerOrchestratorDeps, "hostExec"> = {},
 ): FirecrackerOrchestrator {
-  const orch = new FirecrackerOrchestrator({ hostExec: exec, ...deps });
+  // `sigtermGraceSeconds: 0` by default — a unit test must never wait out the
+  // real 5-second SIGTERM grace. The stop paths used to take it as a call
+  // argument, so each test passed its own 0; now that it is a construction-time
+  // seam, the fixture owns the default and a test that forgets it can no longer
+  // blow bun's 5s per-test timeout. Pass an explicit value to exercise the wait.
+  const orch = new FirecrackerOrchestrator({ sigtermGraceSeconds: 0, hostExec: exec, ...deps });
   Reflect.set(orch, "initialized", true);
   return orch;
 }

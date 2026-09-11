@@ -24,10 +24,10 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.sink.finalizeUrl).toBe(VALID.APPSTRATE_SINK_FINALIZE_URL);
     expect(env.sink.secret).toBe(VALID.APPSTRATE_SINK_SECRET);
     expect(env.workspaceDir).toBe("/workspace");
-    expect(env.heartbeatIntervalMs).toBe(30_000);
-    expect(env.mcpConnectDeadlineMs).toBe(60_000);
     expect(env.modelInput).toEqual(["text"]);
-    expect(env.modelCost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    // Absent, not zero — the run reports no cost of its own (see the warnings
+    // block below), and the platform prices its ledger row server-side.
+    expect(env.modelCost).toBeUndefined();
     expect(env.modelContextWindow).toBe(128_000);
     expect(env.modelMaxTokens).toBe(16_384);
     expect(env.modelReasoning).toBe(false);
@@ -61,14 +61,14 @@ describe("parseRuntimeEnv — happy path", () => {
       MODEL_TEMPERATURE: "0",
       MODEL_REASONING_LEVEL: "xhigh",
       MODEL_REASONING_LEVEL_MAP: '{"xhigh":"max"}',
+      MODEL_PROVIDER: "deepseek",
       MODEL_INPUT: '["text","image"]',
       MODEL_COST: '{"input":1.5,"output":2.5,"cacheRead":0.5,"cacheWrite":0.7}',
       MODEL_CONTEXT_WINDOW: "200000",
       MODEL_MAX_TOKENS: "32768",
       AGENT_INPUT: '{"foo":"bar","n":1}',
       SIDECAR_URL: "http://sidecar:8080",
-      APPSTRATE_HEARTBEAT_INTERVAL_MS: "10000",
-      APPSTRATE_MCP_CONNECT_DEADLINE_MS: "90000",
+      SIDECAR_AUTH_TOKEN: "sidecar-auth-token",
       OUTPUT_SCHEMA: '{"type":"object"}',
     });
     expect(env.workspaceDir).toBe("/agent");
@@ -77,6 +77,9 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelReasoning).toBe(true);
     expect(env.modelTemperature).toBe(0);
     expect(env.modelReasoningLevel).toBe("xhigh");
+    // On a proxied run this is the only thing left for Pi to recognise the
+    // provider by — MODEL_BASE_URL points at the sidecar.
+    expect(env.modelProvider).toBe("deepseek");
     expect(env.modelReasoningLevelMap).toEqual({ xhigh: "max" });
     expect(env.modelInput).toEqual(["text", "image"]);
     expect(env.modelCost).toEqual({ input: 1.5, output: 2.5, cacheRead: 0.5, cacheWrite: 0.7 });
@@ -84,8 +87,22 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelMaxTokens).toBe(32_768);
     expect(env.agentInput).toEqual({ foo: "bar", n: 1 });
     expect(env.sidecarUrl).toBe("http://sidecar:8080");
-    expect(env.heartbeatIntervalMs).toBe(10_000);
-    expect(env.mcpConnectDeadlineMs).toBe(90_000);
+    expect(env.sidecarAuthToken).toBe("sidecar-auth-token");
+  });
+
+  it("refuses a SIDECAR_URL with no SIDECAR_AUTH_TOKEN", () => {
+    // The sidecar denies by default, so a container handed only the URL would
+    // boot and then 401 on every LLM and tool call. Fatal at parse instead.
+    expect(() => parseRuntimeEnv({ ...VALID, SIDECAR_URL: "http://sidecar:8080" })).toThrow(
+      /SIDECAR_AUTH_TOKEN: required/,
+    );
+    // Control: the same environment WITH the token parses, and the same
+    // environment with NEITHER parses too (a no-sidecar run owes no token).
+    expect(
+      parseRuntimeEnv({ ...VALID, SIDECAR_URL: "http://sidecar:8080", SIDECAR_AUTH_TOKEN: "t" })
+        .sidecarAuthToken,
+    ).toBe("t");
+    expect(parseRuntimeEnv({ ...VALID }).sidecarAuthToken).toBeUndefined();
   });
 
   it("forwards a TRACEPARENT env var through to env.traceparent", () => {
@@ -107,12 +124,25 @@ describe("parseRuntimeEnv — happy path", () => {
 // `warnings` one — issue #1025 asked for `issues.push()`, which would have
 // crashed every run on a model the platform could not price.
 describe("parseRuntimeEnv — non-fatal warnings", () => {
+  it("treats an absent MODEL_PROVIDER as an older platform, not an error", () => {
+    expect(parseRuntimeEnv({ ...VALID }).modelProvider).toBeUndefined();
+  });
+
   it("warns (does NOT throw) when MODEL_COST is absent", () => {
     const env = parseRuntimeEnv(VALID);
     expect(env.warnings).toHaveLength(1);
     expect(env.warnings[0]).toContain("MODEL_COST");
-    // The run still gets a usable (all-zero) rate table.
-    expect(env.modelCost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it("reports NO rates when MODEL_COST is absent — never a fabricated all-zero table", () => {
+    // The var is absent for two reasons now: an unpriced model, and an ALIASED
+    // one whose published rate card is withheld because it names the vendor
+    // (`buildRuntimePiEnv`). An all-zero table would make the run report
+    // `cost: 0` — indistinguishable from a genuinely free model, and on an
+    // aliased run a permanent false positive for the platform's cost-divergence
+    // warning, which compares exactly this number against its own.
+    expect(parseRuntimeEnv(VALID).modelCost).toBeUndefined();
+    expect("modelCost" in parseRuntimeEnv(VALID)).toBe(false);
   });
 
   it("emits no warning when MODEL_COST is present", () => {
@@ -219,12 +249,6 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
     );
   });
 
-  it("rejects non-numeric heartbeat interval", () => {
-    expect(() => parseRuntimeEnv({ ...VALID, APPSTRATE_HEARTBEAT_INTERVAL_MS: "abc" })).toThrow(
-      /APPSTRATE_HEARTBEAT_INTERVAL_MS/,
-    );
-  });
-
   it("rejects malformed SIDECAR_URL", () => {
     expect(() => parseRuntimeEnv({ ...VALID, SIDECAR_URL: "weird://x" })).toThrow(/SIDECAR_URL/);
   });
@@ -282,16 +306,16 @@ describe("scrubSinkEnv", () => {
 
     scrubSinkEnv(source);
 
-    // The captured struct still has everything the sink and the document
+    // The captured struct still has everything the sink and the file
     // uploader need.
     expect(env.sink.secret).toBe(VALID.APPSTRATE_SINK_SECRET);
     expect(env.sink.url).toBe(VALID.APPSTRATE_SINK_URL);
     expect(env.sink.finalizeUrl).toBe(VALID.APPSTRATE_SINK_FINALIZE_URL);
     // The environment no longer does. An agent driven by a prompt injection
-    // (an email body, a fetched page, an input document) that runs
+    // (an email body, a fetched page, an input file) that runs
     // `env | grep SINK` gets nothing: without the run HMAC key it cannot forge
-    // a `status: "success"` finalize, nor POST documents straight to
-    // `/api/runs/:id/documents` past the `runtime_tools` gate.
+    // a `status: "success"` finalize, nor POST files straight to
+    // `/api/runs/:id/files` past the `runtime_tools` gate.
     expect(source.APPSTRATE_SINK_SECRET).toBeUndefined();
     expect(source.APPSTRATE_SINK_URL).toBeUndefined();
     expect(source.APPSTRATE_SINK_FINALIZE_URL).toBeUndefined();

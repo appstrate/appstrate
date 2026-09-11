@@ -4,6 +4,22 @@ export const RUN_DETAIL_TABS = ["overview", "journal", "results"] as const;
 
 export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
+/**
+ * There is no retired-hash table any more.
+ *
+ * `#deliverable`, `#result`, `#memory`, `#logs`, `#info` and `#documents` were
+ * mapped onto the pane that absorbed each of them, and rewritten in the
+ * address bar so a copied URL stopped propagating the dead anchor. All six are
+ * gone: an unrecognised hash now falls through to the default pane, the same
+ * as any other hash this page does not know.
+ *
+ * That IS a behaviour change for a link someone still holds — a bookmark, a
+ * back-history entry, a URL pasted into an old message — and it is silent by
+ * nature: the page opens on the default tab and nothing says why. It is the
+ * accepted cost of keeping one vocabulary for these anchors, recorded here
+ * rather than left to be rediscovered.
+ */
+
 export interface RunTabAvailability {
   isActive: boolean;
   isFailed: boolean;

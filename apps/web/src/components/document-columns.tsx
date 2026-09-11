@@ -5,9 +5,9 @@ import { Download, ExternalLink, Pin, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { formatBytes } from "@appstrate/core/format";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
-import type { DocumentDto } from "../hooks/use-documents";
+import type { FileDto } from "../hooks/use-files";
 import { documentExpiryInfo, documentRunHref } from "../lib/documents";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import type { DataColumn } from "./data-table";
 import { TableRowActions } from "./table-row-actions";
 
@@ -40,11 +40,11 @@ export function useDocumentColumns({
 }: {
   pendingKeepId: string | null;
   showRunLink?: boolean;
-  onDownload: (doc: DocumentDto) => void;
-  onKeep: (doc: DocumentDto) => void;
-  onDelete: (doc: DocumentDto) => void;
-}): DataColumn<DocumentDto>[] {
-  const { t } = useTranslation(["documents", "common"]);
+  onDownload: (doc: FileDto) => void;
+  onKeep: (doc: FileDto) => void;
+  onDelete: (doc: FileDto) => void;
+}): DataColumn<FileDto>[] {
+  const { t } = useTranslation(["files", "common"]);
 
   return [
     {

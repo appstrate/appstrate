@@ -9,7 +9,19 @@ import {
   normalizeLandmarkLabel,
 } from "./detail-contract-core.mjs";
 
-function entry(overrides = {}) {
+/**
+ * One rendered-contract entry. `style` is declared here even though the fixture
+ * omits it: the drift test ADDS it to prove `compareContracts` flags a style it
+ * did not expect, and an inferred literal type would refuse that assignment.
+ */
+interface ContractLandmark {
+  key: string;
+  kind: string;
+  rect: { x: number; y: number; width: number; height: number };
+  style?: string[];
+}
+
+function entry(overrides: Record<string, unknown> = {}) {
   return {
     screen: "agent-overview",
     path: "/agents/@tractr/compta-trimestrielle#overview",
@@ -25,7 +37,7 @@ function entry(overrides = {}) {
     landmarks: [
       { key: "main", kind: "main", rect: { x: 256, y: 0, width: 1184, height: 1000 } },
       { key: "panel", kind: "tabpanel", rect: { x: 299, y: 256, width: 1098, height: 341 } },
-    ],
+    ] as ContractLandmark[],
     ...overrides,
   };
 }
@@ -57,7 +69,10 @@ describe("Agent/Run rendered contract", () => {
     expect(compareContracts(expected, withinTolerance)).toEqual([]);
 
     const drifted = structuredClone(withinTolerance);
-    drifted.entries[key].landmarks[0].style = ["rgb(0, 0, 0)"];
+    // The key and the first landmark are both built two lines above; the
+    // non-null assertions say so rather than adding a branch the test would
+    // never take.
+    drifted.entries[key]!.landmarks[0]!.style = ["rgb(0, 0, 0)"];
     expect(compareContracts(expected, drifted)).toContain(
       `entries.${key}.landmarks[0].style: unexpected`,
     );

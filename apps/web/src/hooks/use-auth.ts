@@ -7,7 +7,8 @@ import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
-import { appStore } from "../stores/app-store";
+import { spaceStore } from "../stores/space-store";
+import { exitViewAs } from "../stores/view-as-store";
 import i18n from "../i18n";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
@@ -29,9 +30,9 @@ async function fetchProfile(): Promise<AuthProfile | null> {
 }
 
 /**
- * Centralized session teardown. Resets the auth store AND the org/app scope
+ * Centralized session teardown. Resets the auth store AND the org/space scope
  * stores (clearing their persisted localStorage ids) so a subsequent login
- * can never carry over a stale `X-Org-Id` / `X-Application-Id` header from
+ * can never carry over a stale `X-Org-Id` / `X-Space-Id` header from
  * the previous user — the scoping-header builder reads straight off these
  * stores, so leaving them set would leak the old scope onto the first
  * requests after re-login.
@@ -39,7 +40,12 @@ async function fetchProfile(): Promise<AuthProfile | null> {
 function clearSession() {
   authStore.setState({ user: null, profile: null, loading: false });
   orgStore.getState().setId(null);
-  appStore.getState().setId(null);
+  spaceStore.getState().setId(null);
+  // Same reason, one scope deeper: a persona left behind would ride the next
+  // user's requests as `X-View-As`. Here rather than at the sign-out button —
+  // the OIDC branch navigates away before anything after `logout()` runs, and
+  // a session lost mid-flight never passes through a button at all.
+  exitViewAs();
 }
 
 function setAuthenticatedUser(
@@ -269,8 +275,20 @@ export function useAuth() {
 
   const linkGithub = useCallback(() => linkSocial("github"), [linkSocial]);
 
-  const unlinkAccount = useCallback(async (providerId: string) => {
-    const result = await authClient.unlinkAccount({ providerId });
+  /**
+   * Unlink ONE linked account, named by the `id` of the row `listAccounts()`
+   * returned for it — Better Auth's `account.id` primary key.
+   *
+   * The wire field is called `accountId`, which is a different thing from the
+   * `accountId` on that same row: that one is the identifier AT THE PROVIDER
+   * (a Google `sub`, a GitHub numeric id) and the endpoint never looks at it.
+   * `/unlink-account` resolves the target as
+   * `findAccounts(session.user.id).find((a) => a.id === accountId)`, so
+   * feeding it the provider-side value simply misses and answers
+   * `ACCOUNT_NOT_FOUND`.
+   */
+  const unlinkAccount = useCallback(async (accountRowId: string) => {
+    const result = await authClient.unlinkAccount({ accountId: accountRowId });
     if (result.error) throw toUnlinkError(result.error);
   }, []);
 

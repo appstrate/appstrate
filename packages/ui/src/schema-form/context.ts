@@ -10,7 +10,6 @@ import type { UploadFn } from "./upload-client.ts";
  * rather than re-declaring ad-hoc types.
  */
 export interface SchemaFormContext {
-  uploadPath?: string;
   upload?: UploadFn;
   labels?: FileWidgetLabels & { addItem?: string };
 }

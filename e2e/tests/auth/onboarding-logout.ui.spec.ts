@@ -26,11 +26,15 @@ const USER_MENU = "Menu utilisateur";
 
 /**
  * Browser context for a freshly registered user with NO organization: session
- * cookie only, no org/app localStorage. `OrgGate` sends it to onboarding.
+ * cookie only, no org/space localStorage. `OrgGate` sends it to onboarding.
  */
 async function orglessPage(browser: Browser, cookie: string): Promise<Page> {
   const context = await browser.newContext();
-  const value = cookie.match(/better-auth\.session_token=([^;]+)/)![1];
+  const value = cookie.match(/better-auth\.session_token=([^;]+)/)?.[1];
+  // The whole point of this context is that it is signed in but org-less. A
+  // missing token would silently produce an anonymous page and the assertions
+  // below would fail against the login screen instead of the onboarding one.
+  if (!value) throw new Error(`no better-auth.session_token in cookie: ${cookie}`);
   await context.addCookies([
     { name: "better-auth.session_token", value, domain: "localhost", path: "/" },
   ]);

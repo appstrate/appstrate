@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   isBlockedHost,
   isBlockedUrl,
   resolveAndCheckHost,
+  guardedFetch,
+  DEFAULT_MAX_REDIRECTS,
   type HostResolver,
 } from "../src/ssrf.ts";
 
@@ -242,5 +246,54 @@ describe("resolveAndCheckHost", () => {
       isBlockedHostFn: () => false,
     });
     expect(res).toEqual({ blocked: false, pinnedAddress: "127.0.0.1" });
+  });
+});
+
+describe("what `@appstrate/core/ssrf` actually hands a consumer", () => {
+  // The CHANGELOG's [Unreleased] section tells core's out-of-tree consumers
+  // that `guardedFetch`'s default `maxRedirects` is 10 "exported as
+  // DEFAULT_MAX_REDIRECTS". This subpath is a pure re-export barrel and did
+  // not carry the constant, so the sentence described a budget the reader had
+  // no way to name — and `GuardedFetchOptions.maxRedirects` is optional, so
+  // there was no other route to it either.
+  it("re-exports DEFAULT_MAX_REDIRECTS, and it is the value guardedFetch defaults to", async () => {
+    expect(DEFAULT_MAX_REDIRECTS).toBe(10);
+
+    let hops = -1;
+    const resolve: HostResolver = async () => ["203.0.113.5"];
+    const fetchImpl = (async (input: string | Request | URL) => {
+      hops = Number(new URL(String(input)).pathname.slice(1));
+      // Always redirect: the ceiling, not the server, must end the chain.
+      return new Response(null, { status: 302, headers: { location: `/${hops + 1}` } });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      guardedFetch("https://public.example/0", undefined, { resolve, fetchImpl }),
+    ).rejects.toThrow(/redirect/i);
+
+    // Hop 0 is the original request, so the last URL fetched is hop
+    // DEFAULT_MAX_REDIRECTS. The 5 this used to default to would leave 5 here.
+    expect(hops).toBe(DEFAULT_MAX_REDIRECTS);
+  });
+
+  // Release-order gate. `@appstrate/core` ships as SOURCE, so a consumer's own
+  // install resolves this range and compiles core's files against it — the
+  // floor is what a consumer actually receives, not what the monorepo links.
+  // Keeping it equal to the workspace version is what makes core's CHANGELOG
+  // deliverable: a behaviour described here must be in the oldest afps-shared
+  // the range admits. This does NOT catch a source change made with no bump at
+  // all (floor and version move together at 0), which is why the leaf now has
+  // its own CHANGELOG saying a bump is mandatory.
+  it("declares an @appstrate/afps-shared floor equal to the workspace version", async () => {
+    const dir = join(import.meta.dir, "..");
+    const core = JSON.parse(await readFile(join(dir, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    const leaf = JSON.parse(await readFile(join(dir, "../afps-shared/package.json"), "utf8")) as {
+      version: string;
+    };
+
+    const range = core.dependencies["@appstrate/afps-shared"];
+    expect(range).toBe(`^${leaf.version}`);
   });
 });

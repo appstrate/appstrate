@@ -53,7 +53,7 @@ export interface CatalogOperation {
   operation: OperationNode;
 }
 
-export interface OperationCatalog {
+interface OperationCatalog {
   operations: Map<string, CatalogOperation>;
   /** Component schemas, for resolving `$ref`s in `describe_operation`. */
   componentSchemas: Record<string, unknown>;
@@ -61,6 +61,42 @@ export interface OperationCatalog {
 
 let cached: OperationCatalog | null = null;
 let cachedIndex: string | null = null;
+
+/**
+ * Permission-scoped operation indexes, memoised per permission SET. The MCP
+ * router builds one on every `tools/call` POST (server `instructions` are
+ * assembled per request), and the chat module drives every tool call through
+ * that router — so without this each tool call re-sorted and re-joined ~230
+ * operations. Keyed by the sorted permission list (order-independent), bounded
+ * with insertion-order eviction: distinct permission sets are one per role
+ * plus one per custom API-key scope combination, a small population.
+ *
+ * Cleared whenever the catalog is (re)built so a rebuilt catalog can never
+ * serve an index derived from the previous one.
+ */
+const indexByPermissions = new Map<string, string>();
+const MAX_SCOPED_INDEXES = 64;
+let scopedIndexBuilds = 0;
+
+function permissionsKey(permissions: ReadonlySet<string>): string {
+  return [...permissions].sort().join(",");
+}
+
+/**
+ * Observability for the scoped-index memo: how many entries it holds and how
+ * many times a scoped index was actually built (a miss). Read by the catalog
+ * tests to prove a repeated permission set is served from the map — string
+ * identity cannot show that (`Object.is` compares strings by value).
+ */
+export function getOperationIndexCacheStats(): { entries: number; builds: number } {
+  return { entries: indexByPermissions.size, builds: scopedIndexBuilds };
+}
+
+function resetIndexCaches(): void {
+  cachedIndex = null;
+  indexByPermissions.clear();
+  scopedIndexBuilds = 0;
+}
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
@@ -146,13 +182,17 @@ export function getCatalog(): OperationCatalog {
   }
 
   cached = { operations, componentSchemas };
+  // A (re)built catalog invalidates every index derived from the previous
+  // one — `resetCatalog` alone is not enough, since it is the assignment
+  // above that changes what an index would be built from.
+  resetIndexCaches();
   return cached;
 }
 
-/** Reset the cached catalog. Tests only. */
+/** Reset the cached catalog and every index derived from it. Tests only. */
 export function resetCatalog(): void {
   cached = null;
-  cachedIndex = null;
+  resetIndexCaches();
 }
 
 /**
@@ -183,8 +223,8 @@ const TAG_TO_RESOURCE: Record<string, string> = {
   Runs: "runs",
   Schedules: "schedules",
   Integrations: "integrations",
-  Applications: "applications",
-  "Application Packages": "applications",
+  Spaces: "spaces",
+  "Space Packages": "spaces",
   "End Users": "end-users",
   "API Keys": "api-keys",
   Models: "models",
@@ -202,10 +242,18 @@ function tagVisible(tag: string, permissions: ReadonlySet<string>): boolean {
 }
 
 export function buildOperationIndex(permissions?: ReadonlySet<string>): string {
-  // The unfiltered index is memoized; a permission-scoped index is built fresh
-  // (it varies per caller role and is cheap relative to a full request).
+  // Both shapes are memoised: the unfiltered index in `cachedIndex`, a
+  // permission-scoped one per permission set in `indexByPermissions`.
   if (!permissions && cachedIndex !== null) return cachedIndex;
+  const key = permissions ? permissionsKey(permissions) : null;
+  if (key !== null) {
+    const hit = indexByPermissions.get(key);
+    if (hit !== undefined) return hit;
+  }
 
+  // `getCatalog()` may rebuild (and thereby clear the index maps) — call it
+  // BEFORE the memo write below so the entry is stored against the catalog it
+  // was derived from.
   const { operations } = getCatalog();
   const byTag = new Map<string, string[]>();
   for (const op of operations.values()) {
@@ -227,7 +275,16 @@ export function buildOperationIndex(permissions?: ReadonlySet<string>): string {
     });
 
   const result = sections.join("\n\n");
-  if (!permissions) cachedIndex = result;
+  if (key === null) {
+    cachedIndex = result;
+  } else {
+    scopedIndexBuilds += 1;
+    if (indexByPermissions.size >= MAX_SCOPED_INDEXES) {
+      const oldest = indexByPermissions.keys().next().value;
+      if (oldest !== undefined) indexByPermissions.delete(oldest);
+    }
+    indexByPermissions.set(key, result);
+  }
   return result;
 }
 

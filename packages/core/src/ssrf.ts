@@ -23,5 +23,14 @@
 export { isBlockedHost, isBlockedUrl } from "@appstrate/afps-shared/ssrf";
 export { resolveAndCheckHost } from "@appstrate/afps-shared/ssrf-dns";
 export type { HostResolver, ResolvedHostCheck } from "@appstrate/afps-shared/ssrf-dns";
-export { guardedFetch, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
+// `DEFAULT_MAX_REDIRECTS` is re-exported because a core consumer that calls
+// `guardedFetch` from here has no other way to name its redirect ceiling:
+// `GuardedFetchOptions` declares `maxRedirects` optional and the default lives
+// in the leaf. Its ABSENCE is what made this subpath's CHANGELOG entry
+// undeliverable — the entry described a budget the reader could not reference.
+export {
+  guardedFetch,
+  SsrfBlockedError,
+  DEFAULT_MAX_REDIRECTS,
+} from "@appstrate/afps-shared/guarded-fetch";
 export type { GuardedFetchOptions } from "@appstrate/afps-shared/guarded-fetch";

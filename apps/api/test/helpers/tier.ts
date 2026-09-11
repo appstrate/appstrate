@@ -22,10 +22,10 @@
  * any test imports run), matching how `apps/api/src/infra/mode.ts` decides
  * which adapter to load at runtime.
  */
-import { describe, it } from "bun:test";
+import { describe } from "bun:test";
 
 /** True when running the fast in-memory tier (no external services). */
-export const isTier0 = process.env.TEST_TIER === "0";
+const isTier0 = process.env.TEST_TIER === "0";
 
 const hasRedis = !!process.env.REDIS_URL;
 const hasS3 = !!process.env.S3_BUCKET;
@@ -58,18 +58,14 @@ if (
   );
 }
 
-/** `describe`/`it` that skip unless a real Redis is configured. */
+/** `describe` that skips unless a real Redis is configured. */
 export const describeRequiresRedis = describe.skipIf(!hasRedis);
-export const itRequiresRedis = it.skipIf(!hasRedis);
 
-/** `describe`/`it` that skip unless the Docker Engine API (DinD) is available. */
+/** `describe` that skips unless the Docker Engine API (DinD) is available. */
 export const describeRequiresDocker = describe.skipIf(!hasDocker);
-export const itRequiresDocker = it.skipIf(!hasDocker);
 
-/** `describe`/`it` that skip unless an S3-compatible store is configured. */
+/** `describe` that skips unless an S3-compatible store is configured. */
 export const describeRequiresS3 = describe.skipIf(!hasS3);
-export const itRequiresS3 = it.skipIf(!hasS3);
 
-/** `describe`/`it` that skip unless an external PostgreSQL is configured (not PGlite). */
+/** `describe` that skips unless an external PostgreSQL is configured (not PGlite). */
 export const describeRequiresPostgres = describe.skipIf(!hasExternalDb);
-export const itRequiresPostgres = it.skipIf(!hasExternalDb);

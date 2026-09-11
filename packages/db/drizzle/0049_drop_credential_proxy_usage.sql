@@ -1,0 +1,180 @@
+-- Drop `credential_proxy_usage`: a write-only table on a hot write path.
+--
+-- ═══ WHAT IT IS ═══
+--
+-- Declared in `src/schema/runs.ts:744-784`: 11 columns, 5 indexes and a UNIQUE
+-- on `request_id` (6 index maintenances per row), plus a CHECK and the sequence
+-- behind `id serial`. One row is appended for EVERY call proxied through
+-- `/api/credential-proxy/*` — every upstream integration request a remote
+-- runner makes.
+--
+-- ═══ NOTHING READS IT ═══
+--
+-- Established by a repo-wide search for both `credentialProxyUsage` (the
+-- drizzle symbol) and `credential_proxy_usage` (the SQL name), excluding
+-- `node_modules`, `.turbo` and this migrations folder. Every hit is one of:
+--
+--   WRITE      apps/api/src/services/credential-proxy-usage.ts:40  (the only
+--              INSERT), called once from apps/api/src/routes/credential-proxy.ts:296
+--   SCHEMA     packages/db/src/schema/runs.ts:744-784
+--   PROSE      docs/architecture/RUN_COST.md, CHANGELOG.md, and five OpenAPI
+--              `runId` field descriptions that merely NAME the table
+--   TEST       apps/api/test/helpers/db.ts:68 (truncation list)
+--
+-- There is no `.select()`, no `.from(credentialProxyUsage)`, no join, no route,
+-- no DTO, no OpenAPI response schema and no frontend component. It is not
+-- reachable from a module either: nothing on the `ctx.services` surface
+-- (`packages/core/src/module.ts`, `apps/api/src/modules/**`) exposes it, so the
+-- out-of-tree `@appstrate/cloud` cannot be reading it — and by construction it
+-- could not want to: the table carries no cost column (its own doc comment says
+-- so), and billing reads the `llm_usage` ledger by serial-id cursor.
+--
+-- ═══ AND IT GROWS FOREVER ═══
+--
+-- No retention sweep exists — no DELETE, no prune job, no TTL. Compare
+-- `run_logs` and `model_provider_pairings`, which both have one. So this is not
+-- "an audit log nobody has queried yet"; it is unbounded storage plus six index
+-- writes per proxied call, bought for nothing. If per-call audit is wanted
+-- later it should be rebuilt with a reader and a retention policy from the
+-- start — the same conclusion 0044/0045 reached for the three
+-- WRITTEN-NEVER-READ columns they dropped.
+--
+-- Kept, deliberately: the `X-Run-Id` request header the route reads. It still
+-- feeds `llm_usage.run_id`, which IS read. Only the audit row goes.
+--
+-- ═══ OPERATOR PRE-FLIGHT — RUN THIS AGAINST PRODUCTION FIRST ═══
+--
+-- This is the one destructive migration in the batch, and `0000_init.sql` is a
+-- SQUASH that production predates, so the declared schema is NOT evidence of
+-- what exists there (see `packages/db/README.md` → "Index drift", and 0041's
+-- header). Before deploying, run against the LIVE database:
+--
+--   -- 1. What is actually there, and how big.
+--   SELECT c.relname,
+--          c.reltuples::bigint                                AS approx_rows,
+--          pg_size_pretty(pg_total_relation_size(c.oid))      AS total_size
+--   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+--   WHERE n.nspname = 'public' AND c.relname = 'credential_proxy_usage';
+--
+--   -- 2. Which indexes survive there. 0039 already dropped
+--   --    idx_credential_proxy_usage_org_id; the rest are dropped WITH the
+--   --    table, so this is informational, not a gate.
+--   SELECT indexname FROM pg_indexes
+--   WHERE schemaname = 'public' AND tablename = 'credential_proxy_usage';
+--
+--   -- 3. THE GATE. Anything here means the DROP below fails and the deploy
+--   --    stops. Both queries MUST return zero rows.
+--   SELECT conname, conrelid::regclass AS referencing_table
+--   FROM pg_constraint
+--   WHERE confrelid = 'public.credential_proxy_usage'::regclass;
+--
+--   SELECT DISTINCT dv.relname AS dependent_view
+--   FROM pg_depend d
+--   JOIN pg_rewrite r  ON r.oid = d.objid
+--   JOIN pg_class   dv ON dv.oid = r.ev_class
+--   WHERE d.refobjid = 'public.credential_proxy_usage'::regclass
+--     AND dv.relname <> 'credential_proxy_usage';
+--
+--   -- 4. THE BLAST RADIUS. Query 3 enumerates the INBOUND foreign keys — who
+--   --    points AT this table — and that is the gate. This one enumerates the
+--   --    OUTBOUND ones, which is a different question and the one LOCK AND
+--   --    COST below turns on: every table listed here is taken ACCESS
+--   --    EXCLUSIVE by the DROP, because dropping a foreign key has to remove
+--   --    the action triggers it installed on the REFERENCED side. Without this
+--   --    query the pre-flight surfaces none of that.
+--   SELECT con.conname, con.confrelid::regclass AS referenced_table_locked
+--   FROM pg_constraint con
+--   WHERE con.conrelid = 'public.credential_proxy_usage'::regclass
+--     AND con.contype = 'f'
+--   ORDER BY 2;
+--
+-- If query 1 returns no row the table is already gone and `IF EXISTS` makes
+-- this a no-op; if 3 returns anything, STOP — something out of tree depends on
+-- it and this migration must not ship. Query 4 should return the five rows
+-- named below; a sixth means an out-of-tree foreign key was added and the lock
+-- set this header states is incomplete for that database.
+--
+-- ═══ NO `CASCADE`, DELIBERATELY ═══
+--
+-- `DROP TABLE … CASCADE` would silently take dependents with it, which is
+-- exactly the outcome pre-flight query 3 exists to prevent. Without CASCADE an
+-- unexpected dependent raises `2BP01` and aborts the deploy — loud, and the
+-- right failure. `IF EXISTS` is still there so a partially-applied environment
+-- converges (same reasoning as 0039/0045); an absent table IS the intended end
+-- state.
+--
+-- The table's 5 indexes, its UNIQUE constraint, its CHECK, its 5 outbound
+-- foreign keys and the sequence owned by `id serial` are all dropped with it —
+-- no separate statements, and nothing left orphaned.
+--
+-- ═══ LOCK AND COST ═══
+--
+-- `DROP TABLE` takes ACCESS EXCLUSIVE on `credential_proxy_usage` — AND on
+-- every table its five outbound foreign keys REFERENCE. That is the half worth
+-- reading twice, because the intuitive answer is the opposite one, and an
+-- earlier revision of this header asserted the opposite one outright: that the
+-- referenced sides take NO lock, so "the blast radius is one table that nothing
+-- reads". That was false, and for an operator planning a deploy window it was
+-- false in the dangerous direction.
+--
+-- A foreign key is implemented as triggers on BOTH sides: the check triggers
+-- sit on the referencing table, and the ON DELETE / ON UPDATE action triggers
+-- sit on the REFERENCED one. Dropping the constraint therefore has to drop
+-- triggers on the referenced side too, and Postgres's `RemoveConstraintById`
+-- (`src/backend/catalog/pg_constraint.c`) opens the referenced relation with
+-- `AccessExclusiveLock`, under the source comment "Must match lock taken by
+-- RemoveTriggerById". Trigger CREATION was relaxed to SHARE ROW EXCLUSIVE in
+-- 9.5; trigger REMOVAL never was. The referenced side is locked at the
+-- strongest mode there is, exactly as if it were being rewritten.
+--
+-- The five, confirmed against `meta/0048_snapshot.json` (and re-confirmable on
+-- the target with pre-flight query 4 above):
+--
+--   credential_proxy_usage.org_id         -> organizations
+--   credential_proxy_usage.api_key_id     -> api_keys
+--   credential_proxy_usage.user_id        -> "user"
+--   credential_proxy_usage.run_id         -> runs
+--   credential_proxy_usage.application_id -> applications
+--
+-- `organizations`, `api_keys`, `"user"`, `runs` and `applications` are the
+-- busiest tables in the schema — `"user"` and `api_keys` are on the
+-- authentication path of essentially every request, `runs` and `organizations`
+-- on nearly every read. ACCESS EXCLUSIVE conflicts with every lock mode,
+-- readers included, and each request queues AHEAD of everything behind it on
+-- that table.
+--
+-- AND THE LOCKS ARE HELD TO BATCH COMMIT, not released when this statement
+-- finishes: drizzle's pg dialect wraps every pending migration in ONE
+-- `session.transaction(...)`. So all five stay ACCESS EXCLUSIVE through the
+-- entire tail of the batch — 0050's index build on `notifications`, 0051's
+-- CHECK scan of `webhook_deliveries` plus its `package_schedules` promotion and
+-- its full `uploads` rewrite, and 0052's index build on `chat_messages`. The
+-- outage on `"user"` / `runs` / `organizations` / `api_keys` / `applications`
+-- is the SUM of everything after this line, not the duration of the DROP.
+--
+-- 0048 has already taken ACCESS EXCLUSIVE on `"user"` for the same
+-- trigger-removal reason and still holds it, so on that one table this file
+-- adds nothing. The other four are this file's own contribution to the hold.
+--
+-- Fenced with `SET LOCAL lock_timeout = '3s'`, reset to DEFAULT after — same
+-- instrument as 0039/0041/0047/0048; see 0039's header for `SET LOCAL` rather
+-- than `SET`. That fence bounds ACQUISITION only — how long the DROP waits for
+-- the six locks — not execution; no `statement_timeout` sits beside it here
+-- (unlike 0047/0048/0050-0052) because `DROP TABLE` is a catalog delete plus an
+-- unlink, with no scan, no sort and no rewrite, so there is no unbounded
+-- execution for one to bound. On expiry the statement errors and aborts that
+-- single transaction: `migrate` throws, boot fails, the deploy fails its health
+-- gate. Right trade (fail fast, retry), but a failed deploy, not a silent
+-- skip.
+--
+-- ═══ FORWARD-ONLY, AND THE DATA IS NOT COMING BACK ═══
+--
+-- Rolling this back re-creates an empty table, not its history. Accepted on the
+-- same grounds as 0044/0045: the rows were an input to no decision — no query,
+-- no report, no bill — so nothing downstream needs them. An operator who wants
+-- the history anyway must `CREATE TABLE … AS SELECT * FROM credential_proxy_usage`
+-- into another schema BEFORE the deploy; there is no in-migration escrow,
+-- because a copy nothing reads is the problem this file is removing.
+SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+DROP TABLE IF EXISTS "credential_proxy_usage";--> statement-breakpoint
+SET LOCAL lock_timeout = DEFAULT;

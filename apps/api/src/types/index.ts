@@ -6,13 +6,10 @@ export type { OrgRole } from "@appstrate/shared-types";
 
 // --- Agent Manifest Types ---
 // Re-exported from @appstrate/validation. The AgentManifest type is Zod-inferred
-// and covers all agent manifest fields (name, version, type, dependencies, input/output/config, timeout).
+// and covers all agent manifest fields (name, version, type, dependencies, input/output, timeout).
 
 import type { AgentManifest } from "@appstrate/core/validation";
 export type { AgentManifest };
-
-import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
-export type { ToolMeta };
 
 // --- Loaded Package (manifest + prompt from DB) ---
 
@@ -44,7 +41,34 @@ export type AppEnv = {
     orgSlug: string;
     orgName: string;
     orgRole: import("@appstrate/shared-types").OrgRole;
+    /**
+     * Org-level effective set, written once the org role is known (RBAC spec
+     * §4.2). Kept beside `permissions` because `requireSpaceContext` needs the
+     * org half again to union the space half onto it.
+     */
+    orgPermissions?: Set<string>;
+    /**
+     * Credential ceiling: an API key's `scopes`, an OIDC scope claim, whatever
+     * a module strategy computed. `undefined` for cookie sessions, which have
+     * no ceiling. Every write of `permissions` intersects with it.
+     */
+    scopeCeiling?: ReadonlySet<string>;
+    /**
+     * Effective permissions for this request: `ceiling(orgPermissions)` on an
+     * org route, `ceiling(orgPermissions ∪ spacePermissions)` once
+     * `requireSpaceContext` has resolved the space. The only thing every
+     * permission guard reads.
+     */
     permissions?: Set<string>;
+    /** Role the caller holds in `space`, set by `applySpacePermissions`. */
+    spaceRole?: import("../lib/space-role.ts").SpaceRoleRef;
+    /**
+     * Validated role preview: the persona whose reach answers this request
+     * instead of the caller's own (`lib/view-as.ts`), set before any
+     * `permissions` write. `user` and `orgRole` stay REAL — a persona restricts
+     * what they reach, never who they are.
+     */
+    viewAs?: import("../lib/view-as.ts").ViewAsPersona;
     /**
      * Auth method that resolved the request. Core values: `"session"`,
      * `"api_key"`. Auth-strategy modules set their own identifier (e.g.
@@ -52,16 +76,16 @@ export type AppEnv = {
      */
     authMethod: string;
     apiKeyId: string | null;
-    applicationId: string; // from API key auth or resolved by app-context middleware (X-Application-Id)
+    spaceId: string; // from API key auth or resolved by space-context middleware (X-Space-Id)
     /**
-     * Resolved application row (id/orgId/isDefault) set by
-     * `requireAppContext()` alongside `applicationId`. Services called from
-     * app-scoped routes should accept this shape directly instead of taking
-     * an `applicationId` string and re-SELECTing the row. Optional because
-     * auth strategies set `applicationId` before the middleware runs, but
-     * the `app` row is only loaded once the middleware executes.
+     * Resolved space row (id/orgId/isDefault) set by
+     * `requireSpaceContext()` alongside `spaceId`. Services called from
+     * space-scoped routes should accept this shape directly instead of taking
+     * a `spaceId` string and re-SELECTing the row. Optional because
+     * auth strategies set `spaceId` before the middleware runs, but
+     * the `space` row is only loaded once the middleware executes.
      */
-    app?: import("../middleware/app-context.ts").AppContextRow;
+    space?: import("../lib/space-lookup.ts").SpaceContextRow;
     requestId: string;
     apiVersion: string;
     /**
@@ -92,8 +116,8 @@ export type AppEnv = {
     /**
      * Realm captured from the BA session row (or user row) at auth time.
      * `"platform"` for platform audiences (default, dashboard, org/instance
-     * OIDC clients); `"end_user:<applicationId>"` for end-users of an
-     * application-level OIDC client. Consumed by `requirePlatformRealm()`
+     * OIDC clients); `"end_user:<spaceId>"` for end-users of an
+     * space-level OIDC client. Consumed by `requirePlatformRealm()`
      * to reject BA cookie sessions that belong to a non-platform audience
      * when hitting platform routes.
      */

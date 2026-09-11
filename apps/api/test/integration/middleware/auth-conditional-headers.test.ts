@@ -46,15 +46,16 @@ describe("auth-conditional header guard (Appstrate-User)", () => {
   it("does not preempt the API-key branch: a bad-prefix header is handled there, not by the guard", async () => {
     const apiKey = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       name: "guard-key-badprefix",
+      scopes: ["runs:read"],
     });
 
     const res = await app.request("/api/runs", {
       headers: {
         Authorization: `Bearer ${apiKey.rawKey}`,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "Appstrate-User": "not-an-eu-id",
       },
     });
@@ -81,21 +82,22 @@ describe("auth-conditional header guard (Appstrate-User)", () => {
 
   it("honors Appstrate-User impersonation under API-key auth (valid end-user → 200)", async () => {
     const endUser = await seedEndUser({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       externalId: "ext-guard-eu",
     });
     const apiKey = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       name: "guard-key-valid",
+      scopes: ["runs:read"],
     });
 
     const res = await app.request("/api/runs", {
       headers: {
         Authorization: `Bearer ${apiKey.rawKey}`,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "Appstrate-User": endUser.id,
       },
     });

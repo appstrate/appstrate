@@ -5,14 +5,14 @@
  *
  * Extracted out of `plugins.ts` so `guards.ts` can reuse the same check
  * on paths that don't flow through `@better-auth/oauth-provider`'s
- * `customAccessTokenClaims` — notably Better Auth's `deviceAuthorization()`
+ * access-token claim extension — notably Better Auth's `deviceAuthorization()`
  * plugin at `/device/approve`, which mints BA sessions directly via the
  * internal adapter and bypasses oauth-provider entirely.
  *
  * The realm model itself is documented on `user.realm` in the auth schema
  * and inside `assertUserRealm` below. The short version: a single BA
  * `user` table stores both platform operators (realm=`"platform"`) and
- * end-users of `level=application` OIDC clients (realm=`"end_user:<applicationId>"`).
+ * end-users of `level=space` OIDC clients (realm=`"end_user:<spaceId>"`).
  * Without these checks, a session minted for one audience could mint a
  * token for another.
  */
@@ -24,54 +24,49 @@ import { user as userTable } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 
 /**
- * Subset of an OAuth client's `metadata` JSON blob relevant to realm
- * enforcement. The full shape is documented in `plugins.ts::ClientMetadata`;
- * this file only needs the level + referenced application id.
+ * The `oauth_clients` scoping columns realm enforcement reads.
  */
 export interface ClientAudienceMetadata {
-  level?: "org" | "application" | "instance";
+  level?: "org" | "space" | "instance";
   referencedOrgId?: string;
-  referencedApplicationId?: string;
-  clientId?: string;
+  referencedSpaceId?: string;
 }
 
 /**
- * Given an OAuth client's metadata, compute the realm a user must have to
- * be allowed to mint a token for this client. Mirrors the dispatch in
- * `plugins.ts::buildClaimsForClient` so `/oauth2/token` and
+ * The realm a user must hold to mint a token for this client. Mirrors the
+ * dispatch in `plugins.ts::buildClaimsForClient` so `/oauth2/token` and
  * `/device/approve` apply the same audience-isolation rules.
  *
- * Throws on malformed metadata — rather than silently letting the mint
- * proceed — so drift between metadata and enforcement surfaces as a
+ * Throws on a scoping row that cannot name an audience, so drift surfaces as a
  * structured OAuth2 error instead of a realm-bypass bug.
  */
 export function expectedRealmForClient(metadata: ClientAudienceMetadata): string {
   if (metadata.level === "instance") return "platform";
   if (metadata.level === "org") return "platform";
-  if (metadata.level === "application") {
-    if (!metadata.referencedApplicationId) {
+  if (metadata.level === "space") {
+    if (!metadata.referencedSpaceId) {
       throw new APIError("BAD_REQUEST", {
         error: "invalid_client",
         error_description:
-          "OAuth client metadata is malformed — application-level client is missing referencedApplicationId.",
+          "OAuth client is malformed — a space-level client is missing referencedSpaceId.",
       });
     }
-    return `end_user:${metadata.referencedApplicationId}`;
+    return `end_user:${metadata.referencedSpaceId}`;
   }
   throw new APIError("BAD_REQUEST", {
     error: "invalid_client",
-    error_description: "OAuth client metadata is missing level — cannot determine audience.",
+    error_description: "OAuth client is missing level — cannot determine audience.",
   });
 }
 
 /**
  * Enforce realm isolation at token-mint time. The BA `user.realm` column
  * segregates audiences sharing the user table — platform operators
- * (`"platform"`) vs end-users of application-level OIDC clients
- * (`"end_user:<applicationId>"`). Without this check, a session minted
+ * (`"platform"`) vs end-users of space-level OIDC clients
+ * (`"end_user:<spaceId>"`). Without this check, a session minted
  * under one audience could mint a token for another (e.g. end-user of
- * app A requesting a token for app B, or a platform admin requesting an
- * end-user token for their own app).
+ * space A requesting a token for space B, or a platform admin requesting an
+ * end-user token for their own space).
  *
  * Throws RFC 6749 `access_denied` on mismatch — the satellite client
  * renders a clean auth error instead of a generic 500. Users recover by
@@ -81,7 +76,7 @@ export function expectedRealmForClient(metadata: ClientAudienceMetadata): string
 export async function assertUserRealm(
   userId: string,
   expected: string,
-  context: { clientLevel: string; applicationId?: string | null; orgId?: string | null },
+  context: { clientLevel: string; spaceId?: string | null; orgId?: string | null },
 ): Promise<void> {
   const [row] = await db
     .select({ realm: userTable.realm })
@@ -96,12 +91,12 @@ export async function assertUserRealm(
     expected,
     actual,
     clientLevel: context.clientLevel,
-    applicationId: context.applicationId ?? null,
+    spaceId: context.spaceId ?? null,
     orgId: context.orgId ?? null,
   });
   throw new APIError("FORBIDDEN", {
     error: "access_denied",
     error_description:
-      "This account is not permitted to sign in to this application. Sign out and use an account provisioned for this audience.",
+      "This account is not permitted to sign in to this space. Sign out and use an account provisioned for this audience.",
   });
 }

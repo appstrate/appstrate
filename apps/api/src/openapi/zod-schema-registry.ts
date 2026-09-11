@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
+import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
 
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
@@ -35,11 +36,12 @@ import {
   createOrgSchema,
   updateOrgSchema,
   addMemberSchema,
+  updateInvitationSchema,
   updateRoleSchema,
 } from "../routes/organizations.ts";
 
 // --- Org settings schema (services/organizations.ts) ---
-import { orgSettingsSchema } from "../services/organizations.ts";
+import { orgSettingsPatchSchema } from "../services/organizations.ts";
 
 // --- User-agent schemas (routes/user-agents.ts) ---
 import { updateSkillsSchema } from "../routes/user-agents.ts";
@@ -55,28 +57,63 @@ import {
 } from "../routes/proxies.ts";
 
 // --- Agent schemas (routes/agents.ts) ---
-import { proxyIdSchema, modelIdSchema } from "../routes/agents.ts";
+import { proxyIdSchema, modelIdSchema, agentInputSettingsSchema } from "../routes/agents.ts";
 
 // --- Model Provider Credential schemas (routes/model-provider-credentials.ts) ---
 import {
   createSchema as createModelProviderCredentialSchema,
   updateSchema as updateModelProviderCredentialSchema,
   testInlineSchema as modelProviderCredentialsTestInlineSchema,
+  discoverSchema as modelProviderCredentialsDiscoverSchema,
 } from "../routes/model-provider-credentials.ts";
 
 // --- Profile schemas (routes/profile.ts) ---
-import { profileUpdateSchema, batchLookupSchema } from "../routes/profile.ts";
+import { profileUpdateSchema, batchLookupSchema, setPasswordSchema } from "../routes/profile.ts";
 
 // --- Package schemas (routes/packages.ts) ---
-import { githubImportSchema, forkSchema } from "../routes/packages.ts";
-
-// --- Application schemas (routes/applications.ts) ---
 import {
-  createApplicationSchema,
-  updateApplicationSchema,
+  githubImportSchema,
+  forkSchema,
+  packageJsonCreateSchema,
+  packageJsonCreateWithContentSchema,
+  packageJsonUpdateSchema,
+  createVersionBodySchema,
+} from "../routes/packages.ts";
+
+// --- Space schemas (routes/spaces.ts) ---
+import {
+  createSpaceSchema,
+  updateSpaceSchema,
+  addSpaceMemberSchema,
+  updateSpaceMemberSchema,
   installPackageSchema,
   updatePackageSchema,
-} from "../routes/applications.ts";
+} from "../routes/spaces.ts";
+
+// --- Role schemas (routes/roles.ts) ---
+import { createSpaceRoleSchema, updateSpaceRoleSchema } from "../routes/roles.ts";
+
+// --- Run launch schemas (routes/runs.ts) ---
+import { runAgentBodySchema } from "../routes/runs.ts";
+
+// --- Remote-run schemas (routes/runs-remote.ts) ---
+import { CreateRemoteRunBodySchema, ExtendSinkBodySchema } from "../routes/runs-remote.ts";
+import { CloudEventEnvelopeSchema } from "../routes/runs-events.ts";
+
+// --- Schedule schemas (routes/schedules.ts) ---
+import { createScheduleSchema, updateScheduleSchema } from "../routes/schedules.ts";
+
+// --- Upload schemas (routes/uploads.ts) ---
+import { createUploadSchema } from "../routes/uploads.ts";
+
+// --- Member integration-pin schema (routes/me.ts) ---
+import { upsertMemberPinSchema } from "../routes/me.ts";
+
+// --- Model-provider OAuth pairing schemas (routes/model-providers-oauth.ts) ---
+import { createPairingBody, importBody } from "../routes/model-providers-oauth.ts";
+
+// --- Unattended-install bootstrap schema (routes/auth-bootstrap.ts) ---
+import { redeemSchema as bootstrapRedeemSchema } from "../routes/auth-bootstrap.ts";
 
 // --- Integration schemas (routes/integrations.ts) ---
 import {
@@ -88,6 +125,9 @@ import {
   oauthClientCreateSchema,
   oauthClientUpdateSchema,
   updateConnectionSchema,
+  connectSessionSchema,
+  connectSubmitSchema,
+  setDefaultClientSchema,
 } from "../routes/integrations.ts";
 
 // ---------------------------------------------------------------------------
@@ -95,10 +135,16 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a Zod schema to JSON Schema. Wrapped to handle errors gracefully.
+ * Convert a Zod schema to JSON Schema.
+ *
+ * `io: "input"` is load-bearing: these are REQUEST bodies, and Zod's default
+ * ("output") describes the parsed value. A field carrying `.default(...)` is
+ * optional on the wire but always present after parsing, so the output view
+ * marks it required and the comparison reports the spec — which correctly
+ * documents it as optional — as drift.
  */
 function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
-  return z.toJSONSchema(schema) as Record<string, unknown>;
+  return z.toJSONSchema(schema, { io: "input" }) as Record<string, unknown>;
 }
 
 /**
@@ -151,6 +197,64 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Bulk-seed models from registry",
   },
 
+  // ─── Runs ───────────────────────────────────────────────────────────────
+  //
+  // The launch surfaces are `.strict()` (#1187), so every field they honour
+  // must be documented: an entry here is what turns "accepted by Zod but absent
+  // from the spec" into a failing check instead of a field callers cannot
+  // discover. The two inline surfaces are NOT registered: their schema is a
+  // wire-shape guard that deliberately defers `manifest` / `prompt` to the
+  // preflight (`z.unknown()`, optional), so a field-by-field comparison against
+  // a spec that declares both required and typed reports that deferral as
+  // drift. The check compares shapes; that one is a division of labour.
+  {
+    method: "POST",
+    path: "/api/agents/{scope}/{name}/run",
+    jsonSchema: toJsonSchema(runAgentBodySchema),
+    description: "Execute an agent",
+  },
+  {
+    method: "POST",
+    path: "/api/runs/remote",
+    jsonSchema: toJsonSchema(CreateRemoteRunBodySchema),
+    description: "Create a remote (runner-driven) run",
+  },
+  {
+    method: "PATCH",
+    path: "/api/runs/{runId}/sink/extend",
+    jsonSchema: toJsonSchema(ExtendSinkBodySchema),
+    description: "Extend a remote run's event-sink lease",
+  },
+
+  {
+    method: "POST",
+    path: "/api/runs/{runId}/events",
+    jsonSchema: toJsonSchema(CloudEventEnvelopeSchema),
+    description: "Ingest a run CloudEvent",
+  },
+
+  // ─── Schedules ──────────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/agents/{scope}/{name}/schedules",
+    jsonSchema: toJsonSchema(createScheduleSchema),
+    description: "Create an agent schedule",
+  },
+  {
+    method: "PUT",
+    path: "/api/schedules/{id}",
+    jsonSchema: toJsonSchema(updateScheduleSchema),
+    description: "Update a schedule",
+  },
+
+  // ─── Uploads ────────────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/uploads",
+    jsonSchema: toJsonSchema(createUploadSchema),
+    description: "Register an upload and mint its sink URL",
+  },
+
   // ─── API Keys ───────────────────────────────────────────────────────────
   {
     method: "POST",
@@ -187,13 +291,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "PUT",
     path: "/api/orgs/{orgId}/invitations/{invitationId}",
-    jsonSchema: toJsonSchema(updateRoleSchema),
-    description: "Update invitation role",
+    jsonSchema: toJsonSchema(updateInvitationSchema),
+    description: "Update invitation role and space assignments",
   },
   {
     method: "PUT",
     path: "/api/orgs/{orgId}/settings",
-    jsonSchema: toJsonSchema(orgSettingsSchema.partial()),
+    jsonSchema: toJsonSchema(orgSettingsPatchSchema),
     description: "Update org settings",
   },
 
@@ -246,6 +350,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     jsonSchema: toJsonSchema(modelIdSchema),
     description: "Set agent model",
   },
+  {
+    method: "PUT",
+    path: "/api/agents/{scope}/{name}/input-settings",
+    jsonSchema: toJsonSchema(agentInputSettingsSchema),
+    description: "Set agent input settings",
+  },
 
   // ─── Model Provider Credentials ────────────────────────────────────────
   {
@@ -266,6 +376,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     jsonSchema: toJsonSchema(modelProviderCredentialsTestInlineSchema),
     description: "Test model provider credential inline",
   },
+  {
+    method: "POST",
+    path: "/api/model-provider-credentials/discover",
+    jsonSchema: toJsonSchema(modelProviderCredentialsDiscoverSchema),
+    description: "Discover the models an endpoint serves",
+  },
 
   // ─── Profile ────────────────────────────────────────────────────────────
   {
@@ -280,33 +396,145 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     jsonSchema: toJsonSchema(batchLookupSchema),
     description: "Batch profile lookup",
   },
-
-  // ─── Applications ──────────────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/applications",
-    jsonSchema: toJsonSchema(createApplicationSchema),
-    description: "Create application",
+    path: "/api/profile/password",
+    jsonSchema: toJsonSchema(setPasswordSchema),
+    description: "Set/replace the caller's password",
+  },
+
+  // ─── Spaces ────────────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/spaces",
+    jsonSchema: toJsonSchema(createSpaceSchema),
+    description: "Create space",
   },
   {
     method: "PATCH",
-    path: "/api/applications/{id}",
-    jsonSchema: toJsonSchema(updateApplicationSchema),
-    description: "Update application",
+    path: "/api/spaces/{id}",
+    jsonSchema: toJsonSchema(updateSpaceSchema),
+    description: "Update space",
   },
 
-  // ─── Application Packages ──────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/applications/{applicationId}/packages",
+    path: "/api/spaces/{id}/members",
+    jsonSchema: toJsonSchema(addSpaceMemberSchema),
+    description: "Add a space member",
+  },
+  {
+    method: "PATCH",
+    path: "/api/spaces/{id}/members/{userId}",
+    jsonSchema: toJsonSchema(updateSpaceMemberSchema),
+    description: "Change a space member's role",
+  },
+
+  // ─── Roles ─────────────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/roles",
+    jsonSchema: toJsonSchema(createSpaceRoleSchema),
+    description: "Create a custom space role",
+  },
+  {
+    method: "PATCH",
+    path: "/api/roles/{id}",
+    jsonSchema: toJsonSchema(updateSpaceRoleSchema),
+    description: "Update a custom space role",
+  },
+
+  // ─── Space Packages ────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/spaces/{spaceId}/packages",
     jsonSchema: toJsonSchema(installPackageSchema),
-    description: "Install package in application",
+    description: "Install package in space",
   },
   {
     method: "PUT",
-    path: "/api/applications/{applicationId}/packages/{scope}/{name}",
+    path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
     description: "Update installed package config",
+  },
+
+  // ─── Package draft CRUD (the shared JSON body of every package type) ────
+  //
+  // `packages.ts` builds these routes in a loop over ROUTE_CONFIGS, so one Zod
+  // schema backs several paths. Registering each path individually is what
+  // makes the loop's fan-out visible to the gate: a package type whose spec
+  // body drifts from the shared schema fails on its own line.
+  //
+  // Create is NOT one schema for all types: `agent` and `skill` carry
+  // `requireContent`, so their body is `packageJsonCreateWithContentSchema`
+  // and the spec must publish `content` as required. `integration` has an
+  // optional content file and keeps the looser body.
+  {
+    method: "POST",
+    path: "/api/packages/agents",
+    jsonSchema: toJsonSchema(packageJsonCreateWithContentSchema),
+    description: "Create a draft agent package",
+  },
+  {
+    method: "POST",
+    path: "/api/packages/integrations",
+    jsonSchema: toJsonSchema(packageJsonCreateSchema),
+    description: "Create a draft integration package",
+  },
+  {
+    method: "POST",
+    path: "/api/packages/skills",
+    jsonSchema: toJsonSchema(packageJsonCreateWithContentSchema),
+    description: "Create a draft skill package",
+  },
+  {
+    method: "PUT",
+    path: "/api/packages/agents/{scope}/{name}",
+    jsonSchema: toJsonSchema(packageJsonUpdateSchema),
+    description: "Update a draft agent package",
+  },
+  {
+    method: "PUT",
+    path: "/api/packages/integrations/{scope}/{name}",
+    jsonSchema: toJsonSchema(packageJsonUpdateSchema),
+    description: "Update a draft integration package",
+  },
+  {
+    method: "PUT",
+    path: "/api/packages/mcp-servers/{scope}/{name}",
+    jsonSchema: toJsonSchema(packageJsonUpdateSchema),
+    description: "Update a draft mcp-server package",
+  },
+  {
+    method: "PUT",
+    path: "/api/packages/skills/{scope}/{name}",
+    jsonSchema: toJsonSchema(packageJsonUpdateSchema),
+    description: "Update a draft skill package",
+  },
+
+  {
+    method: "POST",
+    path: "/api/packages/agents/{scope}/{name}/versions",
+    jsonSchema: toJsonSchema(createVersionBodySchema),
+    description: "Publish a version from the agents draft",
+  },
+  {
+    method: "POST",
+    path: "/api/packages/integrations/{scope}/{name}/versions",
+    jsonSchema: toJsonSchema(createVersionBodySchema),
+    description: "Publish a version from the integrations draft",
+  },
+  {
+    method: "POST",
+    path: "/api/packages/mcp-servers/{scope}/{name}/versions",
+    jsonSchema: toJsonSchema(createVersionBodySchema),
+    description: "Publish a version from the mcp-servers draft",
+  },
+  {
+    method: "POST",
+    path: "/api/packages/skills/{scope}/{name}/versions",
+    jsonSchema: toJsonSchema(createVersionBodySchema),
+    description: "Publish a version from the skills draft",
   },
 
   // ─── Package Import & Fork ──────────────────────────────────────────────
@@ -372,7 +600,132 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     jsonSchema: toJsonSchema(updateConnectionSchema),
     description: "Update integration connection metadata",
   },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/auths/{authKey}/connect/session",
+    jsonSchema: toJsonSchema(connectSessionSchema),
+    description: "Mint a hosted connect-portal session",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/connect/submit",
+    jsonSchema: toJsonSchema(connectSubmitSchema),
+    description: "Submit credentials from the hosted connect portal",
+  },
+  {
+    method: "PUT",
+    path: "/api/integrations/{packageId}/auths/{authKey}/default-client",
+    jsonSchema: toJsonSchema(setDefaultClientSchema),
+    description: "Select the default OAuth client for an integration auth",
+  },
+
+  // ─── Member integration pins (routes/me.ts) ─────────────────────────────
+  {
+    method: "PUT",
+    path: "/api/me/integration-pins",
+    jsonSchema: toJsonSchema(upsertMemberPinSchema),
+    description: "Upsert the caller's integration connection pin",
+  },
+
+  // ─── Unattended install bootstrap ───────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/auth/bootstrap/redeem",
+    jsonSchema: toJsonSchema(bootstrapRedeemSchema),
+    description: "Redeem AUTH_BOOTSTRAP_TOKEN to claim instance ownership",
+  },
+
+  // ─── Model-provider OAuth pairing ───────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/model-providers-oauth/pairing",
+    jsonSchema: toJsonSchema(createPairingBody),
+    description: "Mint a connect-helper pairing token",
+  },
+  {
+    method: "POST",
+    path: "/api/model-providers-oauth/pair/redeem",
+    jsonSchema: toJsonSchema(importBody),
+    description: "Redeem a pairing token with provider credentials",
+  },
 ];
+
+/**
+ * Endpoints that declare an `application/json` request body in the spec but are
+ * deliberately NOT compared against a Zod schema. Every JSON body in the spec
+ * must appear either in the registry above (core), in a module's
+ * `openApiSchemas()`, or here — `scripts/verify-openapi.ts` §4b fails otherwise.
+ *
+ * This mirrors `EXEMPT_SCHEMAS` in `response-type-registry.ts`, which does the
+ * same job for response schemas. The point of both is that the registries are
+ * opt-in: without a coverage check, a launch surface can drift from its
+ * documented body and nothing notices. An exemption is a decision, so it must
+ * carry the reason it is one.
+ *
+ * Keys are `"METHOD /spec/path"` — the spec's templated path, not the Hono one.
+ */
+export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
+  // ─── Bodies validated somewhere other than a comparable Zod object ──────
+  //
+  // The two inline-run surfaces guard the wire shape only: they defer
+  // `manifest` / `prompt` to the preflight as optional `z.unknown()`, while the
+  // spec declares both required and typed. A field-by-field comparison would
+  // report that division of labour as drift.
+  "POST /api/runs/inline":
+    "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
+  "POST /api/runs/inline/validate":
+    "wire-shape guard only; manifest/prompt are z.unknown() and validated by the run preflight",
+  // The finalize body is deliberately permissive: it reports the outcome of an
+  // already-completed run, so a malformed field must degrade to absent rather
+  // than 400 a run that has no way to retry. See routes/runs-events.ts.
+  "POST /api/runs/{runId}/events/finalize":
+    "tolerance-by-design body: fields degrade to absent instead of rejecting an already-finished run",
+
+  // ─── Empty bodies (documented for shape, never parsed) ──────────────────
+  "POST /api/runs/{runId}/events/heartbeat":
+    "empty body — the HMAC covers the zero-length payload; the handler reads nothing",
+  "POST /api/integrations/{packageId}/activate":
+    "empty body — activation is a flag upsert with no parameters",
+
+  // ─── Not ours to validate: framework- or provider-owned wire ────────────
+  //
+  // Better Auth owns these routes (plugin-registered under /api/auth/*); the
+  // body is parsed by better-call, and no Zod schema exists in this repo to
+  // compare against.
+  "POST /api/auth/sign-in/email": "Better Auth plugin route; body parsed by better-call, no Zod",
+  "POST /api/auth/sign-up/email": "Better Auth plugin route; body parsed by better-call, no Zod",
+  "POST /api/auth/device/code": "Better Auth device-grant route (RFC 8628); no Zod in this repo",
+  "POST /api/auth/cli/token": "Better Auth CLI-grant route; no Zod in this repo",
+  "POST /api/auth/cli/revoke": "Better Auth CLI-grant route; no Zod in this repo",
+  "POST /api/auth/cli/sessions/revoke": "Better Auth CLI-session route; no Zod in this repo",
+  // The LLM proxy forwards the provider's own request envelope verbatim; the
+  // schema is the provider's, and re-declaring it as Zod would fork it. That is
+  // true of every shape in `LLM_PROXY_ROUTES` by construction — a shape is in
+  // that table precisely because the proxy passes it through — so the keys are
+  // DERIVED from it rather than spelled out a third time beside the mount
+  // (`routes/llm-proxy.ts`) and the document (`openapi/paths/llm-proxy.ts`),
+  // both of which already read the table. A fourth shape gets its mount, its
+  // path entry and this exemption in one edit.
+  ...Object.fromEntries(
+    (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).map((shape) => [
+      `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
+      "verbatim provider passthrough; the body schema is the upstream provider's, not ours",
+    ]),
+  ),
+  // JSON-RPC 2.0 envelope dispatched by the MCP server; the method-level
+  // params are validated per tool, not by one body schema.
+  "POST /api/mcp/o/{org}":
+    "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
+
+  // ─── Module-owned surfaces with no single comparable body ───────────────
+  //
+  // Listed here rather than in the module because the coverage check reads one
+  // map; the owning module is named in each reason.
+  "POST /api/chat":
+    "@appstrate/module-chat streaming turn endpoint; the body is the AI-SDK UI message envelope, not a hand-written Zod object",
+  "POST /api/billing/webhooks":
+    "@appstrate/module-ee Stripe webhook receiver; the raw text is what the signature covers, so the handler never parses JSON and there is no Zod object to compare",
+};
 
 /**
  * Build the full Zod schema registry by merging core schemas with module contributions.

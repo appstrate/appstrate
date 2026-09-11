@@ -12,6 +12,7 @@
  */
 
 import type { ReactNode } from "react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, PanelLeft, Search, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -43,6 +44,7 @@ export function ShellSidebar({
   contentClassName?: string;
 }) {
   const { t } = useTranslation();
+  const { can } = usePermissions();
   const location = useLocation();
   // The page route tree deliberately renders the modal's background location.
   // The address bar is therefore the source of truth for this one global
@@ -74,7 +76,9 @@ export function ShellSidebar({
           inside the context switcher. It sits above the user boundary and
           represents the settings overlay as the active destination. */}
       <SidebarFooter className="gap-0 p-0">
-        <SidebarMenu className="px-2 pb-2">
+        {/* Gated like every other destination: a caller without `org:read`
+            lands on a wall of 403s, so the entry is simply absent. */}
+        <SidebarMenu className="px-2 pb-2" hidden={!can("org:read")}>
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={settingsActive} tooltip={t("nav.settings")}>
               {settingsActive ? (

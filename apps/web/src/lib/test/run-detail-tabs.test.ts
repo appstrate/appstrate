@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { RUN_DETAIL_TABS, effectiveRunDetailTab, initialRunDetailTab } from "../run-detail-tabs";
+import { RUN_DETAIL_TABS, initialRunDetailTab, effectiveRunDetailTab } from "../run-detail-tabs";
 
 const available = (
   overrides: Partial<{
@@ -15,6 +15,7 @@ const available = (
   hasResults: false,
   ...overrides,
 });
+
 describe("run detail tabs", () => {
   it("exposes Overview first, followed by Journal and Results", () => {
     expect(RUN_DETAIL_TABS).toEqual(["overview", "journal", "results"]);

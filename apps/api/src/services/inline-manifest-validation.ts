@@ -11,7 +11,9 @@
  *
  * Pure function — no DB, no env lookup. Caller passes the limits.
  *
- * See docs/specs/INLINE_RUNS.md §6.
+ * The inline-run surface is described in `apps/api/src/routes/runs.ts`
+ * (`POST /api/runs/inline`) and its OpenAPI path; there is no `docs/specs/`
+ * directory in this repo.
  */
 
 import { validateManifest } from "@appstrate/core/validation";
@@ -19,7 +21,7 @@ import type { Manifest } from "@appstrate/core/validation";
 import { extractSkillIdsFromManifest } from "./../lib/manifest-utils.ts";
 import type { InlineRunLimits } from "./run-limits.ts";
 
-export interface InlineManifestValidationResult {
+interface InlineManifestValidationResult {
   valid: boolean;
   errors: string[];
   manifest?: Manifest;
@@ -27,7 +29,7 @@ export interface InlineManifestValidationResult {
   canonicalManifestJson?: string;
 }
 
-export interface InlineManifestValidationInput {
+interface InlineManifestValidationInput {
   manifest: unknown;
   prompt: unknown;
   limits: InlineRunLimits;

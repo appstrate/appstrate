@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getEnv, _resetCacheForTesting } from "../src/index.ts";
 
+/** Every variable a test below mutates — `restore()` cleans only what is named here. */
 const TRACKED = [
   "BETTER_AUTH_SECRET",
   "BETTER_AUTH_ACTIVE_KID",
@@ -15,6 +18,16 @@ const TRACKED = [
   "AUTH_DISABLE_ORG_CREATION",
   "TRUST_PROXY",
   "USERCONTENT_URL",
+  "PI_IMAGE",
+  "SIDECAR_IMAGE",
+  "APP_VERSION",
+  "FILE_MAX_BYTES",
+  "FILE_RETENTION_DAYS",
+  "RUN_MAX_FILES",
+  "WORKSPACE_MAX_FILES_BYTES",
+  "EGRESS_ALLOW_INTERNAL_HOSTS",
+  "MODULES",
+  "RUN_ADAPTER",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -40,6 +53,9 @@ function setBaseEnv(): void {
   delete process.env.APP_URL;
   delete process.env.BETTER_AUTH_ACTIVE_KID;
   delete process.env.USERCONTENT_URL;
+  delete process.env.PI_IMAGE;
+  delete process.env.SIDECAR_IMAGE;
+  delete process.env.APP_VERSION;
 }
 
 describe("BETTER_AUTH_SECRETS namespace-collision scrub", () => {
@@ -308,6 +324,93 @@ describe("APP_URL is the canonical public origin", () => {
   });
 });
 
+// Behind a reverse proxy, `TRUST_PROXY=false` makes every caller resolve to
+// the proxy's own address, so per-IP limits and audit records address the
+// whole instance as one client. Production plus an `APP_URL` that is not
+// plain-http loopback IS behind a proxy — the platform terminates no TLS.
+describe("TRUST_PROXY must name a hop count behind a production proxy", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("rejects TRUST_PROXY=false in production behind a proxy", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "false";
+    expect(() => getEnv()).toThrow(
+      /TRUST_PROXY must name the reverse-proxy hop count in production/,
+    );
+  });
+
+  it("rejects the default (unset) the same way — `false` is the default", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    delete process.env.TRUST_PROXY;
+    expect(() => getEnv()).toThrow(
+      /TRUST_PROXY must name the reverse-proxy hop count in production/,
+    );
+  });
+
+  it("rejects the `0` spelling — client-ip.ts reads it as zero trusted hops", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "0";
+    expect(() => getEnv()).toThrow(
+      /TRUST_PROXY must name the reverse-proxy hop count in production/,
+    );
+  });
+
+  it("accepts a hop count in production", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "1";
+    expect(getEnv().TRUST_PROXY).toBe("1");
+  });
+
+  it('accepts `"true"` in production (one hop)', () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "true";
+    expect(getEnv().TRUST_PROXY).toBe("true");
+  });
+
+  it("accepts TRUST_PROXY=false outside production", () => {
+    process.env.NODE_ENV = "development";
+    process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "false";
+    expect(getEnv().TRUST_PROXY).toBe("false");
+  });
+
+  // The layout the CLI's local Tier 1/2/3 install and
+  // `scripts/health-container-e2e.sh` boot: the production image on plain-http
+  // loopback with nothing in front of it.
+  it("accepts TRUST_PROXY=false in production on a plain-http loopback APP_URL", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "http://127.0.0.1:3317";
+    process.env.TRUST_PROXY = "false";
+    expect(getEnv().TRUST_PROXY).toBe("false");
+  });
+
+  // `https://localhost` still means a proxy terminated TLS in front.
+  it("rejects TRUST_PROXY=false in production on an https loopback APP_URL", () => {
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://localhost:3000";
+    process.env.TRUST_PROXY = "false";
+    expect(() => getEnv()).toThrow(
+      /TRUST_PROXY must name the reverse-proxy hop count in production/,
+    );
+  });
+});
+
 // USERCONTENT_URL is the origin agent-authored HTML previews are served from.
 // Its presence grants no extra execution context — `mayServeActiveHtml` serves
 // active HTML only for a proven iframe load, in every mode. What a value
@@ -411,6 +514,7 @@ describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
   it("requires https:// when NODE_ENV=production (same rule APP_URL carries)", () => {
     process.env.NODE_ENV = "production";
     process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "1";
     process.env.USERCONTENT_URL = "http://usercontent.example.com";
     expect(() => getEnv()).toThrow(/USERCONTENT_URL must use https:\/\/ when NODE_ENV=production/);
   });
@@ -418,6 +522,7 @@ describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
   it("accepts https:// in production", () => {
     process.env.NODE_ENV = "production";
     process.env.APP_URL = "https://app.example.com";
+    process.env.TRUST_PROXY = "1";
     process.env.USERCONTENT_URL = "https://usercontent.example.com";
     expect(getEnv().USERCONTENT_URL).toBe("https://usercontent.example.com");
   });
@@ -427,5 +532,100 @@ describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
     process.env.APP_URL = "http://127.0.0.1:3000";
     process.env.USERCONTENT_URL = "http://localhost:3000";
     expect(getEnv().USERCONTENT_URL).toBe("http://localhost:3000");
+  });
+});
+
+// The full case table for the rule itself lives on the pure function, in
+// `packages/core/test/image-ref.test.ts`. What is left here is the wiring: that
+// the schema calls it at all, and that it feeds it APP_VERSION — the value the
+// trio rule added, and the only way a *matched pair* can now abort boot.
+//
+// Plus the trios the repo itself boots. Those belong here and not only on the
+// pure function, because "does this configuration start the platform?" is a
+// question about `getEnv()`, and the two configurations below — the
+// health-container e2e job and the alias tag families `release.yml` publishes —
+// were both aborting boot while every case on the pure function passed.
+describe("APP_VERSION / PI_IMAGE / SIDECAR_IMAGE are a version contract", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("all three unset is valid — the defaults are the matching dev triple", () => {
+    expect(getEnv().PI_IMAGE).toBe("appstrate-pi:latest");
+    expect(getEnv().SIDECAR_IMAGE).toBe("appstrate-sidecar:latest");
+  });
+
+  it("aborts boot when the runtime pair is one release behind the platform", () => {
+    process.env.APP_VERSION = "v1.0.0-beta.52";
+    process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51";
+    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
+    expect(() => getEnv()).toThrow(/platform build 1\.0\.0-beta\.52.*Out of step: the platform/s);
+  });
+
+  it("anchors the platform-outlier issue on a variable the operator can set", () => {
+    // `oddOneOut` has three values. In this trio the two images agree with each
+    // other and disagree with the platform, so `oddOneOut === "platform"` and
+    // BOTH images have to move. The path used to be a two-way ternary that sent
+    // this case to SIDECAR_IMAGE — the one variable the message says is not
+    // individually at fault — and nothing asserted the path, so it went unseen.
+    process.env.APP_VERSION = "v1.0.0-beta.52";
+    process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51";
+    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
+
+    // Match the PATH prefix only. The message body legitimately names all three
+    // variables, so asserting over the whole line proves nothing.
+    let paths: string[] = [];
+    try {
+      getEnv();
+    } catch (err) {
+      paths = [...String((err as Error).message).matchAll(/^\s*- ([A-Z_]+):/gm)].map(
+        (m) => m[1] as string,
+      );
+    }
+    expect(paths, "no issue path parsed — the error format changed").not.toEqual([]);
+    expect(paths).toContain("PI_IMAGE");
+    expect(paths).not.toContain("SIDECAR_IMAGE");
+  });
+
+  it("boots the health-container e2e trio (APP_VERSION=health-container-e2e, images :local)", () => {
+    // scripts/health-container-e2e.sh + test/setup/docker-compose.health-e2e.yml,
+    // verbatim. This is a CI job: if it cannot get past getEnv(), the container
+    // never reaches its own healthcheck.
+    process.env.APP_VERSION = "health-container-e2e";
+    process.env.PI_IMAGE = "appstrate-health-e2e:local";
+    process.env.SIDECAR_IMAGE = "appstrate-health-e2e:local";
+    expect(getEnv().PI_IMAGE).toBe("appstrate-health-e2e:local");
+  });
+
+  for (const tag of ["latest", "1.0", "sha-abc1234"]) {
+    it(`boots a released platform against runtime images pinned to :${tag}`, () => {
+      // `release.yml` publishes `{{version}}`, `{{major}}.{{minor}}`,
+      // `sha-<sha>` and `latest` for the same image, and every shipped compose
+      // file derives all three images from one ${APPSTRATE_VERSION}. The
+      // platform's APP_VERSION is a git ref name and can only ever equal a
+      // `{{version}}` tag, so these trios are coherent.
+      process.env.APP_VERSION = "v1.0.0-beta.51";
+      process.env.PI_IMAGE = `ghcr.io/appstrate/appstrate-pi:${tag}`;
+      process.env.SIDECAR_IMAGE = `ghcr.io/appstrate/appstrate-sidecar:${tag}`;
+      expect(getEnv().SIDECAR_IMAGE).toBe(`ghcr.io/appstrate/appstrate-sidecar:${tag}`);
+    });
+  }
+
+  it("still aborts boot when the two runtime refs sit in different tag families", () => {
+    process.env.APP_VERSION = "v1.0.0-beta.51";
+    process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:latest";
+    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
+    expect(() => getEnv()).toThrow(
+      /PI_IMAGE tag latest.*Out of step: PI_IMAGE and SIDECAR_IMAGE, which disagree with each other/s,
+    );
   });
 });

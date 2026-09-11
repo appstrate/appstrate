@@ -34,7 +34,7 @@ export const runUpdateEventSchema = z.object({
   userId: z.string().nullable(),
   endUserId: z.string().nullable(),
   orgId: z.string(),
-  applicationId: z.string(),
+  spaceId: z.string(),
   scheduleId: z.string().nullable(),
   error: z.string().nullable(),
   startedAt: z.string().nullable(),
@@ -53,7 +53,7 @@ export const runLogEventSchema = z.object({
   id: z.number(),
   runId: z.string(),
   orgId: z.string(),
-  applicationId: z.string().nullable(),
+  spaceId: z.string().nullable(),
   type: z.string(),
   level: z.enum(["debug", "info", "warn", "error"]),
   event: z.string().nullable(),
@@ -70,7 +70,7 @@ export type RunLogEvent = z.infer<typeof runLogEventSchema>;
 export const runMetricEventSchema = z.object({
   runId: z.string(),
   orgId: z.string(),
-  applicationId: z.string(),
+  spaceId: z.string(),
   packageId: z.string(),
   // Inner object keeps snake_case keys (shallow camelize). Reuse the
   // canonical token-usage schema rather than redefining it.
@@ -94,11 +94,19 @@ export const connectionUpdateEventSchema = z.object({
   authKey: z.string().nullable(),
   userId: z.string().nullable(),
   endUserId: z.string().nullable(),
-  applicationId: z.string(),
+  spaceId: z.string(),
   // NULL on DELETE (the OLD row carries no live reconnection flag).
   needsReconnection: z.boolean().nullable(),
   deleted: z.boolean(),
 });
+/**
+ * Only ever named as the `connection_update` arm of `RealtimeEvent` below —
+ * no consumer imports it, they narrow the union on `event` and read `data`.
+ * Part of that union's contract rather than an independent export; see
+ * `knip.config.ts` on `@typeContract`.
+ *
+ * @typeContract
+ */
 export type ConnectionUpdateEvent = z.infer<typeof connectionUpdateEventSchema>;
 
 /**
@@ -108,13 +116,19 @@ export type ConnectionUpdateEvent = z.infer<typeof connectionUpdateEventSchema>;
  * state: the payload identifies the owner for fan-out filtering and the
  * consumer refetches the session list (stale-while-revalidate), so the DTO
  * stays single-sourced in the chat routes. The payload deliberately omits
- * `application_id` — `chat_sessions` is org+user scoped, not app scoped.
+ * `space_id` — `chat_sessions` is org+user scoped, not space scoped.
  */
 export const chatSessionUpdateEventSchema = z.object({
   sessionId: z.string(),
   orgId: z.string(),
   userId: z.string(),
 });
+/**
+ * Same position as `ConnectionUpdateEvent` above: the `chat_session_update`
+ * arm of `RealtimeEvent`, reached by narrowing rather than by name.
+ *
+ * @typeContract
+ */
 export type ChatSessionUpdateEvent = z.infer<typeof chatSessionUpdateEventSchema>;
 
 /**
@@ -147,7 +161,7 @@ export function runUpdateToRunPatch(evt: RunUpdateEvent): Partial<RunWireDto> {
     userId: evt.userId,
     endUserId: evt.endUserId,
     orgId: evt.orgId,
-    applicationId: evt.applicationId,
+    spaceId: evt.spaceId,
     scheduleId: evt.scheduleId,
     error: evt.error,
     started_at: evt.startedAt,

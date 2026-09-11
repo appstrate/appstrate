@@ -1,14 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { llmProxyUrlPath } from "@appstrate/runner-pi";
+
 /**
  * LLM proxy endpoints — server-side model injection for remote-backed
- * AFPS runs (docs/specs/REMOTE_CLI_EXECUTION_SPEC.md §Phase 3).
+ * AFPS runs. Route implementation: `apps/api/src/routes/llm-proxy.ts`.
  *
  * Three protocol families ship today; each gets its own concrete endpoint
  * so callers hit the upstream shape they already know (OpenAI Chat
- * Completions, Anthropic Messages, Mistral Chat Completions). Additional
- * families land as new path entries — the route surface stays concrete
- * per the spec.
+ * Completions, Anthropic Messages, Mistral Chat Completions).
+ *
+ * The path KEYS are derived from `LLM_PROXY_ROUTES` (`@appstrate/runner-pi`),
+ * the same table `routes/llm-proxy.ts` mounts from — they are not spelled out
+ * again here. That is load-bearing rather than tidy: `verify-openapi` cannot
+ * read the route file (the mounted path is a call, not a literal), so it lists
+ * that file in `SKIP_FILES` and allowlists these three paths on the spec side.
+ * With both sides reading one table, a change to a `baseSuffix` moves the
+ * mounted route and this document together, and the gate's blindness costs
+ * nothing. Spelling the paths here by hand is what would let the published
+ * contract drift from a live endpoint with every check still green.
  */
 
 const baseParameters = [
@@ -73,6 +83,16 @@ const baseResponses = {
       "method was used (cookie sessions and any unknown/unrecognized auth " +
       "strategy are rejected; bearer only).",
   },
+  "409": {
+    description:
+      "`org_deleting` — the organization's deletion is reserved, so no new " +
+      "metered usage is admitted. RFC 9457 problem+json.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+      },
+    },
+  },
   "413": {
     description:
       "Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced " +
@@ -88,7 +108,7 @@ const baseResponses = {
 } as const;
 
 export const llmProxyPaths = {
-  "/api/llm-proxy/openai-completions/v1/chat/completions": {
+  [`/api/llm-proxy${llmProxyUrlPath("openai-completions")}`]: {
     post: {
       operationId: "llmProxyOpenaiChatCompletions",
       tags: ["LLM Proxy"],
@@ -133,7 +153,7 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
-  "/api/llm-proxy/anthropic-messages/v1/messages": {
+  [`/api/llm-proxy${llmProxyUrlPath("anthropic-messages")}`]: {
     post: {
       operationId: "llmProxyAnthropicMessages",
       tags: ["LLM Proxy"],
@@ -200,7 +220,7 @@ export const llmProxyPaths = {
       responses: baseResponses,
     },
   },
-  "/api/llm-proxy/mistral-conversations/v1/chat/completions": {
+  [`/api/llm-proxy${llmProxyUrlPath("mistral-conversations")}`]: {
     post: {
       operationId: "llmProxyMistralChatCompletions",
       tags: ["LLM Proxy"],

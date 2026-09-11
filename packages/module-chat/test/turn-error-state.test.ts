@@ -12,16 +12,15 @@ const t = (key: string) => key;
  * `turnErrorState` reads an assistant-ui message. A message with no bound
  * source message falls back to itself, so a plain literal reaches the persisted
  * path — provided it carries what `turnMetadataFromMessage` requires to accept
- * the envelope at all: `metadata.appstrate.turn` with a known engine and the
- * three step counters. `turn()` supplies those so each test states only the
- * error fields it is about.
+ * the envelope at all: `metadata.appstrate.turn` with the three step counters.
+ * `turn()` supplies those so each test states only the error fields it is about.
  */
 const message = (m: Record<string, unknown>) => m as never;
 
 const turn = (fields: Record<string, unknown>) => ({
   metadata: {
     appstrate: {
-      turn: { engine: "ai-sdk", stepCount: 1, maxSteps: 30, maxStepsReached: false, ...fields },
+      turn: { stepCount: 1, maxSteps: 30, maxStepsReached: false, ...fields },
     },
   },
 });
@@ -56,6 +55,47 @@ describe("turnErrorState", () => {
     expect(
       turnErrorState(message(turn({ finishReason: "error", errorText: "boom" })), t),
     ).toMatchObject({ text: "turn.error.unknown" });
+  });
+
+  it("surfaces the cause of a deadline turn that was failing all along", () => {
+    // The deadline notice is a real persisted text part rendered above this
+    // alert, so the user reads BOTH: "this turn hit its time limit" and why it
+    // was going nowhere. Retry follows the cause, not the ceiling.
+    expect(
+      turnErrorState(
+        message(
+          turn({
+            finishReason: "deadline",
+            errorCategory: "upstream_unavailable",
+            errorRetryable: true,
+            requestId: "req_slow1",
+          }),
+        ),
+        t,
+      ),
+    ).toEqual({ text: "turn.error.upstreamUnavailable", retryable: true, requestId: "req_slow1" });
+  });
+
+  it("takes retryable from the cause on a deadline turn, not from the deadline", () => {
+    expect(
+      turnErrorState(
+        message(
+          turn({
+            finishReason: "deadline",
+            errorCategory: "credential_unavailable",
+            errorRetryable: false,
+          }),
+        ),
+        t,
+      ),
+    ).toMatchObject({ text: "turn.error.credentialUnavailable", retryable: false });
+  });
+
+  it("adds no sentence to a deadline turn that carried no cause", () => {
+    // Nothing failed — the turn simply ran out of clock, and the notice already
+    // says so. A generic "generation failed" here would contradict it and read
+    // as a second, different verdict on the same turn.
+    expect(turnErrorState(message(turn({ finishReason: "deadline" })), t)).toBeNull();
   });
 
   it("localizes an in-stream failure from its marker", () => {

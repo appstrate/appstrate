@@ -13,7 +13,11 @@ import {
   getOrgName,
 } from "../services/invitations.ts";
 import { addMember, getOrgById } from "../services/organizations.ts";
+import { applySpaceAssignments } from "../services/space-assignments.ts";
+import { recordAudit } from "../services/audit.ts";
+import { getClientIpFromRequest } from "../lib/client-ip.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
+import { listedOrgPermissions } from "../lib/permissions.ts";
 
 const router = new Hono();
 
@@ -59,6 +63,7 @@ router.get("/:token/info", async (c) => {
     email: invitation.email,
     org_name: orgName,
     role: invitation.role,
+    space_assignments: invitation.spaceAssignments,
     inviter_name: inviterName,
     expiresAt: invitation.expiresAt.toISOString(),
     is_new_user: !existingUser,
@@ -125,10 +130,19 @@ router.post("/:token/accept", async (c) => {
   // is reported as already-accepted. `addMember` is idempotent (it swallows the
   // unique violation), so an existing membership keeps the claim valid.
   const claimed = await db.transaction(async (tx) => {
-    const won = await markInvitationAccepted(invitation.id, session.user.id, tx);
-    if (!won) return false;
-    await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
-    return true;
+    const current = await markInvitationAccepted(invitation.id, tx);
+    if (!current) return null;
+    // The claim locks and returns the current grant, including edits committed
+    // since the initial token lookup. Never apply that earlier snapshot.
+    await addMember(current.orgId, session.user.id, current.role as AssignableOrgRole, tx);
+    const assignments = await applySpaceAssignments(tx, {
+      orgId: current.orgId,
+      userId: session.user.id,
+      addedBy: current.invitedBy,
+      assignments: current.spaceAssignments,
+      onMissing: "skip",
+    });
+    return { invitation: current, assignments };
   });
 
   if (!claimed) {
@@ -136,14 +150,50 @@ router.post("/:token/accept", async (c) => {
     throw gone("invitation_accepted", "Invitation already accepted");
   }
 
+  // Acceptance attribution. The `org_invitations` row records only THAT it was
+  // accepted — its `accepted_by` / `accepted_at` columns were dropped in
+  // migration 0055 because nothing read them, on the stated grounds that "who
+  // accepted it and when is in the audit log". Nothing wrote that audit row,
+  // so the claim was false and dropping the columns lost the attribution
+  // outright; this is the write that makes it true. It joins the three
+  // sibling invitation mutations (`org.invitation_created` / `_cancelled` /
+  // `_role_updated` in `routes/organizations.ts`) under the same
+  // `resourceType`. Recorded only AFTER the claim is won, so a loser of the
+  // concurrent race never logs an acceptance it did not perform.
+  //
+  // `recordAudit`, not `recordAuditFromContext`: this route is mounted BEFORE
+  // the platform auth + org-context middleware (the invitee is not yet a
+  // member of the org they are joining), so the context carries neither
+  // `orgId` nor `user` — the wrapper would attribute this to `system` and then
+  // drop the row for want of an orgId. Both come from the values this handler
+  // already verified. The insert is best-effort inside `recordAudit`: the
+  // membership is committed either way.
+  await recordAudit({
+    orgId: invitation.orgId,
+    actorType: "user",
+    actorId: session.user.id,
+    action: "org.invitation_accepted",
+    resourceType: "invitation",
+    resourceId: invitation.id,
+    after: {
+      email: invitation.email,
+      role: claimed.invitation.role,
+      space_assignments: claimed.assignments,
+    },
+    ip: getClientIpFromRequest(c.req.raw),
+    userAgent: c.req.header("user-agent") ?? null,
+  });
+
   // Bare joined-org resource — same shape as the items in GET /api/orgs
   // (issue #657). The web accept page reads `id` to pin the org store.
   return c.json({
     id: org.id,
     name: org.name,
     slug: org.slug,
-    role: invitation.role,
+    role: claimed.invitation.role,
+    permissions: listedOrgPermissions(claimed.invitation.role),
     createdAt: org.createdAt,
+    deleting_at: org.deletingAt,
   });
 });
 

@@ -22,26 +22,48 @@
  *         message: <human-readable>,
  *         // optional smuggles:
  *         candidateConnectionIds?: string[],
- *         connection_id?, missing_scopes?, owned_by_actor? }
+ *         connection_id?, missing_scopes?, owned_by_actor?,
+ *         auth_key?, required_scopes? }
  *     ] }
  *
  * Code path: agent-readiness.ts:151-158. Triggered by resolveRunPreflight
  * inside the run pipeline.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedMcpServer, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
-import { integrationConnections, applicationPackages } from "@appstrate/db/schema";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import {
+  seedAgent,
+  seedMcpServer,
+  seedPackage,
+  seedPackageVersion,
+  seedSpaceMember,
+  seedSpaceRole,
+} from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
+import { integrationConnections, spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
+import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
+import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
+import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import type {
+  AppstrateModule,
+  ModuleInitContext,
+  RunConnectionMissingParams,
+} from "@appstrate/core/module";
 
 const app = getTestApp();
 
@@ -116,6 +138,11 @@ interface ValidationFieldError {
   connection_id?: string;
   missing_scopes?: string[];
   owned_by_actor?: boolean;
+  auth_key?: string;
+  required_scopes?: string[];
+  connect_url?: string;
+  expires_at?: number;
+  package_id?: string;
 }
 
 interface ProblemDetails {
@@ -138,7 +165,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       source: "local",
       draftManifest: buildIntegrationManifest(id),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
   async function seedConnection(integrationId: string, userId: string): Promise<string> {
@@ -148,7 +175,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         integrationId: integrationId,
         authKey: "primary",
         accountId: `acct-${userId.slice(0, 6)}`,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
@@ -170,7 +197,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     // Deliberately NO connection seeded for the actor.
 
@@ -209,7 +236,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       // Declares the integration dependency but selects zero tools.
       draftManifest: buildAgentManifestNoTools([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedPackage({
       id: INTEGRATION,
       orgId: ctx.orgId,
@@ -217,7 +244,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       source: "local",
       draftManifest: buildRequiredIntegrationManifest(INTEGRATION),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
     // No connection seeded — the required auth must still block despite no tools.
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
@@ -241,7 +268,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION, SECOND_INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     await seedIntegration(SECOND_INTEGRATION);
     // Both integrations declared + installed, no connections.
@@ -277,7 +304,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
 
     // Seed TWO connections for the same actor + integration. No pin / no
@@ -318,7 +345,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
     // Second candidate (unbound) — its existence is what makes the resolver
@@ -345,6 +372,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // regression in the override→resolver wiring would re-fire 412 here.
     // (Downstream model-config errors surface as 400, not 412 — fine.)
     expect(retry.status).not.toBe(412);
+    expect(retry.status).toBeLessThan(500);
   });
 
   it("emits 412 with needs_reconnection + connection_id when actor's only candidate is flagged", async () => {
@@ -358,7 +386,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
 
     const [row] = await db
@@ -367,7 +395,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "stale" } }),
@@ -397,7 +425,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
 
   it("returns 412 integration_not_active when a declared integration is installed but DISABLED, even with a live connection", async () => {
     // The exact prod regression: a declared integration is switched off on the
-    // app (enabled=false) while a resolvable connection lingers. The connection
+    // space (enabled=false) while a resolvable connection lingers. The connection
     // gate alone would PASS (the connection resolves), so the run used to launch
     // and silently degrade — the runtime spawn resolver skips the inactive
     // integration and the agent runs without its tools. Readiness must reject.
@@ -407,18 +435,18 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     // A live, resolvable connection exists — the connection gate would pass.
     await seedConnection(INTEGRATION, ctx.user.id);
-    // Operator disables the integration on the application.
+    // Operator disables the integration on the space.
     await db
-      .update(applicationPackages)
+      .update(spacePackages)
       .set({ enabled: false })
       .where(
         and(
-          eq(applicationPackages.applicationId, ctx.defaultAppId),
-          eq(applicationPackages.packageId, INTEGRATION),
+          eq(spacePackages.spaceId, ctx.defaultSpaceId),
+          eq(spacePackages.packageId, INTEGRATION),
         ),
       );
 
@@ -436,15 +464,15 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.code).toBe("integration_not_active");
   });
 
-  it("returns 412 integration_not_active when a declared integration is NOT installed on the app", async () => {
+  it("returns 412 integration_not_active when a declared integration is NOT installed on the space", async () => {
     await seedAgent({
       id: AGENT,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
-    // Seed the integration PACKAGE but do NOT install it on the application.
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    // Seed the integration PACKAGE but do NOT install it on the space.
     await seedPackage({
       id: INTEGRATION,
       orgId: ctx.orgId,
@@ -466,6 +494,49 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err!.code).toBe("integration_not_active");
   });
 
+  it("reports an inactive integration ONCE — no downstream not_connected", async () => {
+    // The install/enable gate is documented as failing fast "rather than a
+    // downstream not_connected", and it now does: the connection resolver
+    // applies no active filter of its own, so an inactive integration used to
+    // collect BOTH errors — and a caller opted into the connect-offer relay got
+    // a live connect link for an integration nobody can use in this space.
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    // No connection for the actor: without the skip this is exactly the shape
+    // that produced a second `not_connected` on the same field.
+    await db
+      .update(spacePackages)
+      .set({ enabled: false })
+      .where(
+        and(
+          eq(spacePackages.spaceId, ctx.defaultSpaceId),
+          eq(spacePackages.packageId, INTEGRATION),
+        ),
+      );
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(ctx),
+        "Content-Type": "application/json",
+        [RUN_CONNECT_OFFERS_HEADER]: "1",
+      },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(412);
+    const body = (await res.json()) as ProblemDetails;
+    const forIntegration = body.errors!.filter((e) => e.field === `integrations.${INTEGRATION}`);
+    expect(forIntegration.map((e) => e.code)).toEqual(["integration_not_active"]);
+    expect(JSON.stringify(body)).not.toContain("connect/start");
+  });
+
   it("returns 412 integration_not_found when a declared integration package does not exist (#737)", async () => {
     // The agent declares `@runorg/svc` but no such package was ever seeded.
     // resolveOne would `fetchIntegrationManifest` → `not_found` → skip silently
@@ -477,7 +548,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     // Deliberately no integration package seeded.
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
@@ -507,7 +578,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     // A package with that id exists but is a SKILL, not an integration.
     await seedPackage({
       id: INTEGRATION,
@@ -539,7 +610,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     // Integration package of the right TYPE but with a manifest that fails
     // `integrationManifestSchema` (missing every required field).
     await seedPackage({
@@ -549,7 +620,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       source: "local",
       draftManifest: { not: "a valid integration manifest" },
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
@@ -577,7 +648,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     await seedConnection(INTEGRATION, ctx.user.id);
 
@@ -589,10 +660,11 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
 
     // Not the 412 envelope — readiness passed. (Downstream model-config
     // errors may still 400; that's a different code path.)
-    if (res.status === 412) {
-      const body = (await res.json()) as ProblemDetails;
-      expect(body.code).not.toBe("missing_integration_connection");
-    }
+    // 412 is reserved for the missing_integration_connection envelope, so
+    // "not 412" is the discriminating assertion; "< 500" keeps a crashed
+    // pipeline from passing as "readiness passed".
+    expect(res.status).not.toBe(412);
+    expect(res.status).toBeLessThan(500);
   });
 
   // ─── Bare `dependencies.integrations` (no integrations_configuration) ─
@@ -653,7 +725,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       version: "1.0.0",
       manifest: manifest as unknown as Record<string, unknown>,
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
   it("412s an agent that declares the dependency only, when the integration's default_tools make it active", async () => {
@@ -663,7 +735,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedDefaultToolsIntegration(INTEGRATION);
     // No connection — the integration WILL be spawned (default_tools), so the
     // cascade must demand a connection instead of treating it as inert.
@@ -692,7 +764,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedDefaultToolsIntegration(INTEGRATION);
     const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
     const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
@@ -721,7 +793,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     // No connection — and none required.
 
@@ -731,9 +803,470 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       body: JSON.stringify({}),
     });
 
-    if (res.status === 412) {
-      const body = (await res.json()) as ProblemDetails;
-      expect(body.code).not.toBe("missing_integration_connection");
+    // 412 is reserved for the missing_integration_connection envelope, so
+    // "not 412" is the discriminating assertion; "< 500" keeps a crashed
+    // pipeline from passing as "readiness passed".
+    expect(res.status).not.toBe(412);
+    expect(res.status).toBeLessThan(500);
+  });
+
+  // ─── Connect-offer relay (#1207) ───────────
+  //
+  // The preflight mints the hosted-connect session itself and hands it back on
+  // the error item, so a chat surface renders the connect card straight off the
+  // 412 with zero model action. Strictly opt-in: the header is what separates a
+  // caller that renders the card from one whose payload a model reads.
+  describe("connect_url relay", () => {
+    const OAUTH_INTEGRATION = "@runorg/oauth-svc";
+
+    async function seedOauthIntegration() {
+      await seedPackage({
+        id: OAUTH_INTEGRATION,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: localIntegrationManifest({
+          name: OAUTH_INTEGRATION,
+          serverName: MCP_SERVER,
+          version: "1.0.0",
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://provider.example.com/authorize",
+              tokenEndpoint: "https://provider.example.com/token",
+              defaultScopes: ["base"],
+            },
+          },
+          tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
+        }) as unknown as Record<string, unknown>,
+      });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
+      await seedAgent({
+        id: AGENT,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: buildAgentManifest([OAUTH_INTEGRATION]),
+      });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     }
+
+    async function launch(headers: Record<string, string>): Promise<ProblemDetails> {
+      const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(412);
+      return (await res.json()) as ProblemDetails;
+    }
+
+    it("carries a ready-to-open connect_url on not_connected when the caller opts in", async () => {
+      await seedOauthIntegration();
+      const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+
+      const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(err.code).toBe("not_connected");
+      expect(err.auth_key).toBe("primary");
+      // The agent selects `search`, whose `required_scopes.primary` is
+      // `search.read` — the relay phase the link is built on.
+      expect(err.required_scopes).toEqual(["search.read"]);
+      expect(err.connect_url).toStartWith("http");
+      expect(err.package_id).toBe(OAUTH_INTEGRATION);
+      expect(err.expires_at).toBeGreaterThan(Date.now());
+      // The link targets the hosted dispatcher, not a provider screen — the
+      // scope union and the oauth kickoff both happen at redemption.
+      expect(new URL(err.connect_url!).pathname).toBe("/api/integrations/connect/start");
+
+      // The claims are the security-relevant output: a URL that opens is
+      // worthless if it asks for the wrong scopes on the wrong auth. `scopes`
+      // must be the agent's own selection verbatim — the union with
+      // `default_scopes` (`base`) happens at redemption, not at the mint.
+      const token = new URL(err.connect_url!).searchParams.get("token");
+      expect(readConnectToken(token!)).toMatchObject({
+        org_id: ctx.orgId,
+        space_id: ctx.defaultSpaceId,
+        user_id: ctx.user.id,
+        package_id: OAUTH_INTEGRATION,
+        auth_key: "primary",
+        scopes: ["search.read"],
+      });
+    });
+
+    it("mints nothing without the header — the ordinary 412 is unchanged", async () => {
+      await seedOauthIntegration();
+      const body = await launch({});
+
+      const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(err.code).toBe("not_connected");
+      expect(err.connect_url).toBeUndefined();
+      expect(err.expires_at).toBeUndefined();
+      expect(err.package_id).toBeUndefined();
+      // The relay phase 1 shipped is untouched either way.
+      expect(err.auth_key).toBe("primary");
+    });
+
+    it("ignores a header value other than `1` — the opt-in is exact", async () => {
+      // A capability switch must be asked for in the documented spelling; a
+      // proxy's `0` or an echoed default must not turn it on by being non-empty.
+      await seedOauthIntegration();
+      for (const value of ["0", "true", "yes"]) {
+        const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: value });
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.connect_url, `header value ${value} opted in`).toBeUndefined();
+      }
+    });
+
+    /** A member of `ctx`'s org holding exactly `permissions` in the space. */
+    async function memberHolding(permissions: string[]): Promise<TestContext> {
+      const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      await seedSpaceMember({
+        spaceId: ctx.defaultSpaceId,
+        userId: member.id,
+        presetRole: null,
+        customRoleId: role.id,
+      });
+      return {
+        ...ctx,
+        user: { id: member.id, email: member.email, name: member.name },
+        cookie: member.cookie,
+      };
+    }
+
+    async function launchAs(actor: TestContext): Promise<ProblemDetails> {
+      const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(actor),
+          "Content-Type": "application/json",
+          [RUN_CONNECT_OFFERS_HEADER]: "1",
+        },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(412);
+      return (await res.json()) as ProblemDetails;
+    }
+
+    /** The one relay item this suite's fixtures always produce. */
+    function relayItem(body: ProblemDetails): ValidationFieldError {
+      return body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+    }
+
+    // The link is a bearer capability that connects AS the actor, so the actor
+    // must be one that could have minted it by hand — i.e. hold
+    // `integrations:connect`, the permission guarding the connect routes.
+    describe("permission gate at the request boundary", () => {
+      it("mints nothing for an actor without integrations:connect", async () => {
+        await seedOauthIntegration();
+        const body = await launchAs(await memberHolding(["agents:run"]));
+
+        // Not merely absent from the item we look at — absent from the whole
+        // envelope, so no other item smuggles one in.
+        expect(JSON.stringify(body)).not.toContain("connect/start");
+        for (const err of body.errors ?? []) {
+          expect(err.connect_url).toBeUndefined();
+          expect(err.expires_at).toBeUndefined();
+        }
+      });
+
+      it("mints for the same actor once it holds integrations:connect", async () => {
+        // Discriminating control: everything else about the request is equal,
+        // so the difference above is the permission and not the fixture.
+        await seedOauthIntegration();
+        const body = await launchAs(await memberHolding(["agents:run", "integrations:connect"]));
+
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.connect_url).toStartWith("http");
+      });
+    });
+
+    // `needs_reconnection` is minted under the same rule as an under-scoped
+    // connection: the remedy re-consents THAT row, so it is the owner's to run.
+    describe("needs_reconnection", () => {
+      /** A dead oauth2 connection, owned by `userId` and optionally shared. */
+      async function seedDeadConnection(userId: string, sharedWithOrg = false): Promise<string> {
+        const [row] = await db
+          .insert(integrationConnections)
+          .values({
+            integrationId: OAUTH_INTEGRATION,
+            authKey: "primary",
+            accountId: `acct-${userId.slice(0, 6)}`,
+            spaceId: ctx.defaultSpaceId,
+            userId,
+            endUserId: null,
+            credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "dead" } }),
+            scopesGranted: ["base", "search.read"],
+            needsReconnection: true,
+            sharedWithOrg,
+          })
+          .returning({ id: integrationConnections.id });
+        return row!.id;
+      }
+
+      it("mints a connect_url when the dead connection belongs to the caller", async () => {
+        await seedOauthIntegration();
+        const connectionId = await seedDeadConnection(ctx.user.id);
+        const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.code).toBe("needs_reconnection");
+        expect(err.owned_by_actor).toBe(true);
+        expect(err.connection_id).toBe(connectionId);
+        expect(err.connect_url).toStartWith("http");
+        // The claims re-consent the SAME row — without `connection_id` the
+        // callback INSERTs a duplicate instead of reviving the dead one.
+        const token = new URL(err.connect_url!).searchParams.get("token");
+        expect(readConnectToken(token!)).toMatchObject({
+          package_id: OAUTH_INTEGRATION,
+          auth_key: "primary",
+          connection_id: connectionId,
+          scopes: ["search.read"],
+        });
+      });
+
+      it("mints nothing when the dead connection is a colleague's shared row", async () => {
+        // Discriminating control for the case above: same code, same header,
+        // same permissions — only the owner differs. Minting here would let the
+        // caller re-consent somebody else's account.
+        await seedOauthIntegration();
+        const colleague = await createTestUser();
+        await addOrgMember(ctx.orgId, colleague.id, "member");
+        await seedSpaceMember({
+          spaceId: ctx.defaultSpaceId,
+          userId: colleague.id,
+          presetRole: "operator",
+          customRoleId: null,
+        });
+        await seedDeadConnection(colleague.id, true);
+
+        const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+        const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(err.code).toBe("needs_reconnection");
+        expect(err.owned_by_actor).toBe(false);
+        expect(err.connect_url).toBeUndefined();
+        expect(err.expires_at).toBeUndefined();
+      });
+    });
+
+    // `insufficient_scopes` is the third code a connect flow can clear, and its
+    // remedy is an upgrade of an EXISTING row — so the same ownership rule as
+    // `needs_reconnection` decides it, through the same route.
+    describe("insufficient_scopes", () => {
+      /**
+       * A LIVE oauth2 connection granted `base` only — short of the
+       * `search.read` the agent's `search` selection requires — owned by
+       * `userId` and optionally shared with the org.
+       */
+      async function seedUnderScopedConnection(
+        userId: string,
+        sharedWithOrg = false,
+      ): Promise<string> {
+        const [row] = await db
+          .insert(integrationConnections)
+          .values({
+            integrationId: OAUTH_INTEGRATION,
+            authKey: "primary",
+            accountId: `acct-${userId.slice(0, 6)}`,
+            spaceId: ctx.defaultSpaceId,
+            userId,
+            endUserId: null,
+            credentialsEncrypted: encryptCredentialEnvelope({
+              outputs: { access_token: "live-but-narrow" },
+            }),
+            scopesGranted: ["base"],
+            sharedWithOrg,
+          })
+          .returning({ id: integrationConnections.id });
+        return row!.id;
+      }
+
+      it("mints a connect_url upgrading the caller's own under-scoped connection", async () => {
+        await seedOauthIntegration();
+        const connectionId = await seedUnderScopedConnection(ctx.user.id);
+        const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
+
+        expect(err.code).toBe("insufficient_scopes");
+        expect(err.owned_by_actor).toBe(true);
+        expect(err.missing_scopes).toEqual(["search.read"]);
+        expect(err.connect_url).toStartWith("http");
+        // The claims widen the SAME row — without `connection_id` the callback
+        // INSERTs a second account and the narrow one is still what resolves.
+        const token = new URL(err.connect_url!).searchParams.get("token");
+        expect(readConnectToken(token!)).toMatchObject({
+          package_id: OAUTH_INTEGRATION,
+          auth_key: "primary",
+          connection_id: connectionId,
+          scopes: ["search.read"],
+        });
+      });
+
+      it("mints nothing when the under-scoped connection is a colleague's shared row", async () => {
+        // Discriminating control for the case above: same code, same header,
+        // same permissions — only the owner differs. Minting here would let the
+        // caller re-consent (and widen) somebody else's account.
+        await seedOauthIntegration();
+        const colleague = await createTestUser();
+        await addOrgMember(ctx.orgId, colleague.id, "member");
+        await seedSpaceMember({
+          spaceId: ctx.defaultSpaceId,
+          userId: colleague.id,
+          presetRole: "operator",
+          customRoleId: null,
+        });
+        await seedUnderScopedConnection(colleague.id, true);
+
+        const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
+        expect(err.code).toBe("insufficient_scopes");
+        expect(err.owned_by_actor).toBe(false);
+        expect(err.connect_url).toBeUndefined();
+        expect(err.expires_at).toBeUndefined();
+      });
+    });
+
+    // `block_user_connections` funnels a space onto one shared connection, and
+    // the relay must not hand out a link that walks around it. Its one
+    // carve-out is the same as `assertConnectionCreationAllowed`'s: an actor
+    // holding `integrations:configure` is precisely who is expected to create
+    // the shared connection the block exists to force everyone onto.
+    describe("block_user_connections", () => {
+      async function blockUserConnections() {
+        await db
+          .update(spacePackages)
+          .set({ blockUserConnections: true })
+          .where(
+            and(
+              eq(spacePackages.spaceId, ctx.defaultSpaceId),
+              eq(spacePackages.packageId, OAUTH_INTEGRATION),
+            ),
+          );
+      }
+
+      it("mints nothing for a member who may connect but may not configure", async () => {
+        await seedOauthIntegration();
+        await blockUserConnections();
+
+        const body = await launchAs(await memberHolding(["agents:run", "integrations:connect"]));
+        expect(relayItem(body).code).toBe("not_connected");
+        // Not merely absent from the item we look at — absent from the whole
+        // envelope, so no other item smuggles a way around the block in.
+        expect(JSON.stringify(body)).not.toContain("connect/start");
+      });
+
+      it("mints for the same actor once it also holds integrations:configure", async () => {
+        // Discriminating control: the block and the fixtures are identical, so
+        // the difference is the one permission and nothing else.
+        await seedOauthIntegration();
+        await blockUserConnections();
+
+        const body = await launchAs(
+          await memberHolding(["agents:run", "integrations:connect", "integrations:configure"]),
+        );
+        expect(relayItem(body).connect_url).toStartWith("http");
+      });
+    });
+
+    // SECURITY ORDERING — `validateAgentReadiness` emits `onRunConnectionMissing`
+    // BEFORE `attachConnectOffers` runs, and projects only field/code/title/
+    // message into the payload. A webhook delivery leaves the platform, so a
+    // bearer capability that connects AS the actor must never ride it. Proving
+    // that on a 412 that carries NO link proves nothing; this exercises the one
+    // case where the response really does carry one.
+    describe("webhook projection", () => {
+      let events: RunConnectionMissingParams[] = [];
+
+      const recorder: AppstrateModule = {
+        manifest: {
+          id: "test-connection-missing-recorder",
+          name: "Connection missing recorder",
+          version: "1.0.0",
+        },
+        async init() {},
+        events: {
+          onRunConnectionMissing: (params: RunConnectionMissingParams) => {
+            events.push(params);
+          },
+        },
+      };
+
+      function moduleCtx(): ModuleInitContext {
+        return {
+          redisUrl: null,
+          appUrl: "http://localhost:3000",
+          getSendMail: async () => async () => {},
+          getOrgOwnerEmails: async () => [],
+          getOrgMembers: async () => [],
+          getOrgName: async () => null,
+          services: {} as ModuleInitContext["services"],
+        };
+      }
+
+      // `emitEvent` fans out over the module-loader's own registry (`_modules`),
+      // which `getTestApp()` does not populate — so the recorder goes in through
+      // the same entry point the production boot path uses. The trailing
+      // `getTestApp()` calls re-register the RBAC snapshot that `resetModules()`
+      // nulls out, without which every permission-guarded route 403s.
+      beforeAll(async () => {
+        resetModules();
+        await loadModulesFromInstances([recorder], moduleCtx());
+        getTestApp();
+      });
+
+      afterAll(() => {
+        resetModules();
+        getTestApp();
+      });
+
+      beforeEach(() => {
+        events = [];
+      });
+
+      /** The fan-out is fire-and-forget (`void emitEvent`), so poll for it. */
+      async function emittedEvent(): Promise<RunConnectionMissingParams> {
+        for (let attempt = 0; attempt < 200; attempt++) {
+          if (events.length > 0) return events[0]!;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        throw new Error("onRunConnectionMissing was never emitted");
+      }
+
+      it("keeps the emitted event link-free while the 412 itself carries the link", async () => {
+        await seedOauthIntegration();
+        const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+
+        // Precondition, not decoration: without a minted link on the response
+        // the negative assertion below would hold for the wrong reason.
+        expect(relayItem(body).connect_url).toStartWith("http");
+
+        const event = await emittedEvent();
+        expect(event.packageId).toBe(AGENT);
+        expect(event.actor).toEqual({ type: "user", id: ctx.user.id });
+        const item = event.errors.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
+        expect(item.code).toBe("not_connected");
+        expect(item).not.toHaveProperty("connect_url");
+        expect(item).not.toHaveProperty("expires_at");
+        expect(item).not.toHaveProperty("package_id");
+        // And nothing anywhere else in the payload either.
+        expect(JSON.stringify(event)).not.toContain("connect/start");
+      });
+    });
+
+    it("mints nothing for a non-oauth2 auth even with the header", async () => {
+      // The hosted form needs a human to type a secret; a link that opens a
+      // blank form is not something the card can present as the remedy.
+      await seedAgent({
+        id: AGENT,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: buildAgentManifest([INTEGRATION]),
+      });
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+      await seedIntegration(INTEGRATION);
+
+      const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`)!;
+      expect(err.code).toBe("not_connected");
+      expect(err.connect_url).toBeUndefined();
+    });
   });
 });

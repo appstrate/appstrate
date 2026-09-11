@@ -73,8 +73,12 @@ describe("resolveCatalogDefaults", () => {
 
   describe("provider generation overrides", () => {
     it("keeps the OpenAI API capability while rejecting temperature on Codex", () => {
-      const openai = resolveCatalogDefaults("openai", "gpt-5.6-luna");
-      const codex = resolveCatalogDefaults("codex", "gpt-5.6-luna");
+      // An id the vendored catalog marks `temperature: "supported"` on the
+      // OpenAI API, so the `unsupported` below can only come from the Codex
+      // override. The 5.6 family no longer qualifies: the 2026-09-07 LiteLLM
+      // refresh (#1277) marks it unsupported on the API too.
+      const openai = resolveCatalogDefaults("openai", "gpt-5.4");
+      const codex = resolveCatalogDefaults("codex", "gpt-5.4");
 
       expect(openai.generation?.temperature).toBe("supported");
       expect(codex.generation?.temperature).toBe("unsupported");

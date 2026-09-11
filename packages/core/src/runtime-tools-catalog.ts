@@ -37,16 +37,17 @@ export type EventEmitterRuntimeTool = (typeof EVENT_EMITTER_RUNTIME_TOOLS)[numbe
  * leads the list (it materialises the run result) but is not auto-injected;
  * validation requires it only when an output schema is declared.
  *
- * `publish_document` is the odd one out: unlike the pure event emitters it
+ * `publish_file` is the odd one out: unlike the pure event emitters it
  * performs an HTTP upload of a workspace file to the platform, so it is built
  * with an injected uploader in the runtime entrypoint (not by
  * {@link buildRuntimeToolDefs}) — it is selectable (validation + editor) but
  * never appears in the standalone def builder.
+ *
+ * **Canonical ids only, and there is no second list.** A retired spelling does
+ * not come back here under any circumstance: it is dropped on read, and the
+ * drop is reported by {@link canonicalizeRuntimeToolIds} rather than swallowed.
  */
-export const SELECTABLE_RUNTIME_TOOLS = [
-  ...EVENT_EMITTER_RUNTIME_TOOLS,
-  "publish_document",
-] as const;
+export const SELECTABLE_RUNTIME_TOOLS = [...EVENT_EMITTER_RUNTIME_TOOLS, "publish_file"] as const;
 
 /** A tool the agent author may enable/disable. */
 export type SelectableRuntimeTool = (typeof SELECTABLE_RUNTIME_TOOLS)[number];
@@ -84,16 +85,73 @@ export const RUNTIME_TOOL_CATALOG: readonly RuntimeToolCatalogEntry[] = [
     description: "Upsert a named slot pinned into the system prompt on every run.",
   },
   {
-    id: "publish_document",
-    displayName: "Publish document",
-    description:
-      "Publish a file the agent created (e.g. an HTML report) as a durable run document.",
+    id: "publish_file",
+    displayName: "Publish file",
+    description: "Publish a file the agent created (e.g. an HTML report) as a durable run file.",
   },
 ];
 
-/** Type guard: is `value` a selectable runtime tool id? */
+// ---------------------------------------------------------------------------
+// Reading stored ids
+// ---------------------------------------------------------------------------
+
+/** Type guard: is `value` a selectable (canonical) runtime tool id? */
 export function isSelectableRuntimeTool(value: unknown): value is SelectableRuntimeTool {
   return (
     typeof value === "string" && (SELECTABLE_RUNTIME_TOOLS as readonly string[]).includes(value)
   );
+}
+
+/** Outcome of {@link canonicalizeRuntimeToolIds}. */
+export interface CanonicalizedRuntimeToolIds {
+  /** Canonical ids, in the author's order, de-duplicated. */
+  ids: SelectableRuntimeTool[];
+  /** Ids the platform could not resolve at all (retired outright, or a typo). */
+  dropped: string[];
+  /**
+   * True when {@link ids} differs from the input — a duplicate collapsed, or
+   * an unknown id dropped. Callers that rewrite stored bytes use this to leave
+   * an untouched manifest byte-identical.
+   */
+  changed: boolean;
+}
+
+/**
+ * Canonicalize a raw `runtime_tools` array read from a manifest: drop ids the
+ * platform does not know, collapse duplicates, and preserve the author's
+ * order.
+ *
+ * Every drop is REPORTED in {@link CanonicalizedRuntimeToolIds.dropped} rather
+ * than swallowed — that is what keeps a manifest naming a retired tool
+ * runnable while still telling its caller what was removed.
+ *
+ * There used to be an alias table mapping `publish_document` forward to
+ * `publish_file` (#1177), kept because `runtime_tools` is persisted inside
+ * agent manifests — including published ZIPs, which are immutable. It is gone:
+ * no system package ships that spelling, and no stored manifest carries it. A
+ * manifest that somehow did has the id DROPPED and reported here, never
+ * silently mistaken for another tool.
+ *
+ * Pure and allocation-light; no Zod, no schema. The one helper every read path
+ * should funnel stored ids through.
+ */
+export function canonicalizeRuntimeToolIds(raw: readonly unknown[]): CanonicalizedRuntimeToolIds {
+  const ids: SelectableRuntimeTool[] = [];
+  const dropped: string[] = [];
+  const seen = new Set<SelectableRuntimeTool>();
+  let changed = false;
+  for (const entry of raw) {
+    if (!isSelectableRuntimeTool(entry)) {
+      dropped.push(String(entry));
+      changed = true;
+      continue;
+    }
+    if (seen.has(entry)) {
+      changed = true;
+      continue;
+    }
+    seen.add(entry);
+    ids.push(entry);
+  }
+  return { ids, dropped, changed };
 }

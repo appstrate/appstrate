@@ -120,15 +120,6 @@ _appstrate_bootstrap() {
   # Rotation SOP: docs/adr/ADR-006-cli-device-flow-monorepo.md.
   APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
 
-  if [ "$VERSION" = "latest" ]; then
-    URL_BASE="https://github.com/appstrate/appstrate/releases/latest/download"
-  else
-    URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
-  fi
-  URL="${URL_BASE}/${ASSET}"
-  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
-  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
-
   # ─── Helpers ────────────────────────────────────────────────────────────────
 
   TMPDIR=$(mktemp -d)
@@ -137,6 +128,43 @@ _appstrate_bootstrap() {
   warn() { printf '\033[0;33m⚠\033[0m  %s\n' "$*" >&2; }
   log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
   err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
+
+  # Newest platform `v<semver>` GitHub Release, resolved by listing — not
+  # `releases/latest`. GitHub's "latest" is whichever non-prerelease Release
+  # was created last, whatever its tag: a `cli@` / `core@` / `afps-shared@`
+  # Release published without `make_latest: false`, or created by hand, would
+  # be handed back and carries no CLI binary (`checksums.txt.minisig` 404).
+  # Only `v*` Releases ship the assets this script downloads. Drafts and
+  # prereleases are skipped, same as `releases/latest`. Pages of 30 are walked
+  # (5 at most) until one holds a `v*` Release. No jq: the three fields are
+  # grepped in document order (tag_name precedes draft/prerelease in GitHub's
+  # payload) and awk decides once it holds all three. Creation order within a
+  # page, unlike the CLI's highest-semver pick: BSD sort has no -V and a
+  # semver comparator in awk is not worth it for a path the rendered installer
+  # never takes (it pins `__APPSTRATE_VERSION__`).
+  resolve_latest_platform_release() {
+    local page fields tag
+    for page in 1 2 3 4 5; do
+      # shellcheck disable=SC2086 # CURL_OPTS is word-split on purpose (see its definition)
+      fields=$(curl $CURL_OPTS -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30&page=${page}" |
+        grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)') || true
+      [ -z "$fields" ] && return 1
+      tag=$(printf '%s\n' "$fields" | awk -F': *' '
+          $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
+          $1 ~ /"draft"/    { draft = $2 }
+          $1 ~ /prerelease/ { pre = $2 }
+          tag != "" && draft != "" && pre != "" {
+            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+/ && draft == "false" && pre == "false") { print tag; exit }
+            tag = ""
+          }')
+      if [ -n "$tag" ]; then
+        printf '%s\n' "$tag"
+        return 0
+      fi
+    done
+    return 1
+  }
 
   have_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
   have_shasum() { command -v shasum >/dev/null 2>&1; }
@@ -525,6 +553,21 @@ _appstrate_bootstrap() {
 
   # ─── Download + verify ──────────────────────────────────────────────────────
 
+  # Resolved here, past the SOURCE_ONLY return above: a test harness that
+  # sources this script must define the helpers without a network call.
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_platform_release || true)
+    if [ -z "$VERSION" ]; then
+      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    fi
+    log "Resolved latest platform release: $VERSION"
+  fi
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
+  URL="${URL_BASE}/${ASSET}"
+  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
+  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
+
   log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
   curl $CURL_OPTS "$URL" -o "$TMPDIR/$ASSET"
 
@@ -563,14 +606,13 @@ _appstrate_bootstrap() {
     # roughly the same.
     if ! have_minisign; then
       # Decide between auto-install vs. prompt vs. fail-with-hint. We treat
-      # the same four signals that drive the launch decision below as
-      # "unattended": --yes arg, APPSTRATE_AUTO_INSTALL=1, CI=true|1|yes,
-      # and "no TTY on stdout". This keeps `curl … | bash -s -- --yes`
-      # truly one-step and prevents the prompt from firing in Dockerfile
-      # RUN, cron, or systemd contexts where there's nobody to answer.
+      # the same three signals that drive the launch decision below as
+      # "unattended": --yes arg, CI=true|1|yes, and "no TTY on stdout".
+      # This keeps `curl … | bash -s -- --yes` truly one-step and prevents
+      # the prompt from firing in Dockerfile RUN, cron, or systemd contexts
+      # where there's nobody to answer.
       _ms_wants_auto=0
       case " $* " in *" --yes "*) _ms_wants_auto=1 ;; esac
-      if [ "${APPSTRATE_AUTO_INSTALL:-0}" = "1" ]; then _ms_wants_auto=1; fi
       case "${CI:-}" in true | 1 | yes) _ms_wants_auto=1 ;; esac
       if [ ! -t 1 ]; then _ms_wants_auto=1; fi
 
@@ -736,14 +778,12 @@ _appstrate_bootstrap() {
   # process and no `</dev/tty` redirect chains a kqueue EINVAL into later
   # subprocesses (`bun run dev`, `docker compose up`).
   #
-  # Auto-install (legacy all-in-one behaviour) fires on four signals,
+  # Auto-install (all-in-one behaviour) fires on three signals,
   # ordered cheapest → broadest:
   #   1. user passed `--yes` (CI / scripted automation, explicit intent)
-  #   2. APPSTRATE_AUTO_INSTALL=1 (Ansible / cloud-init escape hatch —
-  #      preserves the previous default for existing IaC)
-  #   3. CI=true|1|yes (GHA, GitLab, CircleCI, Jenkins — any env that
+  #   2. CI=true|1|yes (GHA, GitLab, CircleCI, Jenkins — any env that
   #      sets the canonical CI flag is by definition non-interactive)
-  #   4. stdout is not a TTY (Dockerfile RUN, systemd unit, cron,
+  #   3. stdout is not a TTY (Dockerfile RUN, systemd unit, cron,
   #      `bash /tmp/inst.sh > out.log`). The user wouldn't see the
   #      next-step instruction anyway; running `--yes` is friendlier
   #      than dropping the binary and silently exiting.
@@ -754,12 +794,11 @@ _appstrate_bootstrap() {
   # VPS (#344 Layer 2b). The operator claims ownership at `<URL>/claim`
   # with the printed token.
   #
-  # Pre-existing escape hatch preserved:
+  # Escape hatch:
   #   - APPSTRATE_NO_LAUNCH=1 → drop binary, no install at all (scripted
   #     provisioning where install is owned by Ansible / cloud-init).
   _wants_auto=0
   case " $* " in *" --yes "*) _wants_auto=1 ;; esac
-  if [ "${APPSTRATE_AUTO_INSTALL:-0}" = "1" ]; then _wants_auto=1; fi
   case "${CI:-}" in true | 1 | yes) _wants_auto=1 ;; esac
   if [ ! -t 1 ]; then _wants_auto=1; fi
 

@@ -13,20 +13,27 @@
  * dispatches to the oauth-provider endpoints:
  *
  * 1. **Resource enforcement (RFC 8707)** — `/oauth2/token` grants
- *    `authorization_code` and `refresh_token` MUST carry a `resource` param
- *    matching one of `validAudiences`. Without it, `createUserTokens`
+ *    `authorization_code` and `refresh_token` MUST carry a `resource` param.
+ *    Whether a given resource EXISTS is the oauth-provider's own call (it
+ *    resolves each one against `oauth_resources` and answers `invalid_target`);
+ *    what it does not do is REQUIRE one. Without a `resource`, `createUserTokens`
  *    silently falls back to opaque tokens that our `Bearer ey...` strategy
  *    cannot match — every subsequent scoped request 401s with no hint.
  *    We reject up-front with a clear `invalid_request` so satellites get
- *    a diagnosable error instead of a silent-fail cascade.
+ *    a diagnosable error instead of a silent-fail cascade. On top of that we
+ *    confine self-service (DCR / CIMD) clients to exactly one protected
+ *    resource — a rule with no upstream equivalent.
  *
- * 2. **IP rate limiting** — `/oauth2/token`, `/oauth2/authorize`,
- *    `/oauth2/introspect`, `/oauth2/revoke` are all unauthenticated and
- *    reachable by any client. Without IP-based limits, an attacker can
- *    brute-force `client_secret` at the token endpoint, enumerate
- *    `client_id`s at authorize, or probe tokens at introspect. We reuse
- *    the same `rate-limiter-flexible` Redis backend the rest of the API
- *    uses so limits are distributed across instances.
+ * 2. **Rate limiting the endpoints upstream does not cover** — the
+ *    `/oauth2/*` endpoints are limited per IP by the oauth-provider's own
+ *    rules (`oauthProvider({ rateLimit })` in `plugins.ts`), applied against
+ *    the platform's shared limiter. What has no upstream rule stays here:
+ *    the device-flow and CLI-token endpoints.
+ *
+ * 3. **Registration defaults** — `/oauth2/register` bodies get the
+ *    `application_type` the oauth-provider exposes no option to default,
+ *    so RFC 7591 registrants reach the same redirect-URI rules as CIMD ones
+ *    (see `defaultRegistrationToNativeClient`).
  *
  * Error shape: rejections throw `better-call`'s `APIError` which Better
  * Auth surfaces as the appropriate HTTP status with an OAuth2-style body.
@@ -54,15 +61,11 @@ import {
 } from "./realm-check.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-const TOKEN_RL_POINTS = 30;
-const AUTHORIZE_RL_POINTS = 30;
-const INTROSPECT_RL_POINTS = 60;
-const REVOKE_RL_POINTS = 60;
-// Unauthenticated Dynamic Client Registration (RFC 7591) — each call inserts
-// an oauth_clients row, so an unbounded endpoint is a DB-bloat / resource-
-// exhaustion vector. A real client registers once (then reuses its client_id),
-// so 10/min/IP is generous for legitimate use and tight against abuse.
-const REGISTER_RL_POINTS = 10;
+// The categories below have no upstream rule, and Better Auth answers a 429
+// with `{ message }` + `X-Retry-After` where these answer the RFC 8628 /
+// RFC 6749 `{ error, error_description }` + `Retry-After` the CLI parses
+// (`apps/cli/src/lib/device-flow.ts`), so they stay local.
+//
 // CLI device flow — per-IP limit on `/device/code`. The endpoint is a
 // write (inserts a row) and rarely called more than once per login;
 // 10/min/IP is a loose ceiling.
@@ -75,29 +78,14 @@ const DEVICE_CODE_RL_POINTS = 10;
 // family-revocation UPDATE.
 const CLI_TOKEN_RL_POINTS = 30;
 const CLI_REVOKE_RL_POINTS = 30;
-// Per-IP budget on Better Auth's `GET /device?user_code=…` endpoint
-// (mounted by `deviceAuthorization()` — see
-// `node_modules/better-auth/dist/plugins/device-authorization/routes.mjs:285-337`,
-// public, no auth, returns the device code's `status` for a given
-// `user_code`). Without a guard here this becomes an unrate-limited
-// user_code probe endpoint: an attacker can enumerate the ~34.6-bit
-// user_code space looking for a `pending` row before the legitimate
-// user reaches the consent screen, then race them to `/device/approve`
-// (where the realm guard + per-row attempts counter take over).
+// `GET /device?user_code=…` carries no rule here: `deviceAuthorization()`
+// declares its own (`window: expiresIn`, `max: 5` — 5 probes per 10 minutes
+// per IP against the ~34.6-bit user_code space), which is tighter than any
+// per-minute budget this file could state. The `/activate` SSR page reaches
+// the endpoint through `getOidcAuthApi().deviceVerify()`, an in-process call
+// that never passes the handler, so the rule costs legitimate consent
+// renders nothing.
 //
-// Happy-path traffic audit (grep anchor for future operators surprised
-// by a 429 on `/device`):
-//   - `/device` is consumed SERVER-SIDE only by the `/activate` SSR
-//     page (`apps/api/src/modules/oidc/pages/activate.ts`) at consent
-//     render — one GET per device-authorization session, from the
-//     platform's own IP.
-//   - The web SPA (`apps/web/src/`) does NOT call `/device`; there is
-//     no `fetch("/device")` in the client bundle.
-//   - The CLI client does NOT poll `/device` either — it polls
-//     `/cli/token`, covered by `CLI_TOKEN_RL_POINTS = 30`.
-// Net: legit flows cost 1 hit/session, so 10/min/IP is intentionally
-// generous for legit traffic and tight against probe enumeration.
-const DEVICE_VERIFY_RL_POINTS = 10;
 // Per-IP budget on the BA-mounted `/device/approve` and `/device/deny`
 // endpoints. The SSR wrapper at `/activate/approve` already has its own
 // stricter limiter (5 / 15 min / IP via `rateLimitByIp`) but the direct
@@ -118,17 +106,6 @@ const DEVICE_APPROVE_RL_POINTS = 10;
 // separately constrained by the per-IP rate limits on these endpoints.
 const MAX_APPROVE_ATTEMPTS = 5;
 
-/**
- * Per-client_id brute-force limit on `/oauth2/token`. Complements the
- * per-IP limiter above: an attacker distributing a `client_secret`
- * brute-force attack across many IPs (or spoofing XFF behind a
- * misconfigured `TRUST_PROXY`) is constrained by this secondary limit
- * keyed on `client_id` alone. Legitimate satellites exchange codes at a
- * rate far below this ceiling; anything approaching 20 attempts/minute
- * per client_id is either a misbehaving client or an attack.
- */
-const TOKEN_CLIENT_RL_POINTS = 20;
-
 const LOGIN_EMAIL_POINTS = 5;
 const LOGIN_EMAIL_DURATION_SEC = 900;
 
@@ -139,7 +116,7 @@ async function getLimiter(category: string, points: number): Promise<RateLimiter
   let limiter = limiterCache.get(cacheKey);
   if (!limiter) {
     const factory = await getRateLimiterFactory();
-    limiter = await factory.create(points, 60, `rl:oidc:${category}:`);
+    limiter = factory.create(points, 60, `rl:oidc:${category}:`);
     limiterCache.set(cacheKey, limiter);
   }
   return limiter;
@@ -149,7 +126,7 @@ let loginEmailLimiter: RateLimiterAbstract | null = null;
 async function getLoginEmailLimiter(): Promise<RateLimiterAbstract> {
   if (!loginEmailLimiter) {
     const factory = await getRateLimiterFactory();
-    loginEmailLimiter = await factory.create(
+    loginEmailLimiter = factory.create(
       LOGIN_EMAIL_POINTS,
       LOGIN_EMAIL_DURATION_SEC,
       "rl:oidc:login-email:",
@@ -168,7 +145,7 @@ export function resetOidcGuardsLimiters(): void {
   loginEmailLimiter = null;
 }
 
-export interface LoginEmailLimitResult {
+interface LoginEmailLimitResult {
   allowed: boolean;
   retryAfterSeconds: number;
 }
@@ -224,30 +201,61 @@ async function enforceRateLimit(
         error: "rate_limited",
         error_description: `Too many requests to ${category}. Retry after ${retry}s.`,
       },
-      { "Retry-After": String(retry), "X-RateLimit-Scope": "ip" },
+      { "Retry-After": String(retry) },
     );
   }
-}
-
-interface OidcGuardsOptions {
-  /** Audiences accepted as the RFC 8707 `resource` parameter. */
-  validAudiences: readonly string[];
 }
 
 interface TokenRequestBody {
   grant_type?: string;
   resource?: string | string[];
   client_id?: string;
+  client_assertion?: string;
 }
 
 /**
- * Extract the `client_id` a token request is acting on, either from the
- * parsed body or from HTTP Basic auth header (`client_secret_basic`).
- * Returns `null` if neither path yields a value — the downstream limiter
- * then degrades to IP-only limiting for that specific request.
+ * The client id an unverified `client_assertion` names — RFC 7523 §3, where
+ * `iss` and `sub` are both the client id; the provider reads `sub ?? iss`, so
+ * does this. `null` for anything that does not decode to a JWT payload naming
+ * one consistently.
+ */
+function clientIdFromAssertion(assertion: string): string | null {
+  try {
+    const segment = assertion.split(".")[1] ?? "";
+    const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(
+      atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")),
+      (ch) => ch.charCodeAt(0),
+    );
+    const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!payload || typeof payload !== "object") return null;
+    const { sub, iss } = payload as { sub?: unknown; iss?: unknown };
+    if (sub !== undefined && iss !== undefined && sub !== iss) return null;
+    const id = sub ?? iss;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract the `client_id` a token request is acting on: the parsed body, the
+ * `client_assertion` (`private_key_jwt` may name the client nowhere else), or
+ * the HTTP Basic auth header (`client_secret_basic`).
+ *
+ * Trusting the assertion unverified is safe because the provider then verifies
+ * it against the row this id names: an assertion naming an instance client
+ * clears the caller's gate and dies on the signature check, and one naming a
+ * self-service client stays confined.
+ *
+ * `null` identifies nothing, and callers hold it to the STRICTEST rule they
+ * enforce — declining to name a client must never be a way around a
+ * confinement.
  */
 function extractClientId(body: TokenRequestBody, request: Request | undefined): string | null {
   if (typeof body.client_id === "string" && body.client_id.length > 0) return body.client_id;
+  if (typeof body.client_assertion === "string")
+    return clientIdFromAssertion(body.client_assertion);
   const authHeader = request?.headers.get("authorization");
   if (!authHeader || !authHeader.toLowerCase().startsWith("basic ")) return null;
   try {
@@ -257,87 +265,13 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
     // RFC 6749 §2.3.1: the `client_id` and `client_secret` are
     // `application/x-www-form-urlencoded` BEFORE being joined with `:` and
     // base64-encoded. Reverse that here (`+` → space, then percent-decode) so
-    // a client_id containing reserved characters keys the rate limiter under
-    // its true value rather than its still-encoded form. `decodeURIComponent`
-    // throws on a malformed `%` sequence — the enclosing try/catch degrades to
-    // IP-only limiting for that request.
+    // a client_id containing reserved characters resolves to its true value
+    // rather than its still-encoded form. `decodeURIComponent` throws on a
+    // malformed `%` sequence — the enclosing try/catch answers `null`.
     const rawClientId = decoded.slice(0, sep);
     return decodeURIComponent(rawClientId.replace(/\+/g, " "));
   } catch {
     return null;
-  }
-}
-
-/**
- * Compute the per-client token-limiter key. Keyed on `client_id` + source IP,
- * NOT `client_id` alone: a single OAuth client is shared by MANY end users
- * (e.g. the dashboard SPA / CLI use one `client_id` for the whole instance),
- * so a global-per-client bucket lets any one caller exhaust the budget and
- * DoS every other user's login through that client. Scoping to the source IP
- * confines the blast radius to one caller while still catching a single IP
- * hammering `client_secret` against one client. The complementary per-IP
- * limiter (`enforceRateLimit("oauth-token", …)`) already caps raw IP volume.
- */
-function clientRateLimitKey(clientId: string, request: Request | undefined): string {
-  const ip = getClientIpFromRequest(request) ?? "unknown";
-  return `client:${clientId}:${ip}`;
-}
-
-async function enforceClientRateLimit(
-  clientId: string,
-  request: Request | undefined,
-): Promise<void> {
-  const limiter = await getLimiter("oauth-token-client", TOKEN_CLIENT_RL_POINTS);
-  try {
-    await limiter.consume(clientRateLimitKey(clientId, request));
-  } catch (rej) {
-    const retry =
-      rej && typeof rej === "object" && "msBeforeNext" in rej
-        ? Math.ceil((rej as { msBeforeNext: number }).msBeforeNext / 1000)
-        : 60;
-    // Log the discriminator internally so operators can triage which
-    // limiter fired without surfacing the keying strategy in the
-    // response body. Externally we emit the same generic
-    // `error_description` as `enforceRateLimit` — an attacker probing
-    // rate limits can infer SOME limit exists from the 429, but giving
-    // them "we key on client_id" in plaintext makes it trivial to plan
-    // the distributed-IP bypass the secondary limiter is meant to
-    // catch. The distinguishing `X-RateLimit-Scope` header lets tests
-    // assert which limiter fired without leaking the info to anonymous
-    // token-endpoint callers who already know they were throttled.
-    logger.warn("oidc: /oauth2/token per-client rate limit tripped", {
-      module: "oidc",
-      audit: true,
-      event: "oauth.token.rate_limited.client",
-      clientId,
-      retryAfterSeconds: retry,
-    });
-    throw new APIError(
-      "TOO_MANY_REQUESTS",
-      {
-        error: "rate_limited",
-        error_description: `Too many token requests. Retry after ${retry}s.`,
-      },
-      { "Retry-After": String(retry), "X-RateLimit-Scope": "client" },
-    );
-  }
-}
-
-/**
- * Release the per-(client + IP) token-limiter reservation on a SUCCESSFUL
- * token exchange, so a legitimate `authorization_code` / `refresh_token`
- * grant does not count against the budget — the limiter degrades to a
- * failed-attempt counter (same reserve-then-reset-on-success shape as the
- * login-email limiter). Without this a burst of legit logins from one IP
- * through a shared client could self-DoS. Best-effort: a cleanup failure
- * must never turn a successful token response into an error.
- */
-async function resetClientRateLimit(clientId: string, request: Request | undefined): Promise<void> {
-  try {
-    const limiter = await getLimiter("oauth-token-client", TOKEN_CLIENT_RL_POINTS);
-    await limiter.delete(clientRateLimitKey(clientId, request));
-  } catch {
-    // Best-effort — see doc comment.
   }
 }
 
@@ -380,10 +314,9 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
   if (!token) return;
 
   // Resolve the in-flight client from the TRANSACTION BINDING (the
-  // `(token → client)` record persisted at issuance), falling back to the
-  // pending-client cookie for links issued before the binding mechanism —
-  // same precedence as the realm resolver and the db-hook signup guard
-  // (see `services/oauth-transaction-binding.ts`, CRIT-15).
+  // `(token → client)` record persisted at issuance) — same source as the
+  // realm resolver and the db-hook signup guard, and no cookie fallback on
+  // this leg (see `services/oauth-transaction-binding.ts`, CRIT-15).
   const binding = await resolvePendingClientBinding({
     headers: ctx.request?.headers ?? null,
     path: MAGIC_LINK_VERIFY_PATH,
@@ -509,9 +442,9 @@ export async function enforceMagicLinkSignupPolicy(ctx: {
  *
  * The `deviceAuthorization()` plugin mints BA sessions directly via its
  * internal adapter path — it does NOT flow through `@better-auth/oauth-provider`,
- * so `customAccessTokenClaims` (where `assertUserRealm` normally fires
- * for `/oauth2/token`) never runs for device-flow approvals. Without this
- * hook, an end-user of application X (realm=`"end_user:<applicationId>"`) could
+ * so the access-token claim extension in `plugins.ts` (where `assertUserRealm`
+ * normally fires for `/oauth2/token`) never runs for device-flow approvals.
+ * Without this hook, an end-user of space X (realm=`"end_user:<spaceId>"`) could
  * approve an `appstrate-cli` (level=`"instance"`) device code and obtain
  * a session attached to their identity. The session would be blocked by
  * `requirePlatformRealm` on every subsequent platform request — but the
@@ -552,7 +485,7 @@ async function enforceDeviceApproveRealm(ctx: {
   // on authoritative state.
   //
   // Correctness relies on the schema-level UNIQUE constraint on
-  // `device_codes.user_code` (see `schema.ts::deviceCode` and migration
+  // `device_codes.user_code` (see `schema/oidc.ts::deviceCode` and migration
   // `0004_device_codes.sql`). Without it, two concurrently-issued rows
   // could share a `user_code` and `.limit(1)` would silently mask the
   // collision — picking an arbitrary row whose `clientId` may not match
@@ -640,8 +573,15 @@ async function enforceDeviceApproveRealm(ctx: {
     });
   }
 
+  // Columns, not the `metadata` JSON: that JSON is provider-owned and a
+  // registration body may set it, so a realm derived from it is a realm the
+  // client names.
   const [client] = await db
-    .select({ metadata: oauthClient.metadata, level: oauthClient.level })
+    .select({
+      level: oauthClient.level,
+      referencedOrgId: oauthClient.referencedOrgId,
+      referencedSpaceId: oauthClient.referencedSpaceId,
+    })
     .from(oauthClient)
     .where(eq(oauthClient.clientId, record.clientId))
     .limit(1);
@@ -652,66 +592,69 @@ async function enforceDeviceApproveRealm(ctx: {
     });
   }
 
-  let metadata: ClientAudienceMetadata = { level: client.level as ClientAudienceMetadata["level"] };
-  if (client.metadata) {
-    try {
-      const parsed = JSON.parse(client.metadata) as Partial<ClientAudienceMetadata>;
-      metadata = { ...metadata, ...parsed };
-    } catch (err) {
-      // Corrupt metadata → fall back to column level only.
-      // `expectedRealmForClient` will reject if level is missing or
-      // unknown, which is the safer path. Surface the drift so operators
-      // can repair the row instead of it lingering silently.
-      logger.warn("oidc: oauth_clients.metadata JSON is corrupt — falling back to column level", {
-        module: "oidc",
-        clientId: record.clientId,
-        error: getErrorMessage(err),
-      });
-    }
-  }
-
+  const metadata: ClientAudienceMetadata = {
+    level: client.level,
+    referencedOrgId: client.referencedOrgId ?? undefined,
+    referencedSpaceId: client.referencedSpaceId ?? undefined,
+  };
   const expected = expectedRealmForClient(metadata);
   await assertUserRealm(session.user.id, expected, {
     clientLevel: metadata.level ?? "unknown",
-    applicationId: metadata.referencedApplicationId ?? null,
+    spaceId: metadata.referencedSpaceId ?? null,
     orgId: metadata.referencedOrgId ?? null,
   });
 }
 
 /**
- * Whether `clientId` is a self-service (DCR / CIMD) client — stamped
- * `metadata.selfService = true` at registration (`markClientSelfService`).
+ * Whether `clientId` registered itself (DCR / CIMD) — the `self_service` column
+ * `markClientSelfService` stamps.
  *
- * Self-service clients mint instance tokens carrying the connecting user's full
- * authority, so the ONLY safe audience for such a token is a single protected
- * resource (a per-org MCP endpoint) whose own resource-server check + the
- * outbound confinement in `protected-resources.ts` jointly cage it; the
- * `/oauth2/token` guard enforces that at mint time. Reads the client's metadata
- * directly (same authoritative-row pattern as `enforceDeviceApproveRealm`); a
- * missing / corrupt / non-self-service row is treated as not self-service, so
- * admin-provisioned clients (the dashboard SPA / CLI) keep targeting the
- * platform audience and the other gates apply.
+ * Such a client mints instance tokens carrying the connecting user's full
+ * authority, so the only safe audience is a single protected resource (a per-org
+ * MCP endpoint) whose own resource-server check and the outbound confinement in
+ * `protected-resources.ts` jointly cage it; the `/oauth2/token` guard enforces
+ * that at mint time. A missing row reads as not self-service, so
+ * operator-provisioned clients (the dashboard SPA / CLI) keep targeting the
+ * platform audience under the other gates.
  */
 async function isSelfServiceClient(clientId: string): Promise<boolean> {
   const [row] = await db
-    .select({ metadata: oauthClient.metadata })
+    .select({ selfService: oauthClient.selfService })
     .from(oauthClient)
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
-  if (!row?.metadata) return false;
-  try {
-    const parsed = JSON.parse(row.metadata) as { selfService?: unknown };
-    return parsed.selfService === true;
-  } catch {
-    return false; // corrupt metadata → not provably self-service, defer to other gates
-  }
+  return row?.selfService === true;
 }
 
-export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
-  // Read `opts.validAudiences` LIVE on every request — it is the org-aware
-  // mutable allowlist (see `mcp/audiences.ts`), so a snapshot taken here would
-  // miss orgs created after boot and reject their per-org MCP resource.
+/**
+ * Default an unspecified `application_type` on the DCR path to `native`.
+ *
+ * The provider validates every registered redirect URI against the client's
+ * application type: a `web` client may only use https on a non-loopback host, a
+ * `native` one may use `http://localhost`, `http://127.0.0.1` or `http://[::1]`
+ * (RFC 8252 §7.3 / OIDC Dynamic Registration §2), and it assumes `web` for a DCR
+ * body that declares nothing. The MCP clients this endpoint exists for —
+ * `claude mcp add`, `npx @appstrate/connect-helper` — listen on an ephemeral
+ * loopback port and declare no `application_type`, so `web` would refuse every
+ * one of them with `invalid_redirect_uri`.
+ *
+ * Only the absent case is filled, `null` included: a body that names a type
+ * keeps it, so a client that says `web` is still held to https non-loopback.
+ * The provider exposes no option for this default, hence the hook.
+ */
+async function defaultRegistrationToNativeClient(ctx: {
+  body?: unknown;
+}): Promise<{ context: { body: Record<string, unknown> } } | undefined> {
+  const body = ctx.body;
+  if (!body || typeof body !== "object") return;
+  const declared = (body as { application_type?: unknown }).application_type;
+  if (declared !== undefined && declared !== null) return;
+  return {
+    context: { body: { ...(body as Record<string, unknown>), application_type: "native" } },
+  };
+}
 
+export function oidcGuardsPlugin() {
   return {
     id: "oidc-guards",
     hooks: {
@@ -756,63 +699,29 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           }),
         },
         {
-          // BA's device-authorization plugin exposes `GET /device?user_code=…`
-          // for the SSR consent page to look up the status of a code. Public,
-          // no auth — without this guard it is an unrate-limited user_code
-          // probe surface. See `DEVICE_VERIFY_RL_POINTS` above for the
-          // rationale. The exact path is `/device` (not `/device/verify`),
-          // matching the upstream endpoint registration in
-          // `better-auth@1.6.5/plugins/device-authorization/routes.mjs:285`.
-          matcher: (ctx: { path?: string }) => ctx.path === "/device",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("device-verify", DEVICE_VERIFY_RL_POINTS, ctx.request);
-          }),
-        },
-        {
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/token",
           handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-token", TOKEN_RL_POINTS, ctx.request);
-
             const body = (ctx.body ?? {}) as TokenRequestBody;
-            // Per-client_id throttle on top of per-IP — protects against
-            // distributed `client_secret` brute-force that spreads the
-            // attack across many source IPs (or bypasses per-IP limits
-            // entirely via XFF spoofing behind a misconfigured
-            // TRUST_PROXY). Keyed on `client_id` so a single
-            // misbehaving / compromised satellite is rate-limited
-            // regardless of where its requests come from.
-            const clientId = extractClientId(body, ctx.request);
-            if (clientId) await enforceClientRateLimit(clientId, ctx.request);
-
+            // The two grants the AS supports (`oauthProvider({ grantTypes })`),
+            // both of which mint a user token and may carry a `resource`.
             const grantType = body.grant_type;
-            // Every grant that reaches `createUserTokens` and can carry a
-            // `resource` is gated here — `client_credentials` included, so a
-            // future M2M client cannot mint an un-audience-bound (or
-            // multi-resource self-service) token by switching grant type.
-            if (
-              grantType === "authorization_code" ||
-              grantType === "refresh_token" ||
-              grantType === "client_credentials"
-            ) {
-              // Validate EVERY requested resource, not just the first. The
-              // oauth-provider's `checkResource` accepts `resource` as an array
-              // and stamps the FULL list into `aud`, so validating only
-              // `resource[0]` would let a caller smuggle extra audiences past
-              // this gate (e.g. `resource=[<mcp/o/A>, APP_URL]`).
+            if (grantType === "authorization_code" || grantType === "refresh_token") {
+              // `resource` may arrive repeated (RFC 8707 §2); the whole list
+              // is kept because the self-service rule below counts it. Each
+              // value's existence is checked by the oauth-provider itself —
+              // an unknown or disabled identifier gets `invalid_target` there.
               const resources = Array.isArray(body.resource)
                 ? body.resource
                 : body.resource
                   ? [body.resource]
                   : [];
-              if (
-                resources.length === 0 ||
-                resources.some((r) => !opts.validAudiences.includes(r))
-              ) {
+              if (resources.length === 0) {
                 throw new APIError("BAD_REQUEST", {
                   error: "invalid_request",
                   error_description:
-                    `The 'resource' parameter is required (RFC 8707) and every value must be one of: ${opts.validAudiences.join(", ")}. ` +
-                    `Without it, the plugin issues opaque access tokens that the Appstrate Bearer auth strategy cannot verify.`,
+                    "The 'resource' parameter is required (RFC 8707) — use the resource URI " +
+                    "advertised by the endpoint you are calling. Without it, the plugin issues " +
+                    "opaque access tokens that the Appstrate Bearer auth strategy cannot verify.",
                 });
               }
               // Self-service (DCR / CIMD) clients carry the connecting user's
@@ -829,7 +738,9 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
               // replayed off its resource. No-op when no protected resource is
               // registered (mcp module disabled) — `isProtectedResourceUri` is
               // false for everything, so a self-service client simply cannot mint.
-              if (clientId && (await isSelfServiceClient(clientId))) {
+              // Unidentified ⇒ held to the self-service rule; see `extractClientId`.
+              const clientId = extractClientId(body, ctx.request);
+              if (clientId === null || (await isSelfServiceClient(clientId))) {
                 if (resources.length !== 1 || !isProtectedResourceUri(resources[0]!)) {
                   logger.warn(
                     "oidc: self-service client requested a non-resource / multi-resource audience — rejecting",
@@ -853,54 +764,11 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           }),
         },
         {
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/authorize",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-authorize", AUTHORIZE_RL_POINTS, ctx.request);
-          }),
-        },
-        {
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/introspect",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-introspect", INTROSPECT_RL_POINTS, ctx.request);
-          }),
-        },
-        {
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/revoke",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-revoke", REVOKE_RL_POINTS, ctx.request);
-          }),
-        },
-        {
-          // RFC 7591 Dynamic Client Registration — unauthenticated + write, so
-          // rate-limit per IP (see REGISTER_RL_POINTS).
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/register",
-          handler: createAuthMiddleware(async (ctx) => {
-            await enforceRateLimit("oauth-register", REGISTER_RL_POINTS, ctx.request);
-          }),
+          handler: createAuthMiddleware(defaultRegistrationToNativeClient),
         },
       ],
       after: [
-        {
-          // Release the per-(client + IP) token-limiter reservation when the
-          // token exchange SUCCEEDED, so legitimate grants don't erode the
-          // shared budget (see `resetClientRateLimit`). We re-derive the same
-          // key from the request body + IP and only reset when the response
-          // carries an `access_token` — a rejected exchange leaves the
-          // reservation in place so brute-force attempts still accrue.
-          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/token",
-          handler: createAuthMiddleware(async (ctx) => {
-            const returned = (ctx.context as { returned?: unknown }).returned;
-            const succeeded =
-              returned &&
-              typeof returned === "object" &&
-              "access_token" in returned &&
-              typeof (returned as { access_token?: unknown }).access_token === "string";
-            if (!succeeded) return;
-            const body = (ctx.body ?? {}) as TokenRequestBody;
-            const clientId = extractClientId(body, ctx.request);
-            if (clientId) await resetClientRateLimit(clientId, ctx.request);
-          }),
-        },
         {
           // Stamp the freshly-registered DCR client as a self-service instance
           // client. Done in an AFTER-hook (not before) because the RFC 7591

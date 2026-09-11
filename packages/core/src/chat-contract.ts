@@ -9,7 +9,7 @@
  * (`runPiChat`) serving both credential modes. There is no per-provider
  * chat-handler seam and no second inference loop — the chat module resolves the
  * chosen model row through {@link PlatformServices}
- * (`resolveSubscriptionChatModel`) and drives Pi inline. An oauth2 row yields
+ * (`resolveChatModel`) and drives Pi inline. An oauth2 row yields
  * the real token + provider baseUrl (the engine talks to the provider
  * directly); an API-key row yields no secret at all and the engine is pointed
  * at the platform llm-proxy instead.
@@ -68,36 +68,45 @@ export interface SubscriptionChatModel {
  *   - `{ subscription: true, model }` — an oauth2 model with a fresh token → the
  *     engine talks to the provider directly with it, instead of the llm-proxy.
  */
-export type SubscriptionChatResolution =
+export type ChatModelResolution =
   | { subscription: false }
   | { subscription: true; needsReconnection: true }
   | { subscription: true; model: SubscriptionChatModel };
 
 /**
- * A chat composer file attachment to resolve to a durable document. The chat
+ * A chat composer file attachment to resolve to a durable file. The chat
  * module has no DB access, so it hands these plain fields across `ctx.services`
  * and the platform builds the scope/actor + materializes/validates server-side.
  */
 export interface ChatAttachmentRequest {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   /** The chat session owner (chat sessions are per dashboard user). */
   userId: string;
-  /** Container the materialized document is anchored to (session-scoped ACL). */
+  /** Container the materialized file is anchored to (session-scoped ACL). */
   chatSessionId: string;
-  /** `upload://upl_x` (materialize) or `document://doc_x` (validate access). */
+  /**
+   * `upload://upl_x` (materialize) or `appfile://file_x` (validate access).
+   */
   uri: string;
+  /**
+   * The caller's effective permission set in the space, as the platform auth
+   * pipeline resolved it. It decides how wide a container ACL reads: with
+   * `runs:read-all` an `appfile://` anchored to a colleague's run resolves,
+   * which is what the file gallery the user picked it from already shows;
+   * without it only the session owner's own runs.
+   */
+  permissions: ReadonlySet<string>;
 }
 
 /**
- * A chat attachment resolved to its stable `document://` URI + metadata. An
- * `upload://` was materialized into a chat-session-scoped document; an existing
- * `document://` was validated as readable by the session owner. The URI is what
- * the message persists (stable for the session's lifetime) and what the model
- * is told the attached document is addressed by.
+ * A chat attachment resolved to its stable `appfile://` URI + metadata. An
+ * `upload://` was materialized into a chat-session-scoped file; an existing
+ * `appfile://` was validated as readable by the session owner. The URI is what the message persists (stable for the session's
+ * lifetime) and what the model is told the attached file is addressed by.
  */
 export interface ResolvedChatAttachment {
-  /** `document://doc_x` — the durable, stable URI. */
+  /** `appfile://file_x` — the durable, stable URI, always in canonical form. */
   uri: string;
   name: string;
   mime: string;

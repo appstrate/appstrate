@@ -16,9 +16,8 @@ import {
   useVersionInfo,
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
-import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
@@ -49,7 +48,6 @@ import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-
 type DetailTab =
   "overview" | "runs" | "settings" | "memory" | "versions" | "diff" | "content" | "usedBy";
 
-const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
 const AgentBundleEditorModal = lazy(() =>
   import("./package-editor").then((module) => ({ default: module.AgentBundleEditorModal })),
 );
@@ -205,8 +203,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const downloadBundle = useAgentBundleExport(scope, name);
   const deletePkgMutation = useDeletePackage(type);
   const uninstallMutation = useTogglePackageInstall();
-  const currentAppId = useCurrentApplicationId();
-  const { installedAppNames, isInstalledInCurrentApp } = usePackageInstallState(packageId);
+  const currentSpaceId = useCurrentSpaceId();
+  const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
     type: "deletePackage" | "uninstallPackage";
@@ -304,13 +302,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // values. The only honest form shape available here is the archived AFPS
   // input schema. An empty schema is distinct from undefined, which means
   // "fall back to the current draft" in the form components.
-  const versionInputSchema = (() => {
-    const input = versionDetail?.manifest?.input as { schema?: JSONSchemaObject } | undefined;
-    return input?.schema;
-  })();
-  const effectiveConfigSchema = isHistoricalVersion
-    ? (versionInputSchema ?? EMPTY_CONFIG_SCHEMA)
-    : agentDetail?.config?.schema;
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
   // ── Unified detail for SharedHeader ──
@@ -450,11 +441,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   setConfirmAction({
                     type: "deletePackage",
                     description:
-                      installedAppNames.length > 0
-                        ? t("packages.deleteConfirmWithApps", {
+                      installedSpaceNames.length > 0
+                        ? t("packages.deleteConfirmWithSpaces", {
                             type: typeLabel,
                             name: nameStr,
-                            apps: installedAppNames.join(", "),
+                            spaces: installedSpaceNames.join(", "),
                             ns: "settings",
                           })
                         : t("packages.deleteConfirm", {
@@ -464,7 +455,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                           }),
                   });
                 }}
-                canUninstall={isInstalledInCurrentApp && source !== "system"}
+                canUninstall={isInstalledInCurrentSpace && source !== "system"}
                 onUninstall={() => {
                   setConfirmAction({
                     type: "uninstallPackage",
@@ -548,11 +539,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               value="runs"
               className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
             >
-              <AgentRunsTab
-                packageId={packageId}
-                versionLabel={versionLabel}
-                configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
-              />
+              <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
             </TabsContent>
             <TabsContent
               value="settings"
@@ -562,7 +549,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 packageId={packageId}
                 detail={agentDetail}
                 version={versionLabel}
-                configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
                 isHistorical={isHistoricalVersion}
                 currentManifest={currentManifest}
                 currentContent={currentContent}
@@ -675,9 +661,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           if (!confirmAction) return;
           const close = () => setConfirmAction(null);
           if (confirmAction.type === "uninstallPackage") {
-            if (!currentAppId) return;
+            if (!currentSpaceId) return;
             uninstallMutation.mutate(
-              { applicationId: currentAppId, packageId, installed: true },
+              { spaceId: currentSpaceId, packageId, installed: true },
               {
                 onSuccess: close,
                 onError: (err) =>

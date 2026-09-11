@@ -70,8 +70,7 @@ describe("package detail lab handlers", () => {
       resolveHandler("GET", new URL("http://lab.local/api/orgs"), "empty", detailHeaders)?.body,
     ).toHaveProperty("data.0.id", "org_lab");
     expect(
-      resolveHandler("GET", new URL("http://lab.local/api/applications"), "empty", detailHeaders)
-        ?.body,
+      resolveHandler("GET", new URL("http://lab.local/api/spaces"), "empty", detailHeaders)?.body,
     ).toHaveProperty("data.0.id", "app_lab");
     expect(
       resolveHandler("GET", new URL("http://lab.local/api/orgs"), "empty", listHeaders)?.body,

@@ -42,11 +42,11 @@ async function signUpEndUser(email: string): Promise<string> {
   // attempt hits the counter path, not a BA state flip.
   await db
     .update(userTable)
-    .set({ realm: "end_user:app_attacker" })
+    .set({ realm: "end_user:spc_attacker" })
     .where(eq(userTable.id, body.user.id));
   await db
     .update(sessionTable)
-    .set({ realm: "end_user:app_attacker" })
+    .set({ realm: "end_user:spc_attacker" })
     .where(eq(sessionTable.userId, body.user.id));
   return cookie;
 }

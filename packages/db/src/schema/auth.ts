@@ -8,15 +8,15 @@ import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
  *   - `"platform"` — operator of the Appstrate platform itself (admins,
  *     org members, dashboard users). Default for any signup outside an
  *     OIDC end-user flow.
- *   - `"end_user:<applicationId>"` — end-user of a third-party application
- *     using Appstrate as its OIDC IdP at `level=application`. Assigned by
+ *   - `"end_user:<spaceId>"` — end-user of a third-party product whose
+ *     space uses Appstrate as its OIDC IdP at `level=space`. Assigned by
  *     the OIDC module's realm resolver when the `oidc_pending_client`
- *     cookie points to an application-level OAuth client at BA user
+ *     cookie points to a space-level OAuth client at BA user
  *     creation time.
  *
  * The realm guards prevent audience collision: a session minted via the
  * OIDC end-user flow cannot be replayed against platform routes, and an
- * end-user session for app A cannot be replayed against app B's
+ * end-user session for space A cannot be replayed against space B's
  * `/authorize`. Without this, the single-user-pool made any BA session
  * interchangeable across audiences — a dashboard fixture for OIDC
  * end-users by construction.

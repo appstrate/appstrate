@@ -15,6 +15,7 @@
 
 import { INSTALL_SOURCE } from "../lib/install-source.ts";
 import { CLI_VERSION } from "../lib/version.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
 export interface InternalInfoPayload {
   /** Bundled `CLI_VERSION` (from `package.json` baked at build). */
@@ -33,7 +34,7 @@ export function buildInternalInfoPayload(): InternalInfoPayload {
   };
 }
 
-export function internalInfoCommand(): never {
-  process.stdout.write(`${JSON.stringify(buildInternalInfoPayload())}\n`);
-  process.exit(0);
+export function internalInfoCommand(io: CommandIO = DEFAULT_IO): never {
+  io.stdout.write(`${JSON.stringify(buildInternalInfoPayload())}\n`);
+  io.exit(0);
 }

@@ -23,7 +23,7 @@ import { getExactVersionManifest } from "./package-versions.ts";
 import type { AgentManifest } from "../types/index.ts";
 
 /** The definition was read — the run's output contract and dep set are knowable. */
-export interface RunEffectiveAgentFound {
+interface RunEffectiveAgentFound {
   readonly status: "ok";
   /** Package id — stable across draft and pinned reads. */
   readonly id: string;
@@ -67,7 +67,7 @@ export interface RunAgentGone {
 }
 
 /** Outcome of {@link getRunEffectiveAgent}. */
-export type RunEffectiveAgentResult = RunEffectiveAgentFound | RunPinnedVersionGone | RunAgentGone;
+type RunEffectiveAgentResult = RunEffectiveAgentFound | RunPinnedVersionGone | RunAgentGone;
 
 /**
  * Detail string for STATE A. Names the deleted pinned version, the package it

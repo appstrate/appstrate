@@ -109,12 +109,21 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
     }));
   const resultError = buildError(message, err);
 
-  // 2. Surface the failure as a live event.
+  // 2. Surface the failure as a live event. `buildError`'s structured
+  //    `context` rides along as the event's `data` when there is one: the
+  //    finalize body's RunError is persisted by its `message` alone (the
+  //    platform's `runs.error` is a text column), so this event is the ONLY
+  //    path by which structured failure context reaches durable storage —
+  //    `appstrate.error` already carries an optional `data` object and the
+  //    platform already writes it to `run_logs.data` (jsonb). Spread
+  //    conditionally so a runner whose `buildError` produced no context (the
+  //    default one, among others) emits the event byte-identical to before.
   const errorEvent: RunEvent = {
     type: "appstrate.error",
     timestamp: now(),
     runId,
     message: resultError.message,
+    ...(resultError.context !== undefined ? { data: resultError.context } : {}),
   };
   await emit(errorEvent);
 

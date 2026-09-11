@@ -25,7 +25,7 @@ export function OAuthClientActions({
   onEdit: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const updateMutation = useUpdateOAuthClient();
   const deleteMutation = useDeleteOAuthClient();
   const rotateMutation = useRotateOAuthClientSecret();
@@ -77,7 +77,7 @@ export function OAuthClientActions({
         isPending={isPending}
         pendingLabel={t("common:loading")}
       >
-        {isAdmin && (
+        {can("oauth-clients:write") && (
           <DropdownMenuItem
             onSelect={() => handleUpdate({ isFirstParty: !client.isFirstParty })}
             disabled={updateMutation.isPending}

@@ -28,7 +28,7 @@ browser) and **browser OAuth** (CIMD / DCR, zero manual client registration).
 
 ## Path A — API key (no browser)
 
-Mint an API key in the dashboard (Settings → API keys) scoped to an application,
+Mint an API key in the dashboard (Settings → API keys) scoped to a space,
 granting `mcp:read` and `mcp:invoke`. The key is already scoped to one
 organization, so use that org's endpoint — no `X-Org-Id` header:
 
@@ -85,14 +85,14 @@ What happens under the hood:
    other org's MCP endpoint) — it can only ever drive `/api/mcp/o/<orgId>` for
    the one org it was issued for.
 
-> **Organization & application context.** The organization is fixed by the
+> **Organization & space context.** The organization is fixed by the
 > endpoint: the token is bound to the org in the URL, so an OAuth-onboarded
 > client needs **no** `X-Org-Id` header and there is no org-switch tool. To use
 > several organizations, add one MCP server entry per org (each runs its own
 > OAuth flow and gets its own org-bound token); the entries can be connected at
 > the same time. Within an org, calls run against that org's **default
-> application**. A client that needs a different application sends an
-> `X-Application-Id` header (it must belong to the org).
+> space**. A client that needs a different space sends an
+> `X-Space-Id` header (it must belong to the org).
 
 ### Self-hosting requirements for Path B
 
@@ -121,9 +121,12 @@ What happens under the hood:
   protected resource, so they can never obtain a platform-wide token in the first
   place. Cookie- and API-key-authenticated callers carry no token audience and
   are unaffected by either check.
-- **CIMD fetch is SSRF-protected:** private/link-local/cloud-metadata ranges are
-  blocked, with a 5s timeout, a 5KB body cap, JSON-only responses, and no
-  redirect following — plus the platform's own host denylist.
+- **CIMD fetch is SSRF-protected:** the document is fetched over HTTPS only,
+  through a single DNS lookup whose every answer must be publicly routable, with
+  the connection pinned to that address; no redirects are followed, the response
+  must be JSON, and it is bounded by a 5s timeout and a 5KB body cap. The
+  platform adds a literal host denylist on top, which also covers the run
+  network's internal Docker aliases.
 - **DCR is bounded:** self-registered clients may request only identity + MCP
   scopes (never core action scopes), PKCE is required, and the registration
   endpoint is rate-limited per IP. The browser consent screen and the user's own
@@ -145,7 +148,22 @@ otherwise get wrong.
 | `describe_operation` | `mcp:read`   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                        |
 | `invoke_operation`   | `mcp:invoke` | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                         |
 | `run_and_wait`       | `mcp:invoke` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
-| `list_documents`     | `mcp:read`   | List documents visible to the caller (uploads + agent outputs), each with a `document://` URI.                                              |
+| `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                  |
+
+**Retired tool names do NOT answer.** `list_documents`, `read_document`,
+`validate_package_document` and `import_package_document` were the pre-#1177
+spellings of `list_files`, `read_file`, `validate_package_file` and
+`import_package_file`. They were briefly kept callable-but-unlisted, then
+removed: calling one now returns `-32602 Unknown tool`, and a `document_uri`
+argument is not accepted. `document://` URIs are not parsed either — they fail
+at `parseFileUri`, in the same rejection as any other unknown scheme.
+
+The reason the aliases went is the reason they were tempting: this server
+advertises `tools: { listChanged: false }`, so a client that listed before an
+upgrade may call an old name afterwards. Keeping them answering bought that one
+client a working call at the price of a permanent second dispatch path whose
+only proof of life was its own test. **Re-list your tools after upgrading the
+platform** — that is the supported recovery, and it is one round trip.
 
 Prefer `run_and_wait` when you need a newly launched run's progress or terminal
 result. `runAgent` / `runInline` remain fully discoverable and invokable for
@@ -157,7 +175,7 @@ For `kind:"inline"`, `manifest` is a partial canonical AFPS manifest. A normal
 call can provide only a task-specific `display_name` plus its dependencies and
 integration configuration; `run_and_wait` derives `name` and defaults the
 omitted AFPS boilerplate, `runtime_tools` (`log`, `output`,
-`publish_document`), and an open object output schema. Defaults fill absent top-level
+`publish_file`), and an open object output schema. Defaults fill absent top-level
 fields only. Every supplied field is preserved as an exact
 replacement—arrays and nested objects are not merged, and
 `runtime_tools: []` remains empty. Clients can therefore provide a complete

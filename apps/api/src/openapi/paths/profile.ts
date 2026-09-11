@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 export const profilePaths = {
   "/api/profile": {
     get: {
@@ -10,10 +13,7 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "User profile",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/UserProfile" },
@@ -47,6 +47,7 @@ export const profilePaths = {
                 displayName: { type: "string", minLength: 1, maxLength: 100 },
                 language: { type: "string", enum: ["fr", "en"] },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -54,10 +55,7 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "Updated profile — same serializer as GET /api/profile",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/UserProfile" },
@@ -97,8 +95,13 @@ export const profilePaths = {
               type: "object",
               required: ["newPassword"],
               properties: {
-                newPassword: { type: "string", minLength: 8, maxLength: 128 },
+                newPassword: {
+                  type: "string",
+                  minLength: MIN_PASSWORD_LENGTH,
+                  maxLength: MAX_PASSWORD_LENGTH,
+                },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -106,10 +109,7 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "Password set — the credential account was created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -163,6 +163,7 @@ export const profilePaths = {
               properties: {
                 ids: { type: "array", items: { type: "string" }, maxItems: 100 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -170,10 +171,7 @@ export const profilePaths = {
       responses: {
         "200": {
           description: "Profiles",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {

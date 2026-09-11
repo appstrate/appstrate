@@ -43,8 +43,8 @@ function DetailLine({ label, children }: { label: string; children: ReactNode })
  */
 export function RunDetailPanel({ run }: { run: EnrichedRun }) {
   const { t } = useTranslation(["agents"]);
-  const inputDocs = run.document_counts.input;
-  const outputDocs = run.document_counts.output;
+  const inputDocs = run.file_counts.input;
+  const outputDocs = run.file_counts.output;
 
   return (
     <div className="space-y-2">
@@ -55,7 +55,7 @@ export function RunDetailPanel({ run }: { run: EnrichedRun }) {
       )}
       {(inputDocs > 0 || outputDocs > 0) && (
         <DetailLine label={t("run.tabDocuments")}>
-          {t("run.detailsDocuments", { input: inputDocs, output: outputDocs })}
+          {t("run.detailsFiles", { input: inputDocs, output: outputDocs })}
         </DetailLine>
       )}
       <DetailLine label={t("run.usageTokensTotal")}>

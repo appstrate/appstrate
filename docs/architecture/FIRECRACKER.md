@@ -36,9 +36,8 @@ FIRECRACKER_RUNNER_TOKEN=<shared secret, >=16 chars>
 ```
 
 Setting `RUN_ADAPTER=firecracker` without the module is a fatal boot error
-listing the registered backends; a stale `RUN_ADAPTER=firecracker-remote`
-(the id before the in-process backend was removed) gets a targeted "renamed to
-`firecracker`" error. Platform-side only `FIRECRACKER_RUNNER_URL`/`_TOKEN` are
+listing the registered backends and pointing at `MODULES` — the same message any
+unregistered id gets. Platform-side only `FIRECRACKER_RUNNER_URL`/`_TOKEN` are
 read (validated lazily, on the first `initialize()`), plus the escape hatch
 `FIRECRACKER_RUNNER_TLS_REQUIRED=0` — also platform-side, NOT a daemon
 variable — which downgrades the plaintext-`http://`-to-non-loopback-host hard

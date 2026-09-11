@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import type { Location } from "react-router-dom";
 
-/** Minimal shape the helpers read — a structural subset of the `DocumentDto`. */
+/** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface DocumentLike {
   purpose: "user_upload" | "agent_output";
   run_id: string | null;

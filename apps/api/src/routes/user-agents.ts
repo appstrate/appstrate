@@ -8,17 +8,22 @@ import { packages } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { caretRange } from "@appstrate/core/semver";
-import { requireOrgAgent, requireMutableAgent } from "../middleware/guards.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
+import { extractDependencies } from "@appstrate/core/dependencies";
+import { assertCatalogPackageAccess, packageAccessSpaces } from "../lib/package-access.ts";
+import { requireOrgAgent, requireMutableAgent, requirePackageInOrg } from "../middleware/guards.ts";
 import { buildAgentDetailDto } from "./agent-detail-handler.ts";
 import { internalError, invalidRequest } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { logger } from "../lib/logger.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
-export const updateSkillsSchema = z.object({
-  skillIds: z.array(z.string()).max(50),
-});
+export const updateSkillsSchema = z
+  .object({
+    skillIds: z.array(z.string()).max(50),
+  })
+  .strict();
 
 /**
  * Resolve each dep ID to its canonical caret range (`^X.Y.Z`) from the
@@ -69,13 +74,15 @@ export function createUserAgentsRouter() {
   // PUT /api/agents/:scope/:name/skills — set skill references for an agent
   router.put(
     `/${SCOPED_PACKAGE_ROUTE}/skills`,
+    requirePermission("agents", "write"),
+    requirePackageInOrg(),
     requireOrgAgent(),
     requireMutableAgent(),
     async (c) => {
       const agent = c.get("package");
       const packageId = agent.id;
 
-      const data = await readJsonBody(c, updateSkillsSchema, "skillIds");
+      const data = await readJsonBody(c, updateSkillsSchema, { param: "skillIds" });
       const { skillIds } = data;
 
       const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));
@@ -86,6 +93,16 @@ export function createUserAgentsRouter() {
         );
       }
 
+      const existingIds = new Set(
+        extractDependencies(asRecord(agent.manifest)).map(
+          (dep) => `${dep.depScope}/${dep.depName}`,
+        ),
+      );
+      const added = skillIds.filter((id) => !existingIds.has(id));
+      if (added.length) {
+        const accessible = await packageAccessSpaces(c);
+        for (const skillId of added) await assertCatalogPackageAccess(c, skillId, accessible);
+      }
       await updateManifestDeps(c.get("orgId"), packageId, skillIds);
 
       // Return the updated agent resource bare — same serializer as the GET

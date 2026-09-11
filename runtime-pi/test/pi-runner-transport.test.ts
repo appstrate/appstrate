@@ -5,8 +5,10 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PiModelConfig } from "@appstrate/runner-pi";
+import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { createApp, type AppDeps } from "../sidecar/app.ts";
 import { createRuntimePiRunner } from "../pi-runner.ts";
+import { codexPlaceholderJwt } from "./helpers/container-e2e.ts";
 import {
   createCaptureSink,
   makeBundlePackage,
@@ -19,21 +21,11 @@ interface ObservedRequest {
   path: string;
 }
 
-const TEST_JWT = [
-  encodeJwtSegment({ alg: "none", typ: "JWT" }),
-  encodeJwtSegment({
-    "https://api.openai.com/auth": { chatgpt_account_id: "acct_test" },
-  }),
-  "placeholder",
-].join(".");
+const TEST_JWT = codexPlaceholderJwt("acct_test");
 
 const TEST_BUNDLE = makeTestBundle(
   makeBundlePackage("@test/runtime-sidecar-transport", "0.0.0", "agent", {}),
 );
-
-function encodeJwtSegment(value: unknown): string {
-  return btoa(JSON.stringify(value)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
 
 function completedResponse(): Response {
   return new Response(
@@ -54,6 +46,8 @@ function completedResponse(): Response {
     { headers: { "content-type": "text/event-stream" } },
   );
 }
+
+const SIDECAR_AUTH_TOKEN = "transport-test-sidecar-token";
 
 describe("runtime-pi sidecar transport wiring", () => {
   it("uses one SSE POST through the sidecar and finalizes successfully", async () => {
@@ -80,6 +74,7 @@ describe("runtime-pi sidecar transport wiring", () => {
         config: {
           platformApiUrl: "http://mock:3000",
           runToken: "tok",
+          sidecarAuthToken: SIDECAR_AUTH_TOKEN,
           proxyUrl: "",
           llm: {
             authMode: "api_key",
@@ -115,6 +110,11 @@ describe("runtime-pi sidecar transport wiring", () => {
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 128_000,
         maxTokens: 4_096,
+        // Exactly what `buildPiModelFromEnv` puts on the model in-container.
+        // This is the ONLY thing carrying the agent's credential onto the
+        // `/llm/*` leg, and it has to survive pi-ai's own header assembly —
+        // which is why this end-to-end wiring test is where it is asserted.
+        headers: { [SIDECAR_AUTH_HEADER]: SIDECAR_AUTH_TOKEN },
       };
       const sink = createCaptureSink();
       const runner = createRuntimePiRunner({
@@ -134,6 +134,8 @@ describe("runtime-pi sidecar transport wiring", () => {
         eventSink: sink,
       });
       expect(sidecarRequests).toEqual([{ method: "POST", path: "/llm/codex/responses" }]);
+      // Reached the handler at all ⇒ `Model.headers` carried the auth token
+      // through pi-ai to the sidecar; the control surface denies by default.
       expect(upstreamRequests).toEqual([{ method: "POST", path: "/codex/responses" }]);
       expect(sink.finalizeCalls).toBe(1);
       expect(sink.finalized?.status).toBe("success");

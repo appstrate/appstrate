@@ -51,19 +51,26 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toContain("complete strict `output.schema`");
   });
 
-  it("keeps the fan-in-by-reference rule (context_documents, never a copy)", () => {
-    expect(SYSTEM_PROMPT).toContain("context_documents");
+  it("keeps the fan-in-by-reference rule (context_files, never a copy)", () => {
+    expect(SYSTEM_PROMPT).toContain("context_files");
+    // The "exact shape" line is where the model copies argument NAMES from, so
+    // it must list the two that carry a file and no retired one: `config` died
+    // with #1179, and `run-and-wait-client` builds the launch body from an
+    // allowlist — an argument under any other name is dropped before the HTTP
+    // call, so the run starts with no file and nothing reports it.
+    expect(SYSTEM_PROMPT).toContain('{ kind:"inline", manifest, prompt, input?, context_files? }');
+    expect(SYSTEM_PROMPT).not.toContain("prompt, config?");
     expect(SYSTEM_PROMPT).toMatch(/NEVER paste a previous run's content/);
     // The reason is load-bearing: a rule with a reason survives paraphrase.
     expect(SYSTEM_PROMPT).toMatch(/retyped by a model/);
   });
 
-  it("reads document content directly before considering a run", () => {
-    expect(SYSTEM_PROMPT).toMatch(/call `read_document` first/);
+  it("reads file content directly before considering a run", () => {
+    expect(SYSTEM_PROMPT).toMatch(/call `read_file` first/);
     expect(SYSTEM_PROMPT).toMatch(/answer directly from that content/);
     expect(SYSTEM_PROMPT).toMatch(/do NOT launch a run merely to read or analyse it/);
     expect(SYSTEM_PROMPT).toMatch(/metadata only or binary\/blob data/);
-    expect(SYSTEM_PROMPT).toMatch(/When a run is justified.*`context_documents`/s);
+    expect(SYSTEM_PROMPT).toMatch(/When a run is justified.*`context_files`/s);
   });
 
   it("keeps the fan-out deliverable contract (file in outputs/ AND a short output)", () => {
@@ -92,7 +99,7 @@ describe("SYSTEM_PROMPT invariants", () => {
 
   it("routes integration_not_active to activation, never to a retry", () => {
     // Retrying the run or re-running the connect flow can never clear a 412:
-    // connecting is personal, activating is application-wide. Activation IS
+    // connecting is personal, activating is space-wide. Activation IS
     // reachable (`activateIntegration` is in the platform's operation surface),
     // and RBAC decides who may call it — an admin fixes it in one step, a member
     // gets a 403 and is told to ask one. Nothing in the chat pre-computes that
@@ -104,8 +111,8 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toMatch(/administrator must activate/);
   });
 
-  it("drops the stale claim that a prompt-pasted document:// URI gives no access", () => {
-    // `context_documents` made this half-false;
+  it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
+    // `context_files` made this half-false;
     // the paragraph now points at the cheap path instead of the boilerplate.
     expect(SYSTEM_PROMPT).not.toContain("does NOT give it access");
     expect(SYSTEM_PROMPT).not.toContain("does NOT give access");
@@ -139,8 +146,42 @@ describe("caller-context prompt hygiene", () => {
     expect(formatCallerContext(identity)).toContain("Reply in the user's language (fr)");
   });
 
-  it("rounds the grounding timestamp to the minute (prompt prefix-cache stability)", () => {
-    const out = formatCallerContext(identity);
-    expect(out).toMatch(/Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z \(UTC\)/);
+  it("keeps the block free of standing instructions — they belong to SYSTEM_PROMPT", () => {
+    // Everything the model must DO with the context is a constant, so it lives in
+    // the static prompt. The block renders data only; the sole exception is the
+    // reply-language line, which is parameterised by the `X-Chat-Locale` header.
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      agents_truncated: true,
+      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+      skills_truncated: true,
+    });
+    // Gone from the block…
+    for (const imperative of [
+      "Use the `@scope/name` id verbatim",
+      "Prefer running an existing agent",
+      "dependencies.skills",
+      'operation_id: "listAgents"',
+      'operation_id: "listSkills"',
+      "Use this to resolve relative dates",
+      "More agents are available",
+      "More skills are available",
+    ]) {
+      expect(out).not.toContain(imperative);
+    }
+    // …and standing in the static prompt instead.
+    for (const imperative of [
+      "Use the current date to resolve relative dates",
+      "Use every `@scope/name` id verbatim",
+      "Prefer running an existing agent over doing the work inline",
+      "declare it under the agent manifest's `dependencies.skills`",
+      '`operation_id: "listAgents"` or `"listSkills"`',
+      "call `listRuns` (newest first)",
+    ]) {
+      expect(SYSTEM_PROMPT).toContain(imperative);
+    }
   });
 });

@@ -5,7 +5,7 @@ import { db } from "@appstrate/db/client";
 import { runs, notifications, organizationMembers, packages } from "@appstrate/db/schema";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
-import type { AppScope } from "../../lib/scope.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
 
 // --- Notifications ---
 //
@@ -26,7 +26,7 @@ function recipientFilter(actor: Actor): SQL {
 }
 
 /** Shape returned to the notifications list endpoint. */
-export interface NotificationDto {
+interface NotificationDto {
   id: string;
   type: string;
   run_id: string | null;
@@ -35,7 +35,7 @@ export interface NotificationDto {
   created_at: string;
 }
 
-export interface NotificationListResult {
+interface NotificationListResult {
   data: NotificationDto[];
   /** True when another page follows (keyset pagination — see listNotifications). */
   has_more: boolean;
@@ -51,15 +51,15 @@ export interface NotificationListResult {
  *  - actor-less run (owner-less org / system schedule, where the scheduler
  *    copied a null userId+endUserId onto the run) → org admins/owners only.
  *    Owned schedules carry the owner's userId onto the run, so they hit the
- *    first branch (one notification, no fan-out). Restricting the actor-less
- *    case to admins bounds row growth and avoids bell-spamming every member
- *    for a schedule nobody personally owns; plain members still see the run
- *    in the runs list.
+ *    first branch (one notification, no fan-out). An actor-less row is readable
+ *    only with `runs:read-all` (RBAC spec §3.4) — nobody else would find the
+ *    run behind the bell — which is why the fan-out targets org admins, and it
+ *    bounds row growth at the same time.
  *
  * Best-effort by contract: the caller wraps this in try/catch — the run is
  * already terminal, a notification write must never fail the run.
  */
-export async function createRunNotifications(scope: AppScope, runId: string): Promise<number> {
+export async function createRunNotifications(scope: SpaceScope, runId: string): Promise<number> {
   const [run] = await db
     .select({
       userId: runs.userId,
@@ -73,7 +73,7 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(runs.id, runId)],
       }),
     )
@@ -93,7 +93,7 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
   const payload = { agent_id: run.packageId, status: run.status };
   const base = {
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     type: "run_completed",
     runId,
     payload,
@@ -151,13 +151,13 @@ export async function createRunNotifications(scope: AppScope, runId: string): Pr
  * spurious 404 if a concurrent run-delete cascaded the row away between them.
  */
 export async function markNotificationRead(
-  scope: AppScope,
+  scope: SpaceScope,
   notificationId: string,
   actor: Actor,
 ): Promise<boolean> {
   const where = scopedWhere(notifications, {
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     extra: [eq(notifications.id, notificationId), recipientFilter(actor)],
   })!;
 
@@ -177,7 +177,7 @@ export async function markNotificationRead(
  * or non-recipient (nothing to mark is a no-op, not a 404).
  */
 export async function markNotificationReadByRun(
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
   actor: Actor,
 ): Promise<void> {
@@ -187,7 +187,7 @@ export async function markNotificationReadByRun(
     .where(
       scopedWhere(notifications, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [
           eq(notifications.runId, runId),
           recipientFilter(actor),
@@ -197,14 +197,14 @@ export async function markNotificationReadByRun(
     );
 }
 
-export async function markAllNotificationsRead(scope: AppScope, actor: Actor): Promise<number> {
+export async function markAllNotificationsRead(scope: SpaceScope, actor: Actor): Promise<number> {
   const updated = await db
     .update(notifications)
     .set({ readAt: sql`now()` })
     .where(
       scopedWhere(notifications, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [recipientFilter(actor), isNull(notifications.readAt)],
       }),
     )
@@ -212,14 +212,14 @@ export async function markAllNotificationsRead(scope: AppScope, actor: Actor): P
   return updated.length;
 }
 
-export async function getUnreadNotificationCount(scope: AppScope, actor: Actor): Promise<number> {
+export async function getUnreadNotificationCount(scope: SpaceScope, actor: Actor): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(notifications)
     .where(
       scopedWhere(notifications, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [recipientFilter(actor), isNull(notifications.readAt)],
       }),
     );
@@ -227,7 +227,7 @@ export async function getUnreadNotificationCount(scope: AppScope, actor: Actor):
 }
 
 export async function getUnreadCountsByAgent(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor,
 ): Promise<Record<string, number>> {
   const agentId = sql<string | null>`${notifications.payload}->>'agent_id'`;
@@ -237,7 +237,7 @@ export async function getUnreadCountsByAgent(
     .where(
       scopedWhere(notifications, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [recipientFilter(actor), isNull(notifications.readAt), sql`${agentId} IS NOT NULL`],
       }),
     )
@@ -263,7 +263,7 @@ export async function getUnreadCountsByAgent(
  * cursor resolves to NULL → empty page (the caller restarts from the head).
  */
 export async function listNotifications(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor,
   options: { unread?: boolean; limit?: number; startingAfter?: string } = {},
 ): Promise<NotificationListResult> {
@@ -282,13 +282,13 @@ export async function listNotifications(
     // resolves to NULL → the row-value comparison is NULL → empty page (the
     // caller restarts from the head), which is the correct stale-cursor result.
     extra.push(
-      sql`(${notifications.createdAt}, ${notifications.id}) < ((SELECT created_at FROM notifications WHERE id = ${startingAfter} AND org_id = ${scope.orgId} AND application_id = ${scope.applicationId} AND recipient_type = ${actor.type} AND recipient_id = ${actor.id}), ${startingAfter})`,
+      sql`(${notifications.createdAt}, ${notifications.id}) < ((SELECT created_at FROM notifications WHERE id = ${startingAfter} AND org_id = ${scope.orgId} AND space_id = ${scope.spaceId} AND recipient_type = ${actor.type} AND recipient_id = ${actor.id}), ${startingAfter})`,
     );
   }
 
   const where = scopedWhere(notifications, {
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     extra,
   })!;
 

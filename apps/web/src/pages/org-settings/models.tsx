@@ -26,6 +26,7 @@ import {
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { ApiError } from "../../api/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { ModelFormModal } from "../../components/model-form-modal";
@@ -46,6 +47,8 @@ function ModelsList({
   onDelete,
   onSetDefault,
   settingDefaultId,
+  canWrite,
+  canDelete,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -55,6 +58,11 @@ function ModelsList({
   onDelete: (m: OrgModelInfo) => void;
   onSetDefault: (m: OrgModelInfo) => void;
   settingDefaultId: string | null;
+  // Passed down rather than read here: the page resolves the permissions once,
+  // and a second `usePermissions()` inside would be a second thing to keep in
+  // step with the route that already gates this screen.
+  canWrite: boolean;
+  canDelete: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
@@ -70,18 +78,22 @@ function ModelsList({
     onEdit,
     onDelete,
     onSetDefault,
+    canWrite,
+    canDelete,
   });
 
   return (
     <>
-      <SettingsPageActions>
-        <PageActionsMenu>
-          <DropdownMenuItem data-page-action="create-model" onSelect={onCreate}>
-            <Plus />
-            {t("models.add")}
-          </DropdownMenuItem>
-        </PageActionsMenu>
-      </SettingsPageActions>
+      {canWrite && (
+        <SettingsPageActions>
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="create-model" onSelect={onCreate}>
+              <Plus />
+              {t("models.add")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
+        </SettingsPageActions>
+      )}
 
       <DataTable
         label={t("models.tabTitle")}
@@ -107,6 +119,8 @@ function CredentialsSection({
   onDelete,
   onRename,
   onConnectOAuth,
+  canWrite,
+  canDelete,
 }: {
   credentials: ModelProviderCredentialInfo[] | undefined;
   isLoading: boolean;
@@ -116,6 +130,8 @@ function CredentialsSection({
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => Promise<void>;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
+  canWrite: boolean;
+  canDelete: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
@@ -123,6 +139,8 @@ function CredentialsSection({
   const { data: registry } = useProvidersRegistry();
 
   const columns = useCredentialColumns({
+    canWrite,
+    canDelete,
     registry,
     testingIds,
     testResults,
@@ -170,7 +188,13 @@ function CredentialsSection({
 
 export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
+
+  const canWriteModels = can("models:write");
+  const canDeleteModels = can("models:delete");
+  const canReadCredentials = can("model-provider-credentials:read");
+  const canWriteCredentials = can("model-provider-credentials:write");
+  const canDeleteCredentials = can("model-provider-credentials:delete");
 
   const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
   const [confirmState, setConfirmState] = useState<{
@@ -182,6 +206,23 @@ export function OrgSettingsModelsPage() {
   const [modelModalOpen, setModelModalOpen] = useState(false);
   const [editModel, setEditModel] = useState<OrgModelInfo | null>(null);
   const { data: models, isLoading: modelsLoading, error: modelsError } = useModels();
+
+  // `org_models.credential_id` is ON DELETE RESTRICT (409 `credential_in_use`):
+  // the dialog says so before asking the server.
+  const modelsOnCredential =
+    confirmState?.type === "deleteCredential"
+      ? (models ?? []).filter((m) => m.credentialId === confirmState.id).length
+      : 0;
+
+  const closeConfirm = () => setConfirmState(null);
+  const reportDeleteFailure = (err: unknown) => {
+    toast.error(
+      err instanceof ApiError && err.code === "credential_in_use"
+        ? t("credentials.deleteRefused")
+        : t("error.prefix", { ns: "common", message: getErrorMessage(err) }),
+    );
+    closeConfirm();
+  };
   const deleteModelMutation = useDeleteModel();
   const setDefaultModelMutation = useSetDefaultModel();
   const modelForm = useModelFormHandler({
@@ -191,27 +232,38 @@ export function OrgSettingsModelsPage() {
 
   const [pkModalOpen, setPkModalOpen] = useState(false);
   const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
-  const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
+  const {
+    data: credentials,
+    isLoading: pkLoading,
+    error: pkError,
+  } = useModelProviderCredentials(canReadCredentials);
+  // The credentials tab has its own resource; `models:read` alone does not open it.
+  const activeTab = canReadCredentials ? subTab : "models-list";
   const createPkMutation = useCreateModelProviderCredential();
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
 
-  if (!isAdmin) return <NavigateKeepingState to="/org-settings/general" />;
+  if (!can("models:read")) return <NavigateKeepingState to="/org-settings/general" />;
 
   return (
     <>
-      <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
+      <Tabs value={activeTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
         <TabsList className="mb-4">
           <TabsTrigger value="models-list" data-testid="models-list-tab">
             {t("models.tabTitle")}
           </TabsTrigger>
-          <TabsTrigger value="credentials" data-testid="models-credentials-tab">
-            {t("credentials.title")}
-          </TabsTrigger>
+          {/* The credentials tab is its own resource: `models:read` alone does
+              not open it, so the trigger is absent rather than disabled — a tab
+              you can click into a 403 is worse than one that was never there. */}
+          {canReadCredentials && (
+            <TabsTrigger value="credentials" data-testid="models-credentials-tab">
+              {t("credentials.title")}
+            </TabsTrigger>
+          )}
         </TabsList>
       </Tabs>
 
-      {subTab === "models-list" && (
+      {activeTab === "models-list" && (
         <ModelsList
           models={models}
           isLoading={modelsLoading}
@@ -231,10 +283,12 @@ export function OrgSettingsModelsPage() {
               : null
           }
           onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
+          canWrite={canWriteModels}
+          canDelete={canDeleteModels}
         />
       )}
 
-      {subTab === "credentials" && (
+      {activeTab === "credentials" && (
         <CredentialsSection
           credentials={credentials}
           isLoading={pkLoading}
@@ -265,6 +319,8 @@ export function OrgSettingsModelsPage() {
             setEditPk(credential);
             setPkModalOpen(true);
           }}
+          canWrite={canWriteCredentials}
+          canDelete={canDeleteCredentials}
         />
       )}
 
@@ -317,29 +373,30 @@ export function OrgSettingsModelsPage() {
 
       <ConfirmModal
         open={!!confirmState}
-        onClose={() => setConfirmState(null)}
+        onClose={closeConfirm}
         title={t("btn.confirm", { ns: "common" })}
         description={
           confirmState?.type === "deleteModel"
             ? t("models.deleteConfirm", { label: confirmState.label })
             : confirmState?.type === "deleteCredential"
-              ? t("credentials.deleteConfirm", { label: confirmState.label })
+              ? modelsOnCredential > 0
+                ? t("credentials.deleteInUse", {
+                    label: confirmState.label,
+                    count: modelsOnCredential,
+                  })
+                : t("credentials.deleteConfirm", { label: confirmState.label })
               : ""
         }
+        confirmDisabled={modelsOnCredential > 0}
         isPending={deleteModelMutation.isPending || deletePkMutation.isPending}
         onConfirm={() => {
           if (!confirmState) return;
-          const close = () => setConfirmState(null);
+          const options = { onSuccess: closeConfirm, onError: reportDeleteFailure };
+          const params = { path: { id: confirmState.id } };
           if (confirmState.type === "deleteModel") {
-            deleteModelMutation.mutate(
-              { params: { path: { id: confirmState.id } } },
-              { onSuccess: close, onError: (error) => toast.error(getErrorMessage(error)) },
-            );
+            deleteModelMutation.mutate({ params }, options);
           } else {
-            deletePkMutation.mutate(
-              { params: { path: { id: confirmState.id } } },
-              { onSuccess: close, onError: (error) => toast.error(getErrorMessage(error)) },
-            );
+            deletePkMutation.mutate({ params }, options);
           }
         }}
       />

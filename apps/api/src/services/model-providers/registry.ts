@@ -49,6 +49,9 @@ const _byId = new Map<string, ModelProviderDefinition>();
  * one of the two definitions is unreachable at lookup time, which is
  * exactly the class of bug the module-loader guards against for Drizzle
  * tables and Better Auth model names.
+ *
+ * Also throws when an `authMode: "oauth2"` provider omits
+ * `modelDiscovery: { mode: "static" }` — see {@link assertSubscriptionNeverEnumerated}.
  */
 export function registerModelProvider(def: ModelProviderDefinition): void {
   if (_byId.has(def.providerId)) {
@@ -57,8 +60,26 @@ export function registerModelProvider(def: ModelProviderDefinition): void {
         `Provider ids must be unique — the second definition would silently shadow the first.`,
     );
   }
+  assertSubscriptionNeverEnumerated(def);
   validateCatalogReferences(def);
   _byId.set(def.providerId, def);
+}
+
+/**
+ * An oauth2 credential is a subscription token, and
+ * `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` allows no platform-side
+ * request on one. Only `modelDiscovery: { mode: "static" }` keeps the listing
+ * path from sending it upstream, so declaring it is checked at boot.
+ */
+function assertSubscriptionNeverEnumerated(def: ModelProviderDefinition): void {
+  if (def.authMode === "oauth2" && def.modelDiscovery?.mode !== "static") {
+    throw new Error(
+      `Model provider ${JSON.stringify(def.providerId)} is an oauth2 (subscription) provider ` +
+        `and must declare modelDiscovery: { mode: "static" }. A subscription provider's models ` +
+        `are never enumerated by the platform — without it, model discovery would spend the ` +
+        `user's access token on an upstream model listing.`,
+    );
+  }
 }
 
 /**

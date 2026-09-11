@@ -10,7 +10,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
-import { registerCatalog } from "../../../src/services/pricing-catalog.ts";
+import { registerCatalog, lookupCatalogModel } from "../../../src/services/pricing-catalog.ts";
 import xaiFeatured from "../../../src/data/featured-models.json" with { type: "json" };
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 
@@ -88,12 +88,22 @@ describe("Model Provider Keys API", () => {
       expect(anthropic).toBeDefined();
       const haiku = anthropic!.models.find((m) => m.id === "claude-haiku-4-5-20251001");
       expect(haiku).toBeDefined();
-      expect(haiku!.cost).toEqual({
-        input: expect.closeTo(1, 4),
-        output: expect.closeTo(5, 4),
-        cacheRead: expect.closeTo(0.1, 4),
-        cacheWrite: expect.closeTo(1.25, 4),
-      });
+      // Assert the route SERVES WHAT THE CATALOG HOLDS, not a transcription of
+      // what it held the day this was written. `apps/api/src/data/pricing/*` is
+      // refreshed weekly by a bot (`chore(pricing): refresh LiteLLM pricing
+      // catalog`), so a literal price turns every vendor repricing into a red
+      // `main` — which is exactly what the xai assertion below did on
+      // 2026-09-02 when xAI moved grok from $3/$15 to $1.25/$2.50.
+      //
+      // Not vacuous: the serializer can still drop the field, read the wrong
+      // provider or model, or reshape the object, and each of those fails here.
+      // What it can no longer do is fail because a vendor changed a price. The
+      // `toBeDefined` guard is the other half — without it a catalog that
+      // stopped pricing this model would compare undefined to undefined and go
+      // green while the route served nothing.
+      const haikuCatalogCost = lookupCatalogModel("anthropic", "claude-haiku-4-5-20251001")?.cost;
+      expect(haikuCatalogCost).toBeDefined();
+      expect(haiku!.cost).toEqual(haikuCatalogCost);
     });
 
     it("marks featured catalog models with featured: true (xai)", async () => {
@@ -119,12 +129,48 @@ describe("Model Provider Keys API", () => {
       for (const id of generated) {
         expect(xai!.models.find((m) => m.id === id)?.featured).toBe(true);
       }
-      // Catalog-derived cost still flows for non-featured models.
+      // Catalog-derived cost still flows for non-featured models. Compared
+      // against the catalog rather than a literal, for the reason spelled out
+      // on the anthropic test above.
       const grok4 = xai!.models.find((m) => m.id === "grok-4");
-      expect(grok4?.cost).toEqual({ input: 3, output: 15 });
-      // A non-featured xai model surfaces too.
-      const grok2 = xai!.models.find((m) => m.id === "grok-2");
-      expect(grok2?.featured).toBe(false);
+      const grok4CatalogCost = lookupCatalogModel("xai", "grok-4")?.cost;
+      expect(grok4CatalogCost).toBeDefined();
+      expect(grok4?.cost).toEqual(grok4CatalogCost);
+      // A non-featured xai model surfaces too, flagged `featured: false`.
+      //
+      // Picked from the response rather than named: `grok-2` used to be the
+      // literal here and the 2026-09-02 catalog refresh DELETED it upstream, so
+      // the assertion started reading `undefined?.featured` and failed on a
+      // model that no longer exists. The property is "everything outside the
+      // generated list is flagged false", which needs no particular model to
+      // survive a vendor's catalog.
+      const nonFeatured = xai!.models.filter((m) => !generated.includes(m.id));
+      expect(nonFeatured.length).toBeGreaterThan(0);
+      for (const m of nonFeatured) {
+        expect(m.featured).toBe(false);
+      }
+    });
+
+    it("lists the anthropic-messages custom endpoint with no featured models", async () => {
+      const res = await app.request("/api/model-provider-credentials/registry", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          providerId: string;
+          apiShape: string;
+          baseUrlOverridable: boolean;
+          models: unknown[];
+        }[];
+      };
+      const custom = body.data.find((p) => p.providerId === "anthropic-compatible");
+      expect(custom).toBeDefined();
+      expect(custom!.baseUrlOverridable).toBe(true);
+      expect(custom!.apiShape).toBe("anthropic-messages");
+      // No catalog and no featured list: the form enumerates the endpoint
+      // itself via /discover instead of offering a picker.
+      expect(custom!.models).toEqual([]);
     });
 
     it("projects only requested fields and drops the heavy models catalog", async () => {
@@ -227,6 +273,24 @@ describe("Model Provider Keys API", () => {
       expect(body).not.toHaveProperty("apiKey");
       expect(body).not.toHaveProperty("credentialsEncrypted");
     });
+
+    it("names an unlabelled custom-endpoint credential after its host", async () => {
+      // Several endpoints behind one provider entry would otherwise all be
+      // called "OpenAI-compatible (custom)", told apart only by a ` (2)` suffix.
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "openai-compatible",
+          apiKey: "sk-local",
+          baseUrlOverride: "http://10.255.255.9:9/v1",
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      expect(body.label).toStartWith("10.255.255.9:9 · ");
+    });
   });
 
   describe("PUT /api/model-provider-credentials/:id", () => {
@@ -315,12 +379,13 @@ describe("Model Provider Keys API", () => {
       const modelRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        // `apiShape` / `baseUrl` are deliberately NOT part of this body — they
+        // are pinned by the credential's `providerId`. They used to be sent and
+        // silently stripped; the body is `.strict()` now, so they are gone.
         body: JSON.stringify({
           label: "Sonnet pinned",
           credentialId: credId,
           modelId: "claude-sonnet-4-6",
-          apiShape: "anthropic-messages",
-          baseUrl: "https://api.anthropic.com",
         }),
       });
       expect(modelRes.status).toBe(201);
@@ -536,7 +601,7 @@ describe("Model Provider Keys API", () => {
    * form drives both provider kinds through the same call, and the response
    * still has to be the credential's current list. The harness validates
    * every JSON body against the OpenAPI response schema, so these tests also
-   * gate the documented shape (`outcome`, `probed_count`,
+   * gate the documented shape (`outcome`, `candidate_count`,
    * `available_model_ids`).
    */
   describe("POST /api/model-provider-credentials/:id/refresh-models (static provider)", () => {
@@ -548,7 +613,7 @@ describe("Model Provider Keys API", () => {
     });
     beforeEach(registerStaticRefreshProvider);
 
-    it("returns the derived list with probed_count 0 and writes nothing", async () => {
+    it("returns the derived list and writes nothing", async () => {
       const cred = await seedOrgModelProviderOAuth({
         orgId: ctx.org.id,
         providerId: STATIC_PROVIDER_ID,
@@ -562,13 +627,13 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         outcome: string;
-        probed_count: number;
+        candidate_count: number;
         available_model_ids: string[] | null;
       };
       expect(body.outcome).toBe("ok");
-      // Zero upstream requests — the platform never spends a subscription
-      // quota to enumerate models.
-      expect(body.probed_count).toBe(0);
+      // Every declared candidate is counted, none requested — the platform
+      // never spends a subscription quota to enumerate models.
+      expect(body.candidate_count).toBe(3);
       // "s-absent" is filtered out: seeding would reject an uncatalogued id.
       expect(body.available_model_ids).toEqual(["s-one", "s-two"]);
 

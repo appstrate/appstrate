@@ -52,7 +52,7 @@ import { netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
 import { extractSni, collectUntilSniParses } from "./integration-mitm-listener.ts";
 import type { EgressListenerEvent } from "./integration-egress-listener.ts";
 
-export interface CreateTransparentListenerOptions {
+interface CreateTransparentListenerOptions {
   /** Bind host — 0.0.0.0 on the per-run bridge network. */
   host?: string;
   /** Bind port — 443/80 in production; tests pass 0 for ephemeral. */

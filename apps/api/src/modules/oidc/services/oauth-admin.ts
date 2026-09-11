@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth client admin service — polymorphic org + application clients.
+ * OAuth client admin service — polymorphic org + space clients.
  *
  * Direct CRUD against `oauth_clients`. Each client is scoped at one of three
  * levels:
  *
- *   - `instance`: platform-wide, no org/app FK (the platform dashboard SPA)
+ *   - `instance`: platform-wide, no org/space FK (the platform dashboard SPA)
  *   - `org`: pinned to an organization via `referenced_org_id` (dashboard
  *     users are the actors)
- *   - `application`: pinned to an application via `referenced_application_id`
+ *   - `space`: pinned to a space via `referenced_space_id`
  *     (end-users are the actors)
  *
  * A DB-level CHECK constraint guarantees exactly one of the two FKs is set
@@ -19,19 +19,12 @@
  * Why we bypass `auth.api.adminCreateOAuthClient`: the plugin derives its
  * `reference_id` via `clientReference({ session })` which doesn't have
  * access to Appstrate's multi-tenant context. We write directly to the
- * Drizzle schema and stash the polymorphic fields into the plugin-readable
- * `metadata` JSON column so the `customAccessTokenClaims` closure can
- * branch on them at token-mint time.
+ * Drizzle schema.
  *
- * `metadata` shape (single source of truth readable by the plugin):
- *   {
- *     level: "instance" | "org" | "application",
- *     referencedOrgId?: string,
- *     referencedApplicationId?: string,
- *   }
- *
- * The same values are also persisted in dedicated SQL columns for query
- * performance + FK integrity. Writes keep both in lockstep.
+ * `level`, `referenced_org_id`, `referenced_space_id` and `self_service` are
+ * SQL columns, and the claim builder reads them off the row. The provider's
+ * `metadata` JSON is client-influenced — a registration body may set it — so no
+ * platform decision is taken from it.
  *
  * Secrets are generated as base64url-encoded random bytes, hashed with
  * SHA-256 at rest, and only returned in plaintext from `createClient` /
@@ -40,12 +33,15 @@
 
 import { eq, or, inArray, asc, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applications } from "@appstrate/db/schema";
+import { createCache } from "@appstrate/core/cache";
+import { spaces } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
-import { getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
-import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
+import { getAppstrateScopeSet } from "../auth/scopes.ts";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
+import { assertSpaceAssignmentsValid } from "../../../services/space-assignments.ts";
+import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
 // ─── SECURITY: Trust boundary ─────────────────────────────────────────────────
@@ -63,7 +59,7 @@ import { isValidRedirectUri } from "./redirect-uri.ts";
 //     if (!owning || owning !== orgId) throw notFound("OAuth client not found");
 //     await deleteClient(clientId); // safe only after the guard above
 //
-// Why this shape: the multi-level (instance / org / application) model makes
+// Why this shape: the multi-level (instance / org / space) model makes
 // a single Drizzle predicate awkward — routes already know the authenticated
 // org, so a post-fetch check is both simpler and more obviously correct than
 // a compound WHERE clause. But it means a new caller that forgets the guard
@@ -71,13 +67,13 @@ import { isValidRedirectUri } from "./redirect-uri.ts";
 // OAuth client by id, the `getClientOwningOrg` check is REQUIRED.
 //
 // The only exception is the scoped list helper (`listClientsForOrgAndApps`)
-// which filters by the caller's org/applications at query time and is safe
+// which filters by the caller's org/spaces at query time and is safe
 // to expose directly.
 
-export type OAuthClientLevel = "instance" | "org" | "application";
+export type OAuthClientLevel = "instance" | "org" | "space";
 
-export type OAuthAdminValidationField =
-  "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId" | "signupPolicy";
+type OAuthAdminValidationField =
+  "scopes" | "redirectUris" | "referencedOrgId" | "referencedSpaceId" | "signupPolicy";
 
 export class OAuthAdminValidationError extends Error {
   readonly field: OAuthAdminValidationField;
@@ -88,19 +84,40 @@ export class OAuthAdminValidationError extends Error {
   }
 }
 
-function assertValidScopes(scopes: readonly string[] | undefined): void {
-  if (!scopes || scopes.length === 0) return;
+/**
+ * The scopes in `scopes` that are outside the OIDC vocabulary — i.e. exactly
+ * what {@link assertValidScopes} would refuse. Empty for a valid list, and for
+ * `undefined`/empty input (nothing to validate, the caller's default applies).
+ *
+ * Exported for `instance-client-sync.ts`, which must know whether a declaration
+ * would SURVIVE a re-create before it tells an operator to delete a row and
+ * restart. Answering that with a predicate rather than a catch keeps the
+ * vocabulary in one place.
+ */
+export function invalidScopesIn(scopes: readonly string[] | undefined): string[] {
+  if (!scopes || scopes.length === 0) return [];
   // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
   const allowed = getAppstrateScopeSet();
-  const invalid = scopes.filter((s) => !allowed.has(s));
-  if (invalid.length > 0) {
-    throw new OAuthAdminValidationError(
-      "scopes",
-      `OIDC: unknown scopes rejected at service boundary: ${invalid.join(", ")}. ` +
-        `Only scopes in the OIDC vocabulary (identity scopes + OIDC_ALLOWED_SCOPES) ` +
-        `may be registered.`,
-    );
-  }
+  return scopes.filter((s) => !allowed.has(s));
+}
+
+/**
+ * Reject any requested scope outside the OIDC vocabulary (identity scopes +
+ * `OIDC_ALLOWED_SCOPES` + module `endUserGrantable` contributions).
+ *
+ * `undefined` / empty in — nothing to validate, the caller's own default
+ * applies.
+ */
+function assertValidScopes(scopes: readonly string[] | undefined): void {
+  const invalid = invalidScopesIn(scopes);
+  if (invalid.length === 0) return;
+
+  throw new OAuthAdminValidationError(
+    "scopes",
+    `OIDC: unknown scopes rejected at service boundary: ${invalid.join(", ")}. ` +
+      `Only scopes in the OIDC vocabulary (identity scopes + OIDC_ALLOWED_SCOPES) ` +
+      `may be registered.`,
+  );
 }
 
 function assertValidRedirectUris(uris: readonly string[]): void {
@@ -117,13 +134,16 @@ function assertValidRedirectUris(uris: readonly string[]): void {
 }
 
 /**
- * Role allowlist for org-level auto-provisioning. `owner` is intentionally
- * excluded at the service, DB, and UI layers: self-promotion to owner via a
- * misconfigured client is an unacceptable operational risk. Admins who
- * genuinely need a new owner must promote after the fact.
+ * OIDC Dynamic Registration §2 application type, derived from the redirect URIs
+ * the caller registered. The provider validates every redirect URI against this
+ * value and only a `native` client may declare an `http://` loopback callback —
+ * which `isValidRedirectUri` admits, so hard-coding `web` here would refuse at
+ * authorization time what registration accepted. Same rule the DCR register
+ * hook applies (`auth/guards.ts`).
  */
-export const SIGNUP_ROLE_ALLOWED = ["admin", "member", "viewer"] as const;
-export type SignupRole = (typeof SIGNUP_ROLE_ALLOWED)[number];
+function applicationTypeFor(redirectUris: readonly string[]): "web" | "native" {
+  return redirectUris.some((uri) => uri.startsWith("http://")) ? "native" : "web";
+}
 
 export interface OAuthClientRecord {
   id: string;
@@ -131,7 +151,7 @@ export interface OAuthClientRecord {
   name: string | null;
   level: OAuthClientLevel;
   referencedOrgId: string | null;
-  referencedApplicationId: string | null;
+  referencedSpaceId: string | null;
   redirectUris: string[];
   postLogoutRedirectUris: string[];
   scopes: string[];
@@ -142,22 +162,23 @@ export interface OAuthClientRecord {
    * Keycloak "User Registration", Okta JIT toggle):
    *   - `instance`: brand-new Better Auth user may be created platform-wide.
    *   - `org`: brand-new BA user + auto-join to `referencedOrgId` with `signupRole`.
-   *   - `application`: brand-new BA user + JIT `end_users` provisioning.
+   *   - `space`: brand-new BA user + JIT `end_users` provisioning.
    * Defaults to `false` (secure-by-default) on every level.
    */
   allowSignup: boolean;
   /** Org-level: role assigned on auto-join. `owner` forbidden. Defaults to `"member"`. */
-  signupRole: SignupRole;
+  signupRole: AssignableOrgRole;
+  signupSpaceAssignments: ReadonlyArray<SpaceAssignment>;
   createdAt: string | null;
   updatedAt: string | null;
 }
 
-export interface OAuthClientWithSecret extends OAuthClientRecord {
+interface OAuthClientWithSecret extends OAuthClientRecord {
   clientSecret: string;
 }
 
 function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
-  if (row.level !== "instance" && row.level !== "org" && row.level !== "application") {
+  if (row.level !== "instance" && row.level !== "org" && row.level !== "space") {
     throw new Error(`OIDC: unexpected oauth_client.level value: ${String(row.level)}`);
   }
   return {
@@ -166,14 +187,15 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     name: row.name,
     level: row.level,
     referencedOrgId: row.referencedOrgId ?? null,
-    referencedApplicationId: row.referencedApplicationId ?? null,
+    referencedSpaceId: row.referencedSpaceId ?? null,
     redirectUris: row.redirectUris ?? [],
     postLogoutRedirectUris: row.postLogoutRedirectUris ?? [],
     scopes: row.scopes ?? [],
     disabled: row.disabled ?? false,
     isFirstParty: row.skipConsent ?? false,
     allowSignup: row.allowSignup ?? false,
-    signupRole: row.signupRole as SignupRole,
+    signupRole: row.signupRole,
+    signupSpaceAssignments: row.signupSpaceAssignments,
     createdAt: row.createdAt ? row.createdAt.toISOString() : null,
     updatedAt: row.updatedAt ? row.updatedAt.toISOString() : null,
   };
@@ -195,60 +217,33 @@ export async function hashSecret(plaintext: string): Promise<string> {
   return Buffer.from(new Uint8Array(digest)).toString("hex");
 }
 
-// ─── Short-TTL client cache ───────────────────────────────────────────────────
-//
-// The OIDC auth strategy hits `getClient()` on every authenticated request to
-// verify the client is still enabled (defense-in-depth against stale tokens
-// from disabled clients). That would put a DB round-trip on the hot path of
-// every API call authenticated via OIDC. The server-rendered login/consent
-// pages also re-read the same client across a GET → POST pair, adding two
-// more queries per browser login.
-//
-// Solution: a tiny in-process TTL cache keyed by `clientId`. Reads fall
-// through on miss or expiry; mutations (update / delete / rotate) invalidate
-// the entry synchronously so `updateClient(id, { disabled: true })` takes
-// effect immediately on the next request instead of waiting out the TTL.
-// `createClient` does NOT need to invalidate because new `clientId` values
-// are guaranteed to be absent from the map.
-//
-// Best-effort only: the cache lives per-process, so in a multi-replica
-// deployment a disabled client may remain cached for up to TTL on OTHER
-// replicas. That is acceptable — the worst-case window is one TTL, and the
-// mutation path is already rare compared to the read path it protects.
+// Per-process TTL. An invalidation is broadcast to every replica through the
+// platform cache bus, so a disabled client is dropped everywhere within a
+// round trip; a lost broadcast leaves it cached for at most one TTL window
+// on the replicas that missed it.
 const CLIENT_CACHE_TTL_MS = 30_000;
 // Hard ceiling on distinct cached entries. Because `getClientCached` also
 // caches `null` for UNKNOWN clientIds (to soak up repeated probes), an
 // attacker spraying random client_ids at any OIDC-authenticated endpoint
 // would otherwise grow this Map without bound — a slow memory-exhaustion
-// vector. Expired entries also linger until their key is re-read, so size
-// never self-corrects without an explicit sweep. The cap + sweep below keep
-// the Map bounded regardless of probe volume.
+// vector. The entry cap below keeps the cache bounded regardless of probe
+// volume (oldest entry evicted past it).
 const CLIENT_CACHE_MAX_ENTRIES = 10_000;
-const clientCache = new Map<string, { record: OAuthClientRecord | null; expiresAt: number }>();
+/**
+ * `clientId` → record, or `null` for an unknown client (cached too, to soak
+ * up repeated probes — the entry cap above bounds what a spray can allocate).
+ * A `@appstrate/core/cache`: bounded, TTL'd, concurrent lookups of one client
+ * coalesce, and an invalidation is broadcast to every replica through the
+ * platform cache bus (`lib/cache-bus.ts`).
+ */
+const clientCache = createCache<OAuthClientRecord | null>({
+  name: "oidc-oauth-client",
+  ttlMs: CLIENT_CACHE_TTL_MS,
+  max: CLIENT_CACHE_MAX_ENTRIES,
+});
 
 function cacheInvalidate(clientId: string): void {
-  clientCache.delete(clientId);
-}
-
-/**
- * Keep `clientCache` under `CLIENT_CACHE_MAX_ENTRIES`. Runs only when the map
- * is at capacity, so it is amortized-cheap on the hot path. First drops every
- * expired entry; if live entries alone still breach the cap, evicts oldest by
- * insertion order (Map iteration is insertion-ordered) until back under budget.
- */
-function evictClientCacheIfNeeded(now: number): void {
-  if (clientCache.size < CLIENT_CACHE_MAX_ENTRIES) return;
-  for (const [key, entry] of clientCache) {
-    if (entry.expiresAt <= now) clientCache.delete(key);
-  }
-  if (clientCache.size >= CLIENT_CACHE_MAX_ENTRIES) {
-    const overflow = clientCache.size - CLIENT_CACHE_MAX_ENTRIES + 1;
-    let removed = 0;
-    for (const key of clientCache.keys()) {
-      clientCache.delete(key);
-      if (++removed >= overflow) break;
-    }
-  }
+  clientCache.invalidate(clientId);
 }
 
 /**
@@ -256,14 +251,8 @@ function evictClientCacheIfNeeded(now: number): void {
  * strategy, page rendering). Returns `null` for unknown clientIds (also
  * cached to soak up probes for non-existent clients).
  */
-export async function getClientCached(clientId: string): Promise<OAuthClientRecord | null> {
-  const now = Date.now();
-  const cached = clientCache.get(clientId);
-  if (cached && cached.expiresAt > now) return cached.record;
-  const record = await getClient(clientId);
-  evictClientCacheIfNeeded(now);
-  clientCache.set(clientId, { record, expiresAt: now + CLIENT_CACHE_TTL_MS });
-  return record;
+export function getClientCached(clientId: string): Promise<OAuthClientRecord | null> {
+  return clientCache.get(clientId, () => getClient(clientId));
 }
 
 /** @internal Test helper — drop every entry. */
@@ -273,17 +262,17 @@ export function _resetClientCache(): void {
 
 // ─── Scope-filter helpers ─────────────────────────────────────────────────────
 //
-// Org-level clients are visible to any admin of the org. Application-level
-// clients are visible to any admin of the org that owns the application.
+// Org-level clients are visible to any admin of the org. Space-level
+// clients are visible to any admin of the org that owns the space.
 
 /** Combined list for the admin UI — returns every client the caller's org can see in a single query. */
 export async function listClientsForOrgAndApps(
   orgId: string,
-  applicationIds: string[],
+  spaceIds: string[],
 ): Promise<OAuthClientRecord[]> {
   const conditions = [eq(oauthClient.referencedOrgId, orgId)];
-  if (applicationIds.length > 0) {
-    conditions.push(inArray(oauthClient.referencedApplicationId, applicationIds));
+  if (spaceIds.length > 0) {
+    conditions.push(inArray(oauthClient.referencedSpaceId, spaceIds));
   }
   const rows = await db
     .select()
@@ -303,7 +292,7 @@ export async function getClient(clientId: string): Promise<OAuthClientRecord | n
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
-export interface CreateOrgClientInput {
+interface CreateOrgClientInput {
   level: "org";
   name: string;
   redirectUris: string[];
@@ -314,22 +303,23 @@ export interface CreateOrgClientInput {
   /** Defaults to `false` at org level. */
   allowSignup?: boolean;
   /** Defaults to `"member"`. `owner` forbidden. */
-  signupRole?: SignupRole;
+  signupRole?: AssignableOrgRole;
+  signupSpaceAssignments?: ReadonlyArray<SpaceAssignment>;
 }
 
-export interface CreateApplicationClientInput {
-  level: "application";
+interface CreateSpaceClientInput {
+  level: "space";
   name: string;
   redirectUris: string[];
   postLogoutRedirectUris?: string[];
   scopes?: string[];
-  referencedApplicationId: string;
+  referencedSpaceId: string;
   isFirstParty?: boolean;
   /** Defaults to `false`. When `true`, a first OIDC login JIT-creates a BA user + `end_users` row. */
   allowSignup?: boolean;
 }
 
-export interface CreateInstanceClientInput {
+interface CreateInstanceClientInput {
   level: "instance";
   name: string;
   redirectUris: string[];
@@ -340,8 +330,7 @@ export interface CreateInstanceClientInput {
   allowSignup?: boolean;
 }
 
-export type CreateClientInput =
-  CreateInstanceClientInput | CreateOrgClientInput | CreateApplicationClientInput;
+type CreateClientInput = CreateInstanceClientInput | CreateOrgClientInput | CreateSpaceClientInput;
 
 export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
   assertValidRedirectUris(input.redirectUris);
@@ -353,35 +342,35 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   const hashedSecret = await hashSecret(plaintextSecret);
   const now = new Date();
 
-  // `clientId` is stashed alongside the polymorphic fields so the
-  // `customAccessTokenClaims` closure can recover the client identity from
-  // its `metadata` argument (Better Auth's oauth-provider plugin does not
-  // pass `client.clientId` to the closure directly). Immutable — the unique
-  // `client_id` column never changes for the client's lifetime, so no
-  // drift with the SQL column.
-  const metadata: Record<string, unknown> = { level: input.level, clientId };
-  if (input.level === "org") {
-    metadata.referencedOrgId = input.referencedOrgId;
-  } else if (input.level === "application") {
-    metadata.referencedApplicationId = input.referencedApplicationId;
-  }
-  // instance: no FK fields in metadata
-
   // `signupRole` is only meaningful on org-level clients (role assigned on
-  // auto-join). Application clients have no org membership to attach to;
+  // auto-join). Space clients have no org membership to attach to;
   // instance clients have no fixed org to attach to either. Reject loudly
   // on the non-org levels to surface configuration mistakes.
-  if (input.level !== "org" && (input as { signupRole?: unknown }).signupRole !== undefined) {
+  if (
+    input.level !== "org" &&
+    ((input as { signupRole?: unknown }).signupRole !== undefined ||
+      (input as { signupSpaceAssignments?: unknown }).signupSpaceAssignments !== undefined)
+  ) {
     throw new OAuthAdminValidationError(
       "signupPolicy",
-      "OIDC: signupRole is only valid for org-level clients",
+      "OIDC: signupRole and signupSpaceAssignments are only valid for org-level clients",
     );
   }
   // `allowSignup` is honored on every level (unified Auth0/Keycloak/Okta
   // semantic). Defaults to `false` (secure-by-default); `ensureInstanceClient()`
   // opts in at boot to keep the fresh-install signup page open.
   const allowSignup = input.allowSignup ?? false;
-  const signupRole: SignupRole = input.level === "org" ? (input.signupRole ?? "member") : "member";
+  const signupRole: AssignableOrgRole =
+    input.level === "org" ? (input.signupRole ?? "member") : "member";
+  const signupSpaceAssignments = input.level === "org" ? (input.signupSpaceAssignments ?? []) : [];
+  if (input.level === "org") {
+    await assertSpaceAssignmentsValid({
+      orgId: input.referencedOrgId,
+      role: signupRole,
+      assignments: signupSpaceAssignments,
+      param: "signupSpaceAssignments",
+    });
+  }
 
   const inserted = await db
     .insert(oauthClient)
@@ -395,13 +384,13 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
       scopes: input.scopes ?? ["openid", "profile", "email"],
       level: input.level,
       referencedOrgId: input.level === "org" ? input.referencedOrgId : null,
-      referencedApplicationId: input.level === "application" ? input.referencedApplicationId : null,
-      metadata: JSON.stringify(metadata),
+      referencedSpaceId: input.level === "space" ? input.referencedSpaceId : null,
       skipConsent: input.isFirstParty ?? false,
       allowSignup,
       signupRole,
+      signupSpaceAssignments,
       disabled: false,
-      type: "web",
+      applicationType: applicationTypeFor(input.redirectUris),
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -422,69 +411,23 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
  * Stamp a self-registered (RFC 7591 DCR or CIMD) OAuth client as a
  * self-service **instance** client.
  *
- * Self-registered clients are written WITHOUT the platform's polymorphic
- * `level` in their `metadata` (the native DCR insert and the CIMD plugin both
- * bypass `createClient`), so `customAccessTokenClaims` →
- * `buildClaimsForClient` would reject every token they request
- * (`metadata missing level`). This marks them `level: "instance"` so they mint
- * instance tokens — which the RFC 8707 audience confinement
- * (`protected-resources.ts`) then restricts to the single protected resource
- * the token was issued for (the only resource a self-service client may request
- * — enforced at `/oauth2/token`, see `oidcGuardsPlugin`). The token carries the
- * connecting user's authority but is usable ONLY at that resource.
+ * The native DCR insert and the CIMD plugin both bypass `createClient`, so the
+ * row arrives with no platform discriminator. `level = "instance"` lets it mint
+ * instance tokens; `self_service = true` is what `/oauth2/token` reads to
+ * confine those tokens to a single protected resource — the discriminator
+ * between an operator-provisioned instance client (the dashboard SPA / CLI,
+ * which may target the platform audience) and a self-registered one, which may
+ * not.
  *
- * `selfService: true` is also recorded so the token endpoint can recognise
- * these clients and enforce the resource restriction; it is the discriminator
- * between an admin-provisioned instance client (the dashboard SPA / CLI, which
- * may target the platform audience) and a self-registered one (which may not).
- *
- * Merges into any metadata the registration already wrote, and keeps the SQL
- * `level` column in lockstep. Idempotent: a CIMD client refreshed/re-resolved
- * is safely re-stamped. Best-effort cache invalidation so the next mint reads
- * the stamped row.
+ * Both are columns, never the `metadata` JSON: the provider owns that JSON and
+ * a registration body may set it, so a flag kept there is a flag the client can
+ * name. Idempotent — a refreshed CIMD client is re-stamped on every resolution.
  */
 export async function markClientSelfService(clientId: string): Promise<void> {
-  const [row] = await db
-    .select({ metadata: oauthClient.metadata, scopes: oauthClient.scopes })
-    .from(oauthClient)
-    .where(eq(oauthClient.clientId, clientId))
-    .limit(1);
-  if (!row) return;
-
-  let metadata: Record<string, unknown> = {};
-  if (row.metadata) {
-    try {
-      const parsed = JSON.parse(row.metadata) as unknown;
-      if (parsed && typeof parsed === "object") metadata = parsed as Record<string, unknown>;
-    } catch {
-      // Corrupt metadata → overwrite with a clean self-service marker rather
-      // than carry the garbage forward.
-    }
-  }
-  metadata.level = "instance";
-  metadata.clientId = clientId;
-  metadata.selfService = true;
-
-  // Backfill the self-service scope ceiling when the client registered with
-  // none. A CIMD client whose metadata document declares no `scope` (e.g.
-  // Claude Code) is written with `scopes: []` — and `[]` is not nullish, so
-  // the authorize-time check `client.scopes ?? opts.scopes` keeps the empty
-  // set and rejects EVERY requested scope (`invalid_scope`). The DCR register
-  // path dodges this via `clientRegistrationDefaultScopes`, but the CIMD path
-  // bypasses it. Stamp the same ceiling a self-service DCR client gets
-  // (identity + module end-user-grantable scopes, e.g. mcp:read/mcp:invoke) so
-  // the client may request them. Only fill when empty — never widen a client
-  // that deliberately declared a narrower scope set.
-  const update: Record<string, unknown> = {
-    level: "instance",
-    metadata: JSON.stringify(metadata),
-    updatedAt: new Date(),
-  };
-  if (!row.scopes || row.scopes.length === 0) {
-    update.scopes = [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
-  }
-
-  await db.update(oauthClient).set(update).where(eq(oauthClient.clientId, clientId));
+  await db
+    .update(oauthClient)
+    .set({ selfService: true, level: "instance", updatedAt: new Date() })
+    .where(eq(oauthClient.clientId, clientId));
   cacheInvalidate(clientId);
 }
 
@@ -508,7 +451,7 @@ export async function rotateClientSecret(clientId: string): Promise<OAuthClientW
   return row ? { ...mapRow(row), clientSecret: plaintextSecret } : null;
 }
 
-export interface UpdateClientInput {
+interface UpdateClientInput {
   redirectUris?: string[];
   postLogoutRedirectUris?: string[];
   scopes?: string[];
@@ -516,8 +459,9 @@ export interface UpdateClientInput {
   isFirstParty?: boolean;
   /** Honored on every level (unified semantic). */
   allowSignup?: boolean;
-  /** Honored only on org-level clients; rejected on instance/application. `owner` forbidden. */
-  signupRole?: SignupRole;
+  /** Honored only on org-level clients; rejected on instance/space. `owner` forbidden. */
+  signupRole?: AssignableOrgRole;
+  signupSpaceAssignments?: ReadonlyArray<SpaceAssignment>;
 }
 
 export async function updateClient(
@@ -532,16 +476,23 @@ export async function updateClient(
   }
 
   // `signupRole` is only meaningful on org-level clients — reject updates
-  // targeting instance/application levels loudly so configuration mistakes
+  // targeting instance/space levels loudly so configuration mistakes
   // surface. `allowSignup` is valid on every level.
-  if (input.signupRole !== undefined) {
+  if (input.signupRole !== undefined || input.signupSpaceAssignments !== undefined) {
     const existing = await getClient(clientId);
-    if (existing && existing.level !== "org") {
+    if (!existing) return null;
+    if (existing.level !== "org" || !existing.referencedOrgId) {
       throw new OAuthAdminValidationError(
         "signupPolicy",
-        "OIDC: signupRole is only valid for org-level clients",
+        "OIDC: signupRole and signupSpaceAssignments are only valid for org-level clients",
       );
     }
+    await assertSpaceAssignmentsValid({
+      orgId: existing.referencedOrgId,
+      role: input.signupRole ?? existing.signupRole,
+      assignments: input.signupSpaceAssignments ?? existing.signupSpaceAssignments,
+      param: "signupSpaceAssignments",
+    });
   }
 
   // Build a single SET clause — atomic, no partial-update risk.
@@ -554,6 +505,8 @@ export async function updateClient(
   if (input.isFirstParty !== undefined) set.skipConsent = input.isFirstParty;
   if (input.allowSignup !== undefined) set.allowSignup = input.allowSignup;
   if (input.signupRole !== undefined) set.signupRole = input.signupRole;
+  if (input.signupSpaceAssignments !== undefined)
+    set.signupSpaceAssignments = input.signupSpaceAssignments;
 
   const [row] = await db
     .update(oauthClient)
@@ -562,27 +515,19 @@ export async function updateClient(
     .returning();
   if (!row) return null;
   cacheInvalidate(clientId);
-  // No metadata re-sync needed: none of the `UpdateClientInput` fields
-  // (redirectUris, postLogoutRedirectUris, disabled, isFirstParty) feed
-  // into `metadata`, and `level` / `referenced*` columns are immutable
-  // (enforced by the `oauth_clients_level_immutable` DB trigger in
-  // migration 0001). The metadata JSON written at creation time is
-  // therefore frozen for the client's lifetime and cannot drift from
-  // the SQL columns — eliminating the read-modify-write race that the
-  // old `syncMetadata` helper introduced between mutations.
   return mapRow(row);
 }
 
 /**
  * Resolve the effective "owning entity" for a client — the org id for
- * org-level clients, or the org id derived from the application FK for
- * application-level clients. Used by route-level permission checks that
+ * org-level clients, or the org id derived from the space FK for
+ * space-level clients. Used by route-level permission checks that
  * need to ensure the caller is an admin of the org that owns the client.
  *
  * Single `LEFT JOIN` so we never issue two sequential round-trips for
- * application-level clients — this function runs on every CRUD route
+ * space-level clients — this function runs on every CRUD route
  * (`GET /:id`, `PATCH /:id`, `DELETE /:id`, `POST /:id/rotate`) and is
- * latency-sensitive. The join is cheap: `applications.id` is the primary
+ * latency-sensitive. The join is cheap: `spaces.id` is the primary
  * key and the FK is covered by an index from the initial migration.
  */
 export async function getClientOwningOrg(clientId: string): Promise<string | null> {
@@ -590,17 +535,17 @@ export async function getClientOwningOrg(clientId: string): Promise<string | nul
     .select({
       level: oauthClient.level,
       referencedOrgId: oauthClient.referencedOrgId,
-      appOrgId: applications.orgId,
+      spaceOrgId: spaces.orgId,
     })
     .from(oauthClient)
-    .leftJoin(applications, eq(applications.id, oauthClient.referencedApplicationId))
+    .leftJoin(spaces, eq(spaces.id, oauthClient.referencedSpaceId))
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row) return null;
   // Instance clients are system-level — they have no owning org.
   if (row.level === "instance") return null;
   if (row.level === "org") return row.referencedOrgId;
-  if (row.level === "application") return row.appOrgId ?? null;
+  if (row.level === "space") return row.spaceOrgId ?? null;
   return null;
 }
 
@@ -687,12 +632,12 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  *
  * ## Cache propagation across replicas
  *
- * `cacheInvalidate()` only clears the local per-process cache (see
- * `CLIENT_CACHE_TTL_MS`). Other replicas may serve stale URIs from
- * their local cache for up to one TTL window (~30s). Acceptable in
- * practice because reconciliation only happens at boot, and all
- * replicas boot with the same `APP_URL` and therefore reconcile
- * independently — the old cached value never gets exercised.
+ * `cacheInvalidate()` clears the local entry and broadcasts the
+ * invalidation on the platform cache bus (`lib/cache-bus.ts`), so other
+ * replicas drop theirs within a round trip. A lost broadcast falls back
+ * to one TTL window (~30s, `CLIENT_CACHE_TTL_MS`) — acceptable because
+ * reconciliation only happens at boot, and all replicas boot with the
+ * same `APP_URL` and therefore reconcile independently.
  *
  * Called from `oidcModule.init()` at boot.
  *
@@ -709,7 +654,7 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  * The platform auto-provisioned instance client also opts into open
  * signup at boot so a fresh Appstrate install can register its first
  * user. Every other client (env-declared satellites, org tenants,
- * application clients) keeps the closed `allowSignup: false` default.
+ * space clients) keeps the closed `allowSignup: false` default.
  */
 export async function ensureInstanceClient(appUrl: string): Promise<string> {
   // Normalize: strip trailing slash(es) so `APP_URL=https://x.com/` does
@@ -736,7 +681,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
   // transaction-scoped advisory lock (same primitive core migrations and run
   // concurrency use, PGlite-compatible). The second replica blocks on the
   // lock, then observes the row the first inserted and reconciles/returns it.
-  return db.transaction(async (tx) => {
+  // The cache drop is broadcast to other replicas, so it must follow the
+  // commit: a replica told to drop while the UPDATE is still uncommitted
+  // re-reads the old row and re-caches it.
+  let reconciledClientId: string | null = null;
+  const instanceClientId = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('oidc:instance-client')::bigint)`);
 
     const [existing] = await tx
@@ -744,7 +693,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
         clientId: oauthClient.clientId,
         redirectUris: oauthClient.redirectUris,
         postLogoutRedirectUris: oauthClient.postLogoutRedirectUris,
-        public: oauthClient.public,
         tokenEndpointAuthMethod: oauthClient.tokenEndpointAuthMethod,
         clientSecret: oauthClient.clientSecret,
       })
@@ -757,10 +705,11 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       const storedPostLogout = existing.postLogoutRedirectUris ?? [];
       const redirectDrift = !sameStringSet(existing.redirectUris, expectedRedirectUris);
       const postLogoutDrift = !sameStringSet(storedPostLogout, expectedPostLogoutRedirectUris);
+      // `tokenEndpointAuthMethod === "none"` IS the public-client contract —
+      // it is the value the provider derives "public" from, and the one that
+      // makes it demand PKCE.
       const authMethodDrift =
-        existing.public !== true ||
-        existing.tokenEndpointAuthMethod !== "none" ||
-        existing.clientSecret !== null;
+        existing.tokenEndpointAuthMethod !== "none" || existing.clientSecret !== null;
 
       if (redirectDrift || postLogoutDrift || authMethodDrift) {
         await tx
@@ -770,7 +719,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
             postLogoutRedirectUris: expectedPostLogoutRedirectUris,
             ...(authMethodDrift
               ? {
-                  public: true,
                   tokenEndpointAuthMethod: "none" as const,
                   clientSecret: null,
                 }
@@ -778,7 +726,7 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
             updatedAt: new Date(),
           })
           .where(eq(oauthClient.clientId, existing.clientId));
-        cacheInvalidate(existing.clientId);
+        reconciledClientId = existing.clientId;
         logger.warn("OIDC platform client reconciled to match APP_URL and public-client contract", {
           module: "oidc",
           clientId: existing.clientId,
@@ -787,8 +735,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
           redirectUrisTo: expectedRedirectUris,
           postLogoutRedirectUrisFrom: storedPostLogout,
           postLogoutRedirectUrisTo: expectedPostLogoutRedirectUris,
-          publicFrom: existing.public,
-          publicTo: authMethodDrift ? true : existing.public,
           tokenEndpointAuthMethodFrom: existing.tokenEndpointAuthMethod,
           tokenEndpointAuthMethodTo: authMethodDrift ? "none" : existing.tokenEndpointAuthMethod,
           clientSecretCleared: authMethodDrift && existing.clientSecret !== null,
@@ -800,7 +746,6 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
     const id = prefixedId("oac");
     const clientId = `oauth_${randomSecret().slice(0, 24)}`;
     const now = new Date();
-    const metadata = { level: "instance" as const, clientId };
 
     await tx.insert(oauthClient).values({
       id,
@@ -812,14 +757,12 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       scopes: ["openid", "profile", "email", "offline_access"],
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
-      metadata: JSON.stringify(metadata),
+      referencedSpaceId: null,
       skipConsent: true,
       allowSignup: true,
       signupRole: "member",
       disabled: false,
-      type: "web",
-      public: true,
+      applicationType: applicationTypeFor(expectedRedirectUris),
       tokenEndpointAuthMethod: "none",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -829,6 +772,8 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
     });
     return clientId;
   });
+  if (reconciledClientId) cacheInvalidate(reconciledClientId);
+  return instanceClientId;
 }
 
 // ─── Env-provisioned instance clients ─────────────────────────────────────────
@@ -880,15 +825,6 @@ export async function createInstanceClientFromEnv(
   const hashedSecret = await hashSecret(input.clientSecretPlaintext);
   const now = new Date();
 
-  // Mirror `createClient()` — see oauth-admin.ts metadata shape for the
-  // rationale. `clientId` is stashed alongside `level` so
-  // `customAccessTokenClaims` in plugins.ts can dispatch to
-  // `buildInstanceLevelClaims` at token-mint time.
-  const metadata: Record<string, unknown> = {
-    level: "instance",
-    clientId: input.clientId,
-  };
-
   const inserted = await db
     .insert(oauthClient)
     .values({
@@ -901,13 +837,12 @@ export async function createInstanceClientFromEnv(
       scopes: input.scopes,
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
-      metadata: JSON.stringify(metadata),
+      referencedSpaceId: null,
       skipConsent: input.skipConsent,
       allowSignup: input.allowSignup,
       signupRole: "member",
       disabled: false,
-      type: "web",
+      applicationType: applicationTypeFor(input.redirectUris),
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -922,13 +857,13 @@ export async function createInstanceClientFromEnv(
   return mapRow(inserted[0]!);
 }
 
-export interface InstanceClientDriftMismatch {
+interface InstanceClientDriftMismatch {
   field: string;
   stored: unknown;
   declared: unknown;
 }
 
-export type InstanceClientDriftResult =
+type InstanceClientDriftResult =
   | { kind: "not-found" }
   | { kind: "wrong-level"; storedLevel: string }
   | { kind: "match" }
@@ -946,7 +881,7 @@ function setEquals(a: readonly string[], b: readonly string[]): boolean {
  *
  * - `not-found`: no row with this `clientId` exists.
  * - `wrong-level`: a row exists but its `level` is not `"instance"` — caller
- *   should refuse to operate on it (it belongs to an org/application client
+ *   should refuse to operate on it (it belongs to an org/space client
  *   with the same `clientId`, which is an authorization-critical collision).
  * - `match`: every managed field matches.
  * - `drift`: managed fields differ — caller should fail boot with the list.
@@ -986,6 +921,13 @@ export async function compareDeclaredClientWithStored(
       declared: declared.postLogoutRedirectUris,
     });
   }
+  // Exact comparison, deliberately: a divergence from the stored row is
+  // reported, never absorbed by an alias. What a `scopes` divergence must NOT
+  // do is fall through to the generic "delete the row and restart" remedy when
+  // the declared list would not survive the re-create — that is destructive AND
+  // useless, since the re-create trips `assertValidScopes` on the same env
+  // value. `syncInstanceClientsFromEnv` checks that with `invalidScopesIn`
+  // before offering the remedy.
   if (!setEquals(row.scopes ?? [], declared.scopes)) {
     mismatches.push({
       field: "scopes",

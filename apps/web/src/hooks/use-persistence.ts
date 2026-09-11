@@ -22,7 +22,7 @@ import type {
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { onMutationError } from "./use-mutations";
 import { persistenceKeys } from "../lib/query-keys";
 import type { PersistenceScopeFilter } from "../components/persistence/scope-filter";
@@ -45,11 +45,11 @@ function usePersistenceQuery<T>(
   pick: (res: PersistenceResponse) => T,
 ) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Key pinned to the legacy "agent-persistence" prefix: use-mutations and
-    // the app-switch reset invalidate by that prefix.
-    queryKey: persistenceKeys.list(scopeTag, orgId, applicationId, packageId, query),
+    // the space-switch reset invalidate by that prefix.
+    queryKey: persistenceKeys.list(scopeTag, orgId, spaceId, packageId, query),
     queryFn: async () => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/persistence", {
@@ -57,7 +57,7 @@ function usePersistenceQuery<T>(
       });
       return pick(data ?? {});
     },
-    enabled: !!orgId && !!applicationId && !!packageId,
+    enabled: !!orgId && !!spaceId && !!packageId,
   });
 }
 

@@ -1,46 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import {
+  compileCached,
+  isUnconstrainedSchema,
   stripEmptyRequired,
-  validateConfig as validateConfigCore,
-  type ConfigValidationResult,
+  validateAgainstSchema as validateAgainstSchemaCore,
+  type SchemaValidationResult,
 } from "@appstrate/core/schema-validation";
 
 // --- AJV runtime validation ---
 //
-// Shared Ajv2020 + ajv-formats factory — mirrors the frontend RJSF validator so
-// client- and server-side validation agree. See packages/core/src/ajv.ts.
-//
-// `validateConfig` itself lives in `@appstrate/core/schema-validation` so the
-// CLI's local-run path applies the same gate as the platform server before
-// launching PiRunner. `validateInput` and `validateOutput` stay here — they
-// rely on server-only concerns (file-field stripping, output overload).
-const ajv = createAjv({ coerceTypes: true });
-
-// Compiled-validator cache. `validateInput`/`validateOutput`/
-// `validateConnectionCredentials` run on hot paths (per run, per connect)
-// and rebuild a fresh `effectiveSchema` object each call, so AJV's own
-// by-reference cache never hits — compilation (the expensive step) ran every
-// time. Key by the schema's canonical JSON so structurally-equal schemas
-// share one compiled validator. Bounded to cap memory in a long-lived process.
-const validatorCache = new Map<string, ReturnType<typeof ajv.compile>>();
-const MAX_CACHED_VALIDATORS = 500;
-function compileCached(schema: object): ReturnType<typeof ajv.compile> {
-  const key = JSON.stringify(schema);
-  let validate = validatorCache.get(key);
-  if (!validate) {
-    validate = ajv.compile(schema);
-    if (validatorCache.size >= MAX_CACHED_VALIDATORS) validatorCache.clear();
-    validatorCache.set(key, validate);
-  }
-  return validate;
-}
+// The Ajv2020 instance, its dialect and the compiled-validator cache in front
+// of it all live in `@appstrate/core/schema-validation` — one instance for the
+// process, so nothing here can grow a second unbounded schema registry or
+// collide with the shared one over a `$id`. `validateAgainstSchema` is
+// re-exported below from the same module, a published core export so
+// out-of-tree consumers apply the same gate. What stays HERE is the three
+// server-only shapes: input with file fields stripped, output with
+// `additionalProperties` relaxed, and connection credentials.
 
 // --- Section C: Validation functions ---
 
-export type ValidationResult = ConfigValidationResult;
+type ValidationResult = SchemaValidationResult;
 
 /**
  * Shared AJV validation path for input/output.
@@ -51,9 +33,9 @@ export type ValidationResult = ConfigValidationResult;
  * - "output":  relaxes `additionalProperties: true` (extra fields like state/tokenUsage allowed),
  *              skips normalization, returns errors as pre-formatted strings.
  *
- * Config validation lives in `@appstrate/core/schema-validation` so the
- * CLI uses the same logic; this server path delegates via the
- * `validateConfig` re-export below.
+ * Bare-schema validation lives in `@appstrate/core/schema-validation`,
+ * published for out-of-tree consumers; this module re-exports it below so all
+ * three validators share one import surface.
  */
 function runValidate(
   kind: "input",
@@ -70,8 +52,11 @@ function runValidate(
   data: Record<string, unknown> | undefined,
   schema: JSONSchemaObject,
 ): ValidationResult | { valid: boolean; errors: string[] } {
-  // 1. Empty-schema short circuit
-  if (!schema.properties || Object.keys(schema.properties).length === 0) {
+  // 1. Empty-schema short circuit — `isUnconstrainedSchema` (core), not a
+  //    local `properties` test: a schema constrains plenty without naming a
+  //    property (`required`, `additionalProperties`, `allOf`, `$ref`), and all
+  //    of those used to be waved through here before AJV ran.
+  if (isUnconstrainedSchema(schema)) {
     if (kind === "output") return { valid: true, errors: [] };
     return {
       valid: true,
@@ -89,19 +74,38 @@ function runValidate(
     // `upload://upl_xxx` URIs by the input parser BEFORE this runs; the
     // declared schema still uses `format: uri` + `contentMediaType` which
     // does not match the `upload:` URI scheme under strict format checks.
-    const nonFileProps: Record<string, JSONSchema7> = {};
-    for (const [key, prop] of Object.entries(schema.properties)) {
-      if (!isFileField(prop)) nonFileProps[key] = prop;
+    //
+    // The exclusion RELAXES each file property to `{}` instead of deleting the
+    // key, and the effective schema is a SPREAD of the author's schema rather
+    // than a fresh `{type, properties, required}` object. Both details matter:
+    //
+    //  - rebuilding three keys silently discarded every other keyword the
+    //    author declared — `additionalProperties`, `patternProperties`,
+    //    `allOf`/`oneOf`, `dependentRequired`, `minProperties`, `$defs`/`$ref`
+    //    — so an input the declared schema forbids was accepted;
+    //  - deleting the key would break the keywords that reason about the
+    //    property SET. The parser leaves the resolved `appfile://…` value in
+    //    `input` (see `assertInputValid` in `services/input-parser.ts`), so
+    //    under a declared `additionalProperties: false` an undeclared file key
+    //    would now be rejected as an unexpected extra.
+    //
+    // A required file field is still dropped from `required`, exactly as
+    // before: whether a file was supplied is the upload pipeline's question,
+    // not AJV's.
+    const relaxedProps: Record<string, JSONSchema7> = {};
+    const fileFields = new Set<string>();
+    for (const [key, prop] of Object.entries(schema.properties ?? {})) {
+      if (isFileField(prop)) {
+        fileFields.add(key);
+        relaxedProps[key] = {};
+      } else {
+        relaxedProps[key] = prop;
+      }
     }
-    if (Object.keys(nonFileProps).length === 0) {
-      return { valid: true, errors: [], data: effectiveData };
-    }
-    const nonFileRequired = schema.required?.filter((k) => nonFileProps[k]) ?? [];
-    effectiveSchema = {
-      type: "object",
-      properties: nonFileProps,
-      ...(nonFileRequired.length > 0 ? { required: nonFileRequired } : {}),
-    };
+    const nonFileRequired = schema.required?.filter((k) => !fileFields.has(k)) ?? [];
+    effectiveSchema = { ...schema, properties: relaxedProps };
+    if (nonFileRequired.length > 0) effectiveSchema.required = nonFileRequired;
+    else delete effectiveSchema.required;
     effectiveData = stripEmptyRequired(effectiveData, nonFileRequired);
   } else {
     // output: allow extra fields (state, tokenUsage, etc.)
@@ -111,7 +115,34 @@ function runValidate(
   }
 
   // 3. Compile (cached) + validate
-  const validate = compileCached(effectiveSchema);
+  //
+  // Drop the author's `$schema` first. The shared instance is an Ajv2020 bound
+  // to one dialect, so a manifest declaring a different one — draft-07, which
+  // most JSON Schema tooling still emits — makes `ajv.compile` THROW
+  // ("no schema with key or ref …/draft-07/schema") instead of returning a
+  // validator: a 500 where the whole contract of this function is a 400 with
+  // per-field errors. The input branch above is a SPREAD of the author's
+  // schema, so it forwards the key (the old rebuild-three-keys version dropped
+  // it by accident); the output branch always forwarded it. `$schema` declares
+  // the document's dialect, it asserts nothing about the value, so removing it
+  // cannot change a verdict for any keyword these manifests use.
+  const { $schema: _declaredDialect, ...dialectFreeSchema } =
+    effectiveSchema as JSONSchemaObject & {
+      $schema?: unknown;
+    };
+  // A schema Ajv cannot compile (`allOf: []`, `enum: []`, a `$ref` to nowhere)
+  // is a defect in the MANIFEST, so it belongs in this function's 400, not in a
+  // 500 from an uncaught throw. `compileCached` is deliberately the throwing
+  // path — see its doc comment in `@appstrate/core/schema-validation` — so the
+  // catch belongs here, at the boundary that owns the status code.
+  let validate: ReturnType<typeof compileCached>;
+  try {
+    validate = compileCached(dialectFreeSchema as JSONSchemaObject);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (kind === "output") return { valid: false, errors: [message] };
+    return { valid: false, errors: [{ field: "", message }] };
+  }
   const valid = validate(effectiveData);
 
   // 4. Per-kind error mapping
@@ -135,10 +166,9 @@ function runValidate(
   return { valid: false, errors };
 }
 
-// Re-export the shared config validator so existing call sites
-// (services/agent-readiness.ts, route handlers) keep their import
-// surface unchanged.
-export const validateConfig = validateConfigCore;
+// Re-export the shared schema validator so the three validators share one
+// import surface.
+export const validateAgainstSchema = validateAgainstSchemaCore;
 
 /**
  * Validate a submitted credential bag against an integration auth's
@@ -152,9 +182,9 @@ export const validateConfig = validateConfigCore;
  * injection silently resolves to an empty value at runtime (the credential
  * header is never injected, yet the run still "succeeds").
  *
- * No-op when the auth declares no schema properties — there is nothing to
- * validate against, and forcing field shape on an undeclared schema would
- * reject legitimately loose `custom` auths.
+ * No-op when the auth declares a schema that constrains nothing — there is
+ * nothing to validate against, and forcing field shape on an undeclared schema
+ * would reject legitimately loose `custom` auths.
  */
 export function validateConnectionCredentials(
   schema: JSONSchemaObject | undefined,
@@ -163,14 +193,25 @@ export function validateConnectionCredentials(
   // honours the manifest schema's `type` declarations regardless.
   credentials: Record<string, unknown>,
 ): ValidationResult {
-  if (!schema?.properties || Object.keys(schema.properties).length === 0) {
+  // Same narrowed predicate as the input/output path: an auth that declares
+  // nothing is legitimately loose, but one that declares `required` (or any
+  // other assertion) without naming a property is NOT — and that used to pass.
+  if (!schema || isUnconstrainedSchema(schema)) {
     return { valid: true, errors: [], data: credentials };
   }
   const required = Array.isArray(schema.required) ? schema.required : [];
   // Mirror the input path: AJV coerceTypes lets "" satisfy `required`, so
   // strip empty/null values for required keys before validating.
   const effectiveData = stripEmptyRequired(credentials, required);
-  const validate = compileCached(schema);
+  // Same reasoning as `runValidate`: an uncompilable credentials schema is a
+  // manifest defect and must surface as a validation failure, not a 500.
+  let validate: ReturnType<typeof compileCached>;
+  try {
+    validate = compileCached(schema);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { valid: false, errors: [{ field: "", message }] };
+  }
   if (validate(effectiveData)) return { valid: true, errors: [], data: credentials };
   const errors = (validate.errors || []).map((e) => ({
     field:

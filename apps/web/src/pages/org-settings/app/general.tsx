@@ -8,12 +8,8 @@ import { usePermissions } from "../../../hooks/use-permissions";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import {
-  useApplication,
-  useUpdateApplication,
-  useDeleteApplication,
-} from "../../../hooks/use-applications";
-import { useCurrentApplicationId } from "../../../hooks/use-current-application";
+import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
+import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
 import { SettingsGroup, SettingRow } from "../../../components/settings/setting-row";
@@ -23,25 +19,24 @@ import { toast } from "sonner";
 
 export function OrgSettingsAppGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
-  const applicationId = useCurrentApplicationId();
-  const { data: application, isLoading, error } = useApplication(applicationId ?? "");
+  const { can } = usePermissions();
+  const spaceId = useCurrentSpaceId();
+  const { data: application, isLoading, error } = useSpace(spaceId ?? "");
 
-  if (!isAdmin) return null;
-  if (!applicationId)
-    return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
+  if (!can("org:read")) return null;
+  if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!application) return <ErrorState />;
 
-  return <GeneralForm applicationId={applicationId} application={application} />;
+  return <GeneralForm spaceId={spaceId} application={application} />;
 }
 
 function GeneralForm({
-  applicationId,
+  spaceId,
   application,
 }: {
-  applicationId: string;
+  spaceId: string;
   application: {
     name: string;
     isDefault: boolean;
@@ -51,8 +46,8 @@ function GeneralForm({
   const { t } = useTranslation(["settings", "common"]);
   const location = useLocation();
   const navigate = useNavigate();
-  const updateMutation = useUpdateApplication();
-  const deleteMutation = useDeleteApplication();
+  const updateMutation = useUpdateSpace();
+  const deleteMutation = useDeleteSpace();
 
   const domains = application.settings?.allowedRedirectDomains ?? [];
   const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
@@ -68,7 +63,7 @@ function GeneralForm({
     setSaving(field);
     updateMutation.mutate(
       {
-        params: { path: { id: applicationId } },
+        params: { path: { id: spaceId } },
         body: {
           name: (patch.name ?? application.name).trim(),
           settings: { allowedRedirectDomains: patch.domains ?? activeDomains },
@@ -194,11 +189,11 @@ function GeneralForm({
         isPending={deleteMutation.isPending}
         onConfirm={() => {
           deleteMutation.mutate(
-            { params: { path: { id: applicationId } } },
+            { params: { path: { id: spaceId } } },
             {
               onSuccess: () => {
                 setConfirmOpen(false);
-                navigate("/org-settings/applications", { state: location.state });
+                navigate("/org-settings/spaces", { state: location.state });
               },
             },
           );

@@ -30,7 +30,7 @@ import { writeSnapshot } from "./snapshot.ts";
 const CHECK = "mcp-remote-parity";
 const CONNECT_TIMEOUT_MS = 20_000;
 
-export interface RemoteParityOptions {
+interface RemoteParityOptions {
   /** Write the full live tool surface to this dir (uploaded as a CI artifact). */
   snapshotDir?: string;
 }

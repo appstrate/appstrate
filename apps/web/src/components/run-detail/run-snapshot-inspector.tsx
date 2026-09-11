@@ -15,13 +15,13 @@ import {
   Trophy,
 } from "lucide-react";
 import type { EnrichedRun, TokenUsage } from "@appstrate/shared-types";
-import { RunTurnsDetail } from "../run-info-tab";
+import { RunTurnsDetail } from "../run-execution-tab";
 import type { RunTurnRow } from "../log-utils";
 import { RunCostReadout } from "../run-cost-readout";
 import { Modal } from "../modal";
-import { useDocuments } from "../../hooks/use-documents";
+import { useFiles } from "../../hooks/use-files";
 import { DocumentListPanel } from "../document-list-panel";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import { getRunTriggerActor, getRunTriggerType } from "../run-trigger";
 import type { ExecutionEntry } from "../log-utils";
 import { OverviewCardAction } from "../overview-card-action";
@@ -52,7 +52,7 @@ export function RunSnapshotInspector({
 }) {
   const { t } = useTranslation("agents");
   const [turnsOpen, setTurnsOpen] = useState(false);
-  const inputDocumentsQuery = useDocuments({
+  const inputDocumentsQuery = useFiles({
     runId: run.id,
     purpose: "user_upload",
     limit: 100,
@@ -62,12 +62,12 @@ export function RunSnapshotInspector({
   const inputEntries = input ? Object.entries(input) : [];
   const inputValueEntries = inputEntries.filter(([, value]) => !hasDocumentReference(value));
   const inputDocumentEntries = inputEntries.filter(([, value]) => hasDocumentReference(value));
-  const inputFileCount = Math.max(run.document_counts.input, countDocumentReferences(input));
+  const inputFileCount = Math.max(run.file_counts.input, countDocumentReferences(input));
   const inputDocumentLabel =
     inputDocumentEntries.length === 1
       ? humanizeInputKey(inputDocumentEntries[0]![0])
       : t("run.snapshotInputFiles");
-  const config = (run.config as Record<string, unknown> | null) ?? null;
+  const config = (run.input as Record<string, unknown> | null) ?? null;
   const metadata = (run.metadata as Record<string, unknown> | null) ?? null;
   const usage = run.token_usage as TokenUsage | null;
   const connections = run.connections_used ?? [];
@@ -196,7 +196,7 @@ export function RunSnapshotInspector({
               bodyClassName="p-0"
               headerInside={cardHeaders}
               headerAction={
-                run.document_counts.output + structuredFieldCount + memoryChangeCount > 0
+                run.file_counts.output + structuredFieldCount + memoryChangeCount > 0
                   ? {
                       label: t("run.overview.openResults"),
                       onClick: onOpenResults,
@@ -208,8 +208,8 @@ export function RunSnapshotInspector({
                 <OverviewMetric
                   className="border-border border-r border-b"
                   label={t("run.overview.outputFiles")}
-                  value={run.document_counts.output.toLocaleString()}
-                  onClick={run.document_counts.output > 0 ? onOpenResults : undefined}
+                  value={run.file_counts.output.toLocaleString()}
+                  onClick={run.file_counts.output > 0 ? onOpenResults : undefined}
                 />
                 <OverviewMetric
                   className="border-border border-b"

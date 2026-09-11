@@ -152,7 +152,7 @@ describe("validateManifest", () => {
   });
 
   // `report` was a selectable runtime tool until it was replaced by durable
-  // `outputs/` documents. How an unknown id is treated depends on the
+  // `outputs/` files. How an unknown id is treated depends on the
   // DIRECTION of the call, and both halves matter:
   //
   //   - author input (default) MUST reject — `["lgo"]` is a typo, and
@@ -346,6 +346,68 @@ describe("validateManifest", () => {
     const { manifest, dropped } = dropRetiredRuntimeTools(stored);
     expect(manifest).toBe(stored);
     expect(dropped).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // An id the platform does not know: refused by direction, never guessed.
+  //
+  // `runtime_tools` is persisted inside agent manifests, including published
+  // ZIPs that are immutable by construction, so the two directions cannot
+  // share one rule. Author input is REJECTED (the author can still fix it);
+  // a stored manifest has the id DROPPED and REPORTED (a hard rejection would
+  // make the agent permanently unrunnable). `publish_document` — the retired
+  // pre-#1177 spelling that used to be aliased forward — is the worked
+  // example: it is now simply unknown.
+  // -------------------------------------------------------------------------
+
+  it("a stored manifest naming a retired id has it dropped AND reported", () => {
+    const result = validateManifest(
+      validAgentManifest({ runtime_tools: ["log", "publish_document"] }),
+      { retiredRuntimeTools: "drop" },
+    );
+    expect(result.valid).toBe(true);
+    // Reported — this is what makes the removal auditable instead of silent.
+    expect(result.valid && result.droppedRuntimeTools).toEqual(["publish_document"]);
+    // Dropped, NOT resolved to `publish_file`. The agent keeps its other tools.
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log"]);
+  });
+
+  it("an author saving a retired id is refused rather than corrected", () => {
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["publish_document"] }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
+  });
+
+  it("dropRetiredRuntimeTools strips the unknown id and leaves the rest byte-identical", () => {
+    // What the publish path serialises into the integrity-hashed ZIP: key
+    // order and unknown fields survive, only the unknown id disappears.
+    const stored = {
+      name: "@test/my-agent",
+      runtime_tools: ["log", "publish_document"],
+      custom_field: "must-survive",
+      type: "agent",
+    };
+    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
+    expect(dropped).toEqual(["publish_document"]);
+    expect(Object.keys(manifest)).toEqual(Object.keys(stored));
+    expect(manifest.custom_field).toBe("must-survive");
+    expect(manifest.runtime_tools).toEqual(["log"]);
+  });
+
+  it("dropping the only id removes the key rather than leaving it empty", () => {
+    const { manifest, dropped } = dropRetiredRuntimeTools({
+      type: "agent",
+      name: "@test/a",
+      runtime_tools: ["publish_document"],
+    });
+    expect(dropped).toEqual(["publish_document"]);
+    expect(manifest.runtime_tools).toBeUndefined();
+  });
+
+  it("an unknown id is rejected on the author path alongside a valid one", () => {
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["publish_file", "lgo"] }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
   });
 
   it("agent with no output schema is valid without the `output` runtime tool", () => {
@@ -1020,6 +1082,23 @@ description: A skill without name
   it("no frontmatter", () => {
     const content = "Just some markdown content";
     const result = extractSkillMeta(content);
+    expect(result.name).toBe("");
+    expect(result.description).toBe("");
+    expect(result.warnings.some((w) => w.includes("frontmatter"))).toBe(true);
+  });
+
+  // These two lock the delegation to `parseSkillFrontmatter`: a
+  // Windows-authored SKILL.md the gate accepts must not read as metadata-less
+  // here, and a BOM'd one must read as nothing at all.
+  it("reads CRLF line endings", () => {
+    const result = extractSkillMeta("---\r\nname: my-skill\r\ndescription: A skill\r\n---\r\nBody");
+    expect(result.name).toBe("my-skill");
+    expect(result.description).toBe("A skill");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("reads nothing behind a UTF-8 BOM, exactly as the runtime does", () => {
+    const result = extractSkillMeta("\uFEFF---\nname: my-skill\ndescription: A skill\n---\nBody");
     expect(result.name).toBe("");
     expect(result.description).toBe("");
     expect(result.warnings.some((w) => w.includes("frontmatter"))).toBe(true);

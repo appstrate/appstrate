@@ -59,9 +59,22 @@ import {
   type CallToolResult,
   type ReadResourceResult,
   type Resource,
+  UPSTREAM_META_KEY,
+  type UpstreamMeta,
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isTextShapedContentType } from "@appstrate/core/mime";
+// The canonical api_call/api_upload naming. NOT copied: the reason this file
+// gave for copying it — "the sidecar bundle deliberately avoids the manifest
+// schema stack" — named `@appstrate/core/integration`, but the definition lives
+// in `@appstrate/afps-shared/api-tool-naming`, which imports one sibling module
+// and nothing else, and which this file already pulls in through
+// `@appstrate/core/mime` (a verbatim re-export of `@appstrate/afps-shared/mime`).
+import {
+  API_CALL_TOOL_NAME,
+  API_UPLOAD_TOOL_NAME,
+  apiUploadToolNameFor,
+} from "@appstrate/afps-shared/api-tool-naming";
 import {
   RUN_HISTORY_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
@@ -71,6 +84,7 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
+  OUTBOUND_TIMEOUT_MS,
   concatAndRelease,
   readRequestBodyBounded,
   substituteVars,
@@ -113,12 +127,7 @@ import {
   type ApiCallDeps,
   type ApiCallRequestBody,
 } from "./credential-proxy.ts";
-import {
-  UPSTREAM_META_KEY,
-  buildPreflightUpstreamMeta,
-  buildUpstreamMeta,
-  type UpstreamMeta,
-} from "./upstream-meta.ts";
+import { buildPreflightUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
 
 /**
  * `_meta` payload attached to every `api_call` pre-flight error
@@ -239,64 +248,6 @@ function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   const lower = name.toLowerCase();
   return Object.keys(headers).some((k) => k.toLowerCase() === lower);
-}
-
-/**
- * MCP `_meta` key under which the sidecar surfaces token-budget
- * accounting to the agent runtime.
- *
- * NOTHING reads it today — no agent-side resolver, no runner, no test
- * outside `sidecar/test/token-budget-integration.test.ts`. It is
- * observable in the sidecar's own tests and logs and nowhere else: the
- * runner's `callToolResultToPi` (`runner-pi/src/runtime-tools/
- * mcp-forward.ts`) maps only `content` + `structuredContent` and DROPS
- * `_meta`, so reaching an agent-side consumer would require forwarding
- * `_meta` there first. Treat it as informational: the spill decisions it
- * reports are already enforced sidecar-side and logged, so a client that
- * drops `_meta` loses telemetry, not behaviour. Do not make it
- * load-bearing without giving it a real reader.
- *
- * Distinct from {@link UPSTREAM_META_KEY} (which carries upstream
- * `{ status, headers }`) so a CallToolResult can carry both without
- * collision.
- *
- * AFPS (Phase F1 follow-up): reverse-DNS namespace — `_meta` keys
- * must be either a single bare token or a reverse-DNS prefix (RFC §10.1
- * / Appendix B). The canonical form is `"dev.appstrate/token-budget"`.
- */
-export const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
-
-/**
- * Discriminated reason surfaced in the agent-facing `_meta` payload.
- * Wider than {@link BudgetDecision.reason} because it adds the
- * caller-driven fallback states (no blob store wired, blob store full)
- * the budget tracker itself cannot produce.
- */
-type TokenBudgetMetaReason =
-  | "under_inline_cap"
-  | "exceeds_inline_cap"
-  | "exceeds_run_budget"
-  | "exceeds_context_window"
-  | "blob_store_full"
-  | "no_blob_store_configured";
-
-/**
- * Shape of the {@link TOKEN_BUDGET_META_KEY} payload. Stable wire
- * contract — extensions append, never rename.
- */
-interface TokenBudgetMeta {
-  /** Tokens estimated for *this* tool output. */
-  estimatedTokens: number;
-  /** Cumulative tool-output tokens consumed in the run so far. */
-  consumedTokens: number;
-  /** Configured run-level ceiling. */
-  runBudgetTokens: number;
-  /** Configured per-call inline cap. */
-  inlineCapTokens: number;
-  /** What the budget tracker decided (after caller overrides). */
-  decision: "inline" | "spill";
-  /** Why it decided that way (machine-readable). */
-  reason: TokenBudgetMetaReason;
 }
 
 /**
@@ -656,6 +607,28 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
 }
 
 /**
+ * One-line failure text for a first-party platform call that never produced a
+ * response. Shared by `run_history` and `recall_memory`, whose upstream is the
+ * same platform and whose failure modes are therefore identical.
+ *
+ * The three cases are distinguished because the agent acts on them
+ * differently, and because the legacy numeric `code` an aborted fetch carries
+ * (`23` for a timeout, `20` for an abort) tells it nothing: a deadline hit is
+ * worth retrying, a caller-side cancellation is not, and a transport fault
+ * keeps surfacing its `ECONNREFUSED`-style code as it always has.
+ */
+function upstreamFetchErrorText(tool: string, err: unknown): string {
+  if (err instanceof Error && err.name === "TimeoutError") {
+    return `${tool}: upstream fetch timed out after ${OUTBOUND_TIMEOUT_MS}ms`;
+  }
+  if (err instanceof Error && err.name === "AbortError") {
+    return `${tool}: upstream fetch aborted`;
+  }
+  const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+  return `${tool}: upstream fetch failed${code ? `: ${code}` : ""}`;
+}
+
+/**
  * Build the `{ns}__api_call`, `run_history`, and `recall_memory` MCP
  * tool definitions. All three tools are implemented in-process —
  * `{ns}__api_call` calls {@link executeApiCall} directly via
@@ -853,7 +826,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // handed the model `{"status":200}` and discarded the response body
   // sitting in `content`. See issue #876.
   //
-  // The upstream status/headers/finalUrl ride on `_meta`
+  // The upstream status/headers ride on `_meta`
   // (`UPSTREAM_META_KEY`); the agent-side shaper re-renders the status
   // into a model-visible text line.
   //
@@ -931,7 +904,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     );
     if (protocols.length === 0) return null;
     const apiCallKey = apiCallToolKey(integ);
-    const uploadToolName = apiUploadToolKey(apiCallKey);
+    const uploadToolName = apiUploadToolNameFor(apiCallKey);
     return {
       descriptor: {
         name: `${integ.namespace}__${uploadToolName}`,
@@ -1156,16 +1129,65 @@ function buildSidecarTools(options: MountMcpOptions): {
         ...(blobStore ? { blobStore } : {}),
         tokenBudget,
         source: `${ctx.label}:${ctx.integrationId}`,
-        // Attach upstream `{ status, headers, finalUrl }` to the
-        // CallToolResult `_meta` payload so the agent-side resolver
-        // can surface real HTTP status / response headers (Location,
-        // ETag, Upload-Offset, …) to chunked-upload protocols, plus
-        // the post-redirect terminal URL for OAuth/CAS/magic-link
-        // callback extraction. Always on for `api_call` — the
-        // runtime parser requires it.
+        // Attach upstream `{ status, headers }` to the CallToolResult
+        // `_meta` payload so the agent-side resolver can surface real
+        // HTTP status / response headers (Location, ETag,
+        // Upload-Offset, …) to chunked-upload protocols. Always on for
+        // `api_call` — the runtime parser requires it.
         attachUpstreamMeta: true,
-        upstreamFinalUrl: result.finalUrl,
       });
+    }
+  }
+
+  /**
+   * One first-party platform fetch, shaped into a tool result. Both
+   * `run_history` and `recall_memory` are the same call against the same
+   * upstream, so they share one body.
+   *
+   * Cancellation and deadline are composed: `callerSignal` is the MCP
+   * request's own abort (client gone, transport closed) and must keep working,
+   * `OUTBOUND_TIMEOUT_MS` is the same bound every other outbound call in the
+   * sidecar already carries. `/mcp` has no server-side deadline of its own, so
+   * without it a platform that accepts the connection and never answers hangs
+   * this tool call — and with it the agent — for the rest of the run.
+   *
+   * The deadline bounds the WHOLE request, headers and body alike, which is
+   * what we want (there is no long-lived stream here to keep open). That means
+   * it stays armed while {@link responseToToolResult} reads the body: headers
+   * at 29s plus a slow body aborts mid-read, one `await` past the header-time
+   * failure. So BOTH live inside this one `try` — a mid-body abort produced a
+   * raw handler rejection when only the `fetch` was guarded, while the exact
+   * same failure a second earlier produced a structured `isError` result. One
+   * deadline, one failure shape.
+   */
+  async function platformToolFetch(
+    tool: string,
+    url: string,
+    callerSignal: AbortSignal,
+  ): Promise<{
+    content: Array<
+      | { type: "text"; text: string }
+      | { type: "resource_link"; uri: string; name: string; mimeType?: string }
+    >;
+    isError?: boolean;
+    structuredContent?: Record<string, unknown>;
+    _meta?: Record<string, unknown>;
+  }> {
+    try {
+      const res = await fetchFn(url, {
+        headers: { Authorization: `Bearer ${config.runToken}` },
+        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
+      });
+      return await responseToToolResult(res, {
+        source: tool,
+        ...(blobStore ? { blobStore } : {}),
+        tokenBudget,
+      });
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: upstreamFetchErrorText(tool, err) }],
+        isError: true,
+      };
     }
   }
 
@@ -1180,7 +1202,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       inputSchema:
         RUN_HISTORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
-    handler: async (rawArgs) => {
+    handler: async (rawArgs, extra) => {
       const args = rawArgs as { limit?: number; fields?: string[] };
       const params = new URLSearchParams();
       if (args.limit !== undefined) params.set("limit", String(args.limit));
@@ -1188,32 +1210,14 @@ function buildSidecarTools(options: MountMcpOptions): {
       const qs = params.size > 0 ? `?${params.toString()}` : "";
 
       const url = `${config.platformApiUrl}/internal/run-history${qs}`;
-      let res: Response;
-      try {
-        res = await fetchFn(url, {
-          headers: { Authorization: `Bearer ${config.runToken}` },
-        });
-      } catch (err) {
-        const code =
-          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-        const suffix = code ? `: ${code}` : "";
-        return {
-          content: [{ type: "text", text: `run_history: upstream fetch failed${suffix}` }],
-          isError: true,
-        };
-      }
-      return responseToToolResult(res, {
-        source: "run_history",
-        ...(blobStore ? { blobStore } : {}),
-        tokenBudget,
-      });
+      return platformToolFetch("run_history", url, extra.signal);
     },
   };
 
   // `recall_memory` MCP tool — backs the agent's archive memory store.
   // Pinned memories are already in the system prompt; this tool fetches
   // the archive (everything else) on demand so the working context stays
-  // small. See ADR-012.
+  // small.
   const recallMemory: AppstrateToolDefinition = {
     // Name + description + inputSchema are derived from the canonical
     // `recall_memory` descriptor in `@appstrate/runner-pi/runtime-tools`
@@ -1225,7 +1229,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       inputSchema:
         RECALL_MEMORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
-    handler: async (rawArgs) => {
+    handler: async (rawArgs, extra) => {
       const args = rawArgs as { q?: string; limit?: number };
       const params = new URLSearchParams();
       if (args.q !== undefined && args.q.length > 0) params.set("q", args.q);
@@ -1233,25 +1237,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       const qs = params.size > 0 ? `?${params.toString()}` : "";
 
       const url = `${config.platformApiUrl}/internal/memories${qs}`;
-      let res: Response;
-      try {
-        res = await fetchFn(url, {
-          headers: { Authorization: `Bearer ${config.runToken}` },
-        });
-      } catch (err) {
-        const code =
-          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-        const suffix = code ? `: ${code}` : "";
-        return {
-          content: [{ type: "text", text: `recall_memory: upstream fetch failed${suffix}` }],
-          isError: true,
-        };
-      }
-      return responseToToolResult(res, {
-        source: "recall_memory",
-        ...(blobStore ? { blobStore } : {}),
-        tokenBudget,
-      });
+      return platformToolFetch("recall_memory", url, extra.signal);
     },
   };
 
@@ -1322,67 +1308,50 @@ interface ResponseToToolResultOptions {
   /** Source label propagated to the BlobStore record (for observability). */
   source?: string;
   /**
-   * When true, attach upstream `{ status, headers, finalUrl }` to the
+   * When true, attach upstream `{ status, headers }` to the
    * `CallToolResult._meta` payload under {@link UPSTREAM_META_KEY}.
    * Required for protocols where the agent must read response
    * headers (`Location:` for resumable uploads, `ETag:` for S3
-   * multipart, `Upload-Offset:` for tus) or the post-redirect
-   * terminal URL (OAuth Authorization Code, CAS ticket, magic-link).
-   * Headers are filtered server-side via the allowlist in
-   * `./upstream-meta.ts`; finalUrl is sanitised (userinfo + fragment
-   * stripped) before serialisation.
+   * multipart, `Upload-Offset:` for tus). Headers are filtered
+   * server-side via the allowlist in `./upstream-meta.ts`.
    *
    * Defaults to false for the first-party `run_history` / `recall_memory`
    * tools. The `api_call` path always passes `true` (the runtime parser
    * hard-requires `_meta`), as does the `api_upload` Pi tool.
    */
   attachUpstreamMeta?: boolean;
-  /**
-   * URL the response was eventually served from after any redirect
-   * follow. Forwarded to {@link buildUpstreamMeta} which sanitises it
-   * before serialisation. Omitted when no redirect happened (the
-   * sidecar passes `result.finalUrl` from {@link executeApiCall}
-   * regardless — equals the resolved target URL when no chain).
-   */
-  upstreamFinalUrl?: string;
 }
 
 /**
- * Pure helper: decide whether a text body should spill, and produce
- * the agent-facing `_meta` payload describing the decision.
+ * Pure helper: decide whether a text body should spill.
  *
  * Folded out of {@link responseToToolResult} so the budget logic is
  * unit-testable in isolation and the surrounding async flow stays
  * linear. Calls {@link TokenBudget.tryReserve} so the inline-record is
  * atomic with the decision (no decide/record interleave under
  * concurrent calls).
+ *
+ * `estimatedTokens` rides along because the two caller-driven
+ * forced-inline paths (blob store full, no blob store configured) must
+ * `record()` the tokens `tryReserve` deliberately did not.
  */
 function evaluateBudget(args: { text: string; tokenBudget: TokenBudget }): {
   shouldSpill: boolean;
-  meta: TokenBudgetMeta;
+  estimatedTokens: number;
 } {
   const estimated = args.tokenBudget.estimate(args.text);
   const decision = args.tokenBudget.tryReserve(estimated);
-  // Per-call trace at debug only. Spill events are already surfaced by
-  // the downstream "spilled to blob store" / "blob store full" / "no
-  // blob store configured" logs in spillToBlobStore.
+  // Per-call trace at debug only, and the only place the tracker's
+  // `reason` is surfaced. Spill outcomes are separately surfaced by the
+  // downstream "spilled to blob store" / "blob store full" / "no blob
+  // store configured" logs below.
   logger.debug("token-budget decision", {
     decision: decision.decision,
     reason: decision.reason,
     estimatedTokens: estimated,
     consumedTokens: decision.consumedTokens,
   });
-  return {
-    shouldSpill: decision.decision === "spill",
-    meta: {
-      estimatedTokens: estimated,
-      consumedTokens: decision.consumedTokens,
-      runBudgetTokens: decision.runBudgetTokens,
-      inlineCapTokens: decision.inlineCapTokens,
-      decision: decision.decision,
-      reason: decision.reason,
-    },
-  };
+  return { shouldSpill: decision.decision === "spill", estimatedTokens: estimated };
 }
 
 /**
@@ -1409,9 +1378,6 @@ function evaluateBudget(args: { text: string; tokenBudget: TokenBudget }): {
  *   reason. Production always supplies a BlobStore + TokenBudget via
  *   `mountMcp`.
  *
- * Every text-path result carries a `dev.appstrate/token-budget` `_meta`
- * payload so the agent runtime can surface accounting and react to
- * structured truncation events.
  */
 async function responseToToolResult(
   res: Response,
@@ -1435,13 +1401,8 @@ async function responseToToolResult(
   // but resolving the meta up-front keeps the code path linear and
   // documents the dependency: meta is independent of content.
   const upstreamMeta: UpstreamMeta | undefined = options.attachUpstreamMeta
-    ? buildUpstreamMeta(res, options.upstreamFinalUrl)
+    ? buildUpstreamMeta(res)
     : undefined;
-
-  // Budget meta accumulates per-response: estimated cost + the tracker's
-  // decision are folded in by the text path below. Stays undefined for
-  // binary spills where no text estimate is meaningful.
-  let budgetMeta: TokenBudgetMeta | undefined;
 
   type Result = {
     content: Array<
@@ -1452,22 +1413,16 @@ async function responseToToolResult(
     structuredContent?: Record<string, unknown>;
     _meta?: Record<string, unknown>;
   };
-  // Helper: attach `_meta` to every return path. We merge upstream-
-  // exchange meta and token-budget meta into a single payload — both
-  // are independent of agent-side mapping, both can be present
-  // simultaneously.
+  // Helper: attach `_meta` to every return path.
   //
   // No `structuredContent` is attached here. The response body owns
   // `content`, and a `structuredContent` that does not mirror it makes
-  // spec-compliant clients drop the body (#876). The status, headers and
-  // finalUrl travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side
-  // shaper reads back into a model-visible `[api_call status=…]` line.
+  // spec-compliant clients drop the body (#876). The status and headers
+  // travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side shaper
+  // reads back into a model-visible `[api_call status=…]` line.
   const withMeta = (r: Result): Result => {
-    if (!upstreamMeta && !budgetMeta) return r;
-    const meta: Record<string, unknown> = {};
-    if (upstreamMeta) meta[UPSTREAM_META_KEY] = upstreamMeta;
-    if (budgetMeta) meta[TOKEN_BUDGET_META_KEY] = budgetMeta;
-    return { ...r, _meta: meta };
+    if (!upstreamMeta) return r;
+    return { ...r, _meta: { [UPSTREAM_META_KEY]: upstreamMeta } };
   };
 
   const ct = res.headers.get("content-type") ?? "";
@@ -1560,12 +1515,10 @@ async function responseToToolResult(
   // tryReserve() so cumulative state doesn't drift under concurrent
   // calls (two awaits between decide() and record() would otherwise
   // let two callers both observe a stale `consumed`).
-  const evaluation = evaluateBudget({
+  const { shouldSpill: shouldSpillForBudget, estimatedTokens } = evaluateBudget({
     text,
     tokenBudget: options.tokenBudget,
   });
-  budgetMeta = evaluation.meta;
-  const shouldSpillForBudget = evaluation.shouldSpill;
 
   // If the text body should spill AND we have a blob store, spill it.
   // The agent gets a pointer instead of poisoning its context with a
@@ -1579,14 +1532,13 @@ async function responseToToolResult(
         ...(options.source !== undefined ? { source: options.source } : {}),
       });
     } catch (err) {
-      // Blob store full — surface a distinct reason and record the
-      // forced-inline tokens against the budget. tryReserve() did NOT
-      // record on the spill path, so we record explicitly here.
-      budgetMeta = { ...budgetMeta, decision: "inline", reason: "blob_store_full" };
-      options.tokenBudget.record(budgetMeta.estimatedTokens);
+      // Blob store full — force the body inline and record the tokens
+      // against the budget. tryReserve() did NOT record on the spill
+      // path, so we record explicitly here.
+      options.tokenBudget.record(estimatedTokens);
       logger.warn("token-budget: blob store full, forced inline", {
         source: options.source,
-        estimatedTokens: budgetMeta.estimatedTokens,
+        estimatedTokens,
         consumedTokens: options.tokenBudget.consumedTokens(),
         error: getErrorMessage(err),
       });
@@ -1597,9 +1549,8 @@ async function responseToToolResult(
     }
     logger.info("token-budget: spilled to blob store", {
       source: options.source,
-      reason: budgetMeta?.reason,
-      estimatedTokens: budgetMeta?.estimatedTokens,
-      consumedTokens: budgetMeta?.consumedTokens,
+      estimatedTokens,
+      consumedTokens: options.tokenBudget.consumedTokens(),
       uri: record.uri,
     });
     const link = {
@@ -1612,15 +1563,13 @@ async function responseToToolResult(
   }
 
   // Inline path — when the budget said spill but no blob store is
-  // configured, surface the distinct reason and record the
-  // forced-inline tokens. tryReserve() did NOT record on the spill
-  // path, so we record explicitly here.
+  // configured, record the forced-inline tokens. tryReserve() did NOT
+  // record on the spill path, so we record explicitly here.
   if (shouldSpillForBudget && !options.blobStore) {
-    budgetMeta = { ...budgetMeta, decision: "inline", reason: "no_blob_store_configured" };
-    options.tokenBudget.record(budgetMeta.estimatedTokens);
+    options.tokenBudget.record(estimatedTokens);
     logger.warn("token-budget: no blob store configured, forced inline", {
       source: options.source,
-      estimatedTokens: budgetMeta.estimatedTokens,
+      estimatedTokens,
       consumedTokens: options.tokenBudget.consumedTokens(),
     });
   }
@@ -1798,15 +1747,11 @@ export function createApiCallToolDefs(
   out.push({ ...call, descriptor: { ...call.descriptor, name: apiCallKey } });
   const upload = makeApiUploadTool(integ);
   if (upload) {
-    const name = apiUploadToolKey(apiCallKey);
+    const name = apiUploadToolNameFor(apiCallKey);
     out.push({ ...upload, descriptor: { ...upload.descriptor, name } });
   }
   return out;
 }
-
-/** Unprefixed tool names for the generic credential-injecting tools. */
-export const API_CALL_TOOL_NAME = "api_call";
-export const API_UPLOAD_TOOL_NAME = "api_upload";
 
 /**
  * The auth-scoped, unprefixed tool key for an integration's api_call surface:
@@ -1825,17 +1770,6 @@ function apiCallToolKey(integ: ApiCallIntegrationConfig): string {
 }
 
 /**
- * Derive the `api_upload` companion key from an api_call key, preserving the
- * auth-scoped token suffix. Mirrors `apiUploadToolNameFor` in
- * `@appstrate/core/integration` (which the platform catalog uses); the two are
- * pinned in lockstep by a core test. Duplicated rather than imported because
- * the sidecar bundle deliberately avoids the manifest schema stack.
- */
-function apiUploadToolKey(apiCallToolName: string): string {
-  return `${API_UPLOAD_TOOL_NAME}${apiCallToolName.slice(API_CALL_TOOL_NAME.length)}`;
-}
-
-/**
  * True for the synthetic `api_call` / `api_upload` tool names (bare, or the
  * per-auth token variants). These are served by the in-process api_call
  * server, never by the integration's own MCP server, so any accounting over the
@@ -1851,7 +1785,7 @@ export function isSyntheticApiToolName(name: string): boolean {
   return false;
 }
 
-export interface MountMcpOptions {
+interface MountMcpOptions {
   /** Run-scoped blob store for `api_call` resource spillover. */
   blobStore?: BlobStore;
   /**
@@ -1867,8 +1801,8 @@ export interface MountMcpOptions {
    * Run-scoped token budget. Every tool output is run through the
    * budget tracker before being delivered to the agent; dense JSON that
    * fits under a byte cap but would exhaust the context window spills
-   * to the blob store, and a structured `dev.appstrate/token-budget`
-   * `_meta` payload records the accounting.
+   * to the blob store. The decision is enforced sidecar-side and
+   * recorded in the sidecar's own logs.
    */
   tokenBudget: TokenBudget;
   /**

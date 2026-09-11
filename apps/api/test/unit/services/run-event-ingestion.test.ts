@@ -34,7 +34,7 @@ function makeRun(overrides: Partial<RunSinkContext> = {}): RunSinkContext {
   return {
     id: "run_test",
     orgId: "org_1",
-    applicationId: "app_1",
+    spaceId: "spc_1",
     packageId: "@acme/agent",
     runOrigin: "remote",
     sinkSecretEncrypted: encrypt("s".repeat(32)),

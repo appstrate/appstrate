@@ -32,33 +32,30 @@ import {
   llmUsage,
   notifications,
   organizations,
-  documents,
-  documentLinks,
+  files,
+  fileLinks,
   chatSessions,
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
   type PricingStatus,
 } from "@appstrate/db/schema";
-import { extractDocumentIds } from "@appstrate/core/document-uri";
+import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter, actorScopeFilter } from "../../lib/actor.ts";
-import {
-  runMetadataSchema,
-  runConfigSchema,
-  runConfigOverrideSchema,
-  runLogDataSchema,
-} from "../../lib/jsonb-schemas.ts";
-import { ApiError, conflict, invalidRequest } from "../../lib/errors.ts";
+import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
+import { ApiError, conflict } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
-import { detachOrDeleteContainedDocuments } from "../documents.ts";
+import { detachOrDeleteContainedFiles } from "../files.ts";
+import { enqueueStorageDeletion } from "../storage-deletion.ts";
+import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
-import type { AppScope, OrgScope } from "../../lib/scope.ts";
+import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
   type ModelGenerationSettings,
@@ -82,8 +79,12 @@ export type RunHistoryField = (typeof RUN_HISTORY_FIELDS)[number];
  * observability/billing. Every consumer downstream (finalize, the internal
  * run-context endpoint, `getRunEffectiveAgent`'s `agent_deleted` report) needs a
  * printable, stable id — so fall back to the INSERT-time snapshot, stamped on
- * the row precisely for this case, and only then to a neutral sentinel for
- * pre-snapshot legacy rows.
+ * the row precisely for this case, and only then to a neutral sentinel.
+ *
+ * The sentinel is LIVE, not a legacy path: `agent_scope`/`agent_name` are
+ * nullable and both writers still persist NULL when they have nothing to
+ * snapshot (`params.agentScope ?? null`, `agentDenorm?.scope ?? null` below).
+ * A run launched with no resolvable agent identity reaches it today.
  */
 export function runAgentIdentity(row: {
   packageId: string | null;
@@ -94,38 +95,6 @@ export function runAgentIdentity(row: {
     row.packageId ??
     (row.agentScope && row.agentName ? `@${row.agentScope}/${row.agentName}` : "@deleted/unknown")
   );
-}
-
-function parseRunConfig(value: Record<string, unknown> | null | undefined) {
-  if (value == null) return null;
-  const result = runConfigSchema.safeParse(value);
-  if (!result.success) {
-    throw invalidRequest(
-      `Invalid run config: ${result.error.issues[0]?.message ?? "validation failed"}`,
-    );
-  }
-  return result.data;
-}
-
-function parseRunConfigOverride(value: Record<string, unknown> | null | undefined) {
-  if (value == null) return null;
-  const result = runConfigOverrideSchema.safeParse(value);
-  if (!result.success) {
-    throw invalidRequest(
-      `Invalid run config override: ${result.error.issues[0]?.message ?? "validation failed"}`,
-    );
-  }
-  return result.data;
-}
-
-function parseRunMetadata(value: Record<string, unknown>) {
-  const result = runMetadataSchema.safeParse(value);
-  if (!result.success) {
-    throw invalidRequest(
-      `Invalid run metadata: ${result.error.issues[0]?.message ?? "validation failed"}`,
-    );
-  }
-  return result.data;
 }
 
 /**
@@ -157,7 +126,7 @@ import { toISO } from "../../lib/date-helpers.ts";
 /**
  * The `runs` columns an enriched read actually needs — every column the wire
  * DTO projects, plus `resolvedConnections` (projected into `connections_used`)
- * and `input` (scanned for `document://` ids).
+ * and `input` (scanned for `appfile://` ids).
  *
  * Named explicitly rather than passing the whole `runs` table because the row
  * is WIDER than the DTO: `modelCost`, `resolvedIntegrationVersions`,
@@ -179,7 +148,7 @@ const enrichedRunColumns = {
   endUserId: runs.endUserId,
   apiKeyId: runs.apiKeyId,
   orgId: runs.orgId,
-  applicationId: runs.applicationId,
+  spaceId: runs.spaceId,
   scheduleId: runs.scheduleId,
   status: runs.status,
   input: runs.input,
@@ -188,8 +157,6 @@ const enrichedRunColumns = {
   checkpoint: runs.checkpoint,
   error: runs.error,
   metadata: runs.metadata,
-  config: runs.config,
-  configOverride: runs.configOverride,
   startedAt: runs.startedAt,
   completedAt: runs.completedAt,
   duration: runs.duration,
@@ -228,30 +195,19 @@ function enrichedRunSelect(actor: Actor | null) {
     scheduleName: schedules.name,
     packageEphemeral: packages.ephemeral,
     unread: unreadForActor(actor),
-    // OUTPUT document count — correlated scalar subquery over `documents`,
-    // served by the `idx_documents_run` (run_id-leading) index so the list
+    // OUTPUT file count — correlated scalar subquery over `files`,
+    // served by the `idx_files_run` (run_id-leading) index so the list
     // read stays a single query with no N+1. Coerced to Number in the mapper
     // (postgres.js returns count() as a numeric string).
     //
     // MUST filter on `purpose`: a run's materialized INPUT uploads carry the
     // same `run_id`, so an unfiltered count reported a file-input run that
-    // published nothing as `input: 1, output: 1` — the very same document,
+    // published nothing as `input: 1, output: 1` — the very same file,
     // counted twice, straight to the user. Every other count site filters the
     // same way.
-    outputDocumentCount: sql<number>`(
-      select count(*) from ${documents}
-      where ${documents.runId} = ${runs.id} and ${documents.purpose} = 'agent_output'
-    )`,
-    // The presentation role lives on the produced document so its lifecycle
-    // remains the single source of truth. The partial unique index on
-    // documents(run_id) WHERE presentation = 'primary' makes this scalar
-    // lookup deterministic and cheap.
-    primaryDocumentId: sql<string | null>`(
-      select ${documents.id} from ${documents}
-      where ${documents.runId} = ${runs.id}
-        and ${documents.purpose} = 'agent_output'
-        and ${documents.presentation} = 'primary'
-      limit 1
+    outputFileCount: sql<number>`(
+      select count(*) from ${files}
+      where ${files.runId} = ${runs.id} and ${files.purpose} = 'agent_output'
     )`,
   };
 }
@@ -291,8 +247,7 @@ type EnrichedRunRow = {
   scheduleName: string | null;
   packageEphemeral: boolean | null;
   unread: boolean;
-  outputDocumentCount: number;
-  primaryDocumentId: string | null;
+  outputFileCount: number;
 };
 
 /**
@@ -329,7 +284,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     endUserId: row.endUserId,
     apiKeyId: row.apiKeyId,
     orgId: row.orgId,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     scheduleId: row.scheduleId,
     status: row.status,
     input: row.input,
@@ -338,8 +293,6 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     checkpoint: row.checkpoint,
     error: row.error,
     metadata: row.metadata,
-    config: row.config,
-    config_override: row.configOverride,
     started_at: row.startedAt?.toISOString() ?? null,
     completed_at: row.completedAt?.toISOString() ?? null,
     duration: row.duration,
@@ -398,14 +351,13 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
     connections_used: projectConnectionsUsed(r.run.resolvedConnections),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
-    // INPUT = distinct `document://` ids referenced in the run's persisted
-    // input JSON (extractDocumentIds dedupes + tolerates null); OUTPUT =
-    // documents produced by the run (subquery column above).
-    document_counts: {
-      input: extractDocumentIds(r.run.input).length,
-      output: Number(r.outputDocumentCount),
+    // INPUT = distinct `appfile://` ids referenced in the run's persisted
+    // input JSON (extractFileIds dedupes + tolerates null); OUTPUT =
+    // files produced by the run (subquery column above).
+    file_counts: {
+      input: extractFileIds(r.run.input).length,
+      output: Number(r.outputFileCount),
     },
-    primary_document_id: r.primaryDocumentId ?? null,
   };
 }
 
@@ -416,7 +368,7 @@ type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function nextRunNumber(
   executor: Db | DbTx,
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
 ): Promise<number> {
   const [maxRow] = await executor
@@ -425,7 +377,7 @@ async function nextRunNumber(
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(runs.packageId, packageId)],
       }),
     );
@@ -433,23 +385,60 @@ async function nextRunNumber(
 }
 
 /**
- * Serialize `run_number` allocation per (org, application, package) with a
+ * Serialize `run_number` allocation per (org, space, package) with a
  * transaction-scoped Postgres advisory lock. Without it, two concurrent runs
  * of the same package both `SELECT max(run_number)+1`, read the same value and
  * insert colliding numbers (READ COMMITTED lets neither see the other's
  * uncommitted row). The lock forces the second max+insert to wait for the
  * first to commit, so it observes the freshly inserted row. Released
  * automatically at transaction end.
+ *
+ * The key interpolates `scope.orgId` / `scope.spaceId` WITHOUT `?? ""`
+ * defaults, and that is safe rather than merely type-correct. `hashtext()`
+ * takes an untyped literal, so a caller that slipped an `undefined` past the
+ * type system would hash the nine characters `undefined` — a DIFFERENT lock,
+ * silently, with nothing raised anywhere. Nothing can: `SpaceScope`
+ * (`lib/scope.ts`) declares both fields as required `string`; its constructors
+ * `getSpaceScope` / `getOrgScope` throw on a falsy value rather than return
+ * one; no call site reaches `createRun` through an `as` cast or a JSON-parsed
+ * object (every one threads `{ orgId, spaceId }` from `string`-typed pipeline
+ * params); and the module contract (`PlatformServices` in
+ * `@appstrate/core/module`) exposes no run-creation surface, so no out-of-tree
+ * JS caller exists either. The sibling `ActorScope` deliberately carries NO
+ * `orgId`, but it is not structurally assignable to `SpaceScope` — passing one
+ * here is a compile error, not an `"undefined"` lock. The same reasoning
+ * covers `orgRunConcurrencyLockKey` below. If a dynamically-typed caller is
+ * ever added, a defined-key guard has to land WITH it.
  */
-async function acquireRunNumberLock(tx: DbTx, scope: AppScope, packageId: string): Promise<void> {
-  const lockKey = `run_number:${scope.orgId ?? ""}:${scope.applicationId ?? ""}:${packageId}`;
+async function acquireRunNumberLock(tx: DbTx, scope: SpaceScope, packageId: string): Promise<void> {
+  const lockKey = `run_number:${scope.orgId}:${scope.spaceId}:${packageId}`;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
 }
 
 /**
  * Advisory-lock key serializing per-org run admission. Single-sourced so
  * every party that must serialize against admission (`enforceOrgConcurrencyCap`
- * below, `deleteOrganization`) derives the exact same key.
+ * below, `deletePackageRuns` below, `deleteOrganization`) derives the exact
+ * same key.
+ *
+ * LOCK ORDER — this advisory key is the OUTERMOST lock of the run-admission /
+ * run-teardown family, and every transaction that takes it takes it FIRST:
+ *
+ *   run_concurrency:<org>  →  organizations row  →  packages row  →  files rows
+ *                          →  run_number:<org>:<space>:<package>
+ *
+ * (Each participant takes the subset it needs, never a different order.)
+ *
+ * The order is not cosmetic: `createRun` locks its input `files` rows, and
+ * `deletePackageRuns` / `deleteOrganization` lock `files` while holding this
+ * key. An agent output published by run A can be fed to run B as
+ * `appfile://…` (see `services/input-parser.ts`), so both parties really do
+ * meet on the same file row — `createRun` acquiring the key AFTER its file
+ * lock was an ABBA cycle Postgres resolves with `40P01` and a 500 on one side.
+ *
+ * `organizations` before `files` is the same order every file write and every
+ * parent cascade already uses — see `detachOrDeleteContainedFiles` in
+ * `services/files.ts`, which documents that half.
  */
 export function orgRunConcurrencyLockKey(orgId: string): string {
   return `run_concurrency:${orgId}`;
@@ -468,19 +457,19 @@ export function orgRunConcurrencyLockKey(orgId: string): string {
  * lock serializes admission per org; the cap therefore holds exactly. Throws a
  * 429 `org_run_concurrency_exceeded` (same code the gate surfaces) when at cap.
  *
- * A no-op when the run-limits registry is not initialized (e.g. an isolated
- * unit test that never booted it) — there is no cap to enforce.
+ * An uninitialized run-limits registry throws through, it does NOT open the
+ * gate: this is the authoritative enforcement (the preflight pre-check is
+ * explicitly non-atomic), so swallowing that throw silently uncapped the org
+ * for the whole INSERT. The peer read in `run-preflight-gates.ts` lets the same
+ * throw propagate; a caller that reaches either without `initRunLimits()` has a
+ * boot-ordering bug, not a run to admit.
  */
-async function enforceOrgConcurrencyCap(tx: DbTx, scope: AppScope): Promise<void> {
-  let cap: number;
-  try {
-    cap = getPlatformRunLimits().max_concurrent_per_org;
-  } catch {
-    return;
-  }
+async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<void> {
+  const cap = getPlatformRunLimits().max_concurrent_per_org;
   await tx.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId ?? "")})::bigint)`,
+    sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId)})::bigint)`,
   );
+  await refuseReservedForDeletion(tx, scope.orgId);
   const [row] = await tx
     .select({ active: count() })
     .from(runs)
@@ -500,18 +489,57 @@ async function enforceOrgConcurrencyCap(tx: DbTx, scope: AppScope): Promise<void
   }
 }
 
+/**
+ * Is this organization's deletion reserved (`organizations.deleting_at`)?
+ * Exact under the per-org admission lock; the proxy and chat seams read
+ * unlocked and may admit one call that races the stamp.
+ */
+export async function isOrgDeletionReserved(
+  executor: DbTx | typeof db,
+  orgId: string,
+): Promise<boolean> {
+  const [org] = await executor
+    .select({ deletingAt: organizations.deletingAt })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  return org?.deletingAt != null;
+}
+
+/** The refusal every admission seam answers a reserved organization with. */
+export function orgDeletingError(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "org_deleting",
+    title: "Organization Is Being Deleted",
+    detail: "This organization is being deleted; no new work can be admitted.",
+  });
+}
+
+/**
+ * Refuse admission into an organization whose deletion is reserved. Called by
+ * every seam that admits metered usage: work admitted after the reservation is
+ * cascade-deleted with the org, taking its unread `llm_usage` rows with it.
+ */
+export async function refuseReservedForDeletion(
+  executor: DbTx | typeof db,
+  orgId: string,
+): Promise<void> {
+  if (await isOrgDeletionReserved(executor, orgId)) throw orgDeletingError();
+}
+
 interface CreateRunParams {
   id: string;
   packageId: string;
   actor: Actor | null;
   input: Record<string, unknown> | null;
   /**
-   * Existing durable documents referenced by the run input. These rows are
-   * locked, revalidated in the app scope, and linked to the new run inside the
+   * Existing durable files referenced by the run input. These rows are
+   * locked, revalidated in the space scope, and linked to the new run inside the
    * same transaction as the run INSERT. This closes the resolve/create race:
-   * either every input document is protected by a link, or no run is created.
+   * either every input file is protected by a link, or no run is created.
    */
-  consumedDocumentIds?: string[];
+  consumedFileIds?: string[];
   scheduleId?: string;
   versionLabel?: string;
   versionRef?: string;
@@ -533,16 +561,6 @@ interface CreateRunParams {
   agentScope?: string | null;
   /** Snapshot of the agent's display name (manifest.display_name ?? name). */
   agentName?: string | null;
-  /** Snapshot of the effective agent config (merged overrides) at run creation. */
-  config?: Record<string, unknown> | null;
-  /**
-   * Per-run override delta — the raw object the caller sent in the
-   * request body (or `null` if the run used persisted defaults verbatim).
-   * Persisted alongside the resolved `config` snapshot so the dashboard
-   * can badge "default vs override" and the "Re-run with these settings"
-   * button can replay the exact same delta.
-   */
-  configOverride?: Record<string, unknown> | null;
   /**
    * Per-run dependency version overrides (#666) — the `{ "@scope/name":
    * "draft" | "<spec>" }` map the caller passed on the run trigger (or a
@@ -611,36 +629,50 @@ interface CreateRunParams {
   modelCredentialId?: string | null;
 }
 
-export async function createRun(scope: AppScope, params: CreateRunParams): Promise<void> {
+export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
   const { id, packageId, actor, input } = params;
 
   await db.transaction(async (tx) => {
-    const consumedDocumentIds = [...new Set(params.consumedDocumentIds ?? [])];
-    if (consumedDocumentIds.length > 0) {
+    // FIRST statement, before any row lock: the per-org admission key is the
+    // outermost lock of this family and the run-teardown paths take it before
+    // they touch `files` — see {@link orgRunConcurrencyLockKey} for the one
+    // order every participant follows. Taking it after the file lock below is
+    // what made this transaction the ABBA half of a `40P01` against
+    // `deletePackageRuns` (an agent output of one run is a legal
+    // `appfile://` input to the next).
+    //
+    // The file lock's invariant is untouched by the move: it still precedes
+    // the `file_links` INSERT below, in this same transaction, held for the
+    // rest of it — so deletion still cannot slip between validation and the
+    // link. Only the ORDER of two independent acquisitions changed. One
+    // visible consequence, deliberate: a request that is both over-cap and
+    // references a deleted file now answers 429 instead of 409.
+    await enforceOrgConcurrencyCap(tx, scope);
+
+    const consumedFileIds = [...new Set(params.consumedFileIds ?? [])];
+    if (consumedFileIds.length > 0) {
       const available = await tx
-        .select({ id: documents.id })
-        .from(documents)
+        .select({ id: files.id })
+        .from(files)
         .where(
           and(
-            inArray(documents.id, consumedDocumentIds),
-            eq(documents.orgId, scope.orgId),
-            eq(documents.applicationId, scope.applicationId),
+            inArray(files.id, consumedFileIds),
+            eq(files.orgId, scope.orgId),
+            eq(files.spaceId, scope.spaceId),
           ),
         )
         .for("update");
-      if (available.length !== consumedDocumentIds.length) {
+      if (available.length !== consumedFileIds.length) {
         throw conflict(
-          "document_unavailable",
-          "One or more input documents were deleted before the run could be created",
+          "file_unavailable",
+          "One or more input files were deleted before the run could be created",
         );
       }
     }
 
-    // Among the admission locks, order matters: acquire the per-org concurrency
-    // lock before the per-package run_number lock (consistent ordering across
-    // callers → no deadlock). Input documents are locked first so deletion
-    // cannot slip between validation and the atomic link insert below.
-    await enforceOrgConcurrencyCap(tx, scope);
+    // Last of the admission locks: `run_number` is per (org, space, package) and
+    // nothing outside this file takes it, but it is still acquired after the
+    // per-org key so the two are always seen in the same order.
     await acquireRunNumberLock(tx, scope, packageId);
     const runNumber = await nextRunNumber(tx, scope, packageId);
 
@@ -668,13 +700,11 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
         params.generationConfigOverride == null
           ? null
           : modelGenerationSettingsSchema.parse(params.generationConfigOverride),
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       apiKeyId: params.apiKeyId,
       runNumber,
       agentScope: params.agentScope ?? null,
       agentName: params.agentName ?? null,
-      config: parseRunConfig(params.config),
-      configOverride: parseRunConfigOverride(params.configOverride),
       ...(params.dependencyOverrides !== undefined
         ? { dependencyOverrides: params.dependencyOverrides }
         : {}),
@@ -708,17 +738,17 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
         : {}),
     });
 
-    if (consumedDocumentIds.length > 0) {
+    if (consumedFileIds.length > 0) {
       await tx
-        .insert(documentLinks)
+        .insert(fileLinks)
         .values(
-          consumedDocumentIds.map((documentId) => ({
-            documentId,
+          consumedFileIds.map((fileId) => ({
+            fileId,
             consumerRunId: id,
             // Tenant column, enforced by the two composite FKs on
-            // `document_links`: the document AND the consuming run must both
+            // `file_links`: the file AND the consuming run must both
             // belong to this org, so a cross-tenant link — which would block the
-            // victim org from ever deleting its own document — cannot be written.
+            // victim org from ever deleting its own file — cannot be written.
             orgId: scope.orgId,
           })),
         )
@@ -732,7 +762,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
  * Single INSERT with status=failed — triggers one pg_notify for realtime.
  */
 export async function createFailedRun(
-  scope: AppScope,
+  scope: SpaceScope,
   id: string,
   packageId: string,
   actor: Actor | null,
@@ -752,7 +782,7 @@ export async function createFailedRun(
       userId: actor?.type === "user" ? actor.id : null,
       endUserId: actor?.type === "end_user" ? actor.id : null,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       status: "failed",
       input: null,
       error,
@@ -768,33 +798,18 @@ export async function createFailedRun(
 }
 
 export async function updateRun(
-  scope: AppScope,
+  scope: SpaceScope,
   id: string,
   updates: {
     status?: string;
-    result?: Record<string, unknown>;
-    checkpoint?: Record<string, unknown>;
-    error?: string;
-    completedAt?: string;
-    duration?: number;
     tokenUsage?: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-    /** ISO-8601 timestamp; closes the signed-event sink — subsequent POSTs reject with 410. */
-    sinkClosedAt?: string;
   },
   executor: Db = db,
 ): Promise<void> {
   const set: Record<string, unknown> = {};
 
   if (updates.status !== undefined) set.status = updates.status;
-  if (updates.error !== undefined) set.error = updates.error;
-  if (updates.completedAt !== undefined) set.completedAt = new Date(updates.completedAt);
-  if (updates.duration !== undefined) set.duration = updates.duration;
-  if (updates.result !== undefined) set.result = updates.result;
-  if (updates.checkpoint !== undefined) set.checkpoint = updates.checkpoint;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
-  if (updates.metadata !== undefined) set.metadata = parseRunMetadata(updates.metadata);
-  if (updates.sinkClosedAt !== undefined) set.sinkClosedAt = new Date(updates.sinkClosedAt);
 
   // Monotone status invariant, enforced in the WHERE (not read-then-write):
   // a run that reached a terminal status (success|failed|timeout|cancelled)
@@ -816,7 +831,7 @@ export async function updateRun(
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra,
       }),
     );
@@ -899,7 +914,7 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
 )`;
 
 /** A run's attributable spend and how much of it is backed by real rates. */
-export interface RunSpend {
+interface RunSpend {
   /** Total attributable spend in USD. */
   costUsd: number;
   /**
@@ -985,7 +1000,7 @@ export async function getRunAttribution(
   status: RunStatus;
   runOrigin: "platform" | "remote";
   modelSource: string | null;
-  applicationId: string;
+  spaceId: string;
   userId: string | null;
   endUserId: string | null;
   apiKeyId: string | null;
@@ -997,7 +1012,7 @@ export async function getRunAttribution(
       status: runs.status,
       runOrigin: runs.runOrigin,
       modelSource: runs.modelSource,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
       userId: runs.userId,
       endUserId: runs.endUserId,
       apiKeyId: runs.apiKeyId,
@@ -1008,15 +1023,13 @@ export async function getRunAttribution(
   return row ?? null;
 }
 
-export type RecentRunsField = RunHistoryField;
-
 export async function getRecentRuns(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   actor: Actor | null,
   options: {
     limit?: number;
-    fields?: RecentRunsField[];
+    fields?: RunHistoryField[];
     excludeRunId?: string;
   } = {},
 ): Promise<Record<string, unknown>[]> {
@@ -1026,14 +1039,14 @@ export async function getRecentRuns(
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
     eq(runs.status, "success"),
   ];
   // Actor isolation is mandatory — never leak cross-actor checkpoints.
   // Scheduled / system runs (`actor === null`) read the shared (actor-less)
   // bucket only: the branch always pushes a predicate. Leaving the null
   // branch predicate-less would read EVERY actor's successful runs for this
-  // (org, app, package) — cross-actor checkpoint leakage (CRIT-14).
+  // (org, space, package) — cross-actor checkpoint leakage (CRIT-14).
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   } else {
@@ -1072,14 +1085,14 @@ export async function getRecentRuns(
 }
 
 /**
- * The given actor's most recent runs in an application (own runs only, newest
+ * The given actor's most recent runs in a space (own runs only, newest
  * first) — feeds the chat module's caller-context block. Unlike `getRecentRuns`
  * this spans all packages and all statuses (so failures surface), and returns a
  * minimal wire-shape (snake_case) tuned for the system prompt. Actor isolation
  * is mandatory: a user never sees another actor's runs.
  */
 export async function listRecentForActor(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor | null,
   options: { limit?: number } = {},
 ): Promise<
@@ -1092,7 +1105,7 @@ export async function listRecentForActor(
   }>
 > {
   const limit = options.limit ?? 5;
-  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
+  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
@@ -1126,15 +1139,22 @@ export async function listRecentForActor(
   );
 }
 
-export async function getLastRun(scope: AppScope, packageId: string, actor: Actor | null) {
+/**
+ * The most recent run of `packageId`. `visibility` is the caller's run-read
+ * predicate (`lib/run-visibility.ts`) — without `runs:read-all` the "last run"
+ * an agent reports must be the caller's own, not whatever a colleague fired.
+ */
+export async function getLastRun(
+  scope: SpaceScope,
+  packageId: string,
+  visibility: SQL | undefined,
+) {
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
-  if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
-  }
+  if (visibility) conditions.push(visibility);
 
   const [row] = await db
     .select({
@@ -1152,9 +1172,9 @@ export async function getLastRun(scope: AppScope, packageId: string, actor: Acto
 
 /**
  * Append a log entry for a run. Only org-scoped — `run_logs` is keyed on
- * `runId` (unique globally) + `orgId` only; no application column exists.
- * Callers that hold an `AppScope` can still pass it — `OrgScope` is the
- * structural supertype so `AppScope` flows through naturally.
+ * `runId` (unique globally) + `orgId` only; no space column exists.
+ * Callers that hold a `SpaceScope` can still pass it — `OrgScope` is the
+ * structural supertype so `SpaceScope` flows through naturally.
  */
 export async function appendRunLog(
   scope: OrgScope,
@@ -1214,9 +1234,25 @@ export type BootHeartbeatOutcome = "bumped" | "guest-active" | "closed" | "deadl
  * platform vouching for a run it is still provisioning must not be able to
  * vouch forever (a wedged Docker daemon, a daemon call that never returns).
  * Past the deadline the bump is refused and the startup-deadline predicate
- * in the watchdog finalises the row with an accurate error. Rows with a
- * NULL deadline (pre-migration runs) keep the old unbounded behaviour —
- * they are still bounded by the sink expiry.
+ * in the watchdog finalises the row with an accurate error. The comparison
+ * is unconditional: `> now` is NULL-rejecting, so a row with NO deadline is
+ * not bumped either — and, because the disambiguation query below then finds
+ * an open sink at sequence 0, it is reported as `"deadline-passed"`, which
+ * `services/run-boot-heartbeat.ts` logs as "run blew its provisioning
+ * deadline" about a run that never had one. That is accepted, not overlooked:
+ * the state is unreachable. Every row this function can reach carries a
+ * deadline — {@link createRun} stamps it in the same spread as
+ * `sinkExpiresAt`, which both callers (`run-pipeline.ts`, `run-creation.ts`)
+ * pass unconditionally — and the pump that calls this only ever names a run
+ * THIS process is provisioning right now.
+ *
+ * That reach is also why this function and the watchdog read the column
+ * differently, which is NOT an inconsistency: `run-watchdog.ts` keeps
+ * `isNotNull(bootDeadlineAt)` in its predicate and a `?? 0` on the budget
+ * because it sweeps EVERY open-sink row in the database, including rows a
+ * previous release created; this function is only ever handed a run id by the
+ * in-process pump for a run it is provisioning right now, so a row from an
+ * older release can never be its argument.
  */
 export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatOutcome> {
   const now = new Date();
@@ -1228,7 +1264,7 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
         eq(runs.id, runId),
         isNull(runs.sinkClosedAt),
         eq(runs.lastEventSequence, 0),
-        or(isNull(runs.bootDeadlineAt), gt(runs.bootDeadlineAt, now)),
+        gt(runs.bootDeadlineAt, now),
       ),
     )
     .returning({ id: runs.id });
@@ -1247,33 +1283,51 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
   return "guest-active";
 }
 
-export async function getRunningRunsForPackage(
-  scope: AppScope,
+/**
+ * Count a package's active (pending/running) runs through `handle`.
+ *
+ * `handle` is what separates the two callers: {@link getRunningRunsForPackage}
+ * reads with the base client (its own snapshot, no locks), while
+ * {@link deletePackageRuns} passes its open transaction so the count is taken
+ * under the run-admission advisory lock and sees what that lock is holding back.
+ *
+ * `visibility` narrows the count to what a caller may read; the mutation
+ * guards pass none, because "is this agent busy" is about the agent, not about
+ * who is watching.
+ */
+async function countActiveRunsForPackage(
+  handle: Db | DbTx,
+  scope: SpaceScope,
   packageId: string,
-  actor?: Actor,
+  visibility?: SQL,
 ): Promise<number> {
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     inArray(runs.status, [...activeRunStatusValues]),
+    eq(runs.spaceId, scope.spaceId),
   ];
 
-  conditions.push(eq(runs.applicationId, scope.applicationId));
+  if (visibility) conditions.push(visibility);
 
-  if (actor) {
-    conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
-  }
-
-  const [row] = await db
+  const [row] = await handle
     .select({ count: count() })
     .from(runs)
     .where(and(...conditions));
   return row?.count ?? 0;
 }
 
+export async function getRunningRunsForPackage(
+  scope: SpaceScope,
+  packageId: string,
+  visibility?: SQL,
+): Promise<number> {
+  return countActiveRunsForPackage(db, scope, packageId, visibility);
+}
+
 /**
- * Count in-flight runs across ALL applications in an org. Used by the
- * per-org concurrency limiter — genuinely org-scoped, no applicationId
+ * Count in-flight runs across ALL spaces in an org. Used by the
+ * per-org concurrency limiter — genuinely org-scoped, no spaceId
  * filter. Signature stays org-scoped so the caller can't accidentally
  * scope it narrower.
  */
@@ -1290,15 +1344,26 @@ export async function getRunningRunCountForOrg(scope: OrgScope): Promise<number>
   return row?.count ?? 0;
 }
 
-export async function getRunningRunCounts(scope: AppScope): Promise<Record<string, number>> {
+/**
+ * Active runs per package in the space. `visibility` is the caller's run-read
+ * predicate — without it the count answers "someone else is running this",
+ * which is exactly what `runs:read-all` gates.
+ */
+export async function getRunningRunCounts(
+  scope: SpaceScope,
+  visibility?: SQL,
+): Promise<Record<string, number>> {
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
     .from(runs)
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
-        extra: [inArray(runs.status, [...activeRunStatusValues])],
+        spaceId: scope.spaceId,
+        extra: [
+          inArray(runs.status, [...activeRunStatusValues]),
+          ...(visibility ? [visibility] : []),
+        ],
       }),
     )
     .groupBy(runs.packageId);
@@ -1310,11 +1375,11 @@ export async function getRunningRunCounts(scope: AppScope): Promise<Record<strin
   return counts;
 }
 
-export async function getRun(scope: AppScope, id: string) {
+export async function getRun(scope: SpaceScope, id: string) {
   const conditions = [
     eq(runs.id, id),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
 
   const [row] = await db
@@ -1325,7 +1390,7 @@ export async function getRun(scope: AppScope, id: string) {
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       packageId: runs.packageId,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
       // Raw input snapshot (file fields keep their `upload://` URIs) — read
       // by the `rerun_from` path to replay the same input on a new run.
       input: runs.input,
@@ -1336,13 +1401,19 @@ export async function getRun(scope: AppScope, id: string) {
   return row ?? null;
 }
 
-export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
-  // Enumeration, documents teardown and the runs delete are ONE transaction,
-  // opened by locking the org row — the same serialization point every document
-  // write takes (`createDocumentFromStream`) and the same org-first order the
-  // organization / application / end-user cascades use.
+/**
+ * Delete every run of `packageId` in `scope`, with their files and workspace
+ * objects. Throws `conflict("run_in_progress")` when the package still has an
+ * active run — checked INSIDE the transaction, under the per-org run-admission
+ * advisory lock, so a run admitted concurrently cannot be deleted mid-flight.
+ */
+export async function deletePackageRuns(scope: SpaceScope, packageId: string): Promise<number> {
+  // Enumeration, files teardown and the runs delete are ONE transaction,
+  // opened by taking the run-admission lock and then the org row — the same
+  // serialization point every file write takes (`createFileFromStream`) and the
+  // same org-first order the organization / space / end-user cascades use.
   //
-  // Splitting it (teardown, commit, delete) left a window in which a document
+  // Splitting it (teardown, commit, delete) left a window in which a file
   // published by a still-live sidecar — or by an at-least-once retry of the
   // end-of-run publication sweep — landed on a run that had already been
   // enumerated. The runs delete then cascaded that fresh row away with NO outbox
@@ -1352,6 +1423,19 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   // it commits after and its FK insert fails against the deleted run, dropping
   // its own object.
   return db.transaction(async (tx) => {
+    // FIRST statement: serialize against run admission, exactly as
+    // `deleteOrganization` does (`createRun` takes this same per-org lock
+    // before its count + INSERT). Without it the route's pre-check was the
+    // only guard, and it is not transactional: a launch spends ~1.75s of
+    // pipeline work before `createRun` inserts, so a delete arriving in that
+    // window counts 0 running, then the INSERT commits, then this transaction's
+    // SELECT sees the row and deletes it — the container keeps running with
+    // live credentials against a run id that no longer exists. Acquiring it
+    // before the org row keeps one lock order across both delete paths.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId)})::bigint)`,
+    );
+
     await tx
       .select({ id: organizations.id })
       .from(organizations)
@@ -1359,8 +1443,17 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
       .for("update")
       .limit(1);
 
+    // Now that admission is held, "no active runs" is a fact for the rest of
+    // this transaction rather than a stale reading. This is the ONLY check —
+    // the route no longer pre-checks, because a non-transactional count that
+    // the real guard has to repeat anyway is just a second place to drift.
+    const active = await countActiveRunsForPackage(tx, scope, packageId);
+    if (active > 0) {
+      throw conflict("run_in_progress", `${active} run(s) still running`);
+    }
+
     // Lock the parent package before enumerating its runs — same guard as the
-    // application / end-user cascades, so a concurrent package delete cannot
+    // space / end-user cascades, so a concurrent package delete cannot
     // interleave with this teardown.
     await tx
       .select({ id: packages.id })
@@ -1375,21 +1468,34 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
       .where(
         scopedWhere(runs, {
           orgId: scope.orgId,
-          applicationId: scope.applicationId,
+          spaceId: scope.spaceId,
           extra: [eq(runs.packageId, packageId)],
         }),
       );
     if (runRows.length === 0) return 0;
     const runIds = runRows.map((r) => r.id);
 
-    // Documents FIRST: the runs' FK cascade would otherwise destroy `documents`
-    // rows (and their `document_links`) a live consumer still needs, silently
+    // Files FIRST: the runs' FK cascade would otherwise destroy `files`
+    // rows (and their `file_links`) a live consumer still needs, silently
     // amputating a rerun's inputs.
-    await detachOrDeleteContainedDocuments({ runIds, orgId: scope.orgId }, tx);
+    await detachOrDeleteContainedFiles({ runIds, orgId: scope.orgId }, tx);
 
-    // Scoped to the SELECTed ids — not the package predicate — so a run created
-    // concurrently after the SELECT is left for the next delete call instead of
-    // being deleted without its documents going through detach-or-delete.
+    // The workspace objects (bundle + manifest) are owned by the run row and
+    // by nothing else, so once these rows go they are referenced by no
+    // surviving row and no sweep can ever find them. Enqueue their deletion in
+    // the SAME transaction — the outbox contract every other run-deleting path
+    // already honours (`deleteSpace`, `deleteOrganization`); this one
+    // simply never did, and leaked a bundle + input files per deleted run.
+    await enqueueStorageDeletion(
+      tx,
+      runIds.flatMap((id) => runWorkspaceDeletionJobs(id, "package_runs_deleted")),
+    );
+
+    // Scoped to the SELECTed ids, not the package predicate: whatever the
+    // enumeration missed is not deleted here, so nothing can be removed without
+    // its files having gone through detach-or-delete. Admission is held above,
+    // so a run cannot appear between the SELECT and this DELETE — the scoping
+    // is what makes that independent of the lock rather than reliant on it.
     const deleted = await tx
       .delete(runs)
       .where(inArray(runs.id, runIds))
@@ -1398,13 +1504,19 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   });
 }
 
-export type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
+type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
-export async function listRunsWithFilter(
+/**
+ * The enriched page + total behind the two list surfaces in this module
+ * (`listPackageRuns`, `listScheduleRuns`). Module-private: a caller outside
+ * builds its WHERE by hand, and a hand-built `runs` predicate is what the
+ * `runs:read` visibility rule exists to keep out of the query.
+ */
+async function listRunsWithFilter(
   filter: SQL,
   limit: number,
-  offset = 0,
-  actor: Actor | null = null,
+  offset: number,
+  actor: Actor | null,
 ): Promise<RunListPage> {
   // The `total` count and the page share the same filter but are independent
   // reads — issued concurrently so the endpoint costs one round trip instead
@@ -1435,28 +1547,27 @@ export async function listRunsWithFilter(
 }
 
 export async function listPackageRuns(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   options: {
     limit?: number;
     offset?: number;
-    endUserId?: string | null;
     actor?: Actor | null;
     status?: RunStatus[];
+    /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
+    visibility?: SQL;
   } = {},
 ) {
-  const { limit = 50, offset = 0, endUserId, actor = null, status } = options;
+  const { limit = 50, offset = 0, actor = null, status, visibility } = options;
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
-  if (endUserId) {
-    conditions.push(eq(runs.endUserId, endUserId));
-  }
   if (status && status.length > 0) {
     conditions.push(inArray(runs.status, status));
   }
+  if (visibility) conditions.push(visibility);
   return listRunsWithFilter(and(...conditions)!, limit, offset, actor);
 }
 
@@ -1478,7 +1589,7 @@ export type PackageRunActivity = {
  * clients that need the underlying numbers.
  */
 export async function getPackageRunActivity(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   options: { endUserId?: string | null; now?: Date } = {},
 ): Promise<PackageRunActivity> {
@@ -1489,7 +1600,7 @@ export async function getPackageRunActivity(
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
     gte(runs.startedAt, windowStart),
   ];
   if (options.endUserId) conditions.push(eq(runs.endUserId, options.endUserId));
@@ -1515,7 +1626,7 @@ export async function getPackageRunActivity(
 }
 
 /**
- * List runs across all packages in an org+application, paginated, with
+ * List runs across all packages in an org+space, paginated, with
  * optional kind / status / date / end-user filters. Powers the global
  * `GET /api/runs` view. Joins `packages.ephemeral` so the response carries
  * the inline flag — UI uses it for the "Inline" badge.
@@ -1525,9 +1636,9 @@ export async function getPackageRunActivity(
  * parameter against it, so the tuple and the type cannot drift.
  */
 export const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
-export type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
+type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
-export interface ListGlobalRunsOptions {
+interface ListGlobalRunsOptions {
   limit?: number;
   offset?: number;
   kind?: GlobalRunKind;
@@ -1544,7 +1655,6 @@ export interface ListGlobalRunsOptions {
   status?: RunStatus | RunStatus[];
   startDate?: Date;
   endDate?: Date;
-  endUserId?: string | null;
   chatSessionId?: string;
   /**
    * Free text: the agent a run executed (its scope and name, as stamped on the
@@ -1570,10 +1680,12 @@ export interface ListGlobalRunsOptions {
    */
   mine?: boolean;
   actor?: Actor | null;
+  /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
+  visibility?: SQL;
 }
 
 export async function listGlobalRuns(
-  scope: AppScope,
+  scope: SpaceScope,
   options: ListGlobalRunsOptions = {},
 ): Promise<RunListPage> {
   const {
@@ -1583,14 +1695,15 @@ export async function listGlobalRuns(
     status,
     startDate,
     endDate,
-    endUserId,
     chatSessionId,
     search,
     mine = false,
     actor = null,
+    visibility,
   } = options;
 
-  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
+  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
+  if (visibility) conditions.push(visibility);
   if (mine) {
     // Fail CLOSED. `actor` is optional on this options object, so a caller
     // asking for "mine" without saying whose would otherwise get the whole
@@ -1608,7 +1721,6 @@ export async function listGlobalRuns(
   }
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
-  if (endUserId) conditions.push(eq(runs.endUserId, endUserId));
   if (chatSessionId) {
     conditions.push(eq(runs.chatSessionId, chatSessionId));
     conditions.push(
@@ -1678,7 +1790,7 @@ export async function listGlobalRuns(
 }
 
 export async function listScheduleRuns(
-  scope: AppScope,
+  scope: SpaceScope,
   scheduleId: string,
   options: {
     limit?: number;
@@ -1686,16 +1798,18 @@ export async function listScheduleRuns(
     actor?: Actor | null;
     status?: RunStatus[];
     search?: string;
+    visibility?: SQL;
   } = {},
 ) {
-  const { limit = 20, offset = 0, actor = null, status, search } = options;
+  const { limit = 20, offset = 0, actor = null, status, search, visibility } = options;
   const conditions = [eq(runs.scheduleId, scheduleId)];
   if (status?.length) conditions.push(inArray(runs.status, status));
   if (search) conditions.push(runSearchCondition(search));
+  if (visibility) conditions.push(visibility);
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       extra: conditions,
     })!,
     limit,
@@ -1704,12 +1818,23 @@ export async function listScheduleRuns(
   );
 }
 
-export async function getRunFull(scope: AppScope, id: string, actor: Actor | null = null) {
+/**
+ * One run, enriched. `visibility` is the caller's run-read predicate
+ * (`lib/run-visibility.ts`): a run the caller may not read simply misses, so
+ * the handler's existing `notFound` covers it — hidden is 404, never 403.
+ */
+export async function getRunFull(
+  scope: SpaceScope,
+  id: string,
+  actor: Actor | null = null,
+  visibility?: SQL,
+) {
   const conditions = [
     eq(runs.id, id),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
+  if (visibility) conditions.push(visibility);
 
   // `packages.draftManifest` + `draftContent` (the agent's full prompt) are
   // consumed ONLY by the inline branch below, so they are deliberately NOT in
@@ -1738,7 +1863,7 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
   let inlinePrompt: string | null = null;
   if (isInline && row.run.packageId) {
     // Same reachability as the LEFT JOIN this replaces (the run is already
-    // org+app scoped), with the tenant predicate restated on the package read
+    // org+space scoped), with the tenant predicate restated on the package read
     // itself — org-owned shadow row or system package, never another tenant's.
     const [pkg] = await db
       .select({ manifest: packages.draftManifest, content: packages.draftContent })
@@ -1758,19 +1883,14 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
 }
 
 /**
- * Org-scoped run log read. `order: "asc"` (default) returns entries in
- * insertion order (`id ASC`); `"desc"` selects the most recent `limit`
- * entries and is cheaper when only a tail is needed. The returned batch
- * is always chronological — `desc` affects which rows are selected, not
- * the order callers receive.
+ * Org-scoped run log read. Entries come back in insertion order (`id ASC`),
+ * the only order any caller has ever wanted.
  *
- * `sinceId` (asc-only) returns rows with `id > sinceId`, the cursor used
- * by the CLI's polling loop in `runRemote`. Append-only `id` (BIGSERIAL)
- * makes this a stable monotonic cursor: callers track the last id they
- * rendered and pass it back, so each poll's payload size is bounded by
- * the rows produced since the previous poll instead of the run's full
- * history. Not legal with `order: "desc"` — the call throws to surface
- * the misuse rather than silently fall back to a full scan.
+ * `sinceId` returns rows with `id > sinceId`, the cursor used by the CLI's
+ * polling loop in `runRemote`. Append-only `id` (BIGSERIAL) makes this a
+ * stable monotonic cursor: callers track the last id they rendered and pass
+ * it back, so each poll's payload size is bounded by the rows produced since
+ * the previous poll instead of the run's full history.
  *
  * `minLevel` filters by minimum severity using the fixed `run_logs.level`
  * domain (`debug < info < warn < error`): `minLevel: "info"` returns
@@ -1778,12 +1898,12 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
  * `IN (...)` filter so the check constraint's domain stays the single
  * source of truth — no numeric severity column needed.
  *
- * Org-scoped by design — `run_logs` has no `applicationId` column, and
- * the object-args shape is the module-facing public contract. App-scoped
+ * Org-scoped by design — `run_logs` has no `spaceId` column, and
+ * the object-args shape is the module-facing public contract. Space-scoped
  * callers must verify run ownership via `getRun(scope, runId)` first.
  */
 export const RUN_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
-export type RunLogLevel = (typeof RUN_LOG_LEVELS)[number];
+type RunLogLevel = (typeof RUN_LOG_LEVELS)[number];
 
 export async function listRunLogs(args: {
   runId: string;
@@ -1794,26 +1914,21 @@ export async function listRunLogs(args: {
    * `sinceId` for longer runs.
    */
   limit?: number;
-  order?: "asc" | "desc";
   sinceId?: number;
   minLevel?: RunLogLevel;
 }) {
-  const { runId, orgId, limit = 1000, order = "asc", sinceId, minLevel } = args;
-  if (sinceId !== undefined && order === "desc") {
-    throw new Error("listRunLogs: sinceId is not supported with order=desc");
-  }
+  const { runId, orgId, limit = 1000, sinceId, minLevel } = args;
   const filters = [eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)];
   if (sinceId !== undefined) filters.push(gt(runLogs.id, sinceId));
   if (minLevel !== undefined && minLevel !== "debug") {
     filters.push(inArray(runLogs.level, RUN_LOG_LEVELS.slice(RUN_LOG_LEVELS.indexOf(minLevel))));
   }
-  const q = db
+  return await db
     .select()
     .from(runLogs)
     .where(and(...filters))
-    .orderBy(order === "desc" ? desc(runLogs.id) : runLogs.id);
-  const rows = await q.limit(limit);
-  return order === "desc" ? rows.reverse() : rows;
+    .orderBy(runLogs.id)
+    .limit(limit);
 }
 
 /**
@@ -1836,8 +1951,8 @@ export async function listRunLogs(args: {
  * A row whose `data` is null reads back as `null` and MUST NOT be turned
  * into an empty object by the caller.
  *
- * Org-scoped like {@link listRunLogs} — `run_logs` has no `applicationId`
- * column; app-scoped callers verify run ownership separately.
+ * Org-scoped like {@link listRunLogs} — `run_logs` has no `spaceId`
+ * column; space-scoped callers verify run ownership separately.
  */
 export async function readLastEmittedOutput(args: {
   runId: string;

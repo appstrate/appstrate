@@ -49,7 +49,7 @@ import { LibraryPicker, type LibraryCandidate } from "./library-picker";
  * `publish_document`.
  */
 export type MapEditKind =
-  "prompt" | "skills" | "integrations" | "runtime_tools" | "input" | "output" | "config";
+  "prompt" | "skills" | "integrations" | "runtime_tools" | "input" | "output";
 
 const TITLE_KEY: Record<MapEditKind, string> = {
   prompt: "agent-map:editPrompt",
@@ -58,15 +58,15 @@ const TITLE_KEY: Record<MapEditKind, string> = {
   integrations: "agent-map:addIntegration",
   input: "agent-map:editInput",
   output: "agent-map:editOutput",
-  config: "agent-map:editConfigSchema",
 };
 
 /**
- * The three AFPS schema wrappers (§3.4), which share one field editor. Kept as a
- * guard rather than a repeated union so adding a fourth touches one line.
+ * The two AFPS schema wrappers (§3.4), which share one field editor. Kept as a
+ * guard rather than a repeated union so adding a third touches one line.
+ * `config` was one of them until it merged into `input`.
  */
-function isSchemaKind(kind: MapEditKind): kind is "input" | "output" | "config" {
-  return kind === "input" || kind === "output" || kind === "config";
+function isSchemaKind(kind: MapEditKind): kind is "input" | "output" {
+  return kind === "input" || kind === "output";
 }
 
 interface MapEditDialogProps {

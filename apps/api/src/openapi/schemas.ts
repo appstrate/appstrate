@@ -1,8 +1,81 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { orgRoleEnum } from "@appstrate/db/schema";
+import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
+import { SPACE_ID_RE } from "../lib/ids.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
+
+/**
+ * Prefix a custom space-role id carries. Only the prefix is published: the
+ * server's full `srl_`+UUID rule is stricter, and a spec that pinned it would
+ * turn a server-side id-shape change into a client-side break.
+ */
+export const SPACE_ROLE_ID_PATTERN = "^srl_";
+
+/**
+ * Runtime-tool ids a manifest may DECLARE — the canonical catalog
+ * ({@link SELECTABLE_RUNTIME_TOOLS}) spread into the mutable `string[]` a JSON
+ * Schema `enum` member takes. There is no second list to pick from and no
+ * reason to import anything but the catalog itself.
+ */
+const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
+
+/**
+ * The org-settings members, shared by the READ component (`OrgSettings`, below)
+ * and the CLOSED write body of `PUT /api/orgs/{orgId}/settings`
+ * (`openapi/paths/organizations.ts`).
+ *
+ * The two cannot be one schema: `orgSettingsPatchSchema`
+ * (`services/organizations.ts`) is `.strict()`, so an unknown key on the write
+ * is a 400 — while `getOrgSettings` CASTS the JSONB column and returns it
+ * verbatim, so the READ genuinely can carry keys this document does not name.
+ * Closing the shared component would publish that read as a promise the server
+ * does not keep. Sharing the PROPERTIES instead is what keeps the two halves
+ * from drifting on the descriptions.
+ */
+export const ORG_SETTINGS_PROPERTIES = {
+  api_version: {
+    type: "string",
+    description:
+      "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization.",
+  },
+  dashboard_sso_enabled: {
+    type: "boolean",
+    description:
+      "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users.",
+  },
+};
+
+/**
+ * The two members of the per-space input layer, shared by the
+ * `AgentInputSettings` component (below), by `AgentDetail.input`, and by the
+ * CLOSED write body of `PUT /api/agents/{scope}/{name}/input-settings`
+ * (`openapi/paths/agents.ts`).
+ *
+ * The write body cannot simply `$ref` the component and add
+ * `additionalProperties: false`: that keyword does not compose through
+ * `allOf`/`$ref` — it only sees the `properties` declared in the SAME schema
+ * object. And the component itself cannot be closed, because `AgentDetail.input`
+ * composes it with `schema` / `file_constraints` / `ui_hints`; closing the base
+ * would make that conjunction unsatisfiable. Sharing the properties is the one
+ * form that keeps `locked_fields` documented once.
+ */
+export const AGENT_INPUT_SETTINGS_PROPERTIES = {
+  values: {
+    type: "object",
+    description:
+      "Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
+    additionalProperties: true,
+  },
+  locked_fields: {
+    type: "array",
+    items: { type: "string", minLength: 1 },
+    description:
+      "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`.",
+  },
+};
 
 /**
  * All OpenAPI schema definitions (components/schemas).
@@ -14,8 +87,8 @@ export const schemas = {
   // @appstrate/core/api-errors). Extracted into one component so every
   // consumer (ProblemDetail.errors, and any future readiness DTO) shares one
   // shape and can't drift. The base four (`field`/`code`/`message`/`title`)
-  // come from ValidationFieldError; the six snake_case extras are each
-  // populated only for the matching resolution `code` and so are all optional.
+  // come from ValidationFieldError; the eleven snake_case extras are each
+  // populated only for the matching resolution `code`(s) and so are all optional.
   ResolutionFieldError: {
     type: "object",
     required: ["field", "code", "message"],
@@ -49,7 +122,18 @@ export const schemas = {
       owned_by_actor: {
         type: "boolean",
         description:
-          "Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error).",
+          "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error).",
+      },
+      required_scopes: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.",
+      },
+      auth_key: {
+        type: "string",
+        description:
+          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`).",
       },
       required_auth_key: {
         type: "string",
@@ -61,6 +145,20 @@ export const schemas = {
         items: { type: "string" },
         description:
           "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
+      },
+      connect_url: {
+        type: "string",
+        format: "uri",
+        description:
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+      },
+      expires_at: {
+        type: "integer",
+        description: "Absolute expiry of `connect_url`, epoch ms.",
+      },
+      package_id: {
+        type: "string",
+        description: "Integration package id `connect_url` connects (`@scope/name`).",
       },
     },
   },
@@ -171,15 +269,17 @@ export const schemas = {
       email: { type: "string" },
     },
   },
-  ApplicationPackage: {
+  SpacePackage: {
     type: "object",
-    description: "A package installed in an application with its config and overrides.",
+    description: "A package installed in a space with its model/proxy/version overrides.",
     // The installedPackageSelect projection emits every field unconditionally
-    // (config is the raw JSONB column; package_type/package_source come from
-    // the join). `object` is spec-only (not on the InstalledPackage type).
+    // (package_type/package_source come from the join). `object` is spec-only
+    // (not on the InstalledPackage type). Stored input values and their locks
+    // are not here — they are read via `GET /api/agents/{scope}/{name}`
+    // (`AgentDetail.input`), where the schema and the locks travel with them.
     //
     // CASING: this object deliberately mixes cases and the spec matches the
-    // runtime serializer (`services/application-packages.ts:installedPackageSelect`)
+    // runtime serializer (`services/space-packages.ts:installedPackageSelect`)
     // field-for-field — spec==runtime is the hard invariant, so do NOT "normalize".
     //   - `packageId`/`modelId`/`proxyId`/`updatedAt` are camelCase per the
     //     universal *Id / timestamp carve-out (docs/CASING_CONVENTIONS.md).
@@ -193,7 +293,6 @@ export const schemas = {
     //     intentional here, not an accident.
     required: [
       "packageId",
-      "config",
       "generationConfig",
       "modelId",
       "proxyId",
@@ -206,14 +305,13 @@ export const schemas = {
       "draft_manifest",
     ],
     properties: {
-      object: { type: "string", enum: ["application_package"] },
+      object: { type: "string", enum: ["space_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
-      config: { type: "object", description: "Application-specific configuration" },
       generationConfig: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
       },
-      modelId: { type: ["string", "null"], description: "Model override for this app" },
-      proxyId: { type: ["string", "null"], description: "Proxy override for this app" },
+      modelId: { type: ["string", "null"], description: "Model override for this space" },
+      proxyId: { type: ["string", "null"], description: "Proxy override for this space" },
       version_id: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
       enabled: { type: "boolean" },
       installed_at: { type: "string", format: "date-time" },
@@ -226,21 +324,12 @@ export const schemas = {
       },
     },
   },
+  // READ shape — deliberately open, see ORG_SETTINGS_PROPERTIES above. The
+  // write body of PUT /api/orgs/{orgId}/settings is the closed twin.
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
-    properties: {
-      api_version: {
-        type: "string",
-        description:
-          "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization.",
-      },
-      dashboard_sso_enabled: {
-        type: "boolean",
-        description:
-          "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need application-level SSO for their end-users.",
-      },
-    },
+    properties: ORG_SETTINGS_PROPERTIES,
   },
   ProfileBatchItem: {
     type: "object",
@@ -268,7 +357,7 @@ export const schemas = {
   },
   Organization: {
     type: "object",
-    required: ["id", "name", "slug", "logo", "role", "createdAt"],
+    required: ["id", "name", "slug", "logo", "role", "permissions", "createdAt", "deleting_at"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
@@ -279,7 +368,19 @@ export const schemas = {
           "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial.",
       },
       role: { type: "string", enum: ORG_ROLES },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces.",
+      },
       createdAt: { type: "string", format: "date-time", description: "Creation timestamp" },
+      deleting_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.",
+      },
     },
   },
   OrgMember: {
@@ -295,13 +396,31 @@ export const schemas = {
       joinedAt: { type: "string", format: "date-time" },
     },
   },
+  SpaceAssignment: {
+    type: "object",
+    description:
+      "A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set.",
+    required: ["space_id"],
+    oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }],
+    properties: {
+      space_id: { type: "string" },
+      preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+      custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
+    },
+    additionalProperties: false,
+  },
   OrgInvitationInfo: {
     type: "object",
-    required: ["id", "email", "role", "token", "expiresAt", "createdAt"],
+    required: ["id", "email", "role", "space_assignments", "token", "expiresAt", "createdAt"],
     properties: {
       id: { type: "string" },
       email: { type: "string" },
       role: { type: "string", enum: ORG_ROLES },
+      space_assignments: {
+        type: "array",
+        items: { $ref: "#/components/schemas/SpaceAssignment" },
+        description: "Space memberships applied when the invitation is accepted.",
+      },
       token: { type: "string" },
       expiresAt: { type: "string", format: "date-time" },
       createdAt: { type: "string", format: "date-time" },
@@ -319,13 +438,19 @@ export const schemas = {
           "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial.",
       },
       createdAt: { type: "string", format: "date-time" },
+      deleting_at: {
+        type: ["string", "null"],
+        format: "date-time",
+        description:
+          "When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.",
+      },
       storage: {
         type: "object",
         description:
-          "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited).",
+          "Durable-file storage consumption for this organization. `used_bytes` is the running total of stored file bytes; `limit_bytes` is the raw per-org limit override (`files_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited).",
         required: ["used_bytes", "limit_bytes", "effective_limit_bytes"],
         properties: {
-          used_bytes: { type: "integer", description: "Bytes of durable documents stored." },
+          used_bytes: { type: "integer", description: "Bytes of durable files stored." },
           limit_bytes: {
             type: ["integer", "null"],
             description:
@@ -341,10 +466,13 @@ export const schemas = {
       members: {
         type: "array",
         items: { $ref: "#/components/schemas/OrgMember" },
+        description: "Empty unless the caller holds members:read.",
       },
       invitations: {
         type: "array",
         items: { $ref: "#/components/schemas/OrgInvitationInfo" },
+        description:
+          "Empty unless the caller holds members:invite, including any credential scope ceiling.",
       },
     },
   },
@@ -404,30 +532,55 @@ export const schemas = {
       running_runs: { type: "integer" },
       dependencies: {
         type: "object",
+        // `integrations` — which SaaS the agent talks to — is emitted to every
+        // caller; a launcher is the one who connects them. `skills` and
+        // `mcp_servers` are the composition, withheld from a summary read
+        // (`agents:run` without `agents:read`) and absent rather than empty.
+        required: ["integrations"],
         properties: {
-          skills: { type: "object", additionalProperties: { type: "string" } },
-          mcp_servers: { type: "object", additionalProperties: { type: "string" } },
+          skills: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
+          },
+          mcp_servers: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
+          },
           integrations: { type: "object", additionalProperties: { type: "string" } },
         },
       },
     },
+  },
+  // Composition base (AgentDetail.input, the run-config response) AND the
+  // response body of PUT /agents/{scope}/{name}/input-settings. Left OPEN on
+  // purpose — see AGENT_INPUT_SETTINGS_PROPERTIES above; that route's REQUEST
+  // body is the closed twin, spelled in openapi/paths/agents.ts.
+  AgentInputSettings: {
+    type: "object",
+    required: ["values", "locked_fields"],
+    description:
+      "The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged.",
+    properties: AGENT_INPUT_SETTINGS_PROPERTIES,
   },
   AgentDetail: {
     type: "object",
     // Always emitted by buildAgentDetailDto. `display_name`/`description`/
     // `updatedAt`/`lock_version` stay optional: system agents omit the last two,
     // and the manifest-derived display_name/description may be absent (the
-    // shared-type marks them optional to match).
+    // shared-type marks them optional to match). `forked_from` is optional for
+    // a second reason: a summary read (`agents:run` without `agents:read`)
+    // withholds the authoring history along with the manifest and the prompt.
     required: [
       "id",
       "source",
       "scope",
       "version",
       "dependencies",
-      "config",
+      "input",
       "running_runs",
       "last_run",
-      "forked_from",
       "effective_timeout_seconds",
     ],
     properties: {
@@ -463,37 +616,38 @@ export const schemas = {
         type: "integer",
         description: "Optimistic lock version (user agents only)",
       },
-      config: {
-        type: "object",
-        // The detail serializer always emits `schema` (falls back to an empty
-        // object schema when the manifest has no config wrapper).
-        required: ["schema", "current"],
-        description: "AFPS schema wrapper for agent configuration (set once, reused across runs).",
-        properties: {
-          schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          current: { type: "object", description: "Current configuration values" },
-          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
-          property_order: {
-            type: "array",
-            items: { type: "string" },
-            description: "Presentation order for schema properties",
-          },
-        },
-      },
       input: {
+        // Stated explicitly alongside `allOf`: the branches below are a
+        // conjunction on an object, and a reader that stops at the top level
+        // (openapi-typescript, the breaking-change detector) must still see it.
         type: "object",
-        description: "AFPS schema wrapper for per-run input.",
-        properties: {
-          schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
-          property_order: {
-            type: "array",
-            items: { type: "string" },
-            description: "Presentation order for schema properties",
+        // `values` + `locked_fields` are NOT re-spelled here: they are the
+        // AgentInputSettings component, which is also the request and response
+        // body of PUT /agents/{scope}/{name}/input-settings. Spelling them
+        // twice is how `locked_fields` ended up documented as the full rule in
+        // one place and a single clause in the other.
+        allOf: [
+          { $ref: "#/components/schemas/AgentInputSettings" },
+          {
+            type: "object",
+            // The detail serializer always emits `schema` (falls back to an
+            // empty object schema when the manifest declares no input wrapper),
+            // on top of the two per-space layers the launch form needs.
+            required: ["schema"],
+            properties: {
+              schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
+              file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+              ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
+              property_order: {
+                type: "array",
+                items: { type: "string" },
+                description: "Presentation order for schema properties",
+              },
+            },
           },
-        },
+        ],
+        description:
+          "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
       },
       output: {
         type: "object",
@@ -509,11 +663,17 @@ export const schemas = {
       },
       dependencies: {
         type: "object",
-        // The detail serializer always emits all three arrays (skills/mcp_servers
-        // from the manifest, integrations via parseManifestIntegrations).
-        required: ["skills", "mcp_servers", "integrations"],
+        // `integrations` (via parseManifestIntegrations) is emitted to every
+        // caller — a launcher is the one who connects them. `skills` and
+        // `mcp_servers`, the composition, are withheld from a summary read
+        // (`agents:run` without `agents:read`) and absent rather than empty.
+        required: ["integrations"],
         properties: {
-          skills: { type: "array", items: { $ref: "#/components/schemas/AgentSkillRef" } },
+          skills: {
+            type: "array",
+            items: { $ref: "#/components/schemas/AgentSkillRef" },
+            description: "Withheld from a summary read (`agents:run` without `agents:read`).",
+          },
           mcp_servers: {
             type: "array",
             items: {
@@ -524,7 +684,8 @@ export const schemas = {
                 version: { type: "string" },
               },
             },
-            description: "AFPS §4.1 mcp_servers dependency group",
+            description:
+              "AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`).",
           },
           integrations: {
             type: "array",
@@ -684,7 +845,7 @@ export const schemas = {
       "endUserId",
       "apiKeyId",
       "orgId",
-      "applicationId",
+      "spaceId",
       "scheduleId",
       "status",
       "input",
@@ -693,8 +854,6 @@ export const schemas = {
       "checkpoint",
       "error",
       "metadata",
-      "config",
-      "config_override",
       "generation",
       "generation_override",
       "started_at",
@@ -725,8 +884,7 @@ export const schemas = {
       "connections_used",
       "package_ephemeral",
       "unread",
-      "document_counts",
-      "primary_document_id",
+      "file_counts",
     ],
     properties: {
       id: { type: "string" },
@@ -750,23 +908,11 @@ export const schemas = {
       result: {
         type: ["object", "null"],
         description:
-          "What the run produced: the structured output, and nothing else. Human-facing deliverables are documents (see the run's documents), not fields here. `null` while the run is in flight or when no output was emitted.",
+          "What the run produced: the structured output, and nothing else. Human-facing deliverables are files (see the run's files), not fields here. `null` while the run is in flight or when no output was emitted.",
         properties: {
           output: {
             description:
               "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
-          },
-          text: {
-            type: "string",
-            deprecated: true,
-            description:
-              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`).",
-          },
-          text_truncated: {
-            type: "boolean",
-            deprecated: true,
-            description:
-              "HISTORICAL ONLY. Present and true when a pre-removal `text` exceeded the 256 KiB storage cap.",
           },
         },
       },
@@ -858,25 +1004,15 @@ export const schemas = {
         type: ["string", "null"],
         description: "API key ID that triggered the run (null for dashboard/schedule runs)",
       },
-      applicationId: {
+      spaceId: {
         type: "string",
-        description: "Application ID (app_ prefix) that owns this run",
+        pattern: SPACE_ID_RE.source,
+        description: "Space ID (spc_ prefix) that owns this run",
       },
       metadata: {
         type: ["object", "null"],
         description:
           "Additional module-supplied metadata (e.g. usage-metering fields written by an optional module). Free-form; core does not define billing-specific keys.",
-        additionalProperties: true,
-      },
-      config: {
-        type: ["object", "null"],
-        description: "Snapshot of the effective agent config (merged overrides) at run creation",
-        additionalProperties: true,
-      },
-      config_override: {
-        type: ["object", "null"],
-        description:
-          "Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim.",
         additionalProperties: true,
       },
       generation: {
@@ -928,29 +1064,23 @@ export const schemas = {
         description:
           "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline).",
       },
-      document_counts: {
+      file_counts: {
         type: "object",
         description:
-          "Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced.",
+          "Per-run file counts, always present on enriched list responses. Computed server-side: `input` from the distinct `appfile://` references in the run's persisted input, `output` from the count of files the run produced.",
         required: ["input", "output"],
         properties: {
           input: {
             type: "integer",
             minimum: 0,
-            description: "Distinct documents referenced as input by the run.",
+            description: "Distinct files referenced as input by the run.",
           },
           output: {
             type: "integer",
             minimum: 0,
-            description: "Documents produced by the run.",
+            description: "Files produced by the run.",
           },
         },
-      },
-      primary_document_id: {
-        type: ["string", "null"],
-        description:
-          "Document id of the run's explicitly selected primary deliverable, or null. The " +
-          "referenced document remains part of the ordinary run document list.",
       },
       inline_manifest: {
         type: ["object", "null"],
@@ -1060,13 +1190,12 @@ export const schemas = {
       "userId",
       "endUserId",
       "orgId",
-      "applicationId",
+      "spaceId",
       "name",
       "enabled",
       "cron_expression",
       "timezone",
       "input",
-      "config_override",
       "generation_config_override",
       "model_id_override",
       "proxy_id_override",
@@ -1089,16 +1218,16 @@ export const schemas = {
       userId: { type: ["string", "null"], description: "Member actor the schedule runs as" },
       endUserId: { type: ["string", "null"], description: "End-user actor the schedule runs as" },
       orgId: { type: "string" },
-      applicationId: {
+      spaceId: {
         type: "string",
-        description: "Application ID (app_ prefix) that owns this schedule",
+        pattern: SPACE_ID_RE.source,
+        description: "Space ID (spc_ prefix) that owns this schedule",
       },
       name: { type: ["string", "null"] },
       enabled: { type: "boolean" },
       cron_expression: { type: "string" },
       timezone: { type: ["string", "null"] },
       input: { type: ["object", "null"], additionalProperties: true },
-      config_override: { type: ["object", "null"], additionalProperties: true },
       generation_config_override: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
       },
@@ -1305,7 +1434,7 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "Canonical providerId backing the credential. Set when `authMode === 'oauth2'`.",
+          "Canonical providerId backing the credential. Always set for a `custom` credential (the model form matches a custom endpoint's saved keys on it); `null` for a `built-in` one, whose backing is hidden.",
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
@@ -1313,7 +1442,7 @@ export const schemas = {
         type: ["array", "null"],
         items: { type: "string" },
         description:
-          "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential and persisted by model discovery (POST /:id/refresh-models); empty when discovery never ran, and per-credential because availability depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write.",
+          "Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
@@ -1709,7 +1838,7 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  ApplicationObject: {
+  SpaceObject: {
     type: "object",
     required: [
       "id",
@@ -1718,16 +1847,21 @@ export const schemas = {
       "name",
       "isDefault",
       "settings",
+      "visibility",
+      "default_role",
+      "access",
+      "role",
+      "permissions",
       "created_by",
       "createdAt",
       "updatedAt",
     ],
     properties: {
-      id: { type: "string", description: "Application ID (app_ prefix)" },
-      object: { type: "string", enum: ["application"], description: "Object type" },
+      id: { type: "string", pattern: SPACE_ID_RE.source, description: "Space ID (spc_ prefix)" },
+      object: { type: "string", enum: ["space"], description: "Object type" },
       orgId: { type: "string", description: "Organization ID" },
-      name: { type: "string", description: "Human-readable application name" },
-      isDefault: { type: "boolean", description: "Whether this is the default application" },
+      name: { type: "string", description: "Human-readable space name" },
+      isDefault: { type: "boolean", description: "Whether this is the default space" },
       settings: {
         type: "object",
         properties: {
@@ -1738,12 +1872,158 @@ export const schemas = {
           },
         },
       },
+      visibility: {
+        type: "string",
+        enum: [...SPACE_VISIBILITIES],
+        description:
+          "Who reaches the space without an explicit membership row: `open` (every org member), `closed` (listed, not enterable), `private` (not listed).",
+      },
+      default_role: {
+        type: "string",
+        enum: [...SPACE_ROLE_PRESETS],
+        description: "Preset the implicit members of an `open` space hold",
+      },
+      access: {
+        type: "string",
+        enum: ["member", "none"],
+        description: "Whether the caller may enter this space",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+        description: "The caller's role in this space, or null when they have none",
+      },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description: "The caller's effective permission set in this space, ceiling applied",
+      },
       created_by: {
         type: ["string", "null"],
-        description: "ID of the user who created the application",
+        description: "ID of the user who created the space",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+
+  SpaceMemberObject: {
+    type: "object",
+    required: ["object", "userId", "name", "email", "org_role", "source", "role", "createdAt"],
+    properties: {
+      object: { type: "string", enum: ["space_member"] },
+      userId: { type: "string" },
+      name: { type: ["string", "null"] },
+      email: { type: ["string", "null"] },
+      org_role: { type: "string", enum: ORG_ROLES },
+      source: {
+        type: "string",
+        enum: ["explicit", "org_role", "open_space"],
+        description:
+          "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
+      },
+      role: {
+        type: ["object", "null"],
+        required: ["kind", "key", "name"],
+        properties: {
+          kind: { type: "string", enum: ["preset", "custom"] },
+          key: { type: "string" },
+          name: { type: "string" },
+        },
+      },
+      createdAt: {
+        type: ["string", "null"],
+        format: "date-time",
+        description: "When the explicit row was written; null for an implicit member",
+      },
+    },
+  },
+
+  SpaceMemberAssignment: {
+    type: "object",
+    required: ["object", "userId"],
+    properties: {
+      object: { type: "string", enum: ["space_member"] },
+      userId: { type: "string" },
+      preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+      custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
+    },
+  },
+
+  RoleObject: {
+    type: "object",
+    required: [
+      "object",
+      "kind",
+      "id",
+      "key",
+      "name",
+      "description",
+      "permissions",
+      "createdAt",
+      "updatedAt",
+    ],
+    description:
+      "A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle.",
+    properties: {
+      object: { type: "string", enum: ["role"] },
+      kind: { type: "string", enum: ["preset", "custom"] },
+      id: {
+        type: ["string", "null"],
+        description: "`srl_` id for a custom bundle; null for a preset, which has no row.",
+      },
+      key: { type: "string" },
+      name: { type: "string" },
+      description: { type: ["string", "null"] },
+      permissions: {
+        type: "array",
+        items: { type: "string" },
+        description: "Space-level permission strings the role grants, sorted.",
+      },
+      createdAt: { type: ["string", "null"], format: "date-time" },
+      updatedAt: { type: ["string", "null"], format: "date-time" },
+    },
+  },
+
+  RoleVocabularyGroup: {
+    type: "object",
+    required: ["resource", "permissions"],
+    description: "Space-level permissions of one resource, with their delegation facts.",
+    properties: {
+      resource: { type: "string" },
+      permissions: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["permission", "action", "api_key_grantable"],
+          properties: {
+            permission: { type: "string" },
+            action: { type: "string" },
+            api_key_grantable: {
+              type: "boolean",
+              description: "Can also be carried by an API key.",
+            },
+          },
+        },
+      },
+    },
+  },
+
+  SpaceMemberRemoval: {
+    type: "object",
+    required: ["access_after"],
+    properties: {
+      access_after: {
+        type: "string",
+        enum: ["implicit", "none"],
+        description:
+          "Whether the removed member keeps implicit access (open space) or loses the space entirely.",
+      },
     },
   },
   EndUserObject: {
@@ -1753,7 +2033,7 @@ export const schemas = {
     required: [
       "id",
       "object",
-      "applicationId",
+      "spaceId",
       "name",
       "email",
       "externalId",
@@ -1764,7 +2044,7 @@ export const schemas = {
     properties: {
       id: { type: "string", description: "End-user ID (eu_ prefix)" },
       object: { type: "string", enum: ["end_user"], description: "Object type" },
-      applicationId: { type: "string", description: "ID of the parent application" },
+      spaceId: { type: "string", description: "ID of the parent space" },
       name: { type: ["string", "null"], description: "Display name" },
       email: { type: ["string", "null"], format: "email", description: "Email address" },
       externalId: { type: ["string", "null"], description: "External system identifier" },
@@ -1791,10 +2071,12 @@ export const schemas = {
             type: "array",
             items: {
               type: "string",
-              enum: ["output", "log", "note", "pin", "publish_document"],
+              enum: RUNTIME_TOOL_IDS,
             },
             description:
-              "Appstrate top-level extension: runtime tools the agent may use. Optional.",
+              "Appstrate top-level extension: runtime tools the agent may use. Optional. " +
+              "An id outside this enum is rejected on author input and dropped (with the " +
+              "drop reported) when read back from a stored manifest.",
           },
         },
       },
@@ -1838,8 +2120,8 @@ export const schemas = {
     type: "array",
     description:
       "Packages of a single type visible to the org. Each entry carries an " +
-      "`installed_in` array listing the caller-org applications where the package " +
-      "is currently installed (empty array = not installed in any of the caller's apps).",
+      "`installed_in` array listing the caller-org spaces where the package " +
+      "is currently installed (empty array = not installed in any of the caller's spaces).",
     items: {
       type: "object",
       required: ["id", "type", "source", "name", "description", "installed_in"],
@@ -1864,7 +2146,7 @@ export const schemas = {
         installed_in: {
           type: "array",
           description:
-            "Application ids (`app_…`) belonging to the caller's org where this package is installed.",
+            "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
           items: { type: "string" },
         },
       },

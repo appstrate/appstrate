@@ -17,7 +17,7 @@
  * touching Docker.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { createProcessIntegrationRuntimeAdapter } from "../integration-runtime-adapter-process.ts";
 import { WORKSPACE_ENV_VAR } from "../integration-runtime-adapter.ts";
 import type { IntegrationSpawnSpec } from "../integrations-boot.ts";
+import { installPassthroughRunnerExec, type PassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
 /**
  * Poll until the spawned env-dump-and-exit script has flushed its output
@@ -61,6 +62,17 @@ function baseSpec(extra: Partial<IntegrationSpawnSpec> = {}): IntegrationSpawnSp
 describe("process adapter — workspace env propagation", () => {
   let bundleRoot: string;
   let workspacePath: string;
+  // The adapter refuses to spawn without a privilege-drop wrapper; these
+  // tests need a real subprocess to read its env back, so they stand one in.
+  let runnerExec: PassthroughRunnerExec;
+
+  beforeAll(async () => {
+    runnerExec = await installPassthroughRunnerExec();
+  });
+
+  afterAll(async () => {
+    await runnerExec.restore();
+  });
 
   beforeEach(async () => {
     bundleRoot = await mkdtemp(join(tmpdir(), "appstrate-bundle-"));

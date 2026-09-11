@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 export const schedulesPaths = {
   "/api/schedules": {
     get: {
@@ -9,15 +11,12 @@ export const schedulesPaths = {
       description: "List all schedules across all agents for the organization.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
         "200": {
           description: "Schedule list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -36,6 +35,7 @@ export const schedulesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -47,17 +47,14 @@ export const schedulesPaths = {
       description: "List all cron schedules configured for a specific agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Schedule list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -76,6 +73,7 @@ export const schedulesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
     post: {
@@ -85,7 +83,7 @@ export const schedulesPaths = {
       description: "Create a cron schedule for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -105,11 +103,6 @@ export const schedulesPaths = {
                 },
                 timezone: { type: "string", default: "UTC" },
                 input: { type: "object" },
-                config_override: {
-                  type: "object",
-                  description:
-                    "Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires.",
-                },
                 generation_config_override: {
                   $ref: "#/components/schemas/ModelGenerationSettings",
                   description:
@@ -133,19 +126,19 @@ export const schedulesPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.',
-                  additionalProperties: { type: "string" },
+                    'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Values must be non-empty: an empty id is falsy at the connection resolver, so it would skip the pin in silence on every fire instead of failing here.',
+                  additionalProperties: { type: "string", minLength: 1 },
                 },
                 dependency_overrides: {
                   type: "object",
                   description:
-                    'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them.',
+                    'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire.',
                   additionalProperties: { type: "string" },
                 },
                 actor: {
                   type: "object",
                   description:
-                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to default to the calling identity. Requires `schedules:write`.",
+                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`.",
                   properties: {
                     user_id: { type: "string" },
                     end_user_id: { type: "string" },
@@ -153,6 +146,11 @@ export const schedulesPaths = {
                   oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
                 },
               },
+              // An unknown field is a 400, never a silent drop — the same rule
+              // the other launch bodies publish (`paths/runs.ts`). It matters
+              // most here: a schedule FREEZES this body and replays it on every
+              // fire, so a stripped field is a wrong run forever.
+              additionalProperties: false,
             },
           },
         },
@@ -160,10 +158,7 @@ export const schedulesPaths = {
       responses: {
         "201": {
           description: "Schedule created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -173,13 +168,12 @@ export const schedulesPaths = {
                 userId: "usr_r3t5w8y1z6",
                 endUserId: null,
                 orgId: "org_r3t5w8y1z6",
-                applicationId: "app_r3t5w8y1z6",
+                spaceId: "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                 name: "Weekday morning sort",
                 enabled: true,
                 cron_expression: "0 9 * * 1-5",
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
-                config_override: null,
                 generation_config_override: null,
                 model_id_override: null,
                 proxy_id_override: null,
@@ -192,13 +186,16 @@ export const schedulesPaths = {
                 updatedAt: "2026-01-15T10:30:00Z",
                 actor_name: "Pierre",
                 actor_type: "user",
+                running_runs: 0,
+                unread_count: 0,
+                last_run_number: 0,
               },
             },
           },
         },
         "400": {
           description:
-            "Validation error. Possible causes: missing/invalid cron expression, invalid input, or agent has file inputs (cannot be scheduled).",
+            "Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or agent has file inputs (cannot be scheduled).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -207,6 +204,10 @@ export const schedulesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        // Shared with `PUT /api/schedules/{id}`: both writes resolve the
+        // manifest the schedule will FIRE, so both refuse a never-published
+        // agent with `no_published_version`.
+        "404": { $ref: "#/components/responses/NoPublishedVersion" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -219,16 +220,13 @@ export const schedulesPaths = {
       description: "Get a single schedule by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
           description: "Schedule details",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -238,13 +236,12 @@ export const schedulesPaths = {
                 userId: "usr_r3t5w8y1z6",
                 endUserId: null,
                 orgId: "org_r3t5w8y1z6",
-                applicationId: "app_r3t5w8y1z6",
+                spaceId: "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                 name: "Weekday morning sort",
                 enabled: true,
                 cron_expression: "0 9 * * 1-5",
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
-                config_override: null,
                 generation_config_override: null,
                 model_id_override: null,
                 proxy_id_override: null,
@@ -257,11 +254,15 @@ export const schedulesPaths = {
                 updatedAt: "2026-01-15T09:00:05Z",
                 actor_name: "Pierre",
                 actor_type: "user",
+                running_runs: 0,
+                unread_count: 2,
+                last_run_number: 12,
               },
             },
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -272,7 +273,7 @@ export const schedulesPaths = {
       description: "Update a cron schedule (expression, timezone, enabled state, or input).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -287,10 +288,6 @@ export const schedulesPaths = {
                 timezone: { type: "string" },
                 enabled: { type: "boolean" },
                 input: { type: "object" },
-                config_override: {
-                  type: ["object", "null"],
-                  description: "Per-schedule config delta. Pass `null` to clear the override.",
-                },
                 generation_config_override: {
                   oneOf: [
                     { $ref: "#/components/schemas/ModelGenerationSettings" },
@@ -309,19 +306,19 @@ export const schedulesPaths = {
                 connection_overrides: {
                   type: ["object", "null"],
                   description:
-                    "Per-integration connection picks frozen on the schedule. Pass `null` to clear.",
-                  additionalProperties: { type: "string" },
+                    "Per-integration connection picks frozen on the schedule. Pass `null` to clear. Values must be non-empty — same rule as on create.",
+                  additionalProperties: { type: "string", minLength: 1 },
                 },
                 dependency_overrides: {
                   type: ["object", "null"],
                   description:
-                    'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear.',
+                    'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create.',
                   additionalProperties: { type: "string" },
                 },
                 actor: {
                   type: "object",
                   description:
-                    "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
+                    "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
                   properties: {
                     user_id: { type: "string" },
                     end_user_id: { type: "string" },
@@ -329,6 +326,11 @@ export const schedulesPaths = {
                   oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
                 },
               },
+              // An unknown field is a 400, never a silent drop — the same rule
+              // the other launch bodies publish (`paths/runs.ts`). It matters
+              // most here: a schedule FREEZES this body and replays it on every
+              // fire, so a stripped field is a wrong run forever.
+              additionalProperties: false,
             },
           },
         },
@@ -336,10 +338,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -348,7 +347,7 @@ export const schedulesPaths = {
         },
         "400": {
           description:
-            "Validation error. Possible causes: missing/invalid cron expression or invalid input.",
+            "Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), or invalid input.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -357,7 +356,13 @@ export const schedulesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        // Two causes, both on this one response: `loadScheduleOr404` runs
+        // first (unknown schedule id — the dominant 404 here), and a patch
+        // carrying `input` or `version_override` additionally runs the same
+        // `assertScheduleTargetValid` the create route does, so repointing or
+        // revalidating onto a never-published agent gets `no_published_version`
+        // here too. The shared component's description names both.
+        "404": { $ref: "#/components/responses/NoPublishedVersion" },
       },
     },
     delete: {
@@ -367,16 +372,13 @@ export const schedulesPaths = {
       description: "Permanently delete a cron schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": {
           description: "Schedule deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -392,18 +394,14 @@ export const schedulesPaths = {
       description: "List recent runs triggered by a specific schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
-        {
-          name: "offset",
-          in: "query",
-          schema: { type: "integer", minimum: 0, default: 0 },
-        },
+        { $ref: "#/components/parameters/Offset" },
         {
           name: "status",
           in: "query",
@@ -420,10 +418,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Paginated run list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -443,6 +438,7 @@ export const schedulesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },

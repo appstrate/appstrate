@@ -39,12 +39,29 @@ export type { McpServerManifest };
 // scope and declares no `sideEffects: false` — so a browser consumer that only
 // needs the runtime hint cannot tree-shake it away. Measured: +65 kB gzipped
 // on the integration detail page.
+//
+// A dead-export scan run with `includeEntryExports` on `packages/core` reports
+// THIS LINE, because at least one name below is used inside both modules and
+// imported across neither — `MCP_SERVER_APPSTRATE_META_KEY` is the standing
+// example. The list stays whole regardless: `./mcp-server` is the complete
+// façade by contract (core 6.2.0 CHANGELOG) and `./mcp-server-meta` is only
+// the bundler escape hatch behind it, so dropping a name to satisfy the scan
+// would break that published subpath for an out-of-tree manifest author — the
+// exact consumer the meta key exists for — to save a re-export line.
+//
+// Deliberately no tally of which names have in-tree façade readers: that set
+// moves whenever a call site swaps one helper for another, and a count written
+// here has already gone stale twice. Derive it instead —
+// `rg 'from "@appstrate/core/mcp-server"' --glob '!node_modules'` — and note
+// that a name reading zero is evidence about THIS repo only, never about the
+// published surface.
 export {
   MCP_SERVER_APPSTRATE_META_KEY,
   MCP_SERVER_RUNTIME_CAPABILITIES,
   MCP_SERVER_RUNTIMES,
   isMcpServerRuntime,
   getMcpServerRuntime,
+  effectiveMcpServerType,
 } from "./mcp-server-meta.ts";
 export type { McpServerRuntime } from "./mcp-server-meta.ts";
 

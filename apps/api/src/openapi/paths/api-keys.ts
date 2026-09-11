@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const apiKeysPaths = {
   "/api/api-keys/available-scopes": {
     get: {
@@ -10,15 +12,12 @@ export const apiKeysPaths = {
         "List permission scopes available for API key creation, based on the current user's role.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
         "200": {
           description: "Available scopes",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -59,18 +58,15 @@ export const apiKeysPaths = {
       tags: ["API Keys"],
       summary: "List API keys",
       description:
-        "List active (non-revoked) API keys for the current application (scoped by X-Application-Id).",
+        "List active (non-revoked) API keys for the current space (scoped by X-Space-Id).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
         "200": {
           description: "API key list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -118,7 +114,7 @@ export const apiKeysPaths = {
         "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -127,8 +123,7 @@ export const apiKeysPaths = {
             schema: {
               type: "object",
               required: ["name"],
-              description:
-                "The API key is scoped to the application specified by the X-Application-Id header.",
+              description: "The API key is scoped to the space specified by the X-Space-Id header.",
               properties: {
                 name: {
                   type: "string",
@@ -145,9 +140,10 @@ export const apiKeysPaths = {
                   type: "array",
                   items: { type: "string" },
                   description:
-                    "Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass empty array for full role access. Invalid or unauthorized scopes are silently filtered.",
+                    "Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass an empty array for full role access. A scope no API key can carry — unknown, or session-only such as `org:delete` — is rejected with a 400 naming it; a scope the creator's own role does not hold is dropped, since a key cannot be granted more than its creator has. `GET /api/api-keys/available-scopes` lists what the caller can grant.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -155,10 +151,7 @@ export const apiKeysPaths = {
       responses: {
         "201": {
           description: "API key created. The `key` field contains the raw key (shown only once).",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -202,18 +195,23 @@ export const apiKeysPaths = {
       operationId: "revokeApiKey",
       tags: ["API Keys"],
       summary: "Revoke an API key",
-      description: "Revoke (soft-delete) an API key. The key will immediately stop working.",
+      description:
+        "Revoke (soft-delete) an API key. The key will immediately stop working. " +
+        "`api-keys:revoke` is required in the KEY's own space, not in the space the " +
+        "request carries. A caller who cannot reach that space gets the space's own " +
+        "wall: 404 when it is `private` (its existence must not leak through the id " +
+        "of a key inside it), 403 `not_a_space_member` when it is `open` or " +
+        "`closed`. An API-key caller reaching for a key of another space always " +
+        "answers 404 — a key delegates authority in exactly one space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": {
           description: "API key revoked",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

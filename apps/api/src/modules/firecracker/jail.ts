@@ -149,7 +149,7 @@ export function assertApiSocketPathLength(hostPath: string): void {
   }
 }
 
-export interface ComputeJailPathsInput {
+interface ComputeJailPathsInput {
   dataDir: string;
   /**
    * Basename of the firecracker binary — the jailer nests chroots under
@@ -177,7 +177,7 @@ export function computeJailPaths(input: ComputeJailPathsInput): JailPaths {
   return { jailId, uid, gid: uid, chrootBaseDir, jailDir, rootDir, apiSocketHostPath };
 }
 
-export interface BuildJailerArgvInput {
+interface BuildJailerArgvInput {
   jailerBin: string;
   /** ABSOLUTE path to the firecracker binary (`--exec-file`). */
   fcBin: string;

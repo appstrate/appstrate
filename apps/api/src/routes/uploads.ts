@@ -3,7 +3,7 @@
 /**
  * Uploads API — direct-upload creation + proxy-upload sink.
  *
- *   POST /api/uploads            → create upload (auth + app context)
+ *   POST /api/uploads            → create upload (auth + space context)
  *   PUT  /api/uploads/_content   → proxy sink (public, HMAC token-authenticated)
  *
  * The sink serves BOTH storage backends: filesystem always PUTs here, and
@@ -20,24 +20,26 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { createUpload, writeProxyUploadContent } from "../services/uploads.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { invalidRequest, unauthorized } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor, actorInsert } from "../lib/actor.ts";
 import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
 import { UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
 import { normalizeMime } from "../services/mime-policy.ts";
 import { getEnv } from "@appstrate/env";
 
-const createUploadSchema = z.object({
-  name: z.string().min(1).max(255),
-  size: z.coerce.number().int().positive().max(UPLOAD_MAX_BYTES),
-  mime: z.string().min(1).max(255),
-  // Optional client integrity claim: lowercase-hex SHA-256, verified
-  // server-side (S3 checksum on PUT, proxy-sink re-hash, and again at consume).
-  sha256: z
-    .string()
-    .regex(/^[0-9a-fA-F]{64}$/, "sha256 must be a 64-character hex SHA-256 digest")
-    .optional(),
-});
+export const createUploadSchema = z
+  .object({
+    name: z.string().min(1).max(255),
+    size: z.coerce.number().int().positive().max(UPLOAD_MAX_BYTES),
+    mime: z.string().min(1).max(255),
+    // Optional client integrity claim: lowercase-hex SHA-256, verified
+    // server-side (S3 checksum on PUT, proxy-sink re-hash, and again at consume).
+    sha256: z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, "sha256 must be a 64-character hex SHA-256 digest")
+      .optional(),
+  })
+  .strict();
 
 export function createUploadsRouter() {
   const router = new Hono<AppEnv>();
@@ -49,7 +51,7 @@ export function createUploadsRouter() {
   // catches up.
   router.post("/", rateLimit(20), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
     // Record BOTH creator identities (dashboard/API-key user OR end-user) so the
     // ownership gate on peek/consume can enforce that only the uploading
     // principal reads its own staged bytes. `actorInsert` produces the exact
@@ -58,7 +60,7 @@ export function createUploadsRouter() {
     const data = await readJsonBody(c, createUploadSchema, { allowEmpty: true });
     const upload = await createUpload({
       orgId,
-      applicationId,
+      spaceId,
       createdBy: userId,
       endUserId,
       name: data.name,
@@ -100,7 +102,7 @@ export function createUploadContentRouter() {
   // check. This endpoint is PUBLIC (the HMAC token is the only credential and it
   // arrives in the body/query), so there is no authenticated identity to key on;
   // rate-limiting by client IP first is exactly what caps brute-force token
-  // guessing before any verification work. (Contrast the run-document route,
+  // guessing before any verification work. (Contrast the run-file route,
   // whose limiter keys on a URL runId and so must verify FIRST.)
   router.put("/", rateLimitByIp(60), async (c) => {
     const token = c.req.query("token");
@@ -126,7 +128,7 @@ export function createUploadContentRouter() {
     const lenHdr = c.req.header("content-length");
     if (lenHdr) {
       const len = Number(lenHdr);
-      if (Number.isFinite(len) && payload.s > 0 && len > payload.s) {
+      if (Number.isFinite(len) && len > payload.s) {
         throw invalidRequest(`Content-Length ${len} exceeds signed max ${payload.s}`);
       }
     }

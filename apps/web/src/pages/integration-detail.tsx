@@ -102,6 +102,14 @@ import {
   type IntegrationManifestAuth,
   type IntegrationDetailWire,
 } from "../hooks/use-integrations";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@appstrate/ui/components/table";
 import { useIntegrations } from "../hooks/use-integrations";
 import { useAuth } from "../hooks/use-auth";
 import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
@@ -595,14 +603,14 @@ function IntegrationSettings({
   packageId,
   detail,
   blockUserConnections,
-  isAdmin,
+  canConfigure,
   onActivate,
   activationPending,
 }: {
   packageId: string;
   detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
   blockUserConnections: boolean;
-  isAdmin: boolean;
+  canConfigure: boolean;
   onActivate: () => void;
   activationPending: boolean;
 }) {
@@ -613,14 +621,14 @@ function IntegrationSettings({
   const active =
     requested === "tools" || requested === "functioning" || requested === "map"
       ? requested
-      : requested === "files" || !isAdmin
+      : requested === "files" || !canConfigure
         ? "files"
         : requested === "access"
           ? "access"
           : "authentication";
   const steps = detail.manifest.setup_guide?.steps ?? [];
   const groups = [
-    ...(isAdmin
+    ...(canConfigure
       ? [
           {
             label: t("detail.settings.configurationGroup", { ns: "agents" }),
@@ -704,14 +712,14 @@ function IntegrationSettings({
                       key={section}
                       packageId={packageId}
                       detail={detail}
-                      isAdmin={isAdmin}
+                      canConfigure={canConfigure}
                       initialMethod={section.slice("connections:".length)}
                       onConfigure={(authKey) =>
                         openPanel(`auth:${authKey ?? detail.auths[0]?.auth_key ?? ""}`)
                       }
                     />
                   );
-                if (!isAdmin)
+                if (!canConfigure)
                   return (
                     <p className="text-muted-foreground text-sm">
                       {t("integration.health.adminRequired")}
@@ -1047,7 +1055,6 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const deletePin = useDeleteIntegrationPin();
 
   const [newAgent, setNewAgent] = useState("");
-  const [adding, setAdding] = useState(false);
   const [newConnectionId, setNewConnectionId] = useState("");
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
@@ -1072,7 +1079,6 @@ function PinManagementSection({ packageId }: { packageId: string }) {
         onSuccess: () => {
           setNewAgent("");
           setNewConnectionId("");
-          setAdding(false);
         },
       },
     );
@@ -1087,46 +1093,49 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   );
 
   return (
-    <div className="pb-0" data-testid="pin-management-section">
-      <SettingsHeading
-        level="group"
-        title={t("integration.admin.exceptions.title")}
-        description={t("integration.admin.exceptions.help")}
-      />
+    <div
+      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
+      data-testid="pin-management-section"
+    >
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold">{t("integration.admin.exceptions.title")}</h3>
+        <p className="text-muted-foreground mt-1 text-xs">
+          {t("integration.admin.exceptions.help")}
+        </p>
+      </div>
 
       {/* Existing pins */}
       {(pins ?? []).length > 0 ? (
-        <div className="mb-4 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-muted-foreground border-y">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">
+        <div className="border-border bg-background mb-3 overflow-hidden rounded-md border">
+          <Table className="text-xs">
+            <TableHeader className="bg-muted/40">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-auto px-3 py-2">
                   {t("integration.admin.pinManagement.colAgent")}
-                </th>
-                <th className="px-3 py-2 text-left font-medium">
+                </TableHead>
+                <TableHead className="h-auto px-3 py-2">
                   {t("integration.admin.pinManagement.colAuth")}
-                </th>
-                <th className="px-3 py-2 text-left font-medium">
+                </TableHead>
+                <TableHead className="h-auto px-3 py-2">
                   {t("integration.admin.pinManagement.colConnection")}
-                </th>
-                <th className="w-12 px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+                <TableHead className="h-auto w-12 px-3 py-2" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {(pins ?? []).map((p) => (
-                <tr
+                <TableRow
                   key={`${p.packageId}-${p.auth_key}`}
-                  className="border-border border-t"
                   data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
                 >
-                  <td className="px-3 py-2">{agentDisplayName(p.packageId)}</td>
-                  <td className="px-3 py-2">
+                  <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
+                  <TableCell className="px-3 py-2">
                     <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
                       {p.auth_key}
                     </span>
-                  </td>
-                  <td className="px-3 py-2">{connectionDisplay(p.connection_id)}</td>
-                  <td className="px-3 py-2">
+                  </TableCell>
+                  <TableCell className="px-3 py-2">{connectionDisplay(p.connection_id)}</TableCell>
+                  <TableCell className="px-3 py-2">
                     <Button
                       size="icon"
                       variant="ghost"
@@ -1141,11 +1150,11 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <p className="text-muted-foreground mb-3 text-xs italic">
@@ -1162,62 +1171,51 @@ function PinManagementSection({ packageId }: { packageId: string }) {
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>
-      ) : !adding ? (
-        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-          {t("integration.admin.pinManagement.add")}
-        </Button>
       ) : (
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="border-border bg-background flex flex-wrap items-end gap-2 rounded-md border p-3">
           <div className="min-w-[12rem] flex-1">
-            <Label htmlFor="pin-add-agent" className="mb-2 block text-sm">
+            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
               {t("integration.admin.pinManagement.colAgent")}
             </Label>
-            <Select value={newAgent} onValueChange={setNewAgent}>
-              <SelectTrigger id="pin-add-agent" data-testid="pin-add-agent">
-                <SelectValue placeholder={t("integration.admin.pinManagement.colAgent")} />
-              </SelectTrigger>
-              <SelectContent>
-                {pinnableAgents.map((a) => (
-                  <SelectItem key={a.packageId} value={a.packageId}>
-                    {a.display_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
+              value={newAgent}
+              onChange={(e) => setNewAgent(e.target.value)}
+              data-testid="pin-add-agent"
+            >
+              <option value="">—</option>
+              {pinnableAgents.map((a) => (
+                <option key={a.packageId} value={a.packageId}>
+                  {a.display_name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="min-w-[12rem] flex-1">
-            <Label htmlFor="pin-add-connection" className="mb-2 block text-sm">
+            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
               {t("integration.admin.pinManagement.colConnection")}
             </Label>
-            <Select value={newConnectionId} onValueChange={setNewConnectionId}>
-              <SelectTrigger id="pin-add-connection" data-testid="pin-add-connection">
-                <SelectValue placeholder={t("integration.admin.pinManagement.colConnection")} />
-              </SelectTrigger>
-              <SelectContent>
-                {pinnableConnections.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {connectionDisplay(c.id)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
+              value={newConnectionId}
+              onChange={(e) => setNewConnectionId(e.target.value)}
+              data-testid="pin-add-connection"
+            >
+              <option value="">—</option>
+              {pinnableConnections.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {connectionDisplay(c.id)}
+                </option>
+              ))}
+            </select>
           </div>
           <Button
             size="sm"
-            variant="outline"
             onClick={onSubmitNewPin}
             disabled={!newAgent || !newConnectionId || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={upsertPin.isPending}
-            onClick={() => setAdding(false)}
-          >
-            {t("common:cancel")}
           </Button>
         </div>
       )}
@@ -1237,13 +1235,13 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 function ConnectionsTable({
   packageId,
   detail,
-  isAdmin,
+  canConfigure,
   onConfigure,
   initialMethod,
 }: {
   packageId: string;
   detail: IntegrationDetailWire;
-  isAdmin: boolean;
+  canConfigure: boolean;
   onConfigure: (authKey?: string) => void;
   initialMethod?: string;
 }) {
@@ -1267,7 +1265,7 @@ function ConnectionsTable({
     authType: "custom",
     canRenew: false,
     userId: user?.id,
-    isAdmin,
+    isAdmin: canConfigure,
     authForConnection: (connection) => {
       const auth = detail.auths.find((item) => item.auth_key === connection.auth_key);
       return {
@@ -1347,7 +1345,7 @@ function ConnectionsTable({
           setMethods([]);
         }}
         actions={
-          isAdmin ? (
+          canConfigure ? (
             <AddIntegrationConnection
               packageId={packageId}
               detail={detail}
@@ -1387,7 +1385,7 @@ function ConnectionsTable({
 /**
  * Inline prompt shown inside the Connexions tab when the integration is not
  * yet active — connecting and governance are meaningless until the
- * integration is activated for this application.
+ * integration is activated for this space.
  */
 function ActivationHint({ onActivate, pending }: { onActivate: () => void; pending: boolean }) {
   const { t } = useTranslation("settings");
@@ -1415,7 +1413,9 @@ export function IntegrationDetailPage() {
   const deactivate = useDeactivateIntegration();
   const deletePkg = useDeletePackage("integration");
   const downloadPackage = usePackageDownload(scope, name);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
+  const canConfigure = can("integrations:configure");
+  const canActivate = can("integrations:install");
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
   // because "an administrator must register an OAuth client" is only useful if
   // it can point at the screen where that happens.
@@ -1482,7 +1482,7 @@ export function IntegrationDetailPage() {
         }
         actionsRight={
           <>
-            {!active && (
+            {!active && canActivate && (
               <Button
                 size="sm"
                 onClick={onActivate}
@@ -1547,7 +1547,7 @@ export function IntegrationDetailPage() {
             <ConnectionsTable
               packageId={packageId}
               detail={detail}
-              isAdmin={isAdmin}
+              canConfigure={canConfigure}
               onConfigure={openAuthentication}
             />
           )}
@@ -1562,7 +1562,7 @@ export function IntegrationDetailPage() {
             packageId={packageId}
             detail={detail}
             blockUserConnections={detail.block_user_connections}
-            isAdmin={isAdmin}
+            canConfigure={canConfigure}
             onActivate={onActivate}
             activationPending={activate.isPending}
           />
@@ -1576,7 +1576,7 @@ export function IntegrationDetailPage() {
             detail={detail}
             agents={pkg?.agents}
             onOpenConnections={openConnections}
-            onConfigureAuth={isAdmin ? openAuthentication : undefined}
+            onConfigureAuth={canConfigure ? openAuthentication : undefined}
           />
         </TabsContent>
 

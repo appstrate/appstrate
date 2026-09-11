@@ -35,6 +35,7 @@ import {
   apiUploadToolNameFor as deriveApiUploadToolName,
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
+import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
@@ -69,8 +70,6 @@ export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = [
   "tus",
   "ms-resumable",
 ] as const;
-/** An upload-protocol identifier (open string; reserved values listed above). */
-export type IntegrationUploadProtocol = string;
 
 // ─────────────────────────────────────────────
 // Integration manifest (AFPS + Appstrate cross-field rules)
@@ -161,7 +160,9 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // dispatch exists in `packages/connect/src/afps-delivery.ts`). Rejecting
     // at install time gives manifest authors a loud error instead of a
     // silent runtime no-op.
-    const httpDelivery = (auth as { delivery?: { http?: { in?: string } } }).delivery?.http;
+    const httpDelivery = (
+      auth as { delivery?: { http?: { in?: string; name?: string; prefix?: string } } }
+    ).delivery?.http;
     if (httpDelivery?.in !== undefined && httpDelivery.in !== "header") {
       ctx.addIssue({
         code: "custom",
@@ -170,7 +171,28 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       });
     }
 
-    // (1d) §7.2 + §7.6 install gate — `mtls` + `delivery.http` cannot be
+    // (1d) §7.6 install gate — `prefix` is a LITERAL prepended to the rendered
+    // value, so an auth-scheme prefix must carry its own separator ("Bearer ",
+    // not "Bearer"). A bare scheme renders `Authorization: BearerTOKEN`, which
+    // every upstream rejects as a malformed credential. The injector
+    // (`planHttpDeliveryInjection`) concatenates verbatim and repairs nothing,
+    // so the defect is caught here — where the manifest author can act on it —
+    // instead of at request time inside a run. The grammar itself lives in
+    // `@appstrate/afps-shared`: the portable runtime gates a hand-authored
+    // creds file the same way, and one rule may not have two spellings.
+    const httpPrefix = httpDelivery?.prefix;
+    if (
+      typeof httpPrefix === "string" &&
+      isBareAuthSchemePrefix(httpDelivery?.name ?? "", httpPrefix)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: `delivery.http.prefix "${httpPrefix}" is a bare auth scheme — prefix is a literal (AFPS §7.6) and is concatenated verbatim, so it must include its own separator. Write "${httpPrefix} ".`,
+        path: ["auths", authKey, "delivery", "http", "prefix"],
+      });
+    }
+
+    // (1e) §7.2 + §7.6 install gate — `mtls` + `delivery.http` cannot be
     // honoured: the MITM proxy terminates upstream TLS and re-fetches, so
     // there is no first-class way to drive a client-cert handshake on the
     // upstream leg. Reject at install time; the integration author should
@@ -390,7 +412,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
       );
       for (const name of defaultTools) {
-        if (!catalog.has(canonicalizeApiToolName(manifest, name))) {
+        if (!catalog.has(name)) {
           ctx.addIssue({
             code: "custom",
             message: `default_tools contains "${name}" which is not a tool this integration exposes`,
@@ -660,14 +682,10 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
       : [{ name: config.toolName }],
   );
   const syntheticApiNames = new Set(syntheticApiEntries.map((entry) => entry.name));
-  for (const config of apiCallConfigs) {
-    if (config.legacyToolName) syntheticApiNames.add(config.legacyToolName);
-    if (config.legacyUploadToolName) syntheticApiNames.add(config.legacyUploadToolName);
-  }
-  // Synthetic capability names (including persisted long-key aliases) are
-  // reserved only when the integration opts into that exact capability. Give
-  // the trusted surface canonical precedence over a same-named native MCP tool
-  // instead of advertising an ambiguous duplicate or an unselectable `_2`.
+  // Synthetic capability names are reserved only when the integration opts
+  // into that exact capability. Give the trusted surface canonical precedence
+  // over a same-named native MCP tool instead of advertising an ambiguous
+  // duplicate or an unselectable `_2`.
   base = [
     ...base.filter(
       (entry) =>
@@ -688,14 +706,8 @@ export function resolveIntegrationToolSurface(input: ResolveIntegrationToolCatal
   // but never leave an orphan upload in the catalog when its dependency is
   // hidden.
   for (const config of apiCallConfigs) {
-    const callHidden =
-      hidden.has(config.toolName) ||
-      (config.legacyToolName !== undefined && hidden.has(config.legacyToolName));
-    const uploadHidden =
-      config.uploadToolName !== undefined &&
-      (hidden.has(config.uploadToolName) ||
-        (config.legacyUploadToolName !== undefined && hidden.has(config.legacyUploadToolName)));
-    if (callHidden) hidden.add(config.toolName);
+    const callHidden = hidden.has(config.toolName);
+    const uploadHidden = config.uploadToolName !== undefined && hidden.has(config.uploadToolName);
     if (config.uploadToolName && (callHidden || uploadHidden)) {
       hidden.add(config.uploadToolName);
     }
@@ -782,14 +794,8 @@ export interface ApiCallConfig {
    * `api_call__{authToken}` when it opts in several.
    */
   toolName: string;
-  /**
-   * Pre-bounding `api_call__{authKey}` name accepted for manifests/selections
-   * persisted before long auth keys gained a transport-safe canonical token.
-   * Present only when it differs from {@link ApiCallConfig.toolName}.
-   */
-  legacyToolName?: string;
-  /** Resumable upload protocols this auth's surface supports (open list). */
-  uploadProtocols: IntegrationUploadProtocol[];
+  /** Upload-protocol identifiers (open set; reserved values in RESERVED_INTEGRATION_UPLOAD_PROTOCOLS). */
+  uploadProtocols: string[];
   /**
    * Agent-facing name of the `api_upload` companion tool, present iff
    * {@link ApiCallConfig.uploadProtocols} is non-empty — i.e. exactly when the
@@ -797,8 +803,6 @@ export interface ApiCallConfig {
    * the runtime won't serve.
    */
   uploadToolName?: string;
-  /** Legacy upload alias corresponding to {@link ApiCallConfig.legacyToolName}. */
-  legacyUploadToolName?: string;
 }
 
 /** Read `_meta["dev.appstrate/api"].auths` as a raw record (or undefined). */
@@ -846,37 +850,15 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
     const uploadProtocols = Array.isArray(raw)
       ? raw.filter((v): v is string => typeof v === "string" && v.length > 0)
       : [];
-    const legacyToolName = single ? API_CALL_TOOL_NAME : `${API_CALL_TOOL_NAME}__${authKey}`;
     const toolName = apiCallToolNameForAuth(authKey, !single);
     const uploadToolName = uploadProtocols.length > 0 ? apiUploadToolNameFor(toolName) : undefined;
-    const legacyUploadToolName =
-      uploadProtocols.length > 0 ? apiUploadToolNameFor(legacyToolName) : undefined;
     return {
       authKey,
       toolName,
-      ...(legacyToolName !== toolName ? { legacyToolName } : {}),
       uploadProtocols,
       ...(uploadToolName ? { uploadToolName } : {}),
-      ...(legacyUploadToolName && legacyUploadToolName !== uploadToolName
-        ? { legacyUploadToolName }
-        : {}),
     };
   });
-}
-
-/**
- * Canonicalise a persisted synthetic API tool name without touching native
- * tool names. Long multi-auth names used to embed the full auth key; accept
- * those aliases indefinitely, but emit only the bounded canonical form.
- */
-export function canonicalizeApiToolName(manifest: IntegrationManifest, name: string): string {
-  for (const config of getApiCallConfigs(manifest)) {
-    if (name === config.legacyToolName) return config.toolName;
-    if (name === config.legacyUploadToolName && config.uploadToolName) {
-      return config.uploadToolName;
-    }
-  }
-  return name;
 }
 
 /**
@@ -930,16 +912,6 @@ export function isApiCallToolName(name: string): boolean {
 }
 
 /**
- * True when `name` is an api_upload tool name — the bare `api_upload` or a
- * per-auth `api_upload__{authToken}` variant. Like {@link isApiCallToolName},
- * these never appear in `tools_policy`: they are derived from the
- * `_meta["dev.appstrate/api"]` extension, not declared.
- */
-export function isApiUploadToolName(name: string): boolean {
-  return name === API_UPLOAD_TOOL_NAME || name.startsWith(`${API_UPLOAD_TOOL_NAME}__`);
-}
-
-/**
  * Which auth keys a connection COULD satisfy for the agent's tool selection —
  * the candidate set for a connection *picker* (run/schedule override UI). It
  * returns the auths a connection MAY satisfy, as opposed to the auths that
@@ -981,6 +953,19 @@ export function connectableAuthKeysForAgent(
  * the integration's `allow_undeclared_tools: true`), per-tool inference is
  * bypassed and the selected auth's `default_scopes` (§7.4) is used as the
  * baseline, still unioned with any explicit `agentScopes`.
+ *
+ * `agentScopes` are filtered to what `authKey`'s own `scope_catalog` declares,
+ * because the two ends of that selection are validated against DIFFERENT sets.
+ * An agent's `integrations_configuration[id].scopes` names no auth, so
+ * {@link validateAgentIntegrationScopes} accepts anything in the UNION of every
+ * auth's catalog ({@link getAvailableScopes}); the connect kickoff, in contrast,
+ * is per-auth and refuses a scope the TARGET auth does not declare. Unioning a
+ * sibling auth's scope in here relayed it as `required_scopes` on the 412, and
+ * the kickoff then rejected the platform's own value — a loop nothing in the
+ * agent could break. Tool-contributed scopes need no such filter: they are read
+ * out of `tools_policy[tool].required_scopes[authKey]`, per-auth by
+ * construction. An auth declaring no catalog declares no closed set, so nothing
+ * is filtered and the IdP arbitrates at consent time.
  */
 export function requiredScopesForAgent(input: {
   manifest: IntegrationManifest;
@@ -988,7 +973,10 @@ export function requiredScopesForAgent(input: {
   agentTools: readonly string[] | "*" | undefined;
   agentScopes: readonly string[] | undefined;
 }): string[] {
-  const viaExplicit = input.agentScopes ? [...input.agentScopes] : [];
+  const viaExplicit = partitionScopesByAuthCatalog(
+    input.manifest.auths?.[input.authKey],
+    input.agentScopes,
+  ).declared;
   if (isToolsWildcard(input.agentTools)) {
     const defaultScopes = input.manifest.auths?.[input.authKey]?.default_scopes ?? [];
     return [...new Set([...defaultScopes, ...viaExplicit])];
@@ -999,6 +987,38 @@ export function requiredScopesForAgent(input: {
     agentTools: input.agentTools,
   });
   return [...new Set([...viaTools, ...viaExplicit])];
+}
+
+/**
+ * Split `scopes` by membership of ONE auth's `scope_catalog` (§7.4):
+ * `declared` in caller order, `undeclared` deduped in caller order.
+ *
+ * The single definition of catalog membership. Both ends need it and need the
+ * same carve-out: an auth declaring no catalog declares no closed set, so
+ * everything counts as declared and the IdP arbitrates at consent time.
+ * `declared` filters what {@link requiredScopesForAgent} relays; `undeclared`
+ * is the connect kickoffs' rejection set.
+ *
+ * Keyed by ONE auth, never the union: a scope advertised by a SIBLING auth of
+ * the same integration is still not requestable here. That is the difference
+ * from {@link validateAgentIntegrationScopes}, which validates a selection that
+ * names no auth and so unions the catalogs ({@link getAvailableScopes}).
+ */
+export function partitionScopesByAuthCatalog(
+  auth: { scope_catalog?: readonly { value: string }[] } | undefined,
+  scopes: readonly string[] | undefined,
+): { declared: string[]; undeclared: string[] } {
+  if (!scopes || scopes.length === 0) return { declared: [], undeclared: [] };
+  const catalog = auth?.scope_catalog;
+  if (!catalog || catalog.length === 0) return { declared: [...scopes], undeclared: [] };
+  const known = new Set(catalog.map((entry) => entry.value));
+  const declared: string[] = [];
+  const undeclared = new Set<string>();
+  for (const s of scopes) {
+    if (known.has(s)) declared.push(s);
+    else undeclared.add(s);
+  }
+  return { declared, undeclared: [...undeclared] };
 }
 
 /**
@@ -1150,7 +1170,7 @@ export function validateAgentIntegrationScopes(
     if (catalog.length > 0) {
       const allowed = new Set(catalog.map((e) => e.name));
       for (const tool of selection.tools) {
-        if (allowed.has(canonicalizeApiToolName(integrationManifest, tool))) continue;
+        if (allowed.has(tool)) continue;
         errors.push({
           field: `integrations_configuration.${selection.id}.tools`,
           code: "unknown_tool",
@@ -1251,13 +1271,40 @@ export interface ConnectionResolutionError {
   /** Scopes the agent needs that the connection lacks (insufficient_scopes). */
   missingScopes?: string[];
   /**
+   * The FULL set of oauth scopes the run's selected tools require on
+   * {@link authKey} — not the diff. `insufficient_scopes` also carries
+   * {@link missingScopes} (required minus granted); `not_connected` and
+   * `needs_reconnection` end at a consent that has to stand on its own, so
+   * the full set is the only thing it can be built from. The caller forwards
+   * it as the connect kickoff's `scopes` body field, which unions it with the
+   * auth's `default_scopes` and anything already granted. Omitted when the
+   * auth is not `oauth2`, when the agent's selection requires no scopes, or
+   * when no auth key could be determined.
+   */
+  requiredScopes?: string[];
+  /**
+   * The integration manifest auth the connect flow must target
+   * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
+   * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
+   * connection's own auth) and `not_connected` (the agent dep's pinned
+   * `auth_key`, else the integration's single `oauth2` auth). Omitted on
+   * `not_connected` when the integration declares several oauth2 auths and
+   * the dep pins none — the caller must then let the user choose.
+   */
+  authKey?: string;
+  /**
    * The cascade layer that resolved the (failing) connection, when the error
    * is bound to a specific connection (`insufficient_scopes`). Lets callers
    * derive the pick status directly instead of re-comparing `connectionId`
    * against re-fetched pin ids.
    */
   source?: ConnectionResolutionSource;
-  /** True when the resolved connection belongs to the current actor. */
+  /**
+   * True when the resolved connection belongs to the current actor. Carried on
+   * the two connection-bound connect-flow codes — `insufficient_scopes` and
+   * `needs_reconnection` — because both remedies re-consent THAT row, which is
+   * its owner's to do.
+   */
   ownedByActor?: boolean;
   /**
    * AFPS §4.1 — agent dep's pinned `auth_key` when

@@ -10,7 +10,7 @@
  *
  *   - `/api/models`       → one openai-completions model (llm-proxy-routed)
  *   - `/api/me/context`   → a small caller-context payload
- *   - `/api/applications` → the default application id
+ *   - `/api/spaces` → the default space id
  *
  * The engine itself is injected. Production always gets `runPiChat`, which would
  * open a real Pi session against a real provider; here a scripted engine returns
@@ -36,10 +36,15 @@ import { handleChatStream, type ChatEngine, type ChatEnv } from "../src/chat-str
 import { mintSessionId } from "../src/session-id.ts";
 import { acquirePiChatSlot, releaseOnClose } from "../src/pi-chat/concurrency.ts";
 import type { PiChatInput } from "../src/pi-chat/engine.ts";
+import type { ChatAttachmentRequest } from "@appstrate/core/chat-contract";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
+import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
 import { SYSTEM_PROMPT } from "../src/prompt.ts";
+
+// The chat handler reads the system model registry; the HTTP harness initializes it at boot.
+initSystemModelProviderKeys();
 
 /**
  * Wait until the assistant turn is persisted and the in-flight marker cleared.
@@ -73,7 +78,7 @@ async function waitForAssistantPersist(sessionId: string, timeoutMs = 8_000): Pr
 // `/api/me/context` was fetched and rendered into the system prompt.
 const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
 
-const APP_ID = "app_chat_handler_test";
+const SPACE_ID = "spc_chat_handler_test";
 const MODEL_PRESET_ID = "model_chat_handler_test";
 
 /**
@@ -101,25 +106,28 @@ function modelsResponse(apiShape = "openai-completions"): Response {
 }
 
 /** A minimal but non-empty `/api/me/context` payload. */
-function contextResponse(): Response {
+function contextResponse(recentRuns: unknown[] = []): Response {
   return Response.json({
     user: { name: "Chat Tester", email: "chat-tester@test.com" },
     org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
     connections: [],
     agents: [],
     skills: [],
-    recent_runs: [],
+    recent_runs: recentRuns,
   });
 }
 
 /** Build the scripted in-memory dispatch. Nothing leaves this process. */
-function scriptedDispatch(apiShape?: string): (req: Request) => Promise<Response> {
+function scriptedDispatch(
+  apiShape?: string,
+  context: () => Response = () => contextResponse(),
+): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     const path = new URL(req.url).pathname;
     if (path === "/api/models") return modelsResponse(apiShape);
-    if (path === "/api/me/context") return contextResponse();
-    if (path === "/api/applications") {
-      return Response.json({ data: [{ id: APP_ID, isDefault: true }] });
+    if (path === "/api/me/context") return context();
+    if (path === "/api/spaces") {
+      return Response.json({ data: [{ id: SPACE_ID, isDefault: true }] });
     }
     return new Response("unexpected dispatch: " + path, { status: 404 });
   };
@@ -182,7 +190,7 @@ async function collectUiChunks(
   return chunks;
 }
 
-describe("handleChatStream engine routing", () => {
+describe("handleChatStream", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -191,7 +199,11 @@ describe("handleChatStream engine routing", () => {
   });
 
   /** A `Hono<ChatEnv>` app mirroring what the platform auth pipeline sets. */
-  function buildApp(deps: ReturnType<typeof buildChatPlatformDeps>, engine?: ChatEngine) {
+  function buildApp(
+    deps: ReturnType<typeof buildChatPlatformDeps>,
+    engine?: ChatEngine,
+    permissions: Set<string> = new Set<string>(),
+  ) {
     const app = new Hono<ChatEnv>();
     // Mirror production's RFC 9457 error boundary so invalid client input is
     // asserted at the HTTP contract, not as an uncaught handler exception.
@@ -199,10 +211,13 @@ describe("handleChatStream engine routing", () => {
     app.post("/api/chat", (c) => {
       c.set("orgId", ctx.orgId);
       c.set("user", ctx.user);
+      // What `enterSpaceContext` writes on every `/api/chat/*` route in
+      // production — the session's space and the scope of the turn's reads.
+      c.set("space", { id: ctx.defaultSpaceId });
       c.set("orgRole", "owner");
       c.set("orgName", ctx.org.name);
       c.set("orgSlug", ctx.org.slug);
-      c.set("permissions", new Set<string>());
+      c.set("permissions", permissions);
       return handleChatStream(c, deps, engine);
     });
     return app;
@@ -216,34 +231,85 @@ describe("handleChatStream engine routing", () => {
       /** apiShape of the single scripted `/api/models` row. */
       apiShape?: string;
       /** Stand in for the platform's credential resolution. */
-      resolveSubscriptionChatModel?: ChatPlatformDeps["resolveSubscriptionChatModel"];
+      resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
+      /** Scripted `/api/me/context` body, to vary the payload between turns. */
+      context?: () => Response;
+      /** Replace the whole scripted dispatch (to observe request timing). */
+      dispatch?: (req: Request) => Promise<Response>;
+      /** Stand in for the platform's composer-attachment resolution. */
+      resolveChatAttachment?: ChatPlatformDeps["resolveChatAttachment"];
+      /** The caller's resolved RBAC set, as the auth pipeline would write it. */
+      permissions?: Set<string>;
+      /** Replace the single user message (to carry a composer attachment). */
+      parts?: unknown[];
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
     const deps = {
       ...buildChatPlatformDeps(buildModuleInitContext()),
-      dispatch: scriptedDispatch(overrides?.apiShape),
-      ...(overrides?.resolveSubscriptionChatModel
-        ? { resolveSubscriptionChatModel: overrides.resolveSubscriptionChatModel }
+      dispatch: overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.context),
+      ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
+      ...(overrides?.resolveChatAttachment
+        ? { resolveChatAttachment: overrides.resolveChatAttachment }
         : {}),
     };
-    const app = buildApp(deps, engine);
+    const app = buildApp(deps, engine, overrides?.permissions);
     const res = await app.request("/api/chat", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-application-id": APP_ID,
+        "x-space-id": SPACE_ID,
         "x-org-id": ctx.orgId,
       },
       body: JSON.stringify({
         id: sessionId,
-        messages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "dis bonjour" }] }],
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            parts: overrides?.parts ?? [{ type: "text", text: "dis bonjour" }],
+          },
+        ],
         ...(generation ? { generation } : {}),
       }),
     });
     return res;
   }
+
+  it("hands the composer attachment the caller's own permission set", async () => {
+    // The gallery the user picks an `appfile://` from is filtered by
+    // `runs:read-all`; the platform resolves the attachment against the same
+    // set, so the handler has to carry it. Forwarding nothing would 404 a file
+    // the picker had just offered.
+    const sessionId = mintSessionId();
+    const { engine } = scriptedEngine();
+    const requests: ChatAttachmentRequest[] = [];
+    const permissions = new Set(["runs:read-all"]);
+
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions,
+      parts: [
+        { type: "text", text: "résume ce fichier" },
+        {
+          type: "file",
+          url: "appfile://file_abcdefgh",
+          mediaType: "text/plain",
+          filename: "r.txt",
+        },
+      ],
+      resolveChatAttachment: async (request) => {
+        requests.push(request);
+        return { uri: request.uri, name: "r.txt", mime: "text/plain", size: 12 };
+      },
+    });
+
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(requests).toHaveLength(1);
+    expect([...requests[0]!.permissions]).toEqual(["runs:read-all"]);
+    await waitForAssistantPersist(sessionId);
+  });
 
   it("rejects generation settings unsupported by the selected model", async () => {
     const { engine, calls } = scriptedEngine();
@@ -261,15 +327,15 @@ describe("handleChatStream engine routing", () => {
       apiShape: "anthropic-messages",
       // The platform resolved the row to an oauth2 provider whose credential is
       // revoked or no longer decrypts.
-      resolveSubscriptionChatModel: async () => ({ subscription: true, needsReconnection: true }),
+      resolveChatModel: async () => ({ subscription: true, needsReconnection: true }),
     });
 
     expect(res.status).toBe(401);
     expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
-    const body = (await res.json()) as { code?: string; needsReconnection?: boolean };
-    // The client keys the reconnect prompt off these two fields.
+    const body = (await res.json()) as { code?: string };
+    // The problem `code` is the whole client contract: `refusalCode()`
+    // (`src/turn-error.ts`) reads `status` + `code`, and nothing else.
     expect(body.code).toBe("needs_reconnection");
-    expect(body.needsReconnection).toBe(true);
 
     // No session would 401 upstream, and nothing was written.
     expect(calls).toEqual([]);
@@ -389,6 +455,14 @@ describe("handleChatStream engine routing", () => {
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
+    // The handshake transport is the platform's in-process dispatch, not global
+    // `fetch` — three JSON-RPC hops that used to open real loopback sockets back
+    // into this same process. Proven by calling it: it answers from the scripted
+    // dispatch, which a socket to a non-existent server could not do.
+    expect(typeof input.platformMcp.fetch).toBe("function");
+    const probed = await input.platformMcp.fetch!(new Request("http://127.0.0.1:1/api/models"));
+    expect(probed.status).toBe(200);
+    expect(await probed.json()).toMatchObject({ object: "list" });
 
     // (5) Wait for the connection-independent persist drain to settle.
     await waitForAssistantPersist(sessionId);
@@ -427,5 +501,100 @@ describe("handleChatStream engine routing", () => {
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.orgId, ctx.orgId)))
       .limit(1);
     expect(session?.activeStreamId).toBeNull();
+  }, 20_000);
+
+  /**
+   * The preamble overlap.
+   *
+   * The caller-context read (`/api/me/context`) depends on the space id and the
+   * caller's headers only — never on the chosen model or the admission gate —
+   * so the handler starts it the moment the space id is known, under the model
+   * list. Pinned here: the context request is dispatched BEFORE the model list
+   * has answered. With the reads back in series (context after models → pick →
+   * resolve → gate) it can only start after `models:end`, and this fails.
+   */
+  it("dispatches the caller-context read before the model list has answered", async () => {
+    const events: string[] = [];
+    const base = scriptedDispatch();
+    const dispatch = async (req: Request): Promise<Response> => {
+      const path = new URL(req.url).pathname;
+      if (path === "/api/models") {
+        events.push("models:start");
+        // Long enough that a serial context read is unambiguously later.
+        await new Promise((r) => setTimeout(r, 50));
+        events.push("models:end");
+      } else if (path === "/api/me/context") {
+        events.push("context:start");
+      }
+      return base(req);
+    };
+
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      dispatch,
+      // Scripted so the ordering is observable in isolation — the platform's
+      // own resolution needs the boot-time system-model registry, which is
+      // beside the point here.
+      resolveChatModel: async () => ({ subscription: false }),
+    });
+    expect(res.status).toBe(200);
+    await res.text();
+
+    const contextStart = events.indexOf("context:start");
+    const modelsEnd = events.indexOf("models:end");
+    expect(contextStart).toBeGreaterThanOrEqual(0);
+    expect(modelsEnd).toBeGreaterThanOrEqual(0);
+    expect(contextStart).toBeLessThan(modelsEnd);
+    // The overlapped block still reached the prompt — it was joined, not lost.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.system).toContain(CONTEXT_ORG_MARKER);
+
+    await waitForAssistantPersist(sessionId);
+  }, 20_000);
+
+  /**
+   * The prompt-cache guard.
+   *
+   * pi-ai emits the system prompt as ONE text block carrying ONE `cache_control`
+   * breakpoint, and caching is prefix-based — so any per-turn difference in that
+   * block invalidates it AND the conversation-history breakpoint downstream of
+   * it. The prompt must therefore be byte-identical between turns for a given
+   * caller, whatever the platform reports about their runs in the meantime.
+   *
+   * This asserts the property at the seam the handler owns, so it fails whatever
+   * route a regression takes back in: a re-rendered `recent_runs`, a finer clock,
+   * a newly interpolated per-request value.
+   */
+  it("hands the engine a byte-identical system prompt across turns", async () => {
+    const first = scriptedEngine();
+    await postChat(mintSessionId(), undefined, first.engine, {
+      context: () => contextResponse([]),
+    });
+
+    // Same caller, same org — but the platform now reports runs that did not
+    // exist a moment ago, each with its own timestamp and error text.
+    const second = scriptedEngine();
+    await postChat(mintSessionId(), undefined, second.engine, {
+      context: () =>
+        contextResponse([
+          {
+            package_id: "@acme/report",
+            status: "failed",
+            run_number: 41,
+            started_at: new Date().toISOString(),
+            error: "provider timed out",
+          },
+          { package_id: "@acme/triage", status: "success", run_number: 42 },
+        ]),
+    });
+
+    expect(first.calls).toHaveLength(1);
+    expect(second.calls).toHaveLength(1);
+    expect(second.calls[0]!.system).toBe(first.calls[0]!.system);
+    // And the volatile payload really was delivered — otherwise the assertion
+    // above would pass for the wrong reason (a dispatch that never ran).
+    expect(second.calls[0]!.system).not.toContain("provider timed out");
+    expect(second.calls[0]!.system).not.toContain("@acme/report");
   }, 20_000);
 });

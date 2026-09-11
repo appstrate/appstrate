@@ -30,15 +30,41 @@ import { getErrorMessage } from "@appstrate/core/errors";
  * (0.12+0.24+0.48+0.96+1.92+2+2+2 s), a slightly larger total budget than the
  * previous 6×500ms (7.5 s), still well inside the boot gate.
  */
-export const PROVISION_MAX_ATTEMPTS = 9;
+const PROVISION_MAX_ATTEMPTS = 9;
+
+/**
+ * Per-attempt deadline on the platform's RESPONSE HEADERS.
+ *
+ * Without it the budget above is unreachable: a platform that accepts the
+ * connection and never answers leaves attempt 1 pending forever, so the 9
+ * attempts never happen and boot hangs. Nothing else catches that — the run
+ * watchdog's agent budget starts at the run loop, boot excluded
+ * (`entrypoint.ts`).
+ *
+ * 10 s, sized against the two ends it sits between. Below: this is a
+ * platform-local hop (through the sidecar forward proxy when attached), whose
+ * honest time-to-first-byte at boot is sub-second — 10 s is more than an order
+ * of magnitude of headroom, so it cannot fire on a merely slow platform.
+ * Above: the whole loop must finish well inside `RUN_BOOT_DEADLINE_SECONDS`
+ * (300 s) or the failure surfaces as an opaque boot-deadline reap instead of
+ * the "failed after N attempts" message this function raises; 9 × 10 s plus
+ * ~9.7 s of backoff is ~100 s, a 3× margin. A 30 s bound would fit only
+ * barely, and buys nothing this hop needs.
+ *
+ * HEADERS only, then disarmed: a signal handed to `fetch` aborts the BODY too,
+ * and `provisionFiles` streams input files (up to `WORKSPACE_MAX_FILES_BYTES`,
+ * 256 MiB) off the very `Response` this function returns. A whole-request cap
+ * would kill a healthy large download mid-stream.
+ */
+const PROVISION_HEADERS_TIMEOUT_MS = 10_000;
 
 export interface ProvisionDeps {
   /** The run-scoped event sink URL (`…/api/runs/:id/events`). The workspace
-   *  and documents routes are derived by swapping the `/events` suffix. */
+   *  and files routes are derived by swapping the `/events` suffix. */
   sinkUrl: string;
   /** Run secret used to HMAC-sign each GET (Standard Webhooks). */
   sinkSecret: string;
-  /** Absolute workspace root the bundle + documents are written under. */
+  /** Absolute workspace root the bundle + files are written under. */
   workspace: string;
   /**
    * Fatal-error escalation. In production this posts an `appstrate.error`
@@ -61,8 +87,9 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeou
  * budget. Re-signs each attempt (fresh timestamp). Returns the {@link Response}
  * as soon as it is `ok` OR carries a deterministic non-retryable status (4xx
  * other than 429 — the caller decides whether that status is fatal). Retries
- * 5xx, 429, and network errors with exponential backoff; throws only when the
- * budget is exhausted on transient failures.
+ * 5xx, 429, network errors, and attempts whose response headers do not arrive
+ * within {@link PROVISION_HEADERS_TIMEOUT_MS}, with exponential backoff; throws
+ * only when the budget is exhausted on transient failures.
  *
  * Auth mirrors the event sink: a Standard Webhooks HMAC over the (empty) GET
  * body keyed on the run secret. Outbound traffic reaches the platform exactly
@@ -84,7 +111,29 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
           secret: deps.sinkSecret,
         }),
       };
-      const res = await fetchFn(url, { method: "GET", headers });
+      // Arm the headers deadline for this attempt and disarm it the moment the
+      // response object exists (or the attempt fails) — see
+      // `PROVISION_HEADERS_TIMEOUT_MS` for why it must not outlive the headers.
+      // A fired deadline rejects with a `TimeoutError`, which the `catch` below
+      // already classifies as a retryable failure, so a hung attempt now spends
+      // one attempt of the budget instead of all of it.
+      const deadline = new AbortController();
+      const timer = setTimeout(
+        () =>
+          deadline.abort(
+            new DOMException(
+              `no response headers after ${PROVISION_HEADERS_TIMEOUT_MS}ms`,
+              "TimeoutError",
+            ),
+          ),
+        PROVISION_HEADERS_TIMEOUT_MS,
+      );
+      let res: Response;
+      try {
+        res = await fetchFn(url, { method: "GET", headers, signal: deadline.signal });
+      } finally {
+        clearTimeout(timer);
+      }
       // Success, or a deterministic 4xx (404 missing, 401 bad signature, 410
       // closed/expired sink) that retrying cannot fix — hand back either way.
       if (res.ok || !isRetryableHttpStatus(res.status)) return res;
@@ -124,73 +173,95 @@ export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
   // The bundle is the `agent-package.afps` bytes (itself a ZIP the Pi runtime
   // reads). Buffer-then-write: the bundle is small + bounded, and passing the
   // fetch `Response` to `Bun.write` for streaming-consume busy-loops in the
-  // bundled runtime (see `provisionDocuments`).
+  // bundled runtime (see `provisionFiles`).
   await fs.mkdir(deps.workspace, { recursive: true });
   const bytes = new Uint8Array(await res.arrayBuffer());
   await Bun.write(path.join(deps.workspace, "agent-package.afps"), bytes);
 }
 
 /**
- * Self-provision the run's input documents, streaming each to
- * `workspace/documents/<name>`.
+ * Self-provision the run's input files, streaming each to
+ * `workspace/files/<name>`.
  *
- * Documents are delivered out-of-band from the bundle: large and variable,
+ * Files are delivered out-of-band from the bundle: large and variable,
  * they are fetched individually and streamed straight to disk, so the agent
  * never buffers the whole payload — peak memory stays bounded regardless of
  * upload size. The manifest enumerates them; a 404 on the manifest means the
- * run carries no documents (the common case) and is NOT a fault. A non-ok on a
- * document the manifest listed IS fatal, same reasoning as the bundle (#549).
+ * run carries no files (the common case) and is NOT a fault. A non-ok on a
+ * file the manifest listed IS fatal, same reasoning as the bundle (#549).
  */
-export async function provisionDocuments(deps: ProvisionDeps): Promise<void> {
-  const manifestUrl = deps.sinkUrl.replace(/\/events$/, "/documents");
+export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
+  // `/files` is the ONLY manifest path. There is no `/documents` probe, and the
+  // reason is the ROUTE, not the image-tag guard: a platform old enough to
+  // serve `/documents` (pre-#1193) has no `/files` route, so it answers 404 —
+  // which is already the documented "this run carries no input files" case.
+  // Probing a second path would buy nothing and would put a dual-read fallback
+  // on the common boot path (`docs/NO_TRANSITIONAL_CODE.md` §1).
+  //
+  // Do NOT lean on `findRuntimeImageTagMismatch` (`@appstrate/env`) to argue
+  // this: it compares `PI_IMAGE` against `SIDECAR_IMAGE` unconditionally, but
+  // the PLATFORM only joins that comparison when all three refs are release
+  // versions. A digest-pinned ref is exempt outright, and `:latest`, `dev`,
+  // `sha-…` and `{{major}}.{{minor}}` all take the platform back out — so a
+  // released platform under `:latest` runtime images boots fine and is a
+  // supported deployment. Platform/image skew IS reachable; it just cannot
+  // produce a `documents`-keyed body here, because the only writer of that
+  // body is the platform's `parseRunFilesManifest`, which throws on the
+  // retired spelling rather than serving it.
+  const manifestUrl = deps.sinkUrl.replace(/\/events$/, "/files");
   let manifestRes: Response;
   try {
     manifestRes = await signedGetWithRetry(manifestUrl, deps);
   } catch (err) {
-    return await deps.die(`Failed to fetch documents manifest: ${getErrorMessage(err)}`);
+    return await deps.die(`Failed to fetch files manifest: ${getErrorMessage(err)}`);
   }
-  if (manifestRes.status === 404) return; // run carries no input documents
+  if (manifestRes.status === 404) return; // run carries no input files
   if (!manifestRes.ok) {
-    return await deps.die(`Failed to fetch documents manifest: HTTP ${manifestRes.status}`);
+    return await deps.die(`Failed to fetch files manifest: HTTP ${manifestRes.status}`);
   }
 
   // The manifest carries a `name` (human display name) and a `workspace_name`
   // (the unique single-segment filename to write on disk); the platform
   // guarantees `workspace_name` is present and unique per run — its manifest
-  // reader rejects any entry without one — so two documents never overwrite
-  // each other here (see the platform's run-document-naming.ts). The runtime
+  // reader rejects any entry without one — so two files never overwrite
+  // each other here (see the platform's run-file-naming.ts). The runtime
   // still type-checks the field rather than trusting the JSON blindly.
   const manifest = (await manifestRes.json()) as {
-    documents?: { workspace_name?: unknown }[];
+    files?: { workspace_name?: unknown }[];
   };
-  const names = (manifest.documents ?? [])
+  const names = (manifest.files ?? [])
     .map((d) => d.workspace_name)
     .filter((n): n is string => typeof n === "string" && n.length > 0);
   if (names.length === 0) return;
 
-  const dir = path.join(deps.workspace, "documents");
+  // `files/` is the ONE directory the run's input files land in, and the one
+  // the platform prompt announces (`prompt-builder.ts` — `./files/<name>`,
+  // unconditionally). The two must stay spelled the same: a divergence is a
+  // prompt-level miss with the bytes sitting in a directory the agent is never
+  // told about, and nothing reports a fault.
+  const dir = path.join(deps.workspace, "files");
   await fs.mkdir(dir, { recursive: true });
 
-  // Sequential: input-document sets are small (typically 1–few files), so
+  // Sequential: input-file sets are small (typically 1–few files), so
   // streaming each in turn bounds open connections and peak memory without a
   // concurrency primitive.
   for (const name of names) {
     // Defence-in-depth: the platform sanitises names to a single path segment,
     // but never write outside `dir` on a malformed manifest.
     if (path.basename(name) !== name || name === "." || name === "..") {
-      return await deps.die(`Refusing unsafe document name: ${name}`);
+      return await deps.die(`Refusing unsafe file name: ${name}`);
     }
     let docRes: Response;
     try {
       docRes = await signedGetWithRetry(`${manifestUrl}/${encodeURIComponent(name)}`, deps);
     } catch (err) {
-      return await deps.die(`Failed to fetch document ${name}: ${getErrorMessage(err)}`);
+      return await deps.die(`Failed to fetch file ${name}: ${getErrorMessage(err)}`);
     }
     if (!docRes.ok || !docRes.body) {
-      return await deps.die(`Failed to fetch document ${name}: HTTP ${docRes.status}`);
+      return await deps.die(`Failed to fetch file ${name}: HTTP ${docRes.status}`);
     }
     // Stream the response body to disk chunk-by-chunk — peak memory stays
-    // bounded regardless of document size (WORKSPACE_MAX_DOCS_BYTES allows up
+    // bounded regardless of file size (WORKSPACE_MAX_FILES_BYTES allows up
     // to 256 MiB). We DO NOT use `Bun.write(path, docRes)` / `Bun.write(path,
     // docRes.body)`: handing the fetch `Response`/stream to `Bun.write` for
     // streaming-consume busy-loops at 100% CPU in the bundled runtime,
@@ -205,14 +276,14 @@ export async function provisionDocuments(deps: ProvisionDeps): Promise<void> {
         if (done) break;
         writer.write(value);
         // Apply backpressure so a fast upstream cannot queue unbounded chunks
-        // in the sink buffer — keeps peak memory flat for large documents.
+        // in the sink buffer — keeps peak memory flat for large files.
         await writer.flush();
       }
     } catch (err) {
       // A mid-stream read/write failure is fatal, same as a non-ok fetch: route
       // it through `die()` so the run gets an `appstrate.error` breadcrumb
       // rather than crashing out as an unhandled rejection.
-      return await deps.die(`Failed to stream document ${name}: ${getErrorMessage(err)}`);
+      return await deps.die(`Failed to stream file ${name}: ${getErrorMessage(err)}`);
     } finally {
       reader.releaseLock();
       await writer.end();

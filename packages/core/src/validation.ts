@@ -14,8 +14,9 @@ import {
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
-import { SELECTABLE_RUNTIME_TOOLS, isSelectableRuntimeTool } from "./runtime-tools-catalog.ts";
+import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
+import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -263,7 +264,7 @@ function refineAgentResourceHints(metaValue: unknown, ctx: z.RefinementCtx): voi
  */
 const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // All standard fields (name, version, schema_version, dependencies,
-  // display_name, input/output/config, timeout) inherited from the AFPS
+  // display_name, input/output, timeout) inherited from the AFPS
   // schema.
   // AFPS requires author (MUST, non-empty) for publication; core relaxes it
   // for local drafts (the agent-editor stores `author: ""` until the user
@@ -293,6 +294,13 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // `_meta`, because it is woven through the run pipeline (catalog
   // validation, prompt builder, sidecar tool registration) and namespacing
   // it would be disproportionate.
+  // The enum is {@link SELECTABLE_RUNTIME_TOOLS}, which is the canonical list
+  // and nothing else — there are no retired spellings left to accept. An id
+  // the platform does not know is DROPPED structurally by
+  // `dropRetiredRuntimeTools` before Zod ever sees it, and the drop is
+  // reported to the caller rather than guessed at. Resolution is deliberately
+  // not a Zod `.transform()`: that makes the field unrepresentable in the
+  // generated AFPS JSON Schema and erases the enum.
   runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
 });
 
@@ -438,8 +446,13 @@ function parseWithSchema(
 }
 
 /**
- * Strip the `runtime_tools` entries the platform no longer knows how to build
- * from an ALREADY-STORED agent manifest.
+ * Canonicalize an ALREADY-STORED agent manifest's `runtime_tools`: strip the
+ * entries the platform no longer knows how to build, and collapse duplicates.
+ *
+ * **Every drop is reported, never swallowed.** The `dropped` array reaches the
+ * caller, which is what makes a removal auditable instead of an agent quietly
+ * losing a tool. There is deliberately no alias table any more: an id the
+ * platform does not know is not guessed at, it is removed and named.
  *
  * The runtime-tool set evolves, and a removal is not retroactive: manifests
  * persisted before it (DB drafts, and published ZIPs which are immutable by
@@ -487,15 +500,10 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
   if (manifest.type !== "agent") return { manifest, dropped: [] };
   const raw = manifest.runtime_tools;
   if (!Array.isArray(raw)) return { manifest, dropped: [] };
-  const kept: unknown[] = [];
-  const dropped: string[] = [];
-  for (const entry of raw) {
-    if (isSelectableRuntimeTool(entry)) kept.push(entry);
-    else dropped.push(String(entry));
-  }
-  if (dropped.length === 0) return { manifest, dropped: [] };
+  const { ids, dropped, changed } = canonicalizeRuntimeToolIds(raw);
+  if (!changed) return { manifest, dropped: [] };
   const next = { ...manifest };
-  if (kept.length > 0) next.runtime_tools = kept;
+  if (ids.length > 0) next.runtime_tools = ids;
   else delete next.runtime_tools;
   return { manifest: next, dropped };
 }
@@ -599,12 +607,18 @@ export function validateManifest(
   // all root fields. Dispatch purely on the root `type` discriminator.
   if (type === "mcp-server") return parseWithSchema(mcpServerManifestSchema, raw);
   if (type === "agent") {
-    if (options?.retiredRuntimeTools !== "drop") {
-      // Author direction (default): the `runtime_tools` enum rejects, so a
-      // typo or a retired id surfaces as a field error the editor can render.
-      return parseWithSchema(agentManifestSchema, raw);
-    }
     const { manifest, dropped } = dropRetiredRuntimeTools(obj);
+    if (options?.retiredRuntimeTools !== "drop") {
+      // Author direction (default): an id that resolves to NOTHING must surface
+      // as a field error the editor can render, so the raw manifest is handed
+      // to Zod and the `runtime_tools` enum rejects it. When nothing was
+      // dropped, the canonicalized manifest is what gets parsed and persisted
+      // — `canonicalizeRuntimeToolIds` collapses duplicates, which is the only
+      // thing it does now: it holds no alias table, so no id is rewritten to
+      // another spelling here.
+      if (dropped.length > 0) return parseWithSchema(agentManifestSchema, raw);
+      return parseWithSchema(agentManifestSchema, manifest);
+    }
     return parseWithSchema(agentManifestSchema, manifest, dropped);
   }
   if (type === "skill") return parseWithSchema(skillManifestSchema, raw);
@@ -624,19 +638,12 @@ export function validateManifest(
   };
 }
 
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
 /**
  * Extract name and description from a SKILL.md file's YAML frontmatter.
+ *
+ * Parsed by `parseSkillFrontmatter` — two parsers would let this read a name the
+ * write-path gate rejects. This wrapper only adds warnings, and never throws.
+ *
  * @param content - The full text content of a SKILL.md file
  * @returns Extracted name, description, and any parsing warnings
  */
@@ -646,21 +653,15 @@ export function extractSkillMeta(content: string): {
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const fmMatch = content.match(/^---[^\S\n]*\n([\s\S]*?)\n---/);
-  if (!fmMatch) {
+  const { found, error, name, description } = parseSkillFrontmatter(content);
+  if (!found) {
     warnings.push("No YAML frontmatter detected (expected --- ... --- block)");
     return { name: "", description: "", warnings };
   }
-
-  const fm = fmMatch[1]!;
-  // Anchor to the start of a line (`^` + `m` flag) so a longer key that
-  // ends in the target token (e.g. `displayname:` / `x-description:`) does
-  // not shadow the real top-level `name:` / `description:` field.
-  const nameMatch = fm.match(/^name:[ \t]*(.+)/m);
-  const descMatch = fm.match(/^description:[ \t]*(.+)/m);
-
-  const name = nameMatch ? stripQuotes(nameMatch[1]!) : "";
-  const description = descMatch ? stripQuotes(descMatch[1]!) : "";
+  if (error) {
+    warnings.push(`Could not read YAML frontmatter: ${error}`);
+    return { name: "", description: "", warnings };
+  }
 
   if (!name) {
     warnings.push("Missing 'name' field in YAML frontmatter");

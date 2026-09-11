@@ -22,6 +22,7 @@ import { Type, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runne
 import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
+  mergeConnectOffers,
   redactConnectPayload,
   splitConnectPayload,
   splitJsonText,
@@ -37,47 +38,54 @@ interface PiToolResult {
   content: Array<{ type: "text"; text: string }>;
   details: unknown;
   /**
-   * Typed connect offer for the UI card; pi-ai never serializes it upstream.
-   * CONTRACT: pi-agent-core forwards the execute return REFERENCE into
-   * `tool_execution_end` only while no `afterToolCall` hook is configured —
-   * that hook rebuilds the result as `{content, details, terminate}` and would
-   * silently strip this field (and `details` is redacted, so nothing would
-   * fall back). If a hook is ever added, it must carry `connectOffer` through.
+   * Typed connect offers for the UI cards — one per connect URL the payload
+   * carried, in walk order; omitted entirely when there were none, so a payload
+   * without connect links stays byte-identical. pi-ai never serializes the
+   * field upstream.
+   * CONTRACT: pi-agent-core preserves unknown result fields across the
+   * `afterToolCall` hook — `finalizeExecutedToolCall` SPREADS the original
+   * result (`{...result, content, details, usage, terminate}`, `agent-loop.js`),
+   * so a configured hook can no longer strip this field. Verified against the
+   * pinned `@earendil-works/pi-agent-core@0.85.1`; re-check on an SDK bump,
+   * because `details` is redacted and nothing would fall back.
    */
-  connectOffer?: ConnectOffer;
+  connectOffers?: ConnectOffer[];
 }
 
 /**
- * Wrap an arbitrary payload as a Pi tool result. Channel split mirrors the
- * The model-visible channel: `content` is what pi-ai serializes to
- * the MODEL, so connect links are redacted there; the connect URL surfaces
- * ONLY through the typed `connectOffer` field the connect card reads. `details`
- * (UI JSON view) carries the redacted payload — the live URL lives in exactly
- * one place.
+ * Wrap an arbitrary payload as a Pi tool result. The channel split is the
+ * point. The model-visible channel: `content` is what pi-ai serializes to
+ * the MODEL, so connect links are redacted there; the connect URLs surface
+ * ONLY through the typed `connectOffers` field the connect cards read.
+ * `details` (Pi's in-memory UI channel; stripped before persistence by
+ * `ui-stream-mapper.ts`) carries the redacted payload — the live URLs live in
+ * exactly one place.
  */
 export function toPiToolResult(payload: unknown): PiToolResult {
-  const { redacted, offer } = splitConnectPayload(payload);
+  const { redacted, offers } = splitConnectPayload(payload);
   return {
     content: [{ type: "text", text: JSON.stringify(redacted) }],
     details: redacted,
-    ...(offer ? { connectOffer: offer } : {}),
+    ...(offers.length > 0 ? { connectOffers: offers } : {}),
   };
 }
 
-/** Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (text/image blocks only). */
+/** Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (every block as text). */
 export function mcpResultToPi(result: {
   content: Array<Record<string, unknown>>;
   structuredContent?: unknown;
 }): PiToolResult {
-  let offer: ConnectOffer | null = null;
+  // One list per text block, merged below — a result may split a readiness
+  // error across blocks, and each block's connect links must all reach the UI.
+  const blockOffers: ConnectOffer[][] = [];
   const content = result.content.map((c) => {
     // MODEL-visible channel — scrub connect links from JSON text (valid JSON is
     // redacted and re-stringified only when something changed; non-JSON text
-    // passes through byte-identical). The scrubbed URL is captured as the
-    // typed offer instead.
+    // passes through byte-identical). The scrubbed URLs are captured as the
+    // typed offers instead.
     if (c.type === "text") {
       const split = splitJsonText(String(c.text ?? ""));
-      offer ??= split.offer;
+      blockOffers.push(split.offers);
       return { type: "text" as const, text: split.text };
     }
     // Pi tool results the LLM reads are text/image; render anything else as a
@@ -87,21 +95,25 @@ export function mcpResultToPi(result: {
     }
     return { type: "text" as const, text: JSON.stringify(redactConnectPayload(c)) };
   });
-  // `details` is UI-only (never serialized to the model) but persisted — so it
-  // is redacted too; the connect card reads the typed `connectOffer` field.
+  let offers = mergeConnectOffers(blockOffers);
+  // `details` is Pi's in-memory UI channel (never serialized to the model,
+  // stripped before persistence) — redacted all the same, so the live URLs
+  // exist only in the typed `connectOffers` field the connect cards read.
   let details: unknown;
   if (result.structuredContent !== undefined) {
     const sc = splitConnectPayload(result.structuredContent);
-    // structuredContent is the canonical payload — its offer wins.
-    if (sc.offer) offer = sc.offer;
+    // structuredContent is the canonical payload — its offers replace the
+    // text-derived ones wholesale, rather than merging with a text block that
+    // may be a partial rendering of the same thing.
+    if (sc.offers.length > 0) offers = sc.offers;
     details = sc.redacted;
   } else {
     details = { ...result, content };
   }
-  return { content, details, ...(offer ? { connectOffer: offer } : {}) };
+  return { content, details, ...(offers.length > 0 ? { connectOffers: offers } : {}) };
 }
 
-export interface PlatformMcpTools {
+interface PlatformMcpTools {
   extensionFactories: ExtensionFactory[];
   /** Server usage guidance (MCP `instructions`), to append to the system prompt. */
   instructions?: string;
@@ -130,10 +142,10 @@ export interface PiTurnBudget {
   now?: () => number;
 }
 
-export interface BuildPlatformMcpToolsOptions {
+interface BuildPlatformMcpToolsOptions {
   /** Platform MCP endpoint (`/api/mcp/o/:org?context=injected`). */
   url: string;
-  /** Auth + scoping headers (short-lived MCP loopback bearer + org/app ids). */
+  /** Auth + scoping headers (short-lived MCP loopback bearer + org/space ids). */
   headers: Record<string, string>;
   /** Emits a UI chunk into the live turn stream (used for run_and_wait cards). */
   writeChunk: (chunk: UIMessageChunk) => void;
@@ -141,6 +153,21 @@ export interface BuildPlatformMcpToolsOptions {
   signal: AbortSignal;
   /** Turn deadline + step counter — bounds run_and_wait and feeds the budget note. */
   turnBudget: PiTurnBudget;
+  /**
+   * Transport for every platform hop the tool layer makes. Production passes the
+   * platform's in-process dispatch, so the MCP handshake (`initialize` /
+   * `notifications/initialized` / `tools/list`) AND each `run_and_wait`'s launch
+   * POST + poll loop re-enter the Hono app directly instead of opening real
+   * loopback TCP connections to this same process. `run_and_wait` is the heavier
+   * half by far — the handshake is three hops per turn, a single run is one
+   * launch plus a poll per ~55 s of wait. Auth and RBAC still run on every hop —
+   * `dispatch` goes through the full pipeline — so this trades sockets for
+   * latency, not safety.
+   *
+   * Omitted (tests, and any caller without a dispatcher) → global `fetch`, i.e.
+   * the previous behaviour.
+   */
+  fetch?: typeof fetch;
 }
 
 /**
@@ -181,6 +208,13 @@ export async function buildPlatformMcpTools(
   const client = await createMcpHttpClient(opts.url, {
     clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
     extraHeaders: opts.headers,
+    // The HANDSHAKE, not only the `listTools` below. In production `opts.fetch`
+    // is the platform's in-process dispatch, so `initialize` re-enters the same
+    // process — a DB pool exhausted by concurrent runs or a module hook that
+    // never settles wedges it, and without the signal the turn's stop button
+    // and its deadline are both inert for the SDK's full 60 s request timeout.
+    signal: opts.signal,
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
 
   let listed: Awaited<ReturnType<AppstrateMcpClient["listTools"]>>;
@@ -197,6 +231,9 @@ export async function buildPlatformMcpTools(
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
           headers: opts.headers,
+          // Same seam as the handshake above, and this is the tool that needs
+          // it most: every `run_and_wait` is a launch POST plus a poll loop.
+          fetch: opts.fetch ?? fetch,
           writeChunk: opts.writeChunk,
           signal: opts.signal,
           turnBudget: opts.turnBudget,
@@ -259,6 +296,8 @@ function makeRunAndWaitExtension(
   ctx: {
     origin: string;
     headers: Record<string, string>;
+    /** Transport for the launch POST and the poll loop — see the option above. */
+    fetch: typeof fetch;
     writeChunk: (chunk: UIMessageChunk) => void;
     signal: AbortSignal;
     turnBudget: PiTurnBudget;
@@ -282,8 +321,12 @@ function makeRunAndWaitExtension(
         for await (const step of runAndWaitStepsWithinTurnBudget(params, {
           origin: ctx.origin,
           headers: ctx.headers,
-          fetch,
+          fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
+          // The chat holds the connect capability itself — the link goes to a
+          // card, never to the model. See `RUN_CONNECT_OFFERS_HEADER` in
+          // `@appstrate/core/run-and-wait-client`.
+          connectOffers: true,
           budget: {
             turnDeadlineAt: ctx.turnBudget.deadlineAt,
             chatSessionId: ctx.turnBudget.chatSessionId,

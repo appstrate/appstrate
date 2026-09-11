@@ -7,6 +7,8 @@
  * cycle: api.ts → helpers/*.ts → api.ts).
  */
 
+import { DEFAULT_IO as BASE_IO, type CommandIO } from "../../lib/io.ts";
+
 export interface ApiCommandOptions {
   profile?: string;
   /**
@@ -141,35 +143,23 @@ export interface ApiCommandOptions {
 }
 
 /**
- * Test seam. Production writes directly to `process.stdout.write` etc.;
- * unit tests inject in-memory sinks to assert on output ordering + byte
- * counts without spawning a subprocess.
+ * The shared `CommandIO` seam (see `lib/io.ts`) plus the two hooks only the
+ * `api` command needs: it installs a SIGINT handler and can stream a request
+ * body from stdin, neither of which any other command does.
  */
-export interface ApiCommandIO {
-  stdout: { write(chunk: Uint8Array | string): void };
-  stderr: { write(chunk: Uint8Array | string): void };
-  /** Hook so tests can assert exit codes without terminating the runner. */
-  exit: (code: number) => never;
+export interface ApiCommandIO extends CommandIO {
   /** Install SIGINT handler. Tests pass a no-op to skip. */
   onSigint?: (cb: () => void) => void;
   /** Optional stdin override. Defaults to `Bun.stdin.stream()`. */
   stdinStream?: () => ReadableStream<Uint8Array>;
 }
 
+/**
+ * Production wiring: the shared defaults, extended — not re-implemented — so
+ * stdout / stderr / exit have exactly one definition in the CLI.
+ */
 export const DEFAULT_IO: ApiCommandIO = {
-  stdout: {
-    write(chunk) {
-      if (typeof chunk === "string") process.stdout.write(chunk);
-      else process.stdout.write(chunk);
-    },
-  },
-  stderr: {
-    write(chunk) {
-      if (typeof chunk === "string") process.stderr.write(chunk);
-      else process.stderr.write(chunk);
-    },
-  },
-  exit: (code) => process.exit(code),
+  ...BASE_IO,
   onSigint: (cb) => {
     process.once("SIGINT", cb);
   },

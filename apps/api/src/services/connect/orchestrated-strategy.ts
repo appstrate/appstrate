@@ -30,7 +30,7 @@ import {
   getAppstrateConnectMeta,
   type AfpsManifestConnect,
 } from "../integration-manifest-helpers.ts";
-import type { AppScope } from "../../lib/scope.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 import {
   extractIdentity,
@@ -48,7 +48,7 @@ import { assertFieldsInput, requireNonEmptyCredentials, connectionTarget } from 
 
 /** One connect-tool login run, handed to the {@link ConnectToolExecutor}. */
 export interface ConnectToolExecution {
-  scope: AppScope;
+  scope: SpaceScope;
   /** Acquiring actor on first connect; absent on a system re-bootstrap (reacquire). */
   actor?: Actor;
   integrationId: string;

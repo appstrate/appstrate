@@ -35,8 +35,8 @@ import type { ListEnvelope } from "@appstrate/shared-types";
 import {
   RUN_WORKSPACE_BUCKET,
   parseRunWorkspaceManifestKey,
-  parseRunDocumentsManifest,
-  runWorkspaceDocumentKey,
+  parseRunFilesManifest,
+  runWorkspaceFileKey,
 } from "./run-workspace-manifest.ts";
 
 /** A Drizzle executor — either the root `db` or an open transaction handle. */
@@ -72,7 +72,7 @@ const BACKOFF_CAP_MS = 6 * 60 * 60 * 1000;
  * mid-flight and another instance re-claims jobs this pass is still executing.
  * 50 × 15s ≈ 12.5 min, inside the 15-minute lease.
  */
-const DEFAULT_BATCH_LIMIT = 50;
+const BATCH_LIMIT = 50;
 
 /**
  * Lease window: how far a claim pushes `next_attempt_at` forward while a pass
@@ -80,7 +80,7 @@ const DEFAULT_BATCH_LIMIT = 50;
  * no separate column. A worker that crashes between claim and settle leaves its
  * jobs leased; they simply become due again once the lease expires and a later
  * pass re-runs the (idempotent) delete. Sized to cover a FULL batch of slow
- * deletes (see {@link DEFAULT_BATCH_LIMIT}) rather than a single one.
+ * deletes (see {@link BATCH_LIMIT}) rather than a single one.
  */
 const CLAIM_LEASE_MS = 15 * 60 * 1000;
 
@@ -137,19 +137,17 @@ export async function enqueueStorageDeletion(
 }
 
 /** Injectable dependencies for {@link processStorageDeletionJobs} (DI, no module mocks). */
-export interface ProcessStorageDeletionDeps {
+interface ProcessStorageDeletionDeps {
   /** Physical delete (defaults to the real storage adapter). Idempotent on missing objects. */
   deleteFile?: (bucket: string, path: string) => Promise<void>;
   /** Small-object download used to expand run-workspace manifests. */
   downloadFile?: (bucket: string, path: string) => Promise<Uint8Array | null>;
-  /** Max jobs to claim in this pass. */
-  batchLimit?: number;
   /** Random source for backoff jitter (test seam). */
   rand?: () => number;
 }
 
 /** Outcome of one worker pass. */
-export interface ProcessStorageDeletionResult {
+interface ProcessStorageDeletionResult {
   claimed: number;
   completed: number;
   failed: number;
@@ -157,11 +155,12 @@ export interface ProcessStorageDeletionResult {
 
 /**
  * Delete one outbox target. A run-workspace manifest is a durable deletion
- * index: delete every document it names first, then the manifest itself. If a
- * document delete fails, the manifest remains available and the whole job can
+ * index: delete every file it names first, then the manifest itself. If a
+ * file delete fails, the manifest remains available and the whole job can
  * be retried idempotently. This lets parent-row cascades enqueue two bounded
  * jobs per run (bundle + manifest) without storage I/O inside their DB
- * transaction or silently orphaning `documents/*`.
+ * transaction or silently orphaning the run's `{runId}/files/*` objects (see
+ * {@link runWorkspaceFileKey}).
  */
 async function deleteStorageTarget(
   bucket: string,
@@ -180,13 +179,13 @@ async function deleteStorageTarget(
     // Strict shared parse (same reader the serve path uses): every entry name is
     // validated as a single path segment BEFORE it becomes a key, so a corrupted
     // manifest can never steer a delete outside the run's own prefix.
-    const manifest = parseRunDocumentsManifest(manifestBytes, storageKey);
-    for (const name of new Set(manifest.documents.map((d) => d.workspace_name))) {
-      await del(bucket, runWorkspaceDocumentKey(runId, name));
+    const manifest = parseRunFilesManifest(manifestBytes, storageKey);
+    for (const name of new Set(manifest.files.map((d) => d.workspace_name))) {
+      await del(bucket, runWorkspaceFileKey(runId, name));
     }
   }
 
-  // Delete the index last. A retry can then always rediscover any document
+  // Delete the index last. A retry can then always rediscover any file
   // whose previous physical deletion did not complete.
   await del(bucket, storageKey);
 }
@@ -231,7 +230,6 @@ export async function processStorageDeletionJobs(
 ): Promise<ProcessStorageDeletionResult> {
   const del = deps.deleteFile ?? storageDelete;
   const download = deps.downloadFile ?? storageDownload;
-  const batchLimit = deps.batchLimit ?? DEFAULT_BATCH_LIMIT;
   const rand = deps.rand ?? Math.random;
 
   let completed = 0;
@@ -251,7 +249,7 @@ export async function processStorageDeletionJobs(
       ),
     )
     .orderBy(storageDeletionJobs.nextAttemptAt)
-    .limit(batchLimit)
+    .limit(BATCH_LIMIT)
     .for("update", { skipLocked: true });
 
   const claimedJobs = await db
@@ -335,7 +333,7 @@ async function emitBacklogMetrics(): Promise<void> {
 // Operator surface (admin dead-letter visibility)
 // ---------------------------------------------------------------------------
 
-export type StorageDeletionJobStatus = "pending" | "dead" | "completed";
+type StorageDeletionJobStatus = "pending" | "dead" | "completed";
 
 /**
  * A storage-deletion job row as surfaced to the admin list.
@@ -344,7 +342,7 @@ export type StorageDeletionJobStatus = "pending" | "dead" | "completed";
  * only `id` and `createdAt` sit on the universal DB-convention carve-out list
  * (`completed_at`, like every other domain timestamp, does NOT).
  */
-export interface StorageDeletionJobView {
+interface StorageDeletionJobView {
   id: string;
   bucket: string;
   storage_key: string;
@@ -379,7 +377,7 @@ function statusFilter(status: StorageDeletionJobStatus) {
  * Pagination is the codebase's Stripe-style cursor idiom (see
  * `docs/CASING_CONVENTIONS.md` → "Pagination styles"): `startingAfter` carries
  * the id of the last row of the previous page — the same contract as
- * `/api/end-users` and the document gallery — and the response is the standard
+ * `/api/end-users` and the file gallery — and the response is the standard
  * `{ object: "list", data, hasMore }` envelope. The cursor row is looked up to
  * recover its `created_at`, so the keyset comparison stays on the full sort
  * tuple.

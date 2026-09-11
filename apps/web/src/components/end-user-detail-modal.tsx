@@ -12,7 +12,8 @@ import { Label } from "@appstrate/ui/components/label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
-import { formatDateField } from "../lib/markdown";
+import { usePermissions } from "../hooks/use-permissions";
+import { formatDateField } from "../lib/format-date";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 interface Props {
@@ -129,6 +130,7 @@ export function EndUserDetailModal({
   onDeleted,
 }: Props) {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   const deleteMutation = useDeleteEndUser();
   const updateMutation = useUpdateEndUser();
   const mounted = useRef(true);
@@ -212,7 +214,7 @@ export function EndUserDetailModal({
           open={open}
           onClose={handleClose}
           preventClose={updateMutation.isPending}
-          title={t("applications.editEndUser")}
+          title={t("spaces.editEndUser")}
           actions={
             <>
               <Button
@@ -242,17 +244,17 @@ export function EndUserDetailModal({
             className="space-y-4"
           >
             <div className="space-y-2">
-              <Label htmlFor="eu-edit-name">{t("applications.endUserName")}</Label>
+              <Label htmlFor="eu-edit-name">{t("spaces.endUserName")}</Label>
               <Input
                 id="eu-edit-name"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                placeholder={t("applications.endUserNamePlaceholder")}
+                placeholder={t("spaces.endUserNamePlaceholder")}
                 autoFocus
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="eu-edit-email">{t("applications.endUserEmail")}</Label>
+              <Label htmlFor="eu-edit-email">{t("spaces.endUserEmail")}</Label>
               <Input
                 id="eu-edit-email"
                 type="email"
@@ -262,7 +264,7 @@ export function EndUserDetailModal({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="eu-edit-extid">{t("applications.endUserExternalId")}</Label>
+              <Label htmlFor="eu-edit-extid">{t("spaces.endUserExternalId")}</Label>
               <Input
                 id="eu-edit-extid"
                 value={editExternalId}
@@ -272,20 +274,20 @@ export function EndUserDetailModal({
             </div>
 
             <div className="space-y-2">
-              <Label>{t("applications.metadata")}</Label>
+              <Label>{t("spaces.metadata")}</Label>
               <div className="space-y-2">
                 {editMetadata.map((entry, index) => (
                   <div key={index} className="flex items-center gap-2">
                     <Input
                       value={entry.key}
                       onChange={(e) => handleMetadataChange(index, "key", e.target.value)}
-                      placeholder={t("applications.metadataKey")}
+                      placeholder={t("spaces.metadataKey")}
                       className="flex-1"
                     />
                     <Input
                       value={entry.value}
                       onChange={(e) => handleMetadataChange(index, "value", e.target.value)}
-                      placeholder={t("applications.metadataValue")}
+                      placeholder={t("spaces.metadataValue")}
                       className="flex-1"
                     />
                     <Button
@@ -302,7 +304,7 @@ export function EndUserDetailModal({
               </div>
               <Button type="button" variant="outline" size="sm" onClick={handleMetadataAdd}>
                 <Plus size={14} className="mr-1" />
-                {t("applications.addMetadataKey")}
+                {t("spaces.addMetadataKey")}
               </Button>
             </div>
 
@@ -324,16 +326,20 @@ export function EndUserDetailModal({
       <Modal
         open={open}
         onClose={handleClose}
-        title={endUser.name || endUser.email || t("applications.endUserDetail")}
+        title={endUser.name || endUser.email || t("spaces.endUserDetail")}
         actions={
           <>
-            <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
-              {t("common:btn.delete")}
-            </Button>
+            {can("end-users:delete") && (
+              <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
+                {t("common:btn.delete")}
+              </Button>
+            )}
             <div className="flex-1" />
-            <Button variant="outline" onClick={startEditing}>
-              {t("common:btn.edit")}
-            </Button>
+            {can("end-users:write") && (
+              <Button variant="outline" onClick={startEditing}>
+                {t("common:btn.edit")}
+              </Button>
+            )}
             <Button variant="outline" onClick={handleClose}>
               {t("common:btn.close")}
             </Button>
@@ -342,17 +348,17 @@ export function EndUserDetailModal({
       >
         <div className="space-y-4">
           <CopyableField label="ID" value={endUser.id} />
-          <ReadOnlyField label={t("applications.endUserName")} value={endUser.name} />
-          <ReadOnlyField label={t("applications.endUserEmail")} value={endUser.email} />
-          <ReadOnlyField label={t("applications.endUserExternalId")} value={endUser.externalId} />
+          <ReadOnlyField label={t("spaces.endUserName")} value={endUser.name} />
+          <ReadOnlyField label={t("spaces.endUserEmail")} value={endUser.email} />
+          <ReadOnlyField label={t("spaces.endUserExternalId")} value={endUser.externalId} />
           <ReadOnlyField
-            label={t("applications.createdAtLabel")}
+            label={t("spaces.createdAtLabel")}
             value={formatDateField(endUser.createdAt)}
           />
 
           {metaEntries.length > 0 && (
             <div className="space-y-2">
-              <Label className="text-muted-foreground text-xs">{t("applications.metadata")}</Label>
+              <Label className="text-muted-foreground text-xs">{t("spaces.metadata")}</Label>
               <div className="flex flex-wrap gap-1.5">
                 {metaEntries.map(([key, val]) => (
                   <Badge key={key} variant="outline" className="text-xs font-normal">
@@ -371,7 +377,7 @@ export function EndUserDetailModal({
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         title={t("common:btn.confirm")}
-        description={t("applications.deleteEndUserConfirm")}
+        description={t("spaces.deleteEndUserConfirm")}
         isPending={deleteMutation.isPending}
         onConfirm={async () => {
           try {

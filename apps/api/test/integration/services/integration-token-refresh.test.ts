@@ -33,12 +33,21 @@ import { recordIntegrationRefreshFailure } from "../../../src/services/integrati
 interface TokenServer {
   url: string;
   setResponse: (body: Record<string, unknown>, status?: number) => void;
+  /** Hold each request open, so overlapping exchanges are observable. */
+  setDelayMs: (ms: number) => void;
+  /** Highest number of exchanges this server ever served at the same time. */
+  maxConcurrent: () => number;
+  /** Forget that peak, so an assertion measures only what follows. */
+  resetPeak: () => void;
   stop: () => void;
 }
 
 function startTokenServer(): TokenServer {
   let nextBody: Record<string, unknown> = {};
   let nextStatus = 200;
+  let delayMs = 0;
+  let inFlight = 0;
+  let peak = 0;
   const server = (
     globalThis as unknown as {
       Bun: {
@@ -52,17 +61,29 @@ function startTokenServer(): TokenServer {
   ).Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    fetch: () =>
-      new Response(JSON.stringify(nextBody), {
+    fetch: async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+      inFlight -= 1;
+      return new Response(JSON.stringify(nextBody), {
         status: nextStatus,
         headers: { "Content-Type": "application/json" },
-      }),
+      });
+    },
   });
   return {
     url: `http://${server.hostname}:${server.port}/token`,
     setResponse: (body, status = 200) => {
       nextBody = body;
       nextStatus = status;
+    },
+    setDelayMs: (ms) => {
+      delayMs = ms;
+    },
+    maxConcurrent: () => peak,
+    resetPeak: () => {
+      peak = 0;
     },
     stop: () => server.stop(),
   };
@@ -113,7 +134,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     token.stop();
   });
 
-  async function seedConnection(initialScopes: string[]): Promise<string> {
+  async function seedConnection(initialScopes: string[], expiresAt?: Date): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
         access_token: "old-access",
@@ -128,10 +149,11 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
         integrationId: PACKAGE_ID,
         authKey: "primary",
         accountId: "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: ciphertext,
         scopesGranted: initialScopes,
+        ...(expiresAt ? { expiresAt } : {}),
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -209,6 +231,82 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId));
     expect(row!.scopesGranted.sort()).toEqual(["read", "send"]);
+  });
+
+  // ── The freshness short-circuit, both sides of it ──
+  //
+  // `dedupedRefresh` re-reads the row after winning the lock and may answer
+  // from it instead of spending the refresh_token. That short-circuit is
+  // correct for a PROACTIVE refresh and wrong for a FORCED one, so both
+  // directions are pinned here: removing it entirely would burn a peer's
+  // just-rotated token on every lead-window pass, and leaving it in the forced
+  // path is the bug it was masking.
+
+  it("force (default): refreshes a token that is nowhere near expiry", async () => {
+    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+    const result = await forceRefreshIntegrationConnection(
+      connId,
+      PACKAGE_ID,
+      "primary",
+      (await fetchEncrypted(connId))!,
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+    );
+
+    expect(result.fields.access_token).toBe("rotated");
+  });
+
+  it("force:false: serves the stored token when it is nowhere near expiry", async () => {
+    // CONTROL for the test above. The proactive caller has no evidence against
+    // the stored token, and a peer may have written it microseconds ago — so
+    // the exchange is skipped and the refresh_token is not double-spent. The
+    // token server is armed with a DIFFERENT token, so contacting it would show.
+    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
+    token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
+
+    const result = await forceRefreshIntegrationConnection(
+      connId,
+      PACKAGE_ID,
+      "primary",
+      (await fetchEncrypted(connId))!,
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+      { force: false },
+    );
+
+    expect(result.fields.access_token).toBe("old-access");
+  });
+
+  it("never exchanges concurrently for a forced and a proactive refresh of one connection", async () => {
+    // Expiry INSIDE the 5-minute lead window, so the proactive caller has no
+    // short-circuit either when it starts: both flights want the endpoint, and
+    // only the per-key serialization in `dedupedRefresh` keeps them apart.
+    const connId = await seedConnection(["read"], new Date(Date.now() + 2 * 60_000));
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+    token.setDelayMs(50);
+    // The assertion below must measure these two flights and nothing else.
+    token.resetPeak();
+
+    const encrypted = (await fetchEncrypted(connId))!;
+    const refreshCtx = { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" };
+    const [forced, proactive] = await Promise.all([
+      forceRefreshIntegrationConnection(connId, PACKAGE_ID, "primary", encrypted, refreshCtx),
+      forceRefreshIntegrationConnection(connId, PACKAGE_ID, "primary", encrypted, refreshCtx, {
+        force: false,
+      }),
+    ]);
+
+    expect(forced.fields.access_token).toBe("rotated");
+    // The proactive flight re-reads after the forced one wrote, so it answers
+    // from the row instead of spending the refresh_token a second time.
+    expect(proactive.fields.access_token).toBe("rotated");
+    expect(token.maxConcurrent()).toBe(1);
+
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(false);
   });
 
   it("treats scope creep (response wider than stored) as non-shrink", async () => {
@@ -322,7 +420,7 @@ describe("integration refresh-failure escalation", () => {
         integrationId: PACKAGE_ID,
         authKey: "primary",
         accountId: "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: ciphertext,
         expiresAt: opts.expiresAt,
@@ -338,7 +436,6 @@ describe("integration refresh-failure escalation", () => {
       .select({
         refreshFailureCount: integrationConnections.refreshFailureCount,
         needsReconnection: integrationConnections.needsReconnection,
-        lastRefreshFailureAt: integrationConnections.lastRefreshFailureAt,
       })
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId))
@@ -355,7 +452,6 @@ describe("integration refresh-failure escalation", () => {
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(4);
     expect(row.needsReconnection).toBe(false); // expiry gate blocks escalation
-    expect(row.lastRefreshFailureAt).not.toBeNull();
   });
 
   it("does NOT escalate while the token is expired but within the grace window", async () => {
@@ -414,7 +510,6 @@ describe("integration refresh-failure escalation", () => {
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(0);
-    expect(row.lastRefreshFailureAt).toBeNull();
     expect(row.needsReconnection).toBe(false);
   });
 
@@ -444,7 +539,6 @@ describe("integration refresh-failure escalation", () => {
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(2);
-    expect(row.lastRefreshFailureAt).not.toBeNull();
   });
 
   it("a transient upstream failure during refresh increments the counter and rethrows", async () => {

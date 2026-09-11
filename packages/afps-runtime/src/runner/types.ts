@@ -2,18 +2,14 @@
 // Copyright 2026 Appstrate
 
 /**
- * AFPS Runner surface.
+ * AFPS run invocation surface.
  *
- * A {@link Runner} takes a loaded bundle + execution context,
- * dispatches tool invocations to the LLM, and emits the resulting
- * {@link RunEvent}s to the caller's {@link EventSink}. Tools come from
+ * {@link RunOptions} is what a runner is handed: a loaded bundle, the
+ * per-run execution context, the {@link EventSink} that receives every
+ * RunEvent the tools emit, and a cancellation token. Tools come from
  * spawned `mcp-server` packages and integrations; credentialled HTTP
  * (integration `api_call`) is wired by the runner implementation as
  * pre-built tools, not via a generic in-process resolver.
- *
- * The runtime ships this interface as the canonical execution contract;
- * individual implementations (Pi SDK backend, mock replay, remote
- * delegation, etc.) live outside this package.
  *
  * Specification: `afps-spec/spec.md` §8, spec document §5.
  */
@@ -33,13 +29,4 @@ export interface RunOptions {
 
   /** Cancellation token. Runner MUST stop emitting and reject if aborted. */
   signal?: AbortSignal;
-}
-
-/**
- * Execution surface: take a loaded bundle + execution context, wire the
- * resolvers, dispatch tools to the LLM, emit RunEvents to the sink.
- */
-export interface Runner {
-  readonly name: string;
-  run(options: RunOptions): Promise<void>;
 }

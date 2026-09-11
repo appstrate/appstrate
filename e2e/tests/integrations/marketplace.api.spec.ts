@@ -21,6 +21,7 @@
  */
 
 import { test, expect } from "../../fixtures/api.fixture.ts";
+import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 
 test.describe("Integration marketplace API surface", () => {
   test("GET /api/integrations returns a list envelope (empty for a fresh org)", async ({
@@ -62,19 +63,19 @@ test.describe("Integration marketplace API surface", () => {
   }) => {
     const res = await apiClient.get("/integrations/@official/missing/connections");
     // The route loads the integration first; missing one yields 404 via
-    // `assertAppBelongsToOrg` + manifest lookup. Validates the regex
+    // `assertSpaceBelongsToOrg` + manifest lookup. Validates the regex
     // matcher accepts the `@scope/name` segment past the `/connections`
     // trailing path.
     expect([404, 200]).toContain(res.status());
   });
 
-  test("X-Org-Id and X-Application-Id headers are required by the integrations routes", async ({
+  test("X-Org-Id and X-Space-Id headers are required by the integrations routes", async ({
     request,
     apiClient,
   }) => {
-    // Sanity check that the routes are app-scoped (require X-Application-Id).
+    // Sanity check that the routes are space-scoped (require X-Space-Id).
     // The `apiClient` already injects both; a bare request must 401 or 400.
-    const res = await request.get("http://localhost:3000/api/integrations");
+    const res = await request.get(`${E2E_BASE_URL}/api/integrations`);
     expect([400, 401]).toContain(res.status());
     // Authenticated client still works.
     const ok = await apiClient.get("/integrations");

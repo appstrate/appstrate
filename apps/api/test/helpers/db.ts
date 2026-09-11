@@ -8,13 +8,12 @@
  */
 import { db, closeDb } from "@appstrate/db/client";
 import { sql } from "drizzle-orm";
-import type { Db } from "@appstrate/db/client";
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { withDeadlockRetry } from "./deadlock-retry.ts";
+import { clearAllCachesLocally } from "@appstrate/core/cache";
 
 export { db, closeDb };
-export type { Db };
 
 /**
  * Reset the filesystem storage namespace between tests (tier0 / FS mode).
@@ -57,17 +56,16 @@ function resetFsStorage(): void {
  * running alone touch only core tables.
  */
 const CORE_TABLES = [
-  // Leaf tables (no dependents). `documents` references runs / organizations /
-  // applications / chat_sessions (all ON DELETE CASCADE), so it must be deleted
+  // Leaf tables (no dependents). `files` references runs / organizations /
+  // spaces / chat_sessions (all ON DELETE CASCADE), so it must be deleted
   // BEFORE any of them — placed first to guarantee that ordering.
-  "documents",
+  "files",
   // Standalone outbox table (no FKs) — deletion jobs must not leak between tests.
   "storage_deletion_jobs",
   // Leaf tables (no dependents)
   "notifications",
   "audit_events",
   "llm_usage",
-  "credential_proxy_usage",
   "run_logs",
   // Chat tables (core schema, consumed by @appstrate/module-chat).
   // Children first: chat_messages → chat_sessions → (organizations, user).
@@ -76,7 +74,7 @@ const CORE_TABLES = [
   "package_persistence",
   "package_version_dependencies",
   "package_dist_tags",
-  "application_packages",
+  "space_packages",
   "integration_connections",
   "integration_oauth_clients",
   "package_schedules",
@@ -84,6 +82,10 @@ const CORE_TABLES = [
   "model_provider_credentials",
   "org_proxies",
   "org_invitations",
+  // Space membership: rows first, then the custom bundles they may reference
+  // (`custom_role_id` is ON DELETE RESTRICT, so the order is load-bearing).
+  "space_members",
+  "space_roles",
   // Mid-level tables
   "runs",
   "package_versions",
@@ -91,7 +93,7 @@ const CORE_TABLES = [
   "end_users",
   // Core tables
   "packages",
-  "applications",
+  "spaces",
   "org_members",
   "organizations",
   "profiles",
@@ -174,4 +176,8 @@ export async function truncateAll(): Promise<void> {
     },
   });
   resetFsStorage();
+  // Process-local read-through caches keyed on rows that no longer exist must
+  // reset with the rows, or a test reusing an id would read the previous
+  // test's api_version pin for up to the TTL.
+  clearAllCachesLocally();
 }

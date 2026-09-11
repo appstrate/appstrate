@@ -15,6 +15,7 @@ import {
   getCatalog,
   resetCatalog,
   buildOperationIndex,
+  getOperationIndexCacheStats,
   type CatalogOperation,
 } from "../../catalog.ts";
 import { buildMcpTools, type Dispatch } from "../../tools.ts";
@@ -49,7 +50,8 @@ function makeTools(
     permissions: new Set(permissions),
     dispatch,
     actor,
-    scope: { orgId: "org_1", applicationId: "app_1" },
+    scope: { orgId: "org_1", spaceId: "spc_1" },
+    authorizeBundle: async () => {},
     contextInjected,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
@@ -77,6 +79,59 @@ describe("mcp catalog", () => {
       expect(op.pathTemplate.startsWith("/api/mcp")).toBe(false);
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
+  });
+});
+
+describe("retired pre-#1177 tool names", () => {
+  beforeEach(() => resetCatalog());
+
+  /**
+   * The retired names used to be registered-but-hidden, so a client holding a
+   * cached tool list across an upgrade could still call them (the server
+   * advertises `tools: { listChanged: false }`). That forwarding is gone: the
+   * names are not registered at all, and a caller gets `-32602 Unknown tool`
+   * and re-lists.
+   *
+   * Asserted rather than merely deleted, because "no longer registered" is the
+   * contract now — a hidden alias reappearing would restore a second dispatch
+   * path for the same capability, which is what #1177 set out to remove.
+   */
+  it("registers no retired name, listed or hidden", () => {
+    const tools = buildMcpTools({
+      origin: "https://test.local",
+      authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+      permissions: new Set(["mcp:read", "mcp:invoke", "agents:write"]),
+      dispatch: async () =>
+        new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      actor: { type: "user", id: "user_1" },
+      scope: { orgId: "org_1", spaceId: "spc_1" },
+      authorizeBundle: async () => {},
+    });
+    const registered = new Set(tools.map((t) => t.descriptor.name));
+
+    for (const retired of [
+      "list_documents",
+      "read_document",
+      "validate_package_document",
+      "import_package_document",
+    ]) {
+      expect(registered.has(retired)).toBe(false);
+    }
+    // Positive control: the canonical tools the retired names used to forward
+    // to ARE offered, so the loop above is not passing on an empty tool set.
+    expect(registered.has("list_files")).toBe(true);
+    expect(registered.has("read_file")).toBe(true);
+    expect(registered.has("validate_package_file")).toBe(true);
+  });
+
+  it("does not rename a retired document_uri argument", async () => {
+    const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
+    // `validate_package_file` reads `file_uri`. A caller pinned to the old
+    // vocabulary now gets the plain "required" error rather than a silent
+    // rename — the argument it sent is simply not one the tool knows.
+    await expect(
+      byName.get("validate_package_file")!.handler({ document_uri: "appfile://file_x" }, noExtra),
+    ).rejects.toThrow(/file_uri is required/);
   });
 });
 
@@ -455,6 +510,52 @@ describe("buildOperationIndex", () => {
     const b = buildOperationIndex();
     expect(b).toBe(a);
   });
+
+  // The permission-scoped index is what the MCP router builds on EVERY
+  // `tools/call` POST (the chat module drives each tool call through it), so
+  // it is memoised per permission set. Strings compare by value under
+  // `Object.is`, so identity cannot prove a memo hit — the build counter can.
+  describe("permission-scoped memo", () => {
+    it("serves a repeated permission set from the memo, order-independently", () => {
+      const first = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
+
+      const second = buildOperationIndex(new Set(["agents:read", "mcp:read"]));
+      expect(second).toBe(first);
+      // Negative control: an unmemoised build would report `builds: 2` here.
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
+    });
+
+    it("keeps distinct permission sets apart — they yield different indexes", () => {
+      const narrow = buildOperationIndex(new Set(["mcp:read"]));
+      const wide = buildOperationIndex(new Set(["mcp:read", "agents:read"]));
+      expect(narrow).not.toContain("## Agents");
+      expect(wide).toContain("## Agents");
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 2, builds: 2 });
+    });
+
+    it("is dropped with the catalog — resetCatalog forces a rebuild", () => {
+      const before = buildOperationIndex(new Set(["mcp:read"]));
+      resetCatalog();
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 0, builds: 0 });
+
+      const after = buildOperationIndex(new Set(["mcp:read"]));
+      expect(after).toEqual(before);
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 1, builds: 1 });
+    });
+
+    it("is bounded — past 64 sets the oldest is evicted and rebuilt on demand", () => {
+      for (let i = 0; i < 65; i++) buildOperationIndex(new Set(["mcp:read", `x:${i}`]));
+      expect(getOperationIndexCacheStats()).toEqual({ entries: 64, builds: 65 });
+
+      // The first (oldest) set was evicted, so asking for it again is a miss…
+      buildOperationIndex(new Set(["mcp:read", "x:0"]));
+      expect(getOperationIndexCacheStats().builds).toBe(66);
+      // …while the most recent one is still a hit.
+      buildOperationIndex(new Set(["mcp:read", "x:64"]));
+      expect(getOperationIndexCacheStats().builds).toBe(66);
+    });
+  });
 });
 
 describe("buildMcpTools contextInjected", () => {
@@ -475,8 +576,12 @@ describe("buildMcpTools contextInjected", () => {
       dispatch,
       contextInjected: true,
       actor: { type: "user", id: "user_1" },
-      scope: { orgId: "org_1", applicationId: "app_1" },
+      scope: { orgId: "org_1", spaceId: "spc_1" },
+      authorizeBundle: async () => {},
     });
+    // The whole registered surface IS the advertised surface: no retired name
+    // is registered, listed or hidden — see "registers no retired name, listed
+    // or hidden" above.
     const names = tools.map((t) => t.descriptor.name).sort();
     // get_me is redundant for a context-injected caller; search_operations stays
     // (its best_match schema is not covered by the injected operation index).
@@ -484,24 +589,24 @@ describe("buildMcpTools contextInjected", () => {
       "describe_operation",
       "get_runtime_capabilities",
       "invoke_operation",
-      "list_documents",
-      "read_document",
+      "list_files",
+      "read_file",
       "run_and_wait",
       "search_operations",
-      "validate_package_document",
+      "validate_package_file",
     ]);
   });
 
   it("exposes package import only to authorized organization users", () => {
-    expect(makeTools(["mcp:read", "mcp:invoke"]).byName.has("import_package_document")).toBe(false);
+    expect(makeTools(["mcp:read", "mcp:invoke"]).byName.has("import_package_file")).toBe(false);
     expect(
-      makeTools(["mcp:read", "mcp:invoke", "agents:write"]).byName.has("import_package_document"),
+      makeTools(["mcp:read", "mcp:invoke", "agents:write"]).byName.has("import_package_file"),
     ).toBe(true);
     expect(
       makeTools(["mcp:read", "mcp:invoke", "agents:write"], false, {
         type: "end_user",
         id: "eu_1",
-      }).byName.has("import_package_document"),
+      }).byName.has("import_package_file"),
     ).toBe(false);
   });
 

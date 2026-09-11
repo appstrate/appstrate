@@ -123,6 +123,70 @@ describe("PiChatUiStreamMapper", () => {
     });
   });
 
+  it("strips `details` from the tool output — the wire carries the model channel + typed offer", () => {
+    // A Pi result carries the payload twice: `content[0].text` (what the model
+    // reads) and `details` (Pi's in-memory UI channel, which nothing here
+    // reads). Forwarding both persisted and re-uploaded every tool output at
+    // twice its size. Everything BUT `details` must survive untouched.
+    const content = [{ type: "text", text: JSON.stringify({ id: "run_1", status: "success" }) }];
+    const connectOffers = [{ connect_url: "https://app/api/integrations/connect/start?token=t" }];
+    const { chunks } = run([
+      {
+        type: "tool_execution_end",
+        toolCallId: "call_3",
+        toolName: "invoke_operation",
+        result: { content, details: { id: "run_1", status: "success" }, connectOffers },
+        isError: false,
+      },
+    ]);
+
+    expect(chunks).toEqual([
+      { type: "tool-output-available", toolCallId: "call_3", output: { content, connectOffers } },
+    ]);
+    // Negative control, stated explicitly: the key is absent, not `undefined`.
+    const output = (chunks[0] as { output: Record<string, unknown> }).output;
+    expect(Object.keys(output)).toEqual(["content", "connectOffers"]);
+    expect("details" in output).toBe(false);
+  });
+
+  it("passes a non-object tool output through unchanged", () => {
+    const { chunks } = run([
+      {
+        type: "tool_execution_end",
+        toolCallId: "c",
+        toolName: "t",
+        result: "plain",
+        isError: false,
+      },
+      {
+        type: "tool_execution_end",
+        toolCallId: "d",
+        toolName: "t",
+        result: undefined,
+        isError: false,
+      },
+    ]);
+    expect(chunks).toEqual([
+      { type: "tool-output-available", toolCallId: "c", output: "plain" },
+      { type: "tool-output-available", toolCallId: "d", output: null },
+    ]);
+  });
+
+  it("fires onFirstModelEvent once, on the first ASSISTANT message_start only", () => {
+    // The user echo's `message_start` fires at `prompt()`; the assistant's is
+    // pi-ai's `start`, pushed once the provider answered. Only the latter is a
+    // model event, and only the first one is the turn's time-to-first-response.
+    let fired = 0;
+    const mapper = new PiChatUiStreamMapper({ onFirstModelEvent: () => (fired += 1) });
+    mapper.map({ type: "message_start", message: { role: "user" } });
+    expect(fired).toBe(0);
+    mapper.map({ type: "message_start", message: { role: "assistant" } });
+    expect(fired).toBe(1);
+    mapper.map({ type: "message_start", message: { role: "toolResult" } });
+    mapper.map({ type: "message_start", message: { role: "assistant" } });
+    expect(fired).toBe(1);
+  });
+
   it("emits tool-output-error for a failed tool execution", () => {
     const { chunks } = run([
       {
@@ -213,6 +277,90 @@ describe("PiChatUiStreamMapper", () => {
     expect(meta.errorText).toBe("context overflow");
   });
 
+  it("retires a failure a later model call recovered from", () => {
+    // pi retries inside one turn. A 503 followed by a clean call is no longer
+    // the turn's cause — leaving it standing made a turn that later died of the
+    // wall-clock deadline report a cause that no longer applied.
+    const { mapper } = run([
+      {
+        type: "message_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+      },
+      { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("stop");
+    expect(meta.errorText).toBeUndefined();
+  });
+
+  it("retires it across the whole pi auto-retry shape, agent_end included", () => {
+    // The real event sequence for one chat turn that pi retried once (chat runs
+    // with `retry: { enabled: true, maxRetries: 1 }`). Each internal run closes
+    // with its OWN turn_end + agent_end, and agent_end replays that run's
+    // message list — so the retired failure must not come back on the way out.
+    const { mapper } = run([
+      {
+        type: "message_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+      },
+      {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+        toolResults: [],
+      },
+      {
+        type: "agent_end",
+        messages: [
+          { role: "user" },
+          { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+        ],
+      },
+      { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
+      { type: "turn_end", message: { role: "assistant", stopReason: "stop" }, toolResults: [] },
+      { type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }] },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("stop");
+    expect(meta.errorText).toBeUndefined();
+  });
+
+  it("reads agent_end's verdict off the LAST assistant message, not the whole list", () => {
+    // Same invariant the runner states for `getTerminalError` and pi itself
+    // uses to decide a retry: an errored message followed by a clean one is a
+    // recovery, whatever order the list happens to carry them in. Capturing
+    // every entry would resurrect the failure from inside a single event.
+    const { mapper } = run([
+      {
+        type: "agent_end",
+        messages: [
+          { role: "user" },
+          { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+          { role: "assistant", stopReason: "stop" },
+          { role: "toolResult" },
+        ],
+      },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).not.toBe("error");
+    expect(meta.errorText).toBeUndefined();
+  });
+
+  it("keeps a failure the turn was cut on (aborted settles nothing)", () => {
+    // Stop / deadline abort mid-flight: the last call decided nothing, so the
+    // earlier failure is still the last thing that went wrong and must reach
+    // the user — this is exactly the deadline-with-a-cause turn.
+    const { mapper } = run([
+      {
+        type: "message_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+      },
+      { type: "message_end", message: { role: "assistant", stopReason: "aborted" } },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("other");
+    expect(meta.errorText).toBe("upstream 503");
+  });
+
   it("does not flag an explicit stop (aborted) as an error", () => {
     const { mapper } = run([
       {
@@ -262,5 +410,39 @@ describe("PiChatUiStreamMapper", () => {
   it("ignores unknown session events (forward-compat catch-all)", () => {
     const { chunks } = run([{ type: "queue_update", steering: [], followUp: [] }]);
     expect(chunks).toEqual([]);
+  });
+});
+
+describe("PiChatUiStreamMapper — step counting and block ids", () => {
+  it("counts model calls only — not the user echo, not tool results", () => {
+    const mapper = new PiChatUiStreamMapper();
+    // Pi emits message_start/message_end for the prompt and for every tool
+    // result too; counting those made `stepCount` several times the real
+    // number of model calls.
+    mapper.map({ type: "message_start", message: { role: "user" } });
+    mapper.map({ type: "message_end", message: { role: "user" } });
+    mapper.map({ type: "message_start", message: { role: "assistant" } });
+    mapper.map({ type: "message_end", message: { role: "assistant", stopReason: "toolUse" } });
+    mapper.map({ type: "message_start", message: { role: "toolResult" } });
+    mapper.map({ type: "message_end", message: { role: "toolResult" } });
+    mapper.map({ type: "message_start", message: { role: "assistant" } });
+    mapper.map({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+
+    expect(mapper.stepCount()).toBe(2);
+  });
+
+  it("keeps content-block ids unique across interleaved messages", () => {
+    const mapper = new PiChatUiStreamMapper();
+    const ids: string[] = [];
+    for (const role of ["assistant", "toolResult", "assistant"]) {
+      mapper.map({ type: "message_start", message: { role } });
+      const chunks = mapper.map({
+        type: "message_update",
+        message: {},
+        assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: {} },
+      });
+      for (const c of chunks) if (c.type === "text-start") ids.push(c.id);
+    }
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

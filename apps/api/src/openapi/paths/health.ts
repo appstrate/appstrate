@@ -43,6 +43,14 @@ export const healthPaths = {
                           status: { type: "string", enum: ["healthy", "degraded"] },
                         },
                       },
+                      realtime: {
+                        type: "object",
+                        description:
+                          "PG LISTEN fan-out behind the realtime SSE streams. `degraded` when a channel failed to install. Advisory: not part of the top-level `status`.",
+                        properties: {
+                          status: { type: "string", enum: ["healthy", "degraded"] },
+                        },
+                      },
                     },
                   },
                 },
@@ -54,6 +62,7 @@ export const healthPaths = {
                 checks: {
                   database: { status: "healthy", latency_ms: 2.3 },
                   agents: { status: "healthy" },
+                  realtime: { status: "healthy" },
                 },
               },
             },

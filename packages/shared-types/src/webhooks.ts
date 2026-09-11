@@ -9,8 +9,8 @@
 export interface WebhookInfo {
   id: string;
   object: "webhook";
-  level: "org" | "application";
-  applicationId: string | null;
+  level: "org" | "space";
+  spaceId: string | null;
   url: string;
   events: string[];
   packageId: string | null;

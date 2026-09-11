@@ -4,15 +4,18 @@ import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   schedules,
   endUsers,
   organizationMembers,
+  spaces,
   runs,
   notifications,
 } from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/db/run-status";
+import { loadSpaceMember, resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
@@ -23,6 +26,9 @@ import {
   resolveRunPreflight,
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
+import { getInstalledPackageSettings } from "./space-packages.ts";
+import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
+import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
@@ -30,12 +36,9 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
-import { validateInput } from "./schema.ts";
-import { mergeAndValidateConfigOverride } from "./agent-readiness.ts";
-import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorMatch, type Actor } from "../lib/actor.ts";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -49,13 +52,8 @@ interface ScheduleJobData {
   /** Actor the scheduled run executes as. */
   actor: Actor;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   input?: Record<string, unknown>;
-  // Per-schedule override layer — frozen at schedule create/update and
-  // deep-merged with `application_packages.config` every time the
-  // schedule fires. Mirrors the per-run override pipeline (POST /run
-  // body) so a schedule is "a recurring run with frozen overrides".
-  configOverride?: Record<string, unknown>;
   modelIdOverride?: string;
   generationConfigOverride?: ModelGenerationSettings;
   proxyIdOverride?: string;
@@ -92,13 +90,12 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     userId: row.userId,
     endUserId: row.endUserId,
     orgId: row.orgId,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     name: row.name,
     enabled: row.enabled,
     cron_expression: row.cronExpression,
     timezone: row.timezone,
     input: asRecordOrNull(row.input),
-    config_override: asRecordOrNull(row.configOverride),
     generation_config_override: row.generationConfigOverride ?? null,
     model_id_override: row.modelIdOverride,
     proxy_id_override: row.proxyIdOverride,
@@ -143,9 +140,8 @@ async function upsertScheduleJob(row: typeof schedules.$inferSelect): Promise<vo
     packageId: row.packageId,
     actor,
     orgId: row.orgId,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     input: asRecordOrNull(row.input) ?? undefined,
-    configOverride: asRecordOrNull(row.configOverride) ?? undefined,
     modelIdOverride: row.modelIdOverride ?? undefined,
     generationConfigOverride: row.generationConfigOverride ?? undefined,
     proxyIdOverride: row.proxyIdOverride ?? undefined,
@@ -196,25 +192,34 @@ export async function removeScheduleJobs(scheduleIds: readonly string[]): Promis
  * `user` row (multi-org), so their schedules would otherwise keep firing as
  * them. Re-check on EVERY fire that the frozen actor still holds the
  * identity the schedule runs as: a member must still belong to the
- * schedule's org, an end-user must still exist in the schedule's application.
+ * schedule's org and hold agents:run in its space; an end-user must still
+ * exist in the schedule's space.
  */
 async function isScheduleActorValid(
   actor: Actor,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
 ): Promise<boolean> {
   if (actor.type === "user") {
     const [row] = await db
-      .select({ userId: organizationMembers.userId })
+      .select({ role: organizationMembers.role })
       .from(organizationMembers)
       .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, actor.id)))
       .limit(1);
-    return row !== undefined;
+    if (!row) return false;
+    const [space] = await db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
+      .limit(1);
+    if (!space) return false;
+    const membership = await loadSpaceMember(spaceId, actor.id);
+    return spacePermissions(resolveSpaceRole(row.role, space, membership)).has("agents:run");
   }
   const [row] = await db
     .select({ id: endUsers.id })
     .from(endUsers)
-    .where(and(eq(endUsers.id, actor.id), eq(endUsers.applicationId, applicationId)))
+    .where(and(eq(endUsers.id, actor.id), eq(endUsers.spaceId, spaceId)))
     .limit(1);
   return row !== undefined;
 }
@@ -283,9 +288,8 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     packageId,
     actor,
     orgId,
-    applicationId,
+    spaceId,
     input,
-    configOverride,
     modelIdOverride,
     generationConfigOverride,
     proxyIdOverride,
@@ -321,8 +325,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
       return;
     }
 
-    await triggerScheduledRun(scheduleId, packageId, actor, orgId, applicationId, input, {
-      configOverride,
+    await triggerScheduledRun(scheduleId, packageId, actor, orgId, spaceId, input, {
       modelIdOverride,
       generationConfigOverride,
       proxyIdOverride,
@@ -334,7 +337,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     // Update schedule timestamps. `enabled` is re-read here because the
     // trigger may have just disabled the schedule (invalid actor) — a
     // disabled schedule must not get a fresh nextRunAt re-armed onto it.
-    const schedule = await getSchedule(scheduleId, { orgId, applicationId });
+    const schedule = await loadSchedule(scheduleId, { orgId, spaceId });
     const nextRun = schedule?.enabled
       ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
       : null;
@@ -442,10 +445,9 @@ export async function triggerScheduledRun(
   packageId: string,
   actor: Actor,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
   input: Record<string, unknown> | undefined,
   overrides: {
-    configOverride?: Record<string, unknown>;
     modelIdOverride?: string;
     generationConfigOverride?: ModelGenerationSettings;
     proxyIdOverride?: string;
@@ -463,7 +465,7 @@ export async function triggerScheduledRun(
     const runId = `run_${crypto.randomUUID()}`;
     try {
       await createFailedRun(
-        { orgId, applicationId },
+        { orgId, spaceId },
         runId,
         packageId,
         actor,
@@ -475,7 +477,7 @@ export async function triggerScheduledRun(
         orgId,
         runId,
         packageId,
-        applicationId,
+        spaceId,
         status: "failed",
         extra: { error },
       });
@@ -496,20 +498,20 @@ export async function triggerScheduledRun(
     // job removed, and a VISIBLE failed run is recorded — never a silent
     // skip, and never a false-positive `success` (see the actor-less
     // schedule incident, issue #735).
-    if (!(await isScheduleActorValid(actor, orgId, applicationId))) {
+    if (!(await isScheduleActorValid(actor, orgId, spaceId))) {
       logger.warn("Schedule actor is no longer valid — disabling schedule", {
         scheduleId,
         packageId,
         orgId,
-        applicationId,
+        spaceId,
         actorType: actor.type,
         actorId: actor.id,
       });
       await disableScheduleForInvalidActor(scheduleId);
       await failSchedule(
         actor.type === "user"
-          ? "Schedule disabled: its actor is no longer a member of this organization"
-          : "Schedule disabled: its end-user actor no longer exists in this application",
+          ? "Schedule disabled: its actor is no longer a member of this organization or cannot run agents in this space"
+          : "Schedule disabled: its end-user actor no longer exists in this space",
       );
       return;
     }
@@ -552,15 +554,15 @@ export async function triggerScheduledRun(
       throw err;
     }
 
-    // Shared preflight: resolve config, validate readiness
-    let config: Record<string, unknown>;
-    let preflightModelId: string | null;
-    let preflightGenerationConfig: ModelGenerationSettings | null;
-    let preflightProxyId: string | null;
+    // Per-space settings: editor defaults + locked fields for the input
+    // resolution below, and the model/proxy this fire launches with.
+    const packageSettings = await getInstalledPackageSettings(spaceId, packageId);
+
+    // Shared preflight: validate readiness
     try {
-      const preflight = await resolveRunPreflight({
+      await resolveRunPreflight({
         agent,
-        applicationId,
+        spaceId,
         orgId,
         actor,
         // Schedule freezes per-integration picks at create time; forward
@@ -568,12 +570,13 @@ export async function triggerScheduledRun(
         // pipeline will use a few lines down (matches the "single source
         // of truth" intent of overrides).
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
+        // `package_schedules.dependency_overrides` — the same value forwarded
+        // into `prepareAndExecuteRun` below. Without it a schedule pinned to a
+        // working copy would have its readiness judged against the published
+        // version it is deliberately bypassing, and `failSchedule` would stop
+        // the schedule over a disagreement it invented.
+        dependencyOverrides: overrides.dependencyOverrides ?? null,
       });
-
-      config = preflight.config;
-      preflightModelId = preflight.modelId;
-      preflightGenerationConfig = preflight.generationConfig;
-      preflightProxyId = preflight.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
         logger.warn("Agent readiness check failed, skipping schedule", {
@@ -594,36 +597,43 @@ export async function triggerScheduledRun(
       return;
     }
 
-    // Validate input against agent's input schema (schema may have changed since schedule creation)
-    const inputSchema = agent.manifest.input?.schema;
-    if (inputSchema) {
-      const inputValidation = validateInput(input, asJSONSchemaObject(inputSchema));
-      if (!inputValidation.valid) {
+    // Resolve this fire's input through the same layers as a request run —
+    // author defaults < editor defaults < the schedule's frozen values — and
+    // validate the result, because both the layers and the schema can drift
+    // after the schedule was written (a field locked since, a tightened
+    // schema).
+    //
+    // The pair comes from `resolveAndValidateScheduleInput`, which documents
+    // itself as existing for exactly three call sites — create, update and this
+    // one — and names the drift that writing it out per site produced. This
+    // site had re-inlined it anyway. What stays HERE is the only part that is
+    // the scheduler's own: the failure CHANNEL. A cron fire has no caller to
+    // answer, so a refusal becomes `failSchedule` + a visible failed run rather
+    // than a throw into the worker.
+    let resolvedInput: Record<string, unknown>;
+    try {
+      const resolution = resolveAndValidateScheduleInput({
+        inputSchema: agent.manifest.input?.schema,
+        editorDefaults: packageSettings.values,
+        lockedFields: packageSettings.locked,
+        input,
+      });
+      if (resolution.errors) {
         logger.warn("Scheduled input validation failed, skipping run", {
           scheduleId,
           packageId,
-          errors: inputValidation.errors,
+          errors: resolution.errors,
         });
         await failSchedule(
-          `Input validation failed: ${inputValidation.errors?.map((e) => e.message).join(", ")}`,
+          `Input validation failed: ${resolution.errors.map((e) => e.message).join(", ")}`,
         );
         return;
       }
-    }
-
-    const runId = `run_${crypto.randomUUID()}`;
-
-    // Apply per-schedule overrides (deep-merge + re-validate) via the same
-    // helper used by `POST /run` so both paths converge to an identical
-    // resolved config. Wrapped in try/catch because a frozen schedule
-    // override can fall out of schema after a manifest update tightens it
-    // — the scheduler must `failSchedule` instead of throwing.
-    let mergedConfig: Record<string, unknown>;
-    try {
-      mergedConfig = mergeAndValidateConfigOverride(agent, config, overrides.configOverride);
+      resolvedInput = resolution.resolved;
     } catch (err) {
+      // `locked_input_field` — the one refusal resolution itself raises.
       if (err instanceof ApiError) {
-        logger.warn("Schedule config override no longer satisfies manifest schema", {
+        logger.warn("Schedule input no longer resolvable", {
           scheduleId,
           packageId,
           code: err.code,
@@ -635,8 +645,10 @@ export async function triggerScheduledRun(
       throw err;
     }
 
-    const finalModelId = overrides.modelIdOverride ?? preflightModelId;
-    const finalProxyId = overrides.proxyIdOverride ?? preflightProxyId;
+    const runId = `run_${crypto.randomUUID()}`;
+
+    const finalModelId = overrides.modelIdOverride ?? packageSettings.modelId;
+    const finalProxyId = overrides.proxyIdOverride ?? packageSettings.proxyId;
 
     try {
       await prepareAndExecuteRun({
@@ -644,16 +656,14 @@ export async function triggerScheduledRun(
         agent,
         orgId,
         actor,
-        input,
-        config: mergedConfig,
-        configOverride: overrides.configOverride,
+        input: resolvedInput,
         modelId: finalModelId,
-        generationConfig: preflightGenerationConfig,
+        generationConfig: packageSettings.generationConfig,
         generationConfigOverride: overrides.generationConfigOverride ?? null,
         proxyId: finalProxyId,
         overrideVersionLabel,
         scheduleId,
-        applicationId,
+        spaceId,
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
         dependencyOverrides: overrides.dependencyOverrides ?? null,
       });
@@ -692,21 +702,23 @@ export async function triggerScheduledRun(
 // ---------------------------------------------------------------------------
 
 export async function listSchedules(
-  scope: AppScope,
+  scope: SpaceScope,
   viewer: Actor | null,
+  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(schedules)
-    .where(scopedWhere(schedules, { orgId: scope.orgId, applicationId: scope.applicationId }))
+    .where(scopedWhere(schedules, { orgId: scope.orgId, spaceId: scope.spaceId }))
     .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer);
+  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer, visibility);
 }
 
 export async function listPackageSchedules(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   viewer: Actor | null,
+  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
@@ -714,33 +726,39 @@ export async function listPackageSchedules(
     .where(
       scopedWhere(schedules, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.packageId, packageId)],
       }),
     )
     .orderBy(asc(schedules.createdAt));
-  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer);
+  return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer, visibility);
 }
 
-export async function getSchedule(
-  id: string,
-  scope?: AppScope,
-  viewer: Actor | null = null,
-): Promise<EnrichedSchedule | null> {
+/** The bare schedule row, before any enrichment — what a write path reads to diff against. */
+async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
   const rows = await db
     .select()
     .from(schedules)
     .where(
       scopedWhere(schedules, {
-        orgId: scope?.orgId,
-        applicationId: scope?.applicationId,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.id, id)],
       }),
     )
     .limit(1);
-  if (!rows[0]) return null;
-  const schedule = toSchedule(rows[0]);
-  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer);
+  return rows[0] ? toSchedule(rows[0]) : null;
+}
+
+export async function getSchedule(
+  id: string,
+  scope: SpaceScope,
+  viewer: Actor | null,
+  visibility: SQL | undefined,
+): Promise<EnrichedSchedule | null> {
+  const schedule = await loadSchedule(id, scope);
+  if (!schedule) return null;
+  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer, visibility);
   return enriched ?? null;
 }
 
@@ -774,7 +792,7 @@ const UNENRICHED_SCHEDULE_FIELDS = {
  *
  * These used to be derived client-side: each card fetched
  * `GET /api/schedules/:id/runs` (up to 20 enriched rows, each with its own
- * unread EXISTS and document subqueries) purely to count three things, so a
+ * unread EXISTS and file subqueries) purely to count three things, so a
  * dashboard listing N schedules issued N extra HTTP requests and ~2N SQL
  * queries. Serving them from the list the cards already have removes the fan-out
  * entirely.
@@ -788,11 +806,17 @@ const UNENRICHED_SCHEDULE_FIELDS = {
  *    `unreadForActor` applies to run lists, so a member and an end-user never
  *    observe each other's read state. A null viewer (no actor context) reports
  *    0: unread is a recipient-side concept.
+ *
+ * `visibility` is the caller's run-read predicate (`runVisibilityFilter`), so
+ * the counters span exactly the runs the caller may open from the card. Without
+ * it a member without `runs:read-all` would read "3 running" off a colleague's
+ * schedule and find an empty run list behind it.
  */
 async function loadScheduleRunStats(
   scheduleIds: string[],
   orgId: string,
   viewer: Actor | null,
+  visibility: SQL | undefined,
 ): Promise<Map<string, ScheduleRunStats>> {
   if (scheduleIds.length === 0) return new Map();
 
@@ -820,7 +844,7 @@ async function loadScheduleRunStats(
     .from(runs)
     // `scheduleId` is already unique per org, but the org filter keeps the read
     // tenant-scoped by construction rather than by trusting the id list.
-    .where(and(eq(runs.orgId, orgId), inArray(runs.scheduleId, scheduleIds)))
+    .where(and(eq(runs.orgId, orgId), inArray(runs.scheduleId, scheduleIds), visibility))
     .groupBy(runs.scheduleId);
 
   // postgres.js returns count()/max() as numeric STRINGS — coerce here so the
@@ -846,11 +870,14 @@ async function loadScheduleRunStats(
  *
  * @param viewer Actor the response is being rendered for — scopes
  *   `unread_count` only. Null when there is no actor context.
+ * @param visibility Caller's run-read predicate — scopes `running_runs` and
+ *   `last_run_number` (see {@link loadScheduleRunStats}).
  */
 async function enrichSchedules(
   schedules: ScheduleWireDto[],
   orgId: string,
   viewer: Actor | null,
+  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule[]> {
   if (schedules.length === 0) return [];
 
@@ -874,6 +901,7 @@ async function enrichSchedules(
       schedules.map((s) => s.id),
       orgId,
       viewer,
+      visibility,
     ),
   ]);
   const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
@@ -902,7 +930,7 @@ async function enrichSchedules(
 }
 
 export async function createSchedule(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   actor: Actor,
   data: {
@@ -910,7 +938,6 @@ export async function createSchedule(
     cronExpression: string;
     timezone?: string;
     input?: Record<string, unknown>;
-    configOverride?: Record<string, unknown> | null;
     modelIdOverride?: string | null;
     generationConfigOverride?: ModelGenerationSettings | null;
     proxyIdOverride?: string | null;
@@ -933,13 +960,12 @@ export async function createSchedule(
       userId: actor.type === "user" ? actor.id : null,
       endUserId: actor.type === "end_user" ? actor.id : null,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       name: data.name ?? null,
       enabled: true,
       cronExpression: data.cronExpression,
       timezone: tz,
       input: data.input ?? null,
-      configOverride: data.configOverride ?? null,
       modelIdOverride: data.modelIdOverride ?? null,
       generationConfigOverride: data.generationConfigOverride ?? null,
       proxyIdOverride: data.proxyIdOverride ?? null,
@@ -959,14 +985,14 @@ export async function createSchedule(
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // create response matches the GET detail shape (actor_name/actor_type).
-  // A viewer is not needed here: the schedule was just created, so it has no
-  // runs and every run counter is zero for ANY viewer.
-  const [enriched] = await enrichSchedules([schedule], scope.orgId, null);
+  // Neither a viewer nor a visibility predicate is needed here: the schedule
+  // was just created, so it has no runs and every counter is zero for anyone.
+  const [enriched] = await enrichSchedules([schedule], scope.orgId, null, undefined);
   return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
 }
 
 export async function updateSchedule(
-  scope: AppScope,
+  scope: SpaceScope,
   id: string,
   data: {
     name?: string;
@@ -974,7 +1000,6 @@ export async function updateSchedule(
     timezone?: string;
     input?: Record<string, unknown>;
     enabled?: boolean;
-    configOverride?: Record<string, unknown> | null;
     modelIdOverride?: string | null;
     generationConfigOverride?: ModelGenerationSettings | null;
     proxyIdOverride?: string | null;
@@ -988,9 +1013,11 @@ export async function updateSchedule(
     actor?: Actor;
   },
   /** Actor the response is rendered for — scopes `unread_count` only. */
-  viewer: Actor | null = null,
+  viewer: Actor | null,
+  /** Caller's run-read predicate — scopes the run counters of the echoed row. */
+  visibility: SQL | undefined,
 ): Promise<EnrichedSchedule | null> {
-  const existing = await getSchedule(id, scope);
+  const existing = await loadSchedule(id, scope);
   if (!existing) return null;
 
   const cronExpr = data.cronExpression ?? existing.cron_expression;
@@ -1010,7 +1037,6 @@ export async function updateSchedule(
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
   // Explicit `null` clears the override; `undefined` leaves it untouched.
-  if (data.configOverride !== undefined) payload.configOverride = data.configOverride;
   if (data.modelIdOverride !== undefined) payload.modelIdOverride = data.modelIdOverride;
   if (data.generationConfigOverride !== undefined)
     payload.generationConfigOverride = data.generationConfigOverride;
@@ -1031,7 +1057,7 @@ export async function updateSchedule(
     .where(
       scopedWhere(schedules, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.id, id)],
       }),
     )
@@ -1050,11 +1076,72 @@ export async function updateSchedule(
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // update response matches the GET detail shape (actor/run counters).
-  const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer);
+  const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer, visibility);
   return enriched ?? { ...schedule, ...UNENRICHED_SCHEDULE_FIELDS };
 }
 
-export async function deleteSchedule(scope: AppScope, id: string): Promise<boolean> {
+/**
+ * Drop the locked input fields from every schedule of one agent in one
+ * space.
+ *
+ * Called when the agent's lock set is written. A schedule froze its `input`
+ * before the lock existed, and the fire path refuses a schedule that answers a
+ * locked field (`resolveEffectiveInput` -> `locked_input_field`). Since a
+ * failed fire only records a failed run and never disables the schedule, an
+ * un-reconciled schedule would fail on EVERY tick, forever, until a human
+ * happened to reopen and re-save it.
+ *
+ * Dropping the key is the same rule the `rerun_from` replay applies (see
+ * {@link withoutLockedFields}): a schedule did not "set" the value the way a
+ * caller does, it froze a resolved one — so removing it lets the field
+ * re-resolve from the current editor value, exactly what a fresh launch does.
+ * Refusing the lock write instead would block a legitimate admin action.
+ *
+ * The whole lock set is applied, not just the keys added by this write: it is
+ * idempotent on a consistent row (`PUT /api/schedules/:id` already refuses a
+ * locked field, so a compliant schedule names none) and it repairs any drift.
+ *
+ * Rewrites go through {@link updateSchedule} rather than a raw UPDATE so the
+ * row and its repeatable BullMQ job — whose payload freezes `input` — stay in
+ * step; a raw UPDATE would leave the queue firing the stale frozen values.
+ *
+ * @returns the ids of the schedules that were rewritten.
+ */
+export async function dropLockedFieldsFromSchedules(
+  scope: SpaceScope,
+  packageId: string,
+  lockedFields: readonly string[],
+): Promise<string[]> {
+  if (lockedFields.length === 0) return [];
+
+  const rows = await db
+    .select({ id: schedules.id, input: schedules.input })
+    .from(schedules)
+    .where(
+      scopedWhere(schedules, {
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        extra: [eq(schedules.packageId, packageId)],
+      }),
+    );
+
+  const rewritten: string[] = [];
+  for (const row of rows) {
+    const input = asRecordOrNull(row.input);
+    if (!input) continue;
+    const stripped = withoutLockedFields(input, lockedFields);
+    // Only touch a schedule that actually answers a locked field — every other
+    // schedule keeps its row, its `updatedAt` and its queue job untouched.
+    if (Object.keys(stripped).length === Object.keys(input).length) continue;
+    // No viewer and no run predicate: this rewrite is a repair, and the
+    // enriched row it returns is discarded.
+    await updateSchedule(scope, row.id, { input: stripped }, null, undefined);
+    rewritten.push(row.id);
+  }
+  return rewritten;
+}
+
+export async function deleteSchedule(scope: SpaceScope, id: string): Promise<boolean> {
   await removeScheduleJob(id);
 
   const deleted = await db
@@ -1062,7 +1149,7 @@ export async function deleteSchedule(scope: AppScope, id: string): Promise<boole
     .where(
       scopedWhere(schedules, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.id, id)],
       }),
     )

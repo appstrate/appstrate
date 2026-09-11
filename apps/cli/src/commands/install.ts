@@ -14,7 +14,18 @@
 import { closeSync, openSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as clack from "@clack/prompts";
-import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/ui.ts";
+import {
+  intro,
+  outro,
+  askText,
+  confirm,
+  withSpinner,
+  exitWithError,
+  logInfo,
+  logWarn,
+  note,
+  EXIT_CANCELLED,
+} from "../lib/ui.ts";
 import {
   generateBootstrapToken,
   generateEnvForTier,
@@ -29,7 +40,6 @@ import {
 import {
   assertDockerAvailable,
   checkDockerNetworkBudget,
-  DockerMissingError,
   dockerComposeUp,
   findRunningComposeProject as findRunningComposeProjectImport,
   isDockerAvailable,
@@ -204,18 +214,18 @@ export function postInstallBrowserUrl(localUrl: string, bootstrap: BootstrapOver
  *
  * Token-leak hardening: when stdout is NOT a TTY (the install output
  * is being piped/tee'd to a file), the token line is written directly
- * to `/dev/tty` instead of through clack.note. The clack-rendered
- * note still appears with the URL + .env hint, but the secret itself
- * goes only to the operator's terminal — not to disk.
+ * to `/dev/tty` instead of through the framed note. The note still
+ * appears with the URL + .env hint, but the secret itself goes only to
+ * the operator's terminal — not to disk.
  */
 export function printBootstrapFollowup(
   appUrl: string,
   bootstrap: BootstrapOverrides,
-  note: (message: string, title?: string) => void = clack.note,
+  renderNote: (message: string, title?: string) => void = note,
 ): void {
   const email = bootstrap.bootstrapOwnerEmail;
   if (email) {
-    note(
+    renderNote(
       `Opened  ${appUrl}/register  in your browser.\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
       "Next: create your owner account",
     );
@@ -226,18 +236,18 @@ export function printBootstrapFollowup(
     const stdoutIsTty = process.stdout.isTTY === true;
     if (stdoutIsTty) {
       // Interactive install: stdout IS the operator's terminal, so
-      // printing the token inline is fine — and clack.note frames it
-      // nicely. No risk of capture into a log file.
-      note(
+      // printing the token inline is fine — and the framed note renders
+      // it nicely. No risk of capture into a log file.
+      renderNote(
         `Open  ${appUrl}/claim\nPaste the token below + your owner email/password.\n\n  Bootstrap token:\n  ${token}\n\nThe token is single-use, also stored in <dir>/.env\nas AUTH_BOOTSTRAP_TOKEN. Public signup is disabled\nuntil you claim the instance.`,
         "Closed-by-default install — claim ownership",
       );
       return;
     }
-    // Piped/tee'd install: render the framing note via clack (which
-    // hits stdout — fine, doesn't contain the secret) and write the
-    // token itself directly to the TTY.
-    note(
+    // Piped/tee'd install: render the framing note on stdout (fine, it
+    // doesn't contain the secret) and write the token itself directly to
+    // the TTY.
+    renderNote(
       `Open  ${appUrl}/claim\nThe bootstrap token is printed below directly to your\nterminal (and stored in <dir>/.env, mode 0600). It does\nNOT appear in the install log if you tee'd this output.\nPublic signup is disabled until you claim the instance.`,
       "Closed-by-default install — claim ownership",
     );
@@ -253,7 +263,7 @@ export function printBootstrapFollowup(
  * Same shape as the `TierResolverDeps` / `PortResolverDeps` seams one
  * level down.
  */
-export interface InstallCommandDeps {
+interface InstallCommandDeps {
   /** Terminal Tier 0 installer (clone + bun install + dev server). */
   installTier0?: typeof installTier0;
   /** Terminal Docker-tier installer (compose write + `docker compose up`). */
@@ -271,7 +281,7 @@ const defaultInstallDeps: Required<InstallCommandDeps> = {
   installDockerTier,
   isDockerAvailable,
   findRunningComposeProject: findRunningComposeProjectImport,
-  info: (message: string) => clack.log.info(message),
+  info: (message: string) => logInfo(message),
 };
 
 export async function installCommand(
@@ -423,7 +433,7 @@ export async function composeUpgradeCommand(
   try {
     const dir = resolveComposeUpgradeDir(opts.dir);
     const outcome = await runComposeUpgrade(dir, deps);
-    clack.note(formatComposeUpgradeResult(outcome), "docker-compose.yml");
+    note(formatComposeUpgradeResult(outcome), "docker-compose.yml");
     switch (outcome.status) {
       case "no-install":
         // A wrong --dir (or no install) is a user-actionable failure —
@@ -495,14 +505,14 @@ export async function resolveBootstrapEmail(opts: {
   // Empty input is the documented "skip" path; clack returns "" on Enter
   // with no `placeholder`. The note explains *why* this prompt exists so
   // the user understands the trade-off before answering.
-  clack.note(
+  note(
     "Closed mode locks down public signup so only invited users can join.\nLeave empty to keep the default open mode (anyone with the URL can sign up).",
     "Invitation-only mode (optional)",
   );
   const answer = (await askText("Bootstrap admin email (or empty to skip):", "")).trim();
   if (!answer) return {};
   if (!isValidBootstrapEmail(answer)) {
-    clack.log.warn(
+    logWarn(
       `"${answer}" doesn't look like an email — keeping open mode. Edit .env manually to enable closed mode later.`,
     );
     return {};
@@ -545,7 +555,7 @@ export async function resolveAppUrl(
     const inherited = opts.existing.existingEnv.APP_URL;
     if (inherited) {
       if (requested !== undefined && requested !== inherited) {
-        clack.log.warn(
+        logWarn(
           `app URL ${requested} ignored on upgrade — existing .env pins APP_URL=${inherited}, and config is preserved across upgrades (see mergeEnv). Edit <dir>/.env manually (APP_URL + TRUSTED_ORIGINS + TRUST_PROXY) to change the public URL.`,
         );
       }
@@ -563,7 +573,7 @@ export async function resolveAppUrl(
   // of `--yes` / `--tier N` (remote deploys pass --app-url explicitly).
   if (opts.tier === 0 || opts.nonInteractive) return fallback;
 
-  clack.note(
+  note(
     `Remote deployment (behind a reverse proxy)? Enter the public URL users will\nhit, e.g. https://appstrate.example.com — it drives OAuth redirects, CORS\n(TRUSTED_ORIGINS), and email links. The reverse proxy itself (TLS, forwarding\nto localhost:${port}) is not provisioned by the installer.\nPress Enter to keep the local default.`,
     "Public URL (optional)",
   );
@@ -600,7 +610,7 @@ export function assertLoopbackPortMatches(appUrl: string, port: number): void {
 }
 
 /** DI seam for the cross-check with `docker compose ls` — tests inject a fake, production uses the real helper. */
-export interface PortResolverDeps {
+interface PortResolverDeps {
   findRunningComposeProject?: (name: string) => Promise<RunningComposeProject | null>;
   /**
    * When the preferred port is busy under non-interactive mode, probe
@@ -677,7 +687,7 @@ export async function resolveAppstratePort(
       // via pure fallback is not a user intent we need to flag.
       const userExpressed = (raw ?? envValue ?? "") !== "";
       if (userExpressed && requested !== inherited) {
-        clack.log.warn(
+        logWarn(
           `port ${requested} ignored on upgrade — existing .env pins PORT=${inherited}, and secrets/config are preserved across upgrades (see mergeEnv). Edit <dir>/.env manually to change the port.`,
         );
       }
@@ -700,7 +710,7 @@ function readExistingPort(existingEnv: EnvVars, key: string, fallback: number): 
   if (raw === undefined || raw === "") return fallback;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-    clack.log.warn(
+    logWarn(
       `Ignoring invalid ${key}="${raw}" in existing .env — using default ${fallback}. Fix the .env manually to silence this warning.`,
     );
     return fallback;
@@ -775,7 +785,7 @@ async function ensurePortFree(
       // log.info (not warn) because this is the designed happy path of
       // --yes — "just pick a free port". The message still names the
       // override knobs so a user who does care can redirect on re-run.
-      clack.log.info(
+      logInfo(
         `Port ${port} (${label}) in use.${holderHint} Auto-picked ${next} instead — pass ${flagName} <n> or pipe via \`curl … | ${envVar}=<n> bash\` to override.`,
       );
       return next;
@@ -799,7 +809,7 @@ async function ensurePortFree(
     );
   }
 
-  clack.log.warn(
+  logWarn(
     `Port ${port} (${label}) is already in use.${holderHint} Free it or pick a different port.`,
   );
   const pick = await askText(`New port for ${label}`, String(port));
@@ -816,10 +826,11 @@ async function ensurePortFree(
  * DI seam for `resolveTier()` — production wires `clack` + the real
  * Docker probe; tests inject deterministic stubs.
  */
-export interface TierResolverDeps {
+interface TierResolverDeps {
   select?: typeof clack.select;
   isCancel?: typeof clack.isCancel;
-  note?: typeof clack.note;
+  /** Framed-note renderer; production is `note` from lib/ui.ts. */
+  note?: (message: string, title?: string) => void;
   isDockerAvailable?: () => Promise<boolean>;
   /**
    * When true, skip the `clack.select` prompt entirely and return the
@@ -860,7 +871,9 @@ export async function resolveTier(
   }
   const select = deps.select ?? clack.select;
   const isCancel = deps.isCancel ?? clack.isCancel;
-  const note = deps.note ?? clack.note;
+  // `renderNote`, not `note`: a local named after the import it falls back to
+  // would shadow it and throw on its own initialiser.
+  const renderNote = deps.note ?? note;
   const probe = deps.isDockerAvailable ?? isDockerAvailable;
 
   // --yes path: bypass the clack.select call entirely (never enters raw
@@ -871,7 +884,7 @@ export async function resolveTier(
   if (deps.autoConfirm === true) {
     const dockerOk = await probe();
     const autoTier: Tier = dockerOk ? 2 : 0;
-    note(
+    renderNote(
       dockerOk
         ? "--yes: Tier 2 selected automatically (Docker detected). Re-run with `--tier N` to override."
         : "--yes: Tier 0 selected automatically (Docker not detected). Install Docker and re-run with `--tier 2` for the production stack.",
@@ -896,7 +909,7 @@ export async function resolveTier(
   const dockerOk = await probe();
   const defaultTier: Tier = dockerOk ? 2 : 0;
   if (!dockerOk) {
-    note(
+    renderNote(
       "Docker not detected — Tier 0 selected by default. Install Docker Desktop and re-run for the production stack (Tier 2).",
     );
   }
@@ -914,8 +927,7 @@ export async function resolveTier(
     ],
   });
   if (isCancel(chosen)) {
-    clack.cancel("Cancelled.");
-    process.exit(130);
+    exitWithError("Cancelled.", undefined, EXIT_CANCELLED);
   }
   return chosen;
 }
@@ -924,7 +936,7 @@ export async function resolveTier(
  * DI seam for `resolveDir()` — lets tests exercise the `--yes` short
  * circuit without spawning a real askText prompt.
  */
-export interface DirResolverDeps {
+interface DirResolverDeps {
   /** When true, accept `defaultInstallDir()` without prompting. */
   autoConfirm?: boolean;
 }
@@ -1014,7 +1026,7 @@ export type RunBackendConfig =
       plaintextOptIn: boolean;
     };
 
-export interface RunBackendInputs {
+interface RunBackendInputs {
   /** `--run-adapter` flag (env `APPSTRATE_RUN_ADAPTER` applied as fallback here). */
   runAdapter?: string;
   /** `--runner-url` — an existing remote daemon URL (implies the remote topology). */
@@ -1034,7 +1046,7 @@ export interface RunBackendInputs {
  * network-interface probe + token minting; tests inject deterministic
  * stubs so no prompt, no `os.networkInterfaces()`, no randomness leaks in.
  */
-export interface RunBackendResolverDeps {
+interface RunBackendResolverDeps {
   select?: typeof clack.select;
   isCancel?: typeof clack.isCancel;
   askText?: typeof askText;
@@ -1164,7 +1176,7 @@ export async function resolveRunBackend(
   const confirmPrompt = deps.confirm ?? clack.confirm;
   const detectIp = deps.detectLanIpv4 ?? detectLanIpv4;
   const mintToken = deps.generateToken ?? generateRunnerToken;
-  const warn = deps.warn ?? ((message: string) => clack.log.warn(message));
+  const warn = deps.warn ?? ((message: string) => logWarn(message));
   const { appPort, nonInteractive } = inputs;
 
   // 1. Which adapter? Flag > env > prompt (interactive) > docker.
@@ -1192,8 +1204,7 @@ export async function resolveRunBackend(
       ],
     });
     if (isCancel(chosen)) {
-      clack.cancel("Cancelled.");
-      process.exit(130);
+      exitWithError("Cancelled.", undefined, EXIT_CANCELLED);
     }
     adapter = chosen;
   }
@@ -1225,8 +1236,7 @@ export async function resolveRunBackend(
       ],
     });
     if (isCancel(chosen)) {
-      clack.cancel("Cancelled.");
-      process.exit(130);
+      exitWithError("Cancelled.", undefined, EXIT_CANCELLED);
     }
     topology = chosen;
   }
@@ -1335,8 +1345,7 @@ export async function resolveRunBackend(
         initialValue: false,
       });
       if (isCancel(proceed)) {
-        clack.cancel("Cancelled.");
-        process.exit(130);
+        exitWithError("Cancelled.", undefined, EXIT_CANCELLED);
       }
       if (!proceed) {
         throw new Error(
@@ -1489,17 +1498,18 @@ export async function runSameHostRunnerInstall(
   },
 ): Promise<void> {
   const run = opts.run ?? ((cmd, args) => runCommand(cmd, args, { stdio: "inherit" }));
-  // Wrap the clack helpers in arrows — extracting `clack.log.info` as a bare
-  // value would drop its `this` binding.
-  const note = opts.note ?? ((message: string, title?: string) => clack.note(message, title));
-  const logInfo = opts.logInfo ?? ((message: string) => clack.log.info(message));
-  const logWarn = opts.logWarn ?? ((message: string) => clack.log.warn(message));
+  // Named `render*` rather than reusing the helper names: these are the
+  // injectable overrides, and a `const note = … note …` would shadow the
+  // import it falls back to (a TDZ throw, not a fallback).
+  const renderNote = opts.note ?? note;
+  const renderInfo = opts.logInfo ?? logInfo;
+  const renderWarn = opts.logWarn ?? logWarn;
   const cliInvocation = opts.cliInvocation ?? resolveCliInvocation();
   const args = buildRunnerInstallArgs(cliInvocation, rb.platformUrl, rb.token);
   const manualCommand = `sudo ${args.join(" ")}`;
 
   if (opts.nonInteractive) {
-    note(
+    renderNote(
       "The platform is configured for Firecracker. Install the runner daemon on this host " +
         `(needs root + KVM) with:\n\n  ${manualCommand}`,
       "Next: install the runner daemon",
@@ -1507,7 +1517,7 @@ export async function runSameHostRunnerInstall(
     return;
   }
 
-  logInfo(
+  renderInfo(
     "Installing the Firecracker runner daemon on this host — sudo is required, " +
       "you may be prompted for your password.",
   );
@@ -1539,7 +1549,7 @@ export async function runSameHostRunnerInstall(
     else process.env[RUNNER_TOKEN_ENV] = prevToken;
   }
   if (!res.ok) {
-    logWarn(
+    renderWarn(
       `The runner daemon install did not complete (exit ${res.exitCode}). The platform is ` +
         `installed and running; finish the runner setup manually:\n\n  ${manualCommand}`,
     );
@@ -1573,10 +1583,7 @@ async function installTier0(
     if (!proceed) {
       throw new Error("Tier 0 needs Bun. Install it manually from https://bun.sh and re-run.");
     }
-    const bunSpinner = spinner();
-    bunSpinner.start("Installing Bun");
-    await installBun();
-    bunSpinner.stop("Bun installed");
+    await withSpinner("Installing Bun", () => installBun(), "Bun installed");
     // No re-probe: `installBun()` placed the binary at `~/.bun/bin/bun`
     // and verified it via `access()`. Downstream spawns PATH-resolve
     // through `bunEnv()`, which includes BUN_BIN.
@@ -1588,17 +1595,15 @@ async function installTier0(
   // static package.json import in `lib/version.ts`; falling back to
   // `undefined` when the value is a dev placeholder lets `main` be
   // checked out instead of a bogus tag.
-  const cloneSpinner = spinner();
-  cloneSpinner.start("Cloning Appstrate source");
   const versionTag = CLI_VERSION === "0.0.0" ? undefined : `v${CLI_VERSION}`;
-  await cloneAppstrateSource(dir, { version: versionTag });
-  cloneSpinner.stop("Source cloned");
+  await withSpinner(
+    "Cloning Appstrate source",
+    () => cloneAppstrateSource(dir, { version: versionTag }),
+    "Source cloned",
+  );
 
   // Dependencies.
-  const installSpinner = spinner();
-  installSpinner.start("Installing dependencies");
-  await runBunInstall(dir);
-  installSpinner.stop("Dependencies installed");
+  await withSpinner("Installing dependencies", () => runBunInstall(dir), "Dependencies installed");
 
   // `.env`.
   const env = generateEnvForTier(0, appUrl, { port }, opts.bootstrap);
@@ -1617,10 +1622,11 @@ async function installTier0(
     return;
   }
 
-  const devSpinner = spinner();
-  devSpinner.start("Starting dev server");
-  const { pid } = await spawnDevServer(dir, localUrl);
-  devSpinner.stop(`Dev server running (pid ${pid})`);
+  const { pid } = await withSpinner(
+    "Starting dev server",
+    () => spawnDevServer(dir, localUrl),
+    (started) => `Dev server running (pid ${started.pid})`,
+  );
 
   await openBrowser(postInstallBrowserUrl(localUrl, opts.bootstrap));
   printBootstrapFollowup(appUrl, opts.bootstrap);
@@ -1705,7 +1711,7 @@ async function preflightProjectCollision(
  * of an existing docker install (no token to preserve). Returns a new config
  * (never mutates the input) so the caller resolves the final token exactly once.
  */
-export function seedUpgradeRunnerToken(
+function seedUpgradeRunnerToken(
   runBackend: RunBackendConfig,
   mode: InstallMode,
   existing: ExistingInstall,
@@ -1764,16 +1770,9 @@ async function installDockerTier(
   // reverse proxy is configured, which happens AFTER the install.
   const localUrl = appUrlForPort(port);
   // Docker.
-  const dockerSpinner = spinner();
-  dockerSpinner.start("Checking Docker");
-  try {
-    await assertDockerAvailable();
-    dockerSpinner.stop("Docker OK");
-  } catch (err) {
-    dockerSpinner.stop("Docker not found");
-    if (err instanceof DockerMissingError) throw err;
-    throw err;
-  }
+  await withSpinner("Checking Docker", () => assertDockerAvailable(), "Docker OK", {
+    errorLabel: "Docker not found",
+  });
 
   // Informational pre-flight: Docker's default address pool (~31 user-defined
   // networks) is easy to exhaust once Appstrate's stack plus per-run networks
@@ -1781,7 +1780,7 @@ async function installDockerTier(
   // `daemon.json` before the first run fails with the opaque `ErrNoMoreSubnets`.
   const budget = await checkDockerNetworkBudget();
   if (budget) {
-    clack.note(
+    note(
       [
         `Detected ${budget.used} Docker networks on this host (default ceiling ≈ 31).`,
         "Appstrate consumes several networks at boot + 1 per agent run, so you may",
@@ -1807,7 +1806,7 @@ async function installDockerTier(
     // makes the decision visible so a user re-running `curl|bash --yes`
     // on a live stack isn't surprised.
     if (opts.autoConfirm) {
-      clack.log.info(
+      logInfo(
         `--yes: upgrading existing install at ${dir} (secrets preserved, backups written to <file>.backup).`,
       );
     } else {
@@ -1842,35 +1841,34 @@ async function installDockerTier(
     backedUp,
     async () => {
       // Compose + .env.
-      const writeSpinner = spinner();
-      writeSpinner.start(
+      await withSpinner(
         mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
-      );
-      await writeComposeFile(dir, tier);
-      const fresh = generateEnvForTier(tier, appUrl, { port }, opts.bootstrap, runBackendEnv);
-      let envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
-      // Firecracker pairing token/URL must track the CURRENT install, not
-      // whatever `mergeEnv` happened to keep: `runSameHostRunnerInstall` below
-      // (and the remote one-liner) pair the daemon with `runBackend.token`, so
-      // the platform `.env` must carry that exact token. `runBackend.token` was
-      // already resolved by `seedUpgradeRunnerToken` above — on a remote/generated
-      // upgrade it holds the PRESERVED token so we don't rotate the platform away
-      // from the daemon; otherwise it's the flag/minted token being (re-)paired.
-      if (mode === "upgrade" && runBackend.adapter === "firecracker") {
-        envVars = {
-          ...envVars,
-          FIRECRACKER_RUNNER_URL: runBackend.runnerUrl,
-          FIRECRACKER_RUNNER_TOKEN: runBackend.token,
-        };
-        // The plaintext escape hatch tracks the CURRENT runner URL. Carrying
-        // a stale `=0` forward after the operator moved to https:// (or to
-        // the unix socket) would silently keep the plaintext door open for
-        // the next http:// misconfiguration.
-        if (runBackend.plaintextOptIn) envVars.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
-        else delete envVars.FIRECRACKER_RUNNER_TLS_REQUIRED;
-      }
-      await writeComposeEnv(dir, renderEnvFile(envVars));
-      writeSpinner.stop(
+        async () => {
+          await writeComposeFile(dir, tier);
+          const fresh = generateEnvForTier(tier, appUrl, { port }, opts.bootstrap, runBackendEnv);
+          let envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
+          // Firecracker pairing token/URL must track the CURRENT install, not
+          // whatever `mergeEnv` happened to keep: `runSameHostRunnerInstall` below
+          // (and the remote one-liner) pair the daemon with `runBackend.token`, so
+          // the platform `.env` must carry that exact token. `runBackend.token` was
+          // already resolved by `seedUpgradeRunnerToken` above — on a remote/generated
+          // upgrade it holds the PRESERVED token so we don't rotate the platform away
+          // from the daemon; otherwise it's the flag/minted token being (re-)paired.
+          if (mode === "upgrade" && runBackend.adapter === "firecracker") {
+            envVars = {
+              ...envVars,
+              FIRECRACKER_RUNNER_URL: runBackend.runnerUrl,
+              FIRECRACKER_RUNNER_TOKEN: runBackend.token,
+            };
+            // The plaintext escape hatch tracks the CURRENT runner URL. Carrying
+            // a stale `=0` forward after the operator moved to https:// (or to
+            // the unix socket) would silently keep the plaintext door open for
+            // the next http:// misconfiguration.
+            if (runBackend.plaintextOptIn) envVars.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
+            else delete envVars.FIRECRACKER_RUNNER_TLS_REQUIRED;
+          }
+          await writeComposeEnv(dir, renderEnvFile(envVars));
+        },
         mode === "upgrade"
           ? `Rewrote ${dir}/docker-compose.yml (secrets preserved)`
           : `Wrote ${dir}/docker-compose.yml + .env`,
@@ -1879,16 +1877,18 @@ async function installDockerTier(
       // Bring stack up. The project name is pinned via `--project-name`
       // rather than baked into the compose template, so two installs
       // under different dirs get isolated namespaces.
-      const upSpinner = spinner();
-      upSpinner.start(`Starting Appstrate (docker compose --project-name ${project.name} up -d)`);
-      await dockerComposeUp(dir, project.name);
-      upSpinner.stop("Containers up");
+      await withSpinner(
+        `Starting Appstrate (docker compose --project-name ${project.name} up -d)`,
+        () => dockerComposeUp(dir, project.name),
+        "Containers up",
+      );
 
       // Healthcheck.
-      const healthSpinner = spinner();
-      healthSpinner.start("Waiting for Appstrate to become healthy");
-      await waitForAppstrate(localUrl);
-      healthSpinner.stop("Appstrate is healthy");
+      await withSpinner(
+        "Waiting for Appstrate to become healthy",
+        () => waitForAppstrate(localUrl),
+        "Appstrate is healthy",
+      );
 
       // Persist the project-name binding on success. Written AFTER the
       // healthcheck so a stack that never came up doesn't leave a
@@ -1917,7 +1917,7 @@ async function installDockerTier(
     if (runBackend.topology === "same-host") {
       await runSameHostRunnerInstall(runBackend, { nonInteractive: opts.nonInteractive });
     }
-    clack.note(
+    note(
       firecrackerFollowupNote(runBackend),
       runBackend.topology === "remote"
         ? "Firecracker — install the runner on your KVM host"
@@ -1932,7 +1932,7 @@ async function installDockerTier(
   // explicitly instead of letting a dead public URL look like a failed
   // install.
   if (isRemoteAppUrl(appUrl)) {
-    clack.note(
+    note(
       `The platform listens on ${localUrl} (host port ${port}).\nPoint your reverse proxy (Caddy, nginx, Traefik) at it so that\n${appUrl} → ${localUrl}. TLS termination happens at the proxy;\nTRUST_PROXY=true is already set in .env. Until the proxy is up,\nthe platform is reachable at ${localUrl} only.`,
       "Reverse proxy required",
     );

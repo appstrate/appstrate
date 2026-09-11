@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import { unzipBounded, DecompressionLimitError } from "@appstrate/afps-shared/unzip-bounded";
 import { BundleError } from "./errors.ts";
 import { parseAfpsManifestBytes } from "./parse-manifest.ts";
-import { sanitizeEntries, sumSizes } from "./archive-utils.ts";
+import { decompressionLimitToBundleError, sanitizeEntries, sumSizes } from "./archive-utils.ts";
 import { resolveBundleLimits, type BundleLimits } from "./limits.ts";
 import {
   bundleIntegrity,
@@ -358,27 +358,4 @@ function sha256Digest(data: Uint8Array): Buffer {
   const h = createHash("sha256");
   h.update(data);
   return h.digest();
-}
-
-/**
- * Map a mid-inflate {@link DecompressionLimitError} onto the {@link BundleError}
- * shape these readers already throw. A `corrupt-archive` reason surfaces as
- * `ARCHIVE_INVALID` (matching the previous decompress-failure branch); the
- * three resource-budget reasons surface as `LIMITS_EXCEEDED` with a `field`
- * mirroring the post-hoc checks they replace.
- */
-function decompressionLimitToBundleError(
-  err: DecompressionLimitError,
-  context: string,
-): BundleError {
-  if (err.reason === "corrupt-archive") {
-    return new BundleError("ARCHIVE_INVALID", `failed to decompress ${context}: ${err.message}`);
-  }
-  const field =
-    err.reason === "too-many-files"
-      ? "files"
-      : err.reason === "file-too-large"
-        ? "fileBytes"
-        : "decompressedBytes";
-  return new BundleError("LIMITS_EXCEEDED", err.message, { field });
 }

@@ -4,7 +4,8 @@ import { createCipheriv, randomBytes } from "node:crypto";
 
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
-import type { LlmProxyConfig, ModelSwap } from "./helpers.ts";
+import type { LlmProxyConfig } from "./helpers.ts";
+import { parseModelSwapEnv } from "./model-swap.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
@@ -16,6 +17,7 @@ import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
+import { scrubSecretMaterial } from "./redact.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -91,11 +93,10 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
       placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
       // Model-alias swap (api-key path only — the oauth mode carries no
       // modelSwap; aliases are rejected platform-side for oauth providers).
-      // A malformed payload is a launcher bug — let JSON.parse throw rather
-      // than silently disable the swap (which would leak the real id to the
-      // agent).
+      // A malformed or incomplete payload is a launcher bug: `parseModelSwapEnv`
+      // throws at boot rather than silently disabling the swap and leaking the real id.
       ...(process.env.PI_MODEL_SWAP_JSON
-        ? { modelSwap: JSON.parse(process.env.PI_MODEL_SWAP_JSON) as ModelSwap }
+        ? { modelSwap: parseModelSwapEnv(process.env.PI_MODEL_SWAP_JSON) }
         : {}),
     };
   }
@@ -122,6 +123,10 @@ function readPositiveIntFromEnv(name: string): number | undefined {
 const config = {
   platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
   runToken: process.env.RUN_TOKEN || "",
+  // Per-run agent↔sidecar secret. Absent ⇒ the control surface answers 401 to
+  // everyone (see `SidecarConfig.sidecarAuthToken`) — there is no
+  // unauthenticated mode to fall back to.
+  sidecarAuthToken: process.env.SIDECAR_AUTH_TOKEN || undefined,
   proxyUrl: process.env.PROXY_URL || "",
   llm: readLlmConfigFromEnv(),
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
@@ -176,7 +181,11 @@ if (process.env.CONNECT_LOGIN_JSON) {
     process.stdout.write(`APPSTRATE_CONNECT_RESULT:${payload}\n`);
     process.exit(0);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // `runConnectOnce` surfaces the third-party login tool's own error prose
+    // verbatim (see `parseLoginToolResult`), and this line goes to stdout,
+    // which the platform reads and stores. Scrub credential shapes out of it —
+    // the diagnostic value is in the wording, never in a token it echoed.
+    const message = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
     process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
     process.exit(1);
   }
@@ -266,7 +275,11 @@ const integrationBootPromise =
           // A throw here (vs. a per-integration failure) means the whole boot
           // pass blew up — surface it as a non-OK report so the agent aborts
           // the run rather than running with a silently empty toolset.
-          const error = err instanceof Error ? err.message : String(err);
+          // Same sink as the per-integration `failed[]` entries:
+          // `GET /integrations/boot-report`, which the agent relays into the
+          // org-visible run log. Scrub for the same reason (see
+          // `integrations-boot.ts`' per-spec catch).
+          const error = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
           logger.error("Integration boot raised", { error });
           integrationBootReport = {
             ok: false,

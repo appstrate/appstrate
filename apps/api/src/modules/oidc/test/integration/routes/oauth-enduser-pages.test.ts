@@ -10,7 +10,9 @@
 
 import { describe, it, expect, beforeEach, beforeAll } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { endUsers } from "@appstrate/db/schema";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
+import { eq } from "drizzle-orm";
+import { endUsers, spaces, organizationMembers } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
@@ -37,10 +39,10 @@ async function registerClient(
   } = {},
 ): Promise<{ clientId: string; clientSecret: string }> {
   const body = {
-    level: "application" as const,
+    level: "space" as const,
     name: overrides.name ?? "Acme Portal",
     redirectUris: overrides.redirectUris ?? ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: ctx.defaultAppId,
+    referencedSpaceId: ctx.defaultSpaceId,
     // Default to JIT ON for the end-user page happy-path tests — they
     // simulate brand-new end-user sign-ups that would otherwise be rejected
     // by the secure-by-default gate.
@@ -250,11 +252,10 @@ describe("Public end-user pages — /api/oauth/*", () => {
   });
 
   // C3 — surface `UnverifiedEmailConflictError` while we still control the
-  // response. Previously this error fired inside `customAccessTokenClaims`
-  // during the subsequent token mint, long after the POST /login handler
-  // had already 302'd away, so the user saw an opaque 500. We now pre-
-  // resolve the end-user at the end of the login handler and render the
-  // friendly FR error page from there.
+  // response. The POST /login handler pre-resolves the end-user and renders the
+  // friendly FR error page from there; left to the access-token claim extension
+  // it would fire at token mint, long after the handler has 302'd away, and the
+  // user would see an opaque 500.
   it("POST /login proactively detects an unverified email conflict and 409s", async () => {
     const { clientId } = await registerClient(ctx);
 
@@ -265,7 +266,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
     const conflictEmail = `c3conflict-${Date.now()}@example.com`;
     await db.insert(endUsers).values({
       id: prefixedId("eu"),
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       orgId: ctx.org.id,
       externalId: conflictEmail,
       email: conflictEmail,
@@ -633,7 +634,11 @@ describe("Public end-user pages — /api/oauth/*", () => {
   describe("Org-level signup policy", () => {
     async function registerOrgClient(
       c: TestContext,
-      overrides: { allowSignup?: boolean; signupRole?: "admin" | "member" | "viewer" } = {},
+      overrides: {
+        allowSignup?: boolean;
+        signupRole?: "admin" | "member" | "guest";
+        signupSpaceAssignments?: SpaceAssignment[];
+      } = {},
     ): Promise<{ clientId: string }> {
       // Gate org-level client creation behind dashboardSsoEnabled — tests
       // in this block focus on signup policy, not the SSO gate.
@@ -732,6 +737,81 @@ describe("Public end-user pages — /api/oauth/*", () => {
       expect(html).toContain("n&#39;est pas membre");
     });
 
+    it("POST /login hides the stale assignment's space id and leaves no partial membership", async () => {
+      const outsider = await createTestUser({ email: "stale-signup@example.com" });
+      const { clientId } = await registerOrgClient(ctx, {
+        allowSignup: true,
+        signupRole: "guest",
+        signupSpaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+      });
+      await db.delete(spaces).where(eq(spaces.id, ctx.defaultSpaceId));
+      const url = `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=x`;
+      const page = await app.request(url);
+      const csrfCookie = (page.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="))!;
+      const response = await app.request(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", cookie: csrfCookie },
+        body: new URLSearchParams({
+          _csrf: csrfCookie.slice("oidc_csrf=".length).split(";")[0]!,
+          email: outsider.email,
+          password: "TestPassword123!",
+        }).toString(),
+      });
+      expect(response.status).toBe(403);
+      const html = await response.text();
+      // The underlying message names the space that went missing. This page is
+      // public and unauthenticated, so it says nothing about the org's layout —
+      // the detail goes to the server log instead.
+      expect(html).not.toContain(ctx.defaultSpaceId);
+      expect(html).not.toContain("Invalid signup space assignments");
+      expect(html).toContain(
+        "La configuration d&#39;inscription de cette application est invalide. Contactez votre administrateur.",
+      );
+      expect(
+        await db
+          .select()
+          .from(organizationMembers)
+          .where(eq(organizationMembers.userId, outsider.id)),
+      ).toEqual([]);
+    });
+
+    it("POST /register hides the stale assignment's space id too", async () => {
+      // The register page reaches the same configuration failure through a
+      // fresh sign-up rather than a sign-in, and is just as public.
+      const { clientId } = await registerOrgClient(ctx, {
+        allowSignup: true,
+        signupRole: "guest",
+        signupSpaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+      });
+      await db.delete(spaces).where(eq(spaces.id, ctx.defaultSpaceId));
+      const url = `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=x`;
+      const page = await app.request(url);
+      const csrfCookie = (page.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("oidc_csrf="))!;
+      const response = await app.request(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", cookie: csrfCookie },
+        body: new URLSearchParams({
+          _csrf: csrfCookie.slice("oidc_csrf=".length).split(";")[0]!,
+          name: "Stale Signup",
+          email: "stale-register@example.com",
+          password: "TestPassword123!",
+        }).toString(),
+      });
+      expect(response.status).toBe(403);
+      const html = await response.text();
+      expect(html).not.toContain(ctx.defaultSpaceId);
+      expect(html).not.toContain("Invalid signup space assignments");
+      expect(html).toContain(
+        "La configuration d&#39;inscription de cette application est invalide. Contactez votre administrateur.",
+      );
+    });
+
     it("POST /login auto-joins an existing auth user as signupRole when allowSignup=true", async () => {
       const outsider = await createTestUser({ email: "newbie@example.com" });
       const { clientId } = await registerOrgClient(ctx, {
@@ -785,7 +865,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
     });
   });
 
-  describe("Application-level signup policy (unified with org/instance)", () => {
+  describe("Space-level signup policy (unified with org/instance)", () => {
     // Symmetric to the org-level tests above — since commit a2aae3af the
     // `allowSignup` flag is honored uniformly across all client levels
     // (SOTA alignment with FusionAuth/Auth0/Okta: CTA hidden when closed,
@@ -1029,7 +1109,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
       setRealmResolver(oidcRealmResolver);
     });
 
-    it("POST /register tags the user with realm='end_user:<applicationId>' for an application-level client", async () => {
+    it("POST /register tags the user with realm='end_user:<spaceId>' for a space-level client", async () => {
       const { clientId } = await registerClient(ctx);
       const email = `realm-roundtrip+${crypto.randomUUID().slice(0, 8)}@example.com`;
 
@@ -1083,7 +1163,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
         .where(eq(userTable.email, email))
         .limit(1);
       expect(userRow).toBeDefined();
-      expect(userRow!.realm).toBe(`end_user:${ctx.defaultAppId}`);
+      expect(userRow!.realm).toBe(`end_user:${ctx.defaultSpaceId}`);
 
       // Sessions are created inline on signup when SMTP is disabled;
       // when enabled the session appears only after email verification.
@@ -1093,7 +1173,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
         .from(sessionTable)
         .where(eq(sessionTable.userId, userRow!.id));
       for (const s of sessionRows) {
-        expect(s.realm).toBe(`end_user:${ctx.defaultAppId}`);
+        expect(s.realm).toBe(`end_user:${ctx.defaultSpaceId}`);
       }
     });
 

@@ -42,7 +42,7 @@ export interface FileSystemStorageConfig {
 
 /**
  * HMAC domain separator for upload tokens. The upload keyring
- * (`UPLOAD_SIGNING_SECRET`) also signs document-preview tokens, so binding each
+ * (`UPLOAD_SIGNING_SECRET`) also signs file-preview tokens, so binding each
  * signature to its purpose is what makes the two non-interchangeable in BOTH
  * directions — a preview token can never be replayed at the upload sink, and an
  * upload token can never be replayed at the preview route.
@@ -113,16 +113,16 @@ export interface ProxyUploadUrlConfig {
 export function createProxyUploadDescriptor(
   config: ProxyUploadUrlConfig,
   key: string,
-  opts?: CreateUploadUrlOptions,
+  opts: CreateUploadUrlOptions,
 ): UploadUrlDescriptor {
-  const expiresIn = opts?.expiresIn ?? 900;
+  const expiresIn = opts.expiresIn ?? 900;
   const token = signFsUploadToken(
     {
       k: key,
-      s: opts?.maxSize ?? 0,
-      m: opts?.mime ?? "",
+      s: opts.maxSize,
+      m: opts.mime ?? "",
       e: Math.floor(Date.now() / 1000) + expiresIn,
-      ...(opts?.sha256 && opts.sha256.length > 0 ? { h: opts.sha256 } : {}),
+      ...(opts.sha256 && opts.sha256.length > 0 ? { h: opts.sha256 } : {}),
     },
     config.uploadSecret,
   );
@@ -132,7 +132,7 @@ export function createProxyUploadDescriptor(
   while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
   const url = `${baseUrl}/api/uploads/_content?token=${encodeURIComponent(token)}`;
   const headers: Record<string, string> = {};
-  if (opts?.mime) headers["Content-Type"] = opts.mime;
+  if (opts.mime) headers["Content-Type"] = opts.mime;
   return { url, method: "PUT", headers, expiresIn };
 }
 
@@ -274,7 +274,13 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          writer.write(value);
+          // AWAITED: `FileSink.write` returns `number | Promise<number>` and
+          // returns the promise exactly when the sink has to drain — which is
+          // what the `highWaterMark` above is for. Not awaiting it dropped the
+          // backpressure this path exists to get, and sent a mid-write failure
+          // out as an unhandled rejection instead of into the catch below that
+          // closes the sink and rolls the destination back.
+          await writer.write(value);
         }
         await writer.end();
       } catch (err) {
@@ -369,7 +375,7 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
     async createUploadUrl(
       bucket: string,
       path: string,
-      opts?: CreateUploadUrlOptions,
+      opts: CreateUploadUrlOptions,
     ): Promise<UploadUrlDescriptor> {
       if (!config.uploadSecret) {
         throw new Error(

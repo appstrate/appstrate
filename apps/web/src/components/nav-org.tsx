@@ -9,14 +9,22 @@ import {
   Calendar,
   Wrench,
   Plug,
+  Webhook,
   Loader2,
+  Users,
   Boxes,
+  MessageSquare,
   FileText,
   type LucideIcon,
 } from "lucide-react";
 import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
+import { usePermissions } from "../hooks/use-permissions";
+import { useAppConfig } from "../hooks/use-app-config";
+import { useChatUnreadCount } from "@appstrate/module-chat/unread";
+import { buildScopingHeaders } from "../lib/scoping-headers";
+import { WEBHOOK_READ_PERMISSIONS } from "../lib/webhook-permissions";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -40,6 +48,9 @@ export function NavOrg() {
   const visiblePathname = window.location.pathname;
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
+  const { can } = usePermissions();
+  const { features } = useAppConfig();
+  const chatUnread = useChatUnreadCount(buildScopingHeaders, features.chat);
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
   // so they don't contribute to `runningRuns`. Check them separately.
@@ -61,18 +72,44 @@ export function NavOrg() {
   const activityItems: NavItem[] = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
     // Module-contributed product surfaces (absent flag = entry hidden)
-    { path: "/documents", label: t("nav.documents"), icon: FileText },
+    ...(features.chat
+      ? [{ path: "/chat", label: t("nav.chat"), icon: MessageSquare, badge: chatUnread }]
+      : []),
+    { path: "/files", label: t("nav.files"), icon: FileText },
   ];
 
+  // Each entry asks for the permission its landing page's list route needs, so
+  // a caller who would land on a wall of 403s never sees the link. `agents` is
+  // the disjunction the route itself accepts: a `runner` launches agents it
+  // holds no `agents:read` on. Activité stays ungated — every principal in a
+  // space reaches those.
   const activityTailItems: NavItem[] = [
-    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
+    ...(can("schedules:read")
+      ? [{ path: "/schedules", label: t("nav.schedules"), icon: Calendar }]
+      : []),
   ];
 
   const buildItems: NavItem[] = [
-    { path: "/agents", label: t("nav.agents"), icon: Layers },
-    { path: "/skills", label: t("nav.skills"), icon: Wrench },
-    { path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug },
-    { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
+    ...(can("agents:read") || can("agents:run")
+      ? [{ path: "/agents", label: t("nav.agents"), icon: Layers }]
+      : []),
+    ...(can("skills:read") ? [{ path: "/skills", label: t("nav.skills"), icon: Wrench }] : []),
+    ...(can("mcp-servers:read")
+      ? [{ path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug }]
+      : []),
+    ...(can("integrations:read")
+      ? [{ path: "/integrations", label: t("nav.integrations"), icon: Boxes }]
+      : []),
+  ];
+
+  const canReadWebhooks = WEBHOOK_READ_PERMISSIONS.some((p) => can(p));
+  const adminItems: NavItem[] = [
+    ...(features.webhooks && canReadWebhooks
+      ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
+      : []),
+    ...(can("end-users:read")
+      ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }]
+      : []),
   ];
 
   const renderItems = (items: NavItem[]) =>
@@ -139,6 +176,13 @@ export function NavOrg() {
         <SidebarGroupLabel>{t("nav.section.build")}</SidebarGroupLabel>
         <SidebarMenu>{renderItems(buildItems)}</SidebarMenu>
       </SidebarGroup>
+
+      {adminItems.length > 0 && (
+        <SidebarGroup>
+          <SidebarGroupLabel>{t("nav.section.admin")}</SidebarGroupLabel>
+          <SidebarMenu>{renderItems(adminItems)}</SidebarMenu>
+        </SidebarGroup>
+      )}
     </>
   );
 }

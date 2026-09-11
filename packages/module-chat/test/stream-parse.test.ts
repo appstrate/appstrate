@@ -1,17 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, mock } from "bun:test";
-import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
-import { extractAssistantMessages } from "../src/stream-parse.ts";
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  readUIMessageStream,
+  type UIMessage,
+} from "ai";
+import { extractAssistantMessage, sseToChunks } from "../src/stream-parse.ts";
 import { logger } from "../src/logger.ts";
+
+/**
+ * The implementation `extractAssistantMessage` replaced, kept as the baseline
+ * the single-pass one is measured against. `readUIMessageStream` re-emits a
+ * `structuredClone` of the whole in-progress message on every chunk.
+ */
+async function legacyExtract(
+  byteStream: ReadableStream<Uint8Array>,
+): Promise<UIMessage | undefined> {
+  let last: UIMessage | undefined;
+  for await (const message of readUIMessageStream({ stream: sseToChunks(byteStream) })) {
+    last = message;
+  }
+  return last?.role === "assistant" ? last : undefined;
+}
 
 /**
  * The server persists the assistant turn by parsing a teed copy of the engine's
  * AI SDK UI-message stream (SSE bytes). These tests feed a real encoded stream
- * through the parser and assert the assembled assistant messages — the data that
+ * through the parser and assert the assembled assistant message — the data that
  * gets written to chat_messages when the stream finalizes.
  */
-describe("extractAssistantMessages", () => {
+describe("extractAssistantMessage", () => {
   function encode(
     execute: Parameters<typeof createUIMessageStream>[0]["execute"],
   ): ReadableStream<Uint8Array> {
@@ -36,42 +56,15 @@ describe("extractAssistantMessages", () => {
       writer.write({ type: "finish" });
     });
 
-    const messages = await extractAssistantMessages(body);
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.role).toBe("assistant");
-    expect(messages[0]?.id).toBe("asst_1");
-    expect(textOf(messages[0]!)).toBe("Hello world");
+    const message = await extractAssistantMessage(body);
+    expect(message?.role).toBe("assistant");
+    expect(message?.id).toBe("asst_1");
+    expect(textOf(message!)).toBe("Hello world");
   });
 
-  it("returns an empty array for an empty stream", async () => {
+  it("returns undefined for an empty stream", async () => {
     const body = encode(async () => {});
-    expect(await extractAssistantMessages(body)).toEqual([]);
-  });
-
-  it("keeps every message of a multi-message turn, in first-appearance order", async () => {
-    const body = encode(async ({ writer }) => {
-      writer.write({ type: "start", messageId: "asst_a" });
-      writer.write({ type: "text-start", id: "a" });
-      writer.write({ type: "text-delta", id: "a", delta: "first" });
-      writer.write({ type: "text-end", id: "a" });
-      writer.write({ type: "finish" });
-      writer.write({ type: "start", messageId: "asst_b" });
-      writer.write({ type: "text-start", id: "b" });
-      writer.write({ type: "text-delta", id: "b", delta: "second" });
-      writer.write({ type: "text-end", id: "b" });
-      writer.write({ type: "finish" });
-    });
-
-    // The guarantee: when a turn carries more than one message id, EVERY id
-    // survives as a distinct entry, in first-appearance order — earlier ones are
-    // no longer dropped. ai-sdk v6 `readUIMessageStream` carries parts forward
-    // across `start` boundaries within one stream (the later snapshot is
-    // cumulative); the extractor strips that carried prefix so each persisted
-    // message holds ONLY its own content — no duplication across rows.
-    const messages = await extractAssistantMessages(body);
-    expect(messages.map((m) => m.id)).toEqual(["asst_a", "asst_b"]);
-    expect(textOf(messages[0]!)).toBe("first");
-    expect(textOf(messages[1]!)).toBe("second");
+    expect(await extractAssistantMessage(body)).toBeUndefined();
   });
 
   it("drains a multi-event stream to completion (the disconnect-proof read)", async () => {
@@ -82,8 +75,8 @@ describe("extractAssistantMessages", () => {
       writer.write({ type: "text-end", id: "a" });
       writer.write({ type: "finish" });
     });
-    const messages = await extractAssistantMessages(body);
-    expect(messages[0]?.id).toBe("asst_2");
+    const message = await extractAssistantMessage(body);
+    expect(message?.id).toBe("asst_2");
   });
 
   it("preserves finish message metadata on the persisted assistant message", async () => {
@@ -97,7 +90,6 @@ describe("extractAssistantMessages", () => {
         messageMetadata: {
           appstrate: {
             turn: {
-              engine: "ai-sdk",
               stepCount: 16,
               maxSteps: 16,
               maxStepsReached: true,
@@ -107,17 +99,94 @@ describe("extractAssistantMessages", () => {
       });
     });
 
-    const [message] = await extractAssistantMessages(body);
+    const message = await extractAssistantMessage(body);
     expect((message as { metadata?: unknown } | undefined)?.metadata).toEqual({
       appstrate: {
         turn: {
-          engine: "ai-sdk",
           stepCount: 16,
           maxSteps: 16,
           maxStepsReached: true,
         },
       },
     });
+  });
+
+  it("assembles the turn in ONE pass — no per-chunk clone of the growing message", async () => {
+    // The hazard: a large tool output lands in `parts`, then every later text
+    // delta re-clones the whole message. `readUIMessageStream` does exactly
+    // that (one `structuredClone(state.message)` per chunk it writes), so the
+    // turn costs O(deltas × message size) on the shared event loop. The
+    // single-pass path must clone NOTHING per delta. Counting calls on the
+    // global is deterministic where a timing bound would flake on CI; the
+    // legacy path is run on the same input as the positive control.
+    const DELTAS = 2_000;
+    const toolOutput = { marker: "tool-output", payload: "x".repeat(200 * 1024) };
+    const big = () =>
+      encode(async ({ writer }) => {
+        writer.write({ type: "start", messageId: "asst_big" });
+        writer.write({
+          type: "tool-input-available",
+          toolCallId: "call_1",
+          toolName: "invoke_operation",
+          input: { op: "x" },
+        });
+        writer.write({ type: "tool-output-available", toolCallId: "call_1", output: toolOutput });
+        writer.write({ type: "text-start", id: "t" });
+        for (let i = 0; i < DELTAS; i += 1)
+          writer.write({ type: "text-delta", id: "t", delta: "a" });
+        writer.write({ type: "text-end", id: "t" });
+        writer.write({ type: "finish" });
+      });
+
+    const originalClone = globalThis.structuredClone;
+    let clones = 0;
+    globalThis.structuredClone = ((value: unknown, options?: StructuredSerializeOptions) => {
+      clones += 1;
+      return originalClone(value, options);
+    }) as typeof structuredClone;
+    try {
+      const fresh = await extractAssistantMessage(big());
+      const freshClones = clones;
+
+      clones = 0;
+      const legacy = await legacyExtract(big());
+      const legacyClones = clones;
+
+      // Negative control: the baseline clones on (at least) every delta, so a
+      // regression back to a per-chunk snapshot is a count in the thousands.
+      expect(legacyClones).toBeGreaterThan(DELTAS / 2);
+      expect(freshClones).toBe(0);
+
+      // Equivalence: same message, same parts, same 200 KB output — once.
+      expect(fresh).toEqual(legacy);
+      expect(textOf(fresh!)).toBe("a".repeat(DELTAS));
+      const output = (fresh!.parts as Array<{ type: string; output?: unknown }>).find(
+        (p) => p.type === "tool-invoke_operation",
+      )?.output;
+      expect(output).toEqual(toolOutput);
+    } finally {
+      globalThis.structuredClone = originalClone;
+    }
+  });
+
+  it("returns undefined for a stream that carries no `start` (a lone error chunk)", async () => {
+    // The processor seeds an empty assistant message before the first chunk,
+    // so "no message" has to be decided on what was seen, not on what the
+    // processor hands back. A turn that failed before its `start` (only ever
+    // an `error` chunk on the wire) must not persist an empty assistant row.
+    const body = encode(async ({ writer }) => {
+      writer.write({ type: "error", errorText: "boom" });
+    });
+    const errorSpy = mock(() => {});
+    const original = logger.error;
+    logger.error = errorSpy as unknown as typeof logger.error;
+    try {
+      expect(await extractAssistantMessage(body)).toBeUndefined();
+      // The error chunk is reported once and never thrown.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      logger.error = original;
+    }
   });
 
   it("still yields the valid messages when a frame is malformed, logging once", async () => {
@@ -149,9 +218,9 @@ describe("extractAssistantMessages", () => {
     const original = logger.error;
     logger.error = errorSpy as unknown as typeof logger.error;
     try {
-      const messages = await extractAssistantMessages(corrupted);
-      expect(messages.map((m) => m.id)).toEqual(["asst_ok"]);
-      expect(textOf(messages[0]!)).toBe("ok");
+      const message = await extractAssistantMessage(corrupted);
+      expect(message?.id).toBe("asst_ok");
+      expect(textOf(message!)).toBe("ok");
       // Two malformed frames, but the log fires only once per stream.
       expect(errorSpy).toHaveBeenCalledTimes(1);
       expect(errorSpy.mock.calls[0]?.[0]).toBe("chat sse frame parse failed");

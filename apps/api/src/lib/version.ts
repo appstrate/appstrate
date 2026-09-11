@@ -2,7 +2,7 @@
 
 import { getEnv } from "@appstrate/env";
 
-export interface VersionInfo {
+interface VersionInfo {
   /** Semver/tag of the deployed build (e.g. "v1.0.0-beta.38"). "dev" for source runs. */
   app: string;
   /** Short git SHA of the build commit. Omitted when unknown. */

@@ -70,16 +70,9 @@ describe("buildPromptView", () => {
     expect(view.history).toHaveLength(2);
   });
 
-  it("surfaces ExecutionContext.config on the view when present", async () => {
-    const view = await buildPromptView({
-      context: ctx({ config: { threshold: 42, label: "prod" } }),
-    });
-    expect(view.config).toEqual({ threshold: 42, label: "prod" });
-  });
-
-  it("omits config from the view when absent on the context", async () => {
-    const view = await buildPromptView({ context: ctx() });
-    expect(view.config).toBeUndefined();
+  it("exposes no `config` namespace on the view", async () => {
+    const view = await buildPromptView({ context: ctx({ input: { threshold: 42 } }) });
+    expect(view).not.toHaveProperty("config");
   });
 });
 
@@ -91,6 +84,15 @@ describe("renderPrompt", () => {
       context: ctx({ input: { topic: "physics" } }),
     });
     expect(out).toBe("Run: run_test | Topic: physics");
+  });
+
+  it("renders {{config.*}} as the empty string", async () => {
+    const template = "[{{config.threshold}}]";
+    const out = await renderPrompt({
+      template,
+      context: ctx({ input: { threshold: 42 } }),
+    });
+    expect(out).toBe("[]");
   });
 
   it("iterates memories via a section", async () => {

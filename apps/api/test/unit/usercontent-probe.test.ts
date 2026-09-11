@@ -4,7 +4,7 @@
  * Unit tests for `probeUsercontentReachability()` (issue #1001).
  *
  * The probe fires ONE unauthenticated GET at
- * `${USERCONTENT_URL}/preview/documents/_probe` at boot and, unless it observes
+ * `${USERCONTENT_URL}/preview/files/_probe` at boot and, unless it observes
  * the expected `401` (route reached AND enforcing the preview token — healthy),
  * emits exactly one `logger.error` naming the URL and observed status. It is
  * never fatal and never runs when `USERCONTENT_URL` is unset.
@@ -37,7 +37,7 @@ function restoreEnv(): void {
 // A host distinct from APP_URL (localhost in the test preload) so the env
 // refinement (USERCONTENT_URL host must differ from APP_URL) is satisfied.
 const UC = "http://usercontent.example.test";
-const PROBE_URL = `${UC}/preview/documents/_probe`;
+const PROBE_URL = `${UC}/preview/files/_probe`;
 
 type FetchImpl = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 let originalFetch: typeof fetch;

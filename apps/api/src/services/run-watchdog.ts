@@ -78,7 +78,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
  */
 const WATCHDOG_ADVISORY_LOCK_KEY = 7246811900000001n;
 
-export interface RunWatchdogConfig {
+interface RunWatchdogConfig {
   /** How often the sweep runs, in seconds. */
   readonly intervalSeconds: number;
   /** How long a runner can be silent before it's considered stalled, in seconds. */

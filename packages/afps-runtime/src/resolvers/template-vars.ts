@@ -21,7 +21,7 @@
  *     caller can fail closed by scanning for survivors (the credential-proxy
  *     pattern — never silently blank a credential into a request).
  *
- * NOTE: distinct from the Mustache renderer in `@appstrate/afps-runtime/template`,
+ * NOTE: distinct from the Mustache renderer in `../template/mustache.ts`,
  * which renders agent prompts from a structured view. This one is a flat
  * `{{name}}` → `fields[name]` substitution over a string→string credential map.
  */

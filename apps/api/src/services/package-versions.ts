@@ -29,7 +29,7 @@ import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
-import { storageFolderForType } from "./package-items/config.ts";
+import { storageFolderForType, assertArchiveContentConforms } from "./package-items/config.ts";
 import { toISO } from "../lib/date-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
@@ -646,6 +646,7 @@ export async function createVersionFromDraft(params: {
 
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
+  let frozenEntries: Record<string, Uint8Array> | undefined;
   if (pkg.type === "agent") {
     const storedFiles = await downloadPackageFiles(
       storageFolderForType(pkg.type),
@@ -678,14 +679,29 @@ export async function createVersionFromDraft(params: {
     const entries: Record<string, Uint8Array> = { ...files };
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
+    frozenEntries = entries;
   }
+
+  // The bytes that ACTUALLY get frozen: the artifact's content entry comes from
+  // STORAGE, and `packages.draft_content` is a second copy that can drift.
+  if (frozenEntries) assertArchiveContentConforms(pkg.type, frozenEntries, "content");
 
   // A schema-valid mcp-server draft can still point at a companion file that
   // is absent from the stored payload. Reparse the exact bytes about to become
   // immutable so publish enforces the same executable-archive invariant as
-  // create/import/install. Legacy rows whose stored manifest drifted to another
-  // package type retain their established publish compatibility path.
-  if (pkg.type === "mcp-server" && finalManifest.type === "mcp-server") {
+  // create/import/install.
+  //
+  // Keyed on `pkg.type` ALONE. This used to also require
+  // `finalManifest.type === "mcp-server"`, exempting a row whose stored
+  // manifest had drifted to another type — which meant the one row shape that
+  // cannot be trusted was the one that skipped the check, minting an immutable
+  // version + ZIP nothing ever validated. Every write direction is closed:
+  // create throws (`package-items/manifest.ts`), the author routes 400
+  // (`validateManifestForRoute`), fork normalizes (`package-fork.ts`), and
+  // #987 closed the last one. A surviving drifted row now fails publish loudly
+  // with `invalid_bundle` instead of publishing unchecked
+  // (`docs/NO_TRANSITIONAL_CODE.md` §1).
+  if (pkg.type === "mcp-server") {
     try {
       parsePackageZip(new Uint8Array(zipBuffer), { retiredRuntimeTools: "drop" });
     } catch (err) {

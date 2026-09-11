@@ -83,6 +83,7 @@ import {
   type RuntimeAdapterRunContext,
   type RuntimeEgressContext,
 } from "./integration-runtime-adapter.ts";
+import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 // Side-effect imports — each adapter module registers itself on load.
 // New adapters (firecracker, podman, …) plug in with one more import here.
 import "./integration-runtime-adapter-docker.ts";
@@ -155,7 +156,7 @@ function decodeWorkspaceHandle(): WorkspaceHandle | null {
  * surface is `GET /internal/mcp-server-bundle/:scope/:name` with
  * Bearer-token auth (same run-token as the credentials endpoint).
  */
-export interface BundleFetchOptions {
+interface BundleFetchOptions {
   platformApiUrl: string;
   runToken: string;
   /** Override for tests. Defaults to `globalThis.fetch`. */
@@ -168,7 +169,7 @@ export interface BundleFetchOptions {
   resolveHostFn?: HostResolver;
 }
 
-export interface BootIntegrationsResult {
+interface BootIntegrationsResult {
   host: McpHost;
   /**
    * Tools registered on `host`, ready to merge into the sidecar's MCP
@@ -246,9 +247,10 @@ async function fetchBundleBytes(
   serverVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
-  // #588 — when the platform pinned a concrete version at run kickoff, forward
-  // it so the bytes match the manifest the spawn-resolver read. Absent → the
-  // route serves the latest non-yanked version (back-compat).
+  // #588 — the platform pins a concrete version at run kickoff; forward it so
+  // the bytes match the manifest the spawn-resolver read. Only a system
+  // mcp-server has none (boot registry, single version, served by id alone) —
+  // for anything else the route rejects an absent `?version=`.
   const url = serverVersion
     ? `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}?version=${encodeURIComponent(serverVersion)}`
     : `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}`;
@@ -424,22 +426,14 @@ export async function connectRemoteHttpIntegration(
       `integration ${spec.integrationId} declares sourceKind="remote" but no server.url`,
     );
   }
-  // AFPS §7.1 — pick the MCP client transport from the manifest.
-  // Default to `streamable-http` when the field is absent (back-compat
-  // for manifests that predated the enum). Anything else is a
-  // hard-fail at boot — the platform validates the enum at install time,
-  // so reaching this branch means the manifest carries a value the
-  // sidecar doesn't (yet) know how to dispatch to.
-  const declaredTransport = spec.manifest.server?.transport;
-  const transport: "streamable-http" | "sse" =
-    declaredTransport === "sse" ? "sse" : "streamable-http";
-  if (
-    declaredTransport !== undefined &&
-    declaredTransport !== "streamable-http" &&
-    declaredTransport !== "sse"
-  ) {
+  // AFPS §7.1 — pick the MCP client transport from the manifest. The enum is
+  // required, and re-validated on every read of a stored manifest rather than
+  // only at install, so anything else — absent included — means the spec did
+  // not come from a conforming manifest and is a hard-fail at boot.
+  const transport = spec.manifest.server?.transport;
+  if (transport !== "streamable-http" && transport !== "sse") {
     throw new Error(
-      `integration ${spec.integrationId} declares unsupported source.remote.transport="${declaredTransport}" (allowed: "streamable-http" | "sse")`,
+      `integration ${spec.integrationId} declares unsupported source.remote.transport="${transport}" (allowed: "streamable-http" | "sse")`,
     );
   }
 
@@ -736,25 +730,15 @@ const STDERR_LINE_MAX_CHARS = 500;
  * This is defence-in-depth, not a guarantee — the primary control remains
  * that runs are org-scoped to an actor who already holds the integration's
  * credentials.
+ *
+ * The cap is applied with `truncateForScrub` rather than a bare `.slice`. It is
+ * the TIGHTEST cut in the sidecar (500 chars, against 2 KB elsewhere), so it is
+ * the one most likely to land inside a `scheme://user:pass@host` — an ordinary
+ * shape for a runner printing a connection error — and the userinfo rule cannot
+ * fire without the `@` the cut would have removed.
  */
 export function scrubStderrLine(line: string): string {
-  return (
-    line
-      .slice(0, STDERR_LINE_MAX_CHARS)
-      .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
-      .replace(/\beyJ[A-Za-z0-9._-]{10,}/g, "[redacted-jwt]")
-      // Separator-prefixed families (`sk-…`, `ghp_…`, `xoxb-…`) keep the
-      // mandatory `-`/`_` so prose words starting with `sk`/`pk` survive;
-      // AWS access-key ids (`AKIA` + 16 upper-alnum, no separator) and Google
-      // OAuth tokens (`ya29.` + dot) get their own literal shapes.
-      .replace(/\b(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9._-]{6,}/g, "[redacted-key]")
-      .replace(/\bAKIA[A-Z0-9]{12,}/g, "[redacted-key]")
-      .replace(/\bya29\.[A-Za-z0-9._-]{6,}/g, "[redacted-key]")
-      .replace(
-        /\b(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)(["'\s:=]+)[^\s"',&]+/gi,
-        "$1$2[redacted]",
-      )
-  );
+  return scrubSecretMaterial(truncateForScrub(line, STDERR_LINE_MAX_CHARS));
 }
 
 /**
@@ -762,7 +746,9 @@ export function scrubStderrLine(line: string): string {
  * integration clients (#779 annex). Absent/invalid → `undefined` → the
  * MCP SDK default applies, unchanged behaviour. Third-party servers that
  * do a cold OAuth refresh on their first tool call can legitimately need
- * more; mirrors the `APPSTRATE_MCP_CONNECT_DEADLINE_MS` operator knob.
+ * more. Unlike the connect deadline (a fixed constant — no writer ever set
+ * `APPSTRATE_MCP_CONNECT_DEADLINE_MS`), this one IS reachable: the key is in
+ * `SIDECAR_OPERATOR_ENV_KEYS`, so the platform forwards it into the sidecar.
  */
 export function toolTimeoutMsFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
   const raw = env.APPSTRATE_MCP_TOOL_TIMEOUT_MS;
@@ -919,10 +905,18 @@ async function spawnAndConnectLocalIntegration(params: {
   }
 
   // AFPS — fetch the referenced mcp-server package's bundle (the runnable
-  // server code), NOT the integration's own bundle. Local-source integrations
-  // always carry `server.packageId`; fall back to the integration id only
-  // if a spec somehow omits it (defensive).
-  const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
+  // server code), NOT the integration's own bundle. `server.packageId` is
+  // required for a local source (optional in TypeScript only because the
+  // `server` bag is the collapsed union of the local / remote / serverless
+  // shapes), so an absent one means the spec did not come from a conforming
+  // manifest — a hard-fail at boot, never a fetch of some other package's
+  // bytes into a code-execution position.
+  const serverPackageId = spec.manifest.server?.packageId;
+  if (!serverPackageId) {
+    throw new Error(
+      `integration ${spec.integrationId} declares sourceKind="local" but no server.packageId`,
+    );
+  }
   const bytes = await fetchBundleBytes(
     serverPackageId,
     spec.manifest.server?.version,
@@ -937,10 +931,15 @@ async function spawnAndConnectLocalIntegration(params: {
     bundleRoot: root,
     egress: egressCtx,
     workspaceHandle: params.workspaceHandle,
-    onStderrLine: (line) => {
+    // Scrub ONCE, at the point third-party bytes enter the process, so both
+    // consumers get the same masked line. Scrubbing only the report copy left
+    // the operator's log aggregator holding the raw line — a wider audience,
+    // not a narrower one, than the report the scrub was written for.
+    onStderrLine: (raw) => {
+      const line = scrubStderrLine(raw);
       logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
       if (params.stderrTail) {
-        params.stderrTail.push(scrubStderrLine(line));
+        params.stderrTail.push(line);
         if (params.stderrTail.length > STDERR_TAIL_MAX_LINES) params.stderrTail.shift();
       }
     },
@@ -1086,12 +1085,8 @@ export function hiddenToolsForNativeUpstream(
   const hidden = new Set(spec.hiddenTools ?? []);
   for (const apiCall of spec.apiCalls ?? []) {
     hidden.add(apiCall.toolName);
-    const legacyCallName =
-      apiCall.toolName === "api_call" ? "api_call" : `api_call__${apiCall.authKey}`;
-    hidden.add(legacyCallName);
     if ((apiCall.uploadProtocols?.length ?? 0) > 0) {
       hidden.add(apiCall.toolName.replace(/^api_call/, "api_upload"));
-      hidden.add(legacyCallName.replace(/^api_call/, "api_upload"));
     }
   }
   return hidden.size > 0 ? [...hidden] : undefined;
@@ -1295,7 +1290,12 @@ export async function bootIntegrations(
       // below and land in `failed`, which aborts the run. We log + breadcrumb
       // the root cause here so the per-integration failures downstream are
       // attributable (typically openssl missing from the sidecar image).
-      const msg = err instanceof Error ? err.message : String(err);
+      //
+      // Scrubbed for the same reason the per-spec catch below is: this message
+      // is not all sidecar-authored — openssl's workdir errors quote the path
+      // they were handed — and it lands on the UNAUTHENTICATED
+      // `GET /integrations/boot-report`, verbatim, twice (crumb message + data).
+      const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
       logger.warn("integration MITM CA bring-up failed; HTTP-delivery integrations will skip", {
         runId,
         error: msg,
@@ -1524,7 +1524,7 @@ export async function bootIntegrations(
           serverUrl: server.url,
           // AFPS §7.1 — surface the actual transport the sidecar
           // dispatched to so operators can audit which path executed.
-          transport: server.transport ?? "streamable-http",
+          transport: server.transport,
           authKey,
           toolCount: added + apiCallAdded,
         });
@@ -1636,7 +1636,16 @@ export async function bootIntegrations(
         },
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // Scrub the failure message itself, not just the stderr tail appended
+      // below. `msg` is third-party text on several paths — a `connect.tool`
+      // login tool's own error prose (`parseLoginToolResult` surfaces it
+      // verbatim), a `docker`/runner diagnostic that quotes back what it was
+      // given, a platform error `detail`. All of it lands in `failed[].error`
+      // and on a breadcrumb, both served by the UNAUTHENTICATED
+      // `GET /integrations/boot-report` the agent container reads as its boot
+      // gate. Scrubbing one half of a string the caller reads whole was the
+      // bug.
+      const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
       const ms = Math.round(performance.now() - specStart);
       // #779 — append the runner's stderr tail so the boot report carries
       // the actual upstream cause, not just the transport-level symptom

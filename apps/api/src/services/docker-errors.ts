@@ -61,6 +61,37 @@ export function classifyDockerNetworkError(
 }
 
 /**
+ * Raised when a container vanishes from the daemon while the platform is
+ * still waiting for its exit code.
+ *
+ * The honest answer to "how did it end?" is then *unknown*. The previous
+ * behaviour — synthesising exit code 137 — asserted SIGKILL, which reads
+ * downstream (and in the UI) as an OOM kill, sending every investigation
+ * after a memory ceiling that was never reached (#1130). A container can
+ * disappear for reasons that have nothing to do with its process: a host
+ * `docker container prune`, an infra-level image/container GC, a daemon
+ * restart, or another Appstrate instance's boot sweep.
+ *
+ * Callers treat this as an infrastructure failure, not a run outcome:
+ * `execute-background.ts` synthesises a `failed` terminal carrying this
+ * message, so the operator reads the real cause instead of a fabricated
+ * signal number.
+ */
+export class DockerContainerDisappearedError extends Error {
+  readonly code = "DOCKER_CONTAINER_DISAPPEARED" as const;
+
+  constructor(readonly containerId: string) {
+    super(
+      `Container ${containerId.slice(0, 12)} disappeared from the Docker daemon before its exit ` +
+        `code could be read. Its real exit status is unknown. Likely causes: a host-side ` +
+        `\`docker container prune\`, a daemon restart, or another Appstrate instance sweeping ` +
+        `containers at boot.`,
+    );
+    this.name = "DockerContainerDisappearedError";
+  }
+}
+
+/**
  * Detect Moby's "image is not present locally" failure on container create.
  *
  * `POST /containers/create` **never pulls**: a missing image comes back as

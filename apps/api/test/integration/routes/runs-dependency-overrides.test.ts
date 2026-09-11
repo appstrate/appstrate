@@ -18,7 +18,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -31,7 +31,7 @@ describe("POST /api/agents/:scope/:name/run — dependency_overrides validation"
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "deporg" });
     await seedPackage({ id: AGENT, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 
   async function run(body: Record<string, unknown>) {
@@ -74,14 +74,14 @@ describe("GET /api/runs/:id — dependency_overrides echo", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "deporg" });
     await seedPackage({ id: AGENT, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 
   it("echoes the persisted dependency_overrides on the run wire DTO", async () => {
     const row = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       dependencyOverrides: { "@deporg/skill": "draft" },
     });
@@ -95,7 +95,7 @@ describe("GET /api/runs/:id — dependency_overrides echo", () => {
     const row = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const res = await app.request(`/api/runs/${row.id}`, { headers: authHeaders(ctx) });

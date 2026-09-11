@@ -4,7 +4,7 @@
  * /api/credential-proxy/proxy — public authenticated credential proxy.
  *
  * Used by external runners (CLI, GitHub Action, third-party agents) to
- * reach an application's integrations without copying raw credentials out
+ * reach a space's integrations without copying raw credentials out
  * of Appstrate. The CLI's `RemoteAppstrateIntegrationResolver` is the
  * canonical consumer; in-container runs reach the same credential-proxy
  * core via the sidecar's MCP `{ns}__api_call` tools instead.
@@ -17,7 +17,7 @@
  *     sessions are rejected because the drive-by CSRF threat model
  *     doesn't fit an endpoint that reaches third-party providers.
  *   - Explicit `credential-proxy:call` scope — NOT granted by default
- *   - Per-application scope (principal cannot reach providers in another app)
+ *   - Per-space scope (principal cannot reach providers in another space)
  *   - Rate-limit: 100 req/min per principal (configurable via
  *     `CREDENTIAL_PROXY_LIMITS.rate_per_min`)
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
@@ -34,19 +34,22 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-// Streaming cap — mirrored from runtime-pi/sidecar constants.
-// The streaming/buffered decision is header-driven (X-Stream-Request),
-// not threshold-driven, so only the hard cap is needed here.
-const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024; // 100 MB
+// Streaming cap — single-sourced from the shared outbound-HTTP engine, the
+// same module the in-container resolvers enforce it from. It used to be a
+// third private copy of the literal here, so a change to the shared value
+// silently desynchronised this route from every runner. The streaming/buffered
+// decision is header-driven (X-Stream-Request), not threshold-driven, so only
+// the hard cap is needed here.
+import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
-export const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 import { filterHeaders, stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import { getActor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
+import { requireSpaceContext } from "../middleware/space-context.ts";
 import {
   ApiError,
   invalidRequest,
@@ -62,7 +65,6 @@ import {
   ProxySubstitutionError,
 } from "../services/credential-proxy/core.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
-import { insertCredentialProxyUsage } from "../services/credential-proxy-usage.ts";
 import type { AppEnv } from "../types/index.ts";
 
 import { assertBearerOnly } from "../lib/bearer-only.ts";
@@ -73,7 +75,7 @@ export function createCredentialProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getCredentialProxyLimits();
 
-  router.use("/*", requireAppContext());
+  router.use("/*", requireSpaceContext());
 
   // Accept any HTTP method — the proxy preserves `req.method` on the
   // upstream fetch. A POST-only route would silently 404 GET/PUT/DELETE
@@ -123,7 +125,7 @@ export function createCredentialProxyRouter() {
         throw invalidRequest("X-Session-Id must be a UUID v4");
       }
 
-      const applicationIdEarly = c.get("applicationId");
+      const spaceIdEarly = c.get("spaceId");
       const apiKeyIdEarly = c.get("apiKeyId");
       const userIdEarly = c.get("user").id;
       // Namespaced principal id — keeps JWT-user and API-key buckets
@@ -136,7 +138,7 @@ export function createCredentialProxyRouter() {
           principalId,
           boundTo: binding.boundTo,
           authMethod,
-          applicationId: applicationIdEarly,
+          spaceId: spaceIdEarly,
         });
         throw forbidden("X-Session-Id is bound to a different principal");
       }
@@ -149,7 +151,7 @@ export function createCredentialProxyRouter() {
         );
       }
 
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const orgId = c.get("orgId");
       const apiKeyId = c.get("apiKeyId");
       const userId = c.get("user").id;
@@ -158,7 +160,7 @@ export function createCredentialProxyRouter() {
       // The actor selects which `integration_connections` row is decrypted:
       //   - `Appstrate-User` impersonation → the end-user's connection
       //   - dashboard / CLI-JWT / API-key callers → the platform user's
-      //     own connection (or any `shared_with_org` connection in the app).
+      //     own connection (or any `shared_with_org` connection in the space).
       // `X-Connection-Id` (when present) pins a specific connection id,
       // validated against the actor's accessible set in the resolver.
       const actor = getActor(c);
@@ -251,7 +253,7 @@ export function createCredentialProxyRouter() {
         // duplex: "half" and 401-retry is suppressed (body unreplayable);
         // authRefreshed is surfaced on the result instead.
         const result = await proxyCall({
-          applicationId,
+          spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
           integrationId,
@@ -263,7 +265,6 @@ export function createCredentialProxyRouter() {
           cookieJar: jar,
           jarSessionId: sessionId,
           cookieJarTtlSeconds: limits.session_ttl_seconds,
-          sessionKey: integrationId,
           // When the client wants a streamed response, skip the platform
           // response-size cap — the capping transform stream in this
           // route enforces MAX_STREAMED_BODY_SIZE instead.
@@ -278,30 +279,13 @@ export function createCredentialProxyRouter() {
           apiKeyId,
           userId,
           endUserId: endUser?.id,
-          applicationId,
+          spaceId,
           integrationId,
           method,
           target,
           status: result.status,
           runId,
           durationMs,
-        });
-
-        // Record per-call metering for reporting. `request_id` is the row
-        // UNIQUE key — replays (retries of the same proxy request) no-op.
-        // Fire-and-forget: metering failure MUST NOT fail a successful
-        // upstream call; the service logs and drops on DB error.
-        void insertCredentialProxyUsage({
-          orgId,
-          apiKeyId: apiKeyId ?? null,
-          userId: apiKeyId ? null : userId,
-          runId,
-          applicationId,
-          integrationId,
-          targetHost: safeTargetHost(target),
-          httpStatus: result.status,
-          durationMs,
-          requestId: c.get("requestId"),
         });
 
         // Strip hop-by-hop + stale content-encoding/length (shared helper),
@@ -366,7 +350,7 @@ export function createCredentialProxyRouter() {
             authMethod,
             apiKeyId,
             userId,
-            applicationId,
+            spaceId,
             integrationId,
             target,
           });
@@ -382,7 +366,7 @@ export function createCredentialProxyRouter() {
           authMethod,
           apiKeyId,
           userId,
-          applicationId,
+          spaceId,
           integrationId,
           error: getErrorMessage(err),
         });
@@ -401,7 +385,7 @@ const PROXY_CONTROL_HEADERS = new Set([
   "x-session-id",
   "x-substitute-body",
   "x-run-id",
-  "x-application-id",
+  "x-space-id",
   "x-connection-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.
   "x-stream-request",
@@ -417,19 +401,6 @@ const PROXY_CONTROL_HEADERS = new Set([
   // forward (re-encoding would require rebuffering the whole stream).
   "accept-encoding",
 ]);
-
-/**
- * Derive the audit-safe host for usage logging. Returns `null` for
- * unparseable targets — the usage record carries a nullable `target_host`
- * column so we never lose the attribution row on a malformed target.
- */
-function safeTargetHost(target: string): string | null {
-  try {
-    return new URL(target).host;
-  } catch {
-    return null;
-  }
-}
 
 /** Transport hints between the runtime and this proxy — never forwarded to the caller. */
 const STREAM_CONTROL_HEADERS = new Set(["x-stream-request", "x-stream-response"]);

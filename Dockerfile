@@ -21,7 +21,6 @@ WORKDIR /app
 # it up. The deps layer still caches on manifest/lockfile changes only.
 COPY package.json bun.lock turbo.json ./
 COPY --parents */package.json */*/package.json ./
-COPY patches/ patches/
 
 # ── Stage 2a: Full install (build toolchain) ──────────────────────
 # Everything the BUILD needs: Vite/Rolldown, TypeScript, Turbo, the SPA's
@@ -41,13 +40,19 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 # stage copies: measured 1.0 GB → 642 MB.
 #
 # NOT `--production`: several packages value-import at runtime a dependency
-# that is declared as a `devDependency` — most importantly
+# that reaches the install only as a `devDependency` — most importantly
 # `packages/core/src/storage-s3.ts` imports `@aws-sdk/client-s3`, which core
-# does not declare and apps/api declares as a devDependency. `--production`
-# therefore deletes the S3 storage backend from the image, and because the
-# backend is source-only (Bun executes `.ts` directly, no build step) the
-# build stays GREEN and the failure only appears at runtime. Fix the manifests
-# first if `--production` is ever wanted; it is worth only ~26 MB more.
+# declares only as a PEER dependency (so it does not pull it in itself) and
+# apps/api satisfies as a devDependency. `--production` therefore deletes the
+# S3 storage backend from the image, and because the backend is source-only
+# (Bun executes `.ts` directly, no build step) the build stays GREEN and the
+# failure only appears at runtime. Fix the manifests first if `--production`
+# is ever wanted; it is worth only ~26 MB more.
+#
+# This paragraph is the repo's canonical description of that hazard — a value
+# import invisible to tsc, satisfied by a manifest that `--production` prunes.
+# Keep it accurate: it is what stops the next reader from "cleaning up" a
+# dependency that has no static importer.
 #
 # `--filter` is safe against that class of bug: it selects whole workspace
 # members and keeps each selected member's devDependencies intact.
@@ -87,7 +92,7 @@ FROM oven/bun:1.3.14-alpine
 # only Bun's upstream OCI labels).
 LABEL org.opencontainers.image.source="https://github.com/appstrate/appstrate"
 LABEL org.opencontainers.image.description="Appstrate — Open-source platform for running autonomous AI agents in sandboxed Docker containers"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.licenses="Apache-2.0 AND LicenseRef-Appstrate-Commercial"
 
 WORKDIR /app
 
@@ -119,11 +124,16 @@ COPY --from=deps-runtime --parents /app/./apps/api/node_modules /app/./packages/
 COPY --from=build --parents /app/./apps/api/src /app/./apps/api/package.json ./
 COPY --from=build --parents /app/./packages/*/src /app/./packages/*/package.json ./
 
-# Non-`src` package assets that must ship alongside their package source:
-#   core/schema — JSON schemas resolved at runtime
-#   db/drizzle  — SQL migrations applied at boot
+# Non-`src` package assets that must ship alongside their package source.
+# Every `packages/*/drizzle` is graph-derived like the `src` globs above, so a
+# package that starts owning migrations needs no edit here: db's are applied to
+# the platform database at boot, module-ee's to that same platform database at
+# init under its own journal (`drizzle.ee_migrations`), and
+# the `src`-only globs above would otherwise leave the image loading the module
+# and dying on `Cannot find module '../drizzle/schema.ts'`.
+# core/schema is hand-listed — it is the one non-`drizzle` asset of its kind.
+COPY --from=build --parents /app/./packages/*/drizzle ./
 COPY --from=build /app/packages/core/schema ./packages/core/schema
-COPY --from=build /app/packages/db/drizzle ./packages/db/drizzle
 
 # Built frontend
 COPY --from=build /app/apps/web/dist ./apps/web/dist
@@ -139,6 +149,11 @@ RUN chown -R bun:bun /app/packages /app/apps/api/node_modules
 # Root package.json needed for workspace resolution
 COPY --from=build /app/package.json ./
 COPY --from=build /app/system-packages ./system-packages
+
+# The image ships two licences: Apache-2.0 for the platform, and the commercial
+# one for packages/module-ee, which is shipped by the `packages/*` globs above.
+COPY --from=build /app/LICENSE /app/NOTICE ./
+COPY --from=build --chown=bun:bun /app/packages/module-ee/LICENSE ./packages/module-ee/LICENSE
 
 # su-exec for lightweight privilege drop in entrypoint
 RUN apk add --no-cache su-exec

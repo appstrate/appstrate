@@ -9,15 +9,15 @@ import { loadSystemPackages, type SystemPackageEntry } from "@appstrate/core/sys
 import { compareVersionsDesc } from "@appstrate/core/semver";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import type { PackageType } from "@appstrate/core/validation";
 import { createVersionAndUpload } from "./package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "./package-items/storage.ts";
 import { storageFolderForType } from "./package-items/config.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
 export type { SystemPackageEntry };
 
 /** What one `syncSystemPackagesToDb` pass actually wrote. */
-export interface SystemPackageSyncReport {
+interface SystemPackageSyncReport {
   /** `packages` rows inserted or updated. */
   syncedPackages: number;
   /** `package_versions` rows created. */
@@ -46,26 +46,6 @@ let systemPackageVersions: readonly SystemPackageEntry[] = [];
  * caller behind the pool. Kept well under the pool size on purpose.
  */
 const SYNC_CONCURRENCY = 6;
-
-/**
- * `Promise.all`-shaped map with a bounded worker pool. Local by design: this
- * file and `lib/boot.ts` each keep their own tiny pool rather than sharing a
- * new util module.
- */
-async function mapBounded<T>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < items.length) {
-      const item = items[cursor++]!;
-      await fn(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-}
 
 /** Load system packages from AFPS archives. Call once at boot. */
 export async function initSystemPackages(): Promise<void> {
@@ -115,8 +95,22 @@ export function isSystemPackage(id: string): boolean {
   return systemPackages.has(id);
 }
 
-export function getSystemPackagesByType(type: PackageType): SystemPackageEntry[] {
-  return [...systemPackages.values()].filter((e) => e.type === type);
+/**
+ * Test-only: install a registry and return the undo. `getTestApp()` skips
+ * `boot()`, so the registry is empty under test and every boot-registry branch
+ * (e.g. the mcp-server byte route's system short-circuit — the one caller
+ * allowed to omit `?version=`) is otherwise unreachable. Restoring matters:
+ * `bun test` runs the whole suite in one process, and a registry left populated
+ * would flip `isSystemPackage()` for every file that runs after.
+ */
+export function _setSystemPackagesForTesting(
+  entries: ReadonlyMap<string, SystemPackageEntry>,
+): () => void {
+  const previous = systemPackages;
+  systemPackages = entries;
+  return () => {
+    systemPackages = previous;
+  };
 }
 
 /**
@@ -321,7 +315,10 @@ export async function syncSystemPackagesToDb(
     syncedVersions++;
   };
 
-  await mapBounded(Array.from(canonicalPackages), SYNC_CONCURRENCY, ([id, entry]) =>
+  // Each callback swallows its own failure into a `logger.warn` below, so the
+  // pool's abort-on-first-rejection never triggers here — one unsyncable
+  // package must not stop the rest of the boot sync.
+  await mapWithConcurrency(Array.from(canonicalPackages), SYNC_CONCURRENCY, ([id, entry]) =>
     syncCanonical(id, entry).catch((err) => {
       logger.warn("Failed to sync canonical system package", {
         packageId: id,
@@ -329,7 +326,7 @@ export async function syncSystemPackagesToDb(
       });
     }),
   );
-  await mapBounded(allVersions, SYNC_CONCURRENCY, (entry) =>
+  await mapWithConcurrency(allVersions, SYNC_CONCURRENCY, (entry) =>
     syncVersion(entry).catch((err) => {
       logger.warn("Failed to register system package version", {
         packageId: entry.packageId,

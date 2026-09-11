@@ -7,7 +7,74 @@
  * following the EventSource spec: fields separated by \n\n blocks.
  */
 
+import { sql } from "drizzle-orm";
 import type { RealtimeEvent } from "@appstrate/shared-types";
+import { db } from "./db.ts";
+
+/**
+ * Per-channel required-field defaults for a synthetic `pg_notify` payload.
+ *
+ * The realtime service validates every NOTIFY payload against the shared Zod
+ * schemas (`runUpdateEventSchema` / `runLogEventSchema` / `runMetricEventSchema`
+ * in `@appstrate/shared-types`) and SILENTLY DROPS anything incomplete — a
+ * fixture missing one required key never reaches a subscriber, and the test
+ * that fired it fails as a timeout rather than as a validation error. So the
+ * defaults mirror the FULL payload the production triggers/broadcaster emit:
+ * every key present, `null` where the column is nullable. A test overrides only
+ * the fields it asserts on.
+ *
+ * This lived as two copies — one in `integration/services/realtime.test.ts`,
+ * one in `integration/routes/realtime-sse.test.ts`, the second annotated as a
+ * mirror of the first. The route-level copy had lost the whole `run_metric`
+ * block, so that channel's SSE framing could not be exercised there at all.
+ * One home, so a channel added to the producer is added once.
+ */
+const NOTIFY_DEFAULTS: Record<string, Record<string, unknown>> = {
+  run_update: {
+    operation: "UPDATE",
+    id: "exec-default",
+    package_id: null,
+    status: "running",
+    user_id: null,
+    end_user_id: null,
+    org_id: "org-default",
+    space_id: "spc-default",
+    schedule_id: null,
+    error: null,
+    started_at: null,
+    completed_at: null,
+    duration: null,
+  },
+  run_log_insert: {
+    id: 1,
+    run_id: "exec-default",
+    org_id: "org-default",
+    space_id: "spc-default",
+    type: "progress",
+    level: "info",
+    event: null,
+    message: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+  },
+  run_metric: {
+    run_id: "exec-default",
+    org_id: "org-default",
+    space_id: "spc-default",
+    package_id: "pkg-default",
+    token_usage: null,
+    cost_so_far: 0,
+    cost_pricing_status: null,
+  },
+};
+
+/**
+ * Fire a `pg_notify` on `channel` with `payload` merged over the channel's
+ * required-field defaults, so the payload matches the real producer shape.
+ */
+export async function pgNotify(channel: string, payload: Record<string, unknown>): Promise<void> {
+  const full = { ...(NOTIFY_DEFAULTS[channel] ?? {}), ...payload };
+  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(full)})`);
+}
 
 /** Maps each event name to its `data` payload type. */
 type EventDataMap = {
@@ -33,7 +100,7 @@ export function eventData<E extends RealtimeEvent["event"]>(
   return frame.data as EventDataMap[E];
 }
 
-export interface SSEEvent {
+interface SSEEvent {
   event: string;
   data: string;
   /**
@@ -43,56 +110,6 @@ export interface SSEEvent {
    * because pre-existing fixtures predate id support.
    */
   id?: string;
-}
-
-/**
- * Async generator that parses an SSE ReadableStream into structured events.
- *
- * Reads chunks from the stream, splits by double-newline delimiters,
- * and extracts `event:` and `data:` fields from each SSE frame.
- */
-export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<SSEEvent> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Split on double newline (SSE frame delimiter)
-      const frames = buffer.split("\n\n");
-      // Keep the last incomplete frame in the buffer
-      buffer = frames.pop()!;
-
-      for (const frame of frames) {
-        if (!frame.trim()) continue;
-
-        let event = "";
-        let data = "";
-        let id: string | undefined;
-
-        for (const line of frame.split("\n")) {
-          if (line.startsWith("event:")) {
-            event = line.slice("event:".length).trim();
-          } else if (line.startsWith("data:")) {
-            data = line.slice("data:".length).trim();
-          } else if (line.startsWith("id:")) {
-            id = line.slice("id:".length).trim();
-          }
-        }
-
-        if (event) {
-          yield { event, data, ...(id !== undefined ? { id } : {}) };
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 /**

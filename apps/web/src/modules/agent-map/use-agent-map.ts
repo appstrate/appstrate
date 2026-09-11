@@ -5,7 +5,7 @@ import { $api, type paths } from "../../api/client";
 import { splitPackageRef } from "../../lib/package-paths";
 import { isVersioned } from "../../lib/version-selector";
 import { useCurrentOrgId } from "../../hooks/use-org";
-import { useCurrentApplicationId } from "../../hooks/use-current-application";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 
 const MAP_PATH = "/api/agents/{scope}/{name}/map" as const;
 
@@ -36,7 +36,7 @@ export type AgentMapNode = AgentMap["nodes"][number];
  */
 export function useAgentMap(agentPackageId: string | undefined, version?: string) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
@@ -50,11 +50,11 @@ export function useAgentMap(agentPackageId: string | undefined, version?: string
           ...(isVersioned(version) ? { query: { version } } : {}),
           header: {
             "X-Org-Id": orgId ?? undefined,
-            "X-Application-Id": applicationId ?? undefined,
+            "X-Application-Id": spaceId ?? undefined,
           },
         },
       },
-      { enabled: Boolean(orgId && applicationId && agentPackageId) },
+      { enabled: Boolean(orgId && spaceId && agentPackageId) },
     ),
   );
 }

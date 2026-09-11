@@ -5,6 +5,11 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  INTEGRATION_CONNECT_CHANNEL,
+  acceptsCompletionMessage,
+  completionMatches,
+} from "@appstrate/core/connect-handshake";
+import {
   invalidateIntegrationQueries,
   useInitiateIntegrationConnect,
 } from "../../hooks/use-integrations";
@@ -12,11 +17,6 @@ import {
 const CONNECT_POPUP_TIMEOUT_MS = 5 * 60_000;
 const POPUP_POLL_INTERVAL_MS = 500;
 const POPUP_FEATURES = "width=600,height=700";
-
-// Must match `apps/api/src/lib/oauth-popup-html.ts` + the hosted form
-// (`pages/hosted-connect.tsx`) — both emit this on a successful connect.
-const INTEGRATION_BROADCAST_CHANNEL = "appstrate_integration";
-const INTEGRATION_MESSAGE_TYPE = "appstrate:integration_connection";
 
 /**
  * Drives the unified hosted-connect-portal flow via popup (issue #769).
@@ -85,24 +85,34 @@ export function useHostedConnectPopup() {
               }
               resolve();
             };
-            const isSignal = (data: unknown): boolean =>
-              !!data &&
-              typeof data === "object" &&
-              (data as { type?: string }).type === INTEGRATION_MESSAGE_TYPE &&
-              (data as { ok?: boolean }).ok === true;
+            // Which completion this popup is waiting for. Both carriers fan
+            // out — a `BroadcastChannel` publish reaches every listener on the
+            // origin, a `postMessage` every listener on the window — so a
+            // completion for ANOTHER package would otherwise settle this
+            // promise and report a connect that never happened for the
+            // integration the caller asked about. `completionMatches` is the
+            // same predicate the in-chat connect card correlates with.
+            const target = { packageId: input.packageId };
+            // Success only: an `ok: false` completion is a failed connect, and
+            // the popup-close poll below is what settles that case.
+            const isSuccess = (data: unknown): boolean =>
+              completionMatches(data, target) && data.ok === true;
             const onMessage = (e: MessageEvent) => {
-              // The success page (hosted form + OAuth popup HTML) is served from
-              // our own origin, so reject foreign-origin messages — a forged
-              // signal from another tab must not stand in for a real connect.
-              if (e.origin !== window.location.origin) return;
-              if (isSignal(e.data)) onHit();
+              // The completion pages (hosted form + OAuth popup HTML) are served
+              // from our own origin, so a foreign-origin message is a forgery —
+              // it must not stand in for a real connect. Origin first, then the
+              // correlation, in one call.
+              if (!acceptsCompletionMessage(e, window.location.origin, target)) return;
+              if (isSuccess(e.data)) onHit();
             };
             window.addEventListener("message", onMessage);
             let bc: BroadcastChannel | null = null;
             try {
-              bc = new BroadcastChannel(INTEGRATION_BROADCAST_CHANNEL);
+              // No origin to check: `BroadcastChannel` is same-origin by spec —
+              // correlation only, which is what `isSuccess` applies.
+              bc = new BroadcastChannel(INTEGRATION_CONNECT_CHANNEL);
               bc.onmessage = (e) => {
-                if (isSignal(e.data)) onHit();
+                if (isSuccess(e.data)) onHit();
               };
             } catch {
               /* BroadcastChannel unsupported — postMessage + close-poll cover it */

@@ -13,23 +13,23 @@ import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
 type WebhookInsert = Partial<InferInsertModel<typeof webhooks>> & {
   orgId: string;
-  applicationId?: string | null;
+  spaceId?: string | null;
 };
 
 export async function seedWebhook(
   overrides: WebhookInsert,
 ): Promise<InferSelectModel<typeof webhooks>> {
-  const level: "org" | "application" =
-    overrides.level === "org" || overrides.level === "application"
+  const level: "org" | "space" =
+    overrides.level === "org" || overrides.level === "space"
       ? overrides.level
-      : overrides.applicationId
-        ? "application"
+      : overrides.spaceId
+        ? "space"
         : "org";
   const values: InferInsertModel<typeof webhooks> = {
     id: `wh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
     level,
     orgId: overrides.orgId,
-    applicationId: overrides.applicationId ?? null,
+    spaceId: overrides.spaceId ?? null,
     url: overrides.url ?? "https://example.com/webhook",
     events: overrides.events ?? ["run.success"],
     secret: overrides.secret ?? crypto.randomUUID(),

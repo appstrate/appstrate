@@ -139,7 +139,7 @@ export function AgentFilesView({
       queryKey: [
         "agent-runtime-skill-files",
         scope.header["X-Org-Id"],
-        scope.header["X-Application-Id"],
+        scope.header["X-Space-Id"],
         skill.id,
       ],
       enabled: scope.enabled,
@@ -157,7 +157,7 @@ export function AgentFilesView({
       queryKey: [
         "agent-runtime-local-mcp-files",
         scope.header["X-Org-Id"],
-        scope.header["X-Application-Id"],
+        scope.header["X-Space-Id"],
         server.id,
       ],
       enabled: scope.enabled,

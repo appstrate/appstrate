@@ -4,7 +4,7 @@
  * Integration tests for the `openapi` subcommands — exercise the full
  * resolve-profile → fetch (via stubbed global fetch) → format → stdout
  * path. Follows the `whoami.test.ts` harness pattern: fake keyring +
- * `XDG_*` tmpdirs + process stream / exit hijacking.
+ * `XDG_*` tmpdirs + a per-test injected `CommandIO`.
  *
  * The real `apiFetchRaw` is hit here (no injected fetcher), so this
  * also covers the profile + auth plumbing end-to-end. We deliberately
@@ -14,49 +14,42 @@
  * is structured.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
-import { setProfile } from "../src/lib/config.ts";
 import {
   openapiExportCommand,
   openapiListCommand,
   openapiShowCommand,
 } from "../src/commands/openapi.ts";
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempCacheHome,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
-
+/**
+ * Every command invocation gets its own `createMemoryIO()` sink rather than
+ * a process-wide stream swap. `bun test` runs the whole repo in one process,
+ * so a global capture buffer also collected writes from other suites and
+ * made assertions like `toBe("")` non-deterministic (issue #1180). A fresh
+ * sink per invocation doubles as the segmentation the multi-command tests
+ * at the bottom of this file need: "what did the *second* command print?"
+ * is answered by that command's own sink, not by clearing a shared array.
+ *
+ * `io.exit` throws `ExitError`, so exit-code branches unwind without
+ * terminating the worker.
+ */
 import { ExitError } from "./helpers/process-exit.ts";
+import { createMemoryIO } from "./helpers/memory-io.ts";
 
-let tmpConfig: string;
-let tmpCache: string;
-let originalXdgConfig: string | undefined;
-let originalXdgCache: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-openapi-cfg-");
+const cacheHome = useTempCacheHome("appstrate-cli-openapi-cache-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
-const originalExit = process.exit;
-const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
-let stdoutChunks: string[];
-let stderrChunks: string[];
 let fetchCalls: Array<{ url: string; method: string | undefined; headers: Record<string, string> }>;
 
 function installFetch(responder: (url: string, init?: RequestInit) => Promise<Response>): void {
@@ -69,68 +62,19 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-function captureIo(): void {
-  stdoutChunks = [];
-  stderrChunks = [];
-  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stderr.write;
-  (process as unknown as { exit: (code?: number) => never }).exit = ((code?: number): never => {
-    throw new ExitError(code ?? 0);
-  }) as (code?: number) => never;
-}
-
-beforeAll(() => {
-  originalXdgConfig = process.env.XDG_CONFIG_HOME;
-  originalXdgCache = process.env.XDG_CACHE_HOME;
-});
-
-afterAll(() => {
-  if (originalXdgConfig === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdgConfig;
-  if (originalXdgCache === undefined) delete process.env.XDG_CACHE_HOME;
-  else process.env.XDG_CACHE_HOME = originalXdgCache;
-});
-
 beforeEach(async () => {
-  tmpConfig = await mkdtemp(join(tmpdir(), "appstrate-cli-openapi-cfg-"));
-  tmpCache = await mkdtemp(join(tmpdir(), "appstrate-cli-openapi-cache-"));
-  process.env.XDG_CONFIG_HOME = tmpConfig;
-  process.env.XDG_CACHE_HOME = tmpCache;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  await cacheHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
-  captureIo();
 });
 
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  process.stdout.write = originalStdoutWrite;
-  process.stderr.write = originalStderrWrite;
-  (process as unknown as { exit: typeof originalExit }).exit = originalExit;
-  await rm(tmpConfig, { recursive: true, force: true });
-  await rm(tmpCache, { recursive: true, force: true });
+  await configHome.teardown();
+  await cacheHome.teardown();
 });
-
-async function seedLoggedInProfile(name = "default"): Promise<void> {
-  await setProfile(name, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "a@example.com",
-  });
-  await saveTokens(name, {
-    accessToken: "tok-abc",
-    expiresAt: Date.now() + 15 * 60 * 1000,
-    refreshToken: "rt-xyz",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  });
-}
 
 function sampleSchema() {
   return {
@@ -179,8 +123,9 @@ describe("openapi list", () => {
           headers: { "Content-Type": "application/json", ETag: '"v1"' },
         }),
     );
-    await openapiListCommand({ profile: "default" });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiListCommand({ profile: "default" }, io);
+    const out = stdout();
     expect(out).toContain("GET");
     expect(out).toContain("/api/runs");
     expect(out).toContain("POST");
@@ -200,8 +145,9 @@ describe("openapi list", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    await openapiListCommand({ profile: "default", tag: "RUNS" });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiListCommand({ profile: "default", tag: "RUNS" }, io);
+    const out = stdout();
     expect(out).toContain("/api/runs");
   });
 
@@ -214,8 +160,9 @@ describe("openapi list", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    await openapiListCommand({ profile: "default", json: true });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiListCommand({ profile: "default", json: true }, io);
+    const out = stdout();
     const parsed = JSON.parse(out);
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0]).toHaveProperty("method");
@@ -231,8 +178,9 @@ describe("openapi list", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    await openapiListCommand({ profile: "default", tag: "nonexistent" });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiListCommand({ profile: "default", tag: "nonexistent" }, io);
+    const out = stdout();
     expect(out).toMatch(/No operations match/);
   });
 
@@ -252,15 +200,16 @@ describe("openapi list", () => {
         headers: { "Content-Type": "application/json" },
       });
     });
+    const { io, stderr } = createMemoryIO();
     let code: number | undefined;
     try {
-      await openapiListCommand({ profile: "default" });
+      await openapiListCommand({ profile: "default" }, io);
     } catch (err) {
       if (err instanceof ExitError) code = err.code;
       else throw err;
     }
     expect(code).toBe(1);
-    const err = stderrChunks.join("");
+    const err = stderr();
     expect(err).toMatch(/appstrate login --profile default/);
   });
 });
@@ -275,8 +224,9 @@ describe("openapi show", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    await openapiShowCommand("createRun", undefined, { profile: "default" });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiShowCommand("createRun", undefined, { profile: "default" }, io);
+    const out = stdout();
     expect(out).toContain("POST /api/runs");
     expect(out).toContain("operationId: createRun");
     expect(out).toContain("Create a run");
@@ -292,8 +242,9 @@ describe("openapi show", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    await openapiShowCommand("GET", "/api/runs", { profile: "default" });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiShowCommand("GET", "/api/runs", { profile: "default" }, io);
+    const out = stdout();
     expect(out).toContain("GET /api/runs");
     expect(out).toContain("operationId: listRuns");
   });
@@ -307,8 +258,9 @@ describe("openapi show", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    await openapiShowCommand("createRun", undefined, { profile: "default", json: true });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiShowCommand("createRun", undefined, { profile: "default", json: true }, io);
+    const out = stdout();
     const parsed = JSON.parse(out);
     expect(parsed.method).toBe("POST");
     expect(parsed.path).toBe("/api/runs");
@@ -370,8 +322,9 @@ describe("openapi show", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    await openapiShowCommand("listCategories", undefined, { profile: "default", json: true });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiShowCommand("listCategories", undefined, { profile: "default", json: true }, io);
+    const out = stdout();
     const parsed = JSON.parse(out);
     expect(parsed.method).toBe("GET");
     expect(parsed.path).toBe("/api/categories");
@@ -390,15 +343,16 @@ describe("openapi show", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
+    const { io, stderr } = createMemoryIO();
     let code: number | undefined;
     try {
-      await openapiShowCommand("doesNotExist", undefined, { profile: "default" });
+      await openapiShowCommand("doesNotExist", undefined, { profile: "default" }, io);
     } catch (err) {
       if (err instanceof ExitError) code = err.code;
       else throw err;
     }
     expect(code).toBe(1);
-    expect(stderrChunks.join("")).toMatch(/No operation matches/);
+    expect(stderr()).toMatch(/No operation matches/);
   });
 });
 
@@ -413,8 +367,9 @@ describe("openapi export", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    await openapiExportCommand({ profile: "default" });
-    const out = stdoutChunks.join("");
+    const { io, stdout } = createMemoryIO();
+    await openapiExportCommand({ profile: "default" }, io);
+    const out = stdout();
     const parsed = JSON.parse(out);
     expect(parsed.openapi).toBe("3.1.0");
     expect(parsed.paths["/api/runs"].get.operationId).toBe("listRuns");
@@ -430,15 +385,16 @@ describe("openapi export", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const target = join(tmpCache, "schema.json");
-    await openapiExportCommand({ profile: "default", output: target });
+    const target = join(cacheHome.dir(), "schema.json");
+    const { io, stdout, stderr } = createMemoryIO();
+    await openapiExportCommand({ profile: "default", output: target }, io);
     const written = await readFile(target, "utf-8");
     const parsed = JSON.parse(written);
     expect(parsed.openapi).toBe("3.1.0");
-    const err = stderrChunks.join("");
+    const err = stderr();
     expect(err).toMatch(/Wrote \d+ bytes/);
     // Nothing should leak to stdout when -o is set
-    expect(stdoutChunks.join("")).toBe("");
+    expect(stdout()).toBe("");
   });
 });
 
@@ -455,21 +411,22 @@ describe("openapi — ETag revalidation across commands", () => {
           headers: { "Content-Type": "application/json", ETag: '"v1"' },
         }),
     );
-    await openapiListCommand({ profile: "default" });
+    await openapiListCommand({ profile: "default" }, createMemoryIO().io);
     expect(fetchCalls).toHaveLength(1);
 
-    // Reset buffers and swap in a 304 responder
-    stdoutChunks = [];
-    stderrChunks = [];
+    // Second invocation gets its own sink, so what we assert below is the
+    // `show` output alone — the sink boundary is the segmentation that
+    // clearing a shared buffer used to provide.
     fetchCalls = [];
     installFetch(async (_url, init) => {
       const headers = (init?.headers ?? {}) as Record<string, string>;
       expect(headers["If-None-Match"]).toBe('"v1"');
       return new Response(null, { status: 304 });
     });
-    await openapiShowCommand("listRuns", undefined, { profile: "default" });
+    const { io: showIo, stdout: showStdout } = createMemoryIO();
+    await openapiShowCommand("listRuns", undefined, { profile: "default" }, showIo);
     expect(fetchCalls).toHaveLength(1);
-    expect(stdoutChunks.join("")).toContain("GET /api/runs");
+    expect(showStdout()).toContain("GET /api/runs");
   });
 
   it("--no-cache bypasses ETag revalidation entirely", async () => {
@@ -484,11 +441,11 @@ describe("openapi — ETag revalidation across commands", () => {
           headers: { "Content-Type": "application/json", ETag: '"v1"' },
         }),
     );
-    await openapiListCommand({ profile: "default" });
+    await openapiListCommand({ profile: "default" }, createMemoryIO().io);
 
-    // Reset + second invocation with --no-cache; server should NOT
-    // receive an If-None-Match header
-    stdoutChunks = [];
+    // Second invocation with --no-cache; server should NOT receive an
+    // If-None-Match header. A fresh sink keeps the two invocations'
+    // output separate without clearing shared state.
     fetchCalls = [];
     installFetch(async (_url, init) => {
       const headers = (init?.headers ?? {}) as Record<string, string>;
@@ -498,7 +455,7 @@ describe("openapi — ETag revalidation across commands", () => {
         headers: { "Content-Type": "application/json" },
       });
     });
-    await openapiListCommand({ profile: "default", noCache: true });
+    await openapiListCommand({ profile: "default", noCache: true }, createMemoryIO().io);
     expect(fetchCalls).toHaveLength(1);
   });
 });

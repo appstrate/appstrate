@@ -19,10 +19,20 @@ import { isValidRange, matchVersion } from "@appstrate/core/semver";
 import { getEnv } from "@appstrate/env";
 import {
   CORE_RESOURCE_NAMES,
+  ORG_LEVEL_PERMISSIONS,
+  ORG_ROLES,
+  SPACE_ROLE_PRESETS,
+  getModuleEndUserAllowedScopes,
   setModulePermissionsProvider,
   type OrgRole,
+  type SpaceRolePreset,
   type ModulePermissionsSnapshot,
 } from "@appstrate/core/permissions";
+import {
+  setPrincipalPermissionsProviders,
+  type RegisteredPrincipalPermissions,
+} from "@appstrate/core/principal-permissions";
+import { getApiKeyAllowedScopes, presetsStrictlyStrongerThan } from "../permissions.ts";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import type { AppEnv } from "../../types/index.ts";
@@ -71,10 +81,7 @@ function getBuiltinModules(): Map<string, string> {
  * otherwise the specifier is treated as an npm package name and loaded via
  * dynamic import. The built-in directory is scanned only once per process.
  */
-async function resolveSpecifier(specifier: string): Promise<{
-  default?: AppstrateModule;
-  appstrateModule?: AppstrateModule;
-}> {
+async function resolveSpecifier(specifier: string): Promise<{ default?: AppstrateModule }> {
   const builtinPath = getBuiltinModules().get(specifier);
   if (builtinPath) {
     return import(/* webpackIgnore: true */ builtinPath);
@@ -84,15 +91,25 @@ async function resolveSpecifier(specifier: string): Promise<{
 
 /**
  * Import one module specifier and return its exported module object. Any
- * failure (unresolvable specifier, missing `manifest.id`) is fatal — all
- * declared modules are required.
+ * failure (unresolvable specifier, wrong export shape, missing `manifest.id`)
+ * is fatal — all declared modules are required.
+ *
+ * The default export is the ONE shape a module is loaded from, so the two
+ * failures get one error each: nothing was exported in that shape, or the
+ * exported thing is malformed. Collapsing them sends an author with a
+ * wrong-shaped export to inspect a manifest that is fine.
  */
 async function importModule(specifier: string): Promise<AppstrateModule> {
   try {
     const raw = await resolveSpecifier(specifier);
-    // Support both default export and named `appstrateModule` export
-    const mod = (raw.default ?? raw.appstrateModule) as AppstrateModule | undefined;
-    if (!mod?.manifest?.id) {
+    const mod = raw.default;
+    if (!mod) {
+      throw new Error(
+        `Module "${specifier}" has no default export. A module is loaded from its default ` +
+          `export only — end the entry file with \`export default myModule;\`.`,
+      );
+    }
+    if (!mod.manifest?.id) {
       throw new Error(`Module "${specifier}" is missing manifest.id`);
     }
     return mod;
@@ -315,11 +332,13 @@ async function initSortedModules(
 ): Promise<void> {
   const sorted = topoSort(modules);
   // Compute the RBAC snapshot from module contributions and register it
-  // BEFORE init() runs, so any module that calls `resolvePermissions(...)`
-  // during init (e.g. seeding default API keys with module-owned scopes)
-  // sees the merged view.
+  // BEFORE init() runs, so any module that calls `orgPermissions(...)` /
+  // `presetPermissions(...)` during init (e.g. seeding default API keys with
+  // module-owned scopes) sees the merged view.
   const rbacSnapshot = collectModulePermissions(sorted);
   setModulePermissionsProvider(() => rbacSnapshot);
+  // Must follow the snapshot: `mayGrant` is validated against the merged vocabulary.
+  setPrincipalPermissionsProviders(collectPrincipalPermissions(sorted));
   // Audit trace: `endUserGrantable` permissions are reachable through
   // end-user OAuth/OIDC tokens issued by embedding apps — a much broader
   // blast radius than session or API-key scopes. Surface the full list at
@@ -375,11 +394,13 @@ const MODULE_RBAC_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
  *   - resource collision between two modules
  *   - action name format
  *   - empty `actions` (would contribute nothing)
- *   - empty `grantTo` (legal — declares the resource without granting it,
- *     useful when API-key-only access is intended; we just warn-log)
+ *   - one `level` per resource across all of a module's entries
+ *   - `grantTo` / `presets` name a known org role / space preset
+ *   - `presets` is upward-closed (see {@link assertPresetsUpwardClosed})
+ *   - an empty `grantTo`/`presets` is legal: declares without granting
  *
  * Returns the snapshot in `ModulePermissionsSnapshot` shape — Sets keyed
- * by role plus the API-key allowlist union.
+ * by org role and by space preset, plus the API-key allowlist union.
  */
 export function collectModulePermissions(
   modules: readonly AppstrateModule[],
@@ -388,35 +409,113 @@ export function collectModulePermissions(
     owner: new Set(),
     admin: new Set(),
     member: new Set(),
+    guest: new Set(),
+  };
+  const byPreset: Record<SpaceRolePreset, Set<string>> = {
+    admin: new Set(),
+    builder: new Set(),
+    operator: new Set(),
+    runner: new Set(),
     viewer: new Set(),
   };
   const apiKeyAllowed = new Set<string>();
   const endUserAllowed = new Set<string>();
   const ownerByResource = new Map<string, string>(); // resource → first module that claimed it
+  const levelByResource = new Map<string, "org" | "space">();
 
   for (const mod of modules) {
     const contributions = mod.permissionsContribution?.();
     if (!contributions) continue;
     for (const entry of contributions) {
-      validateContribution(entry, mod.manifest.id, ownerByResource);
+      validateContribution(entry, mod.manifest.id, ownerByResource, levelByResource);
       for (const action of entry.actions) {
         const perm = `${entry.resource}:${action}`;
-        for (const role of entry.grantTo) byRole[role].add(perm);
+        if (entry.level === "org") {
+          for (const role of entry.grantTo) byRole[role].add(perm);
+        } else {
+          for (const preset of entry.presets) byPreset[preset].add(perm);
+        }
         if (entry.apiKeyGrantable) apiKeyAllowed.add(perm);
         if (entry.endUserGrantable) endUserAllowed.add(perm);
       }
     }
   }
 
-  return { byRole, apiKeyAllowed, endUserAllowed };
+  return { byRole, byPreset, apiKeyAllowed, endUserAllowed };
+}
+
+/**
+ * Aggregate `principalPermissions` from every module, validating each `mayGrant`
+ * string at boot (RBAC spec §4.2; the throws below state the two rules). Reads
+ * the merged allowlists, so it must run AFTER the module RBAC snapshot.
+ */
+export function collectPrincipalPermissions(
+  modules: readonly AppstrateModule[],
+): RegisteredPrincipalPermissions[] {
+  const orgLevel = knownOrgLevelPermissions(modules);
+  const apiKeyGrantable = getApiKeyAllowedScopes();
+  const endUserGrantable = getModuleEndUserAllowedScopes();
+  const registered: RegisteredPrincipalPermissions[] = [];
+
+  for (const mod of modules) {
+    const declaration = mod.principalPermissions;
+    if (!declaration) continue;
+    const moduleId = mod.manifest.id;
+    if (!Array.isArray(declaration.mayGrant) || declaration.mayGrant.length === 0) {
+      throw new Error(
+        `Module "${moduleId}" declared principalPermissions with an empty mayGrant list. ` +
+          `A resolver that may grant nothing can only ever be dropped at runtime.`,
+      );
+    }
+    for (const permission of declaration.mayGrant) {
+      if (!orgLevel.has(permission)) {
+        throw new Error(
+          `Module "${moduleId}" declared principalPermissions.mayGrant ` +
+            `${JSON.stringify(permission)}, which is not a known org-level permission. ` +
+            `Per-principal grants are org-level only — a space-level string is granted by a ` +
+            `space role, through permissionsContribution().`,
+        );
+      }
+      if (apiKeyGrantable.has(permission) || endUserGrantable.has(permission)) {
+        throw new Error(
+          `Module "${moduleId}" declared principalPermissions.mayGrant ` +
+            `${JSON.stringify(permission)}, which is grantable to an API key or an end-user ` +
+            `token. Per-principal grants are session-only: no delegated credential's ceiling ` +
+            `can carry them, so the declaration would promise access no key can obtain.`,
+        );
+      }
+    }
+    registered.push({
+      moduleId,
+      mayGrant: declaration.mayGrant,
+      resolve: (ctx) => declaration.resolve(ctx),
+    });
+  }
+  return registered;
+}
+
+/**
+ * Walks the contributions rather than the role snapshot: a `grantTo: []`
+ * resource is absent from the snapshot yet a real string `mayGrant` may name.
+ */
+function knownOrgLevelPermissions(modules: readonly AppstrateModule[]): ReadonlySet<string> {
+  const known = new Set<string>(ORG_LEVEL_PERMISSIONS);
+  for (const mod of modules) {
+    for (const entry of mod.permissionsContribution?.() ?? []) {
+      if (entry.level !== "org") continue;
+      for (const action of entry.actions) known.add(`${entry.resource}:${action}`);
+    }
+  }
+  return known;
 }
 
 function validateContribution(
   entry: ModulePermissionContribution,
   moduleId: string,
   ownerByResource: Map<string, string>,
+  levelByResource: Map<string, "org" | "space">,
 ): void {
-  const { resource, actions, grantTo } = entry;
+  const { resource, actions, level } = entry;
 
   if (!MODULE_RBAC_NAME_PATTERN.test(resource)) {
     throw new Error(
@@ -439,6 +538,23 @@ function validateContribution(
   }
   ownerByResource.set(resource, moduleId);
 
+  // One resource, one level: split entries would leave a role with `read` but never `write`.
+  if (level !== "org" && level !== "space") {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown level ` +
+        `${JSON.stringify(level)}. Expected "org" or "space".`,
+    );
+  }
+  const previousLevel = levelByResource.get(resource);
+  if (previousLevel && previousLevel !== level) {
+    throw new Error(
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} at level ` +
+        `${JSON.stringify(previousLevel)} and ${JSON.stringify(level)}. ` +
+        `Every entry for one resource must declare the same level.`,
+    );
+  }
+  levelByResource.set(resource, level);
+
   if (!Array.isArray(actions) || actions.length === 0) {
     throw new Error(
       `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with no actions.`,
@@ -453,17 +569,85 @@ function validateContribution(
     }
   }
 
-  if (!Array.isArray(grantTo)) {
+  if (entry.level === "org") {
+    assertGrantList(
+      entry.grantTo,
+      "grantTo",
+      ORG_ROLES as readonly string[],
+      moduleId,
+      resource,
+      "org role",
+    );
+  } else {
+    assertGrantList(
+      entry.presets,
+      "presets",
+      SPACE_ROLE_PRESETS as readonly string[],
+      moduleId,
+      resource,
+      "space-role preset",
+    );
+    assertPresetsUpwardClosed(entry.presets, moduleId, resource);
+  }
+}
+
+/**
+ * Presets nest by grant — `viewer ⊂ operator ⊂ builder ⊂ admin` and
+ * `runner ⊂ operator` — so `presets` must be upward-closed under that
+ * containment: `builder` without `admin` would give a space admin LESS than a
+ * builder for this one resource. Boot error, not a warning: the wrong answer is
+ * a 403 nobody looks for.
+ *
+ * "Stronger" is read from the preset matrix ({@link presetsStrictlyStrongerThan}),
+ * never from a position in `SPACE_ROLE_PRESETS`. `runner` and `viewer` are
+ * incomparable — a runner launches what it cannot read, a viewer reads what it
+ * cannot launch — so the tuple is a display order and answers nothing here. A
+ * module that grants a read resource to `viewer` is free to leave `runner` out.
+ */
+function assertPresetsUpwardClosed(
+  presets: readonly SpaceRolePreset[],
+  moduleId: string,
+  resource: string,
+): void {
+  const declared = new Set<SpaceRolePreset>(presets);
+  const missing = new Set<SpaceRolePreset>();
+  for (const preset of declared) {
+    for (const stronger of presetsStrictlyStrongerThan(preset)) {
+      if (!declared.has(stronger)) missing.add(stronger);
+    }
+  }
+  if (missing.size === 0) return;
+  const quoted = (subset: ReadonlySet<SpaceRolePreset>) =>
+    SPACE_ROLE_PRESETS.filter((preset) => subset.has(preset))
+      .map((preset) => JSON.stringify(preset))
+      .join(", ");
+  throw new Error(
+    `Module "${moduleId}" declared resource ${JSON.stringify(resource)} for preset ` +
+      `${quoted(declared)} but not ${quoted(missing)}. ` +
+      `Presets nest by grant (viewer \u2282 operator \u2282 builder \u2282 admin, ` +
+      `runner \u2282 operator), so granting a preset requires granting every preset ` +
+      `that already grants a superset of it.`,
+  );
+}
+
+function assertGrantList(
+  values: unknown,
+  field: "grantTo" | "presets",
+  allowed: readonly string[],
+  moduleId: string,
+  resource: string,
+  label: string,
+): void {
+  if (!Array.isArray(values)) {
     throw new Error(
-      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with non-array grantTo.`,
+      `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with non-array ${field}.`,
     );
   }
-  const allowedRoles = new Set<string>(["owner", "admin", "member", "viewer"]);
-  for (const role of grantTo) {
-    if (!allowedRoles.has(role)) {
+  for (const value of values) {
+    if (!allowed.includes(value as string)) {
       throw new Error(
-        `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown role ` +
-          `${JSON.stringify(role)}. Expected one of owner|admin|member|viewer.`,
+        `Module "${moduleId}" declared resource ${JSON.stringify(resource)} with unknown ` +
+          `${label} ${JSON.stringify(value)} in ${field}. Expected one of ${allowed.join("|")}.`,
       );
     }
   }
@@ -474,9 +658,27 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
 }
 
+/**
+ * Memoized derivations of `_modules`. Both are boot constants: the module set
+ * is frozen from `_initialized = true` until `clearAllState()`, which resets
+ * them. Neither getter had a cache, and both sit on the per-request path —
+ * `getModulePublicPaths()` alone runs twice per request from `index.ts`, plus
+ * once per `skipAuth` call in the auth pipeline, and every call rebuilt an
+ * array and a Set from scratch. `getModuleAuthStrategies()` was worse: it
+ * re-invoked each module's `authStrategies()` FACTORY every time.
+ *
+ * The accessors are handed to the pipeline as lazy function references
+ * precisely because they are wired before `boot()` finishes loading modules,
+ * so caching must key off the loaded set, not off first call — hence the reset
+ * in `clearAllState()` rather than a one-shot `??=` at module scope.
+ */
+let _publicPathsCache: Set<string> | null = null;
+let _authStrategiesCache: AuthStrategy[] | null = null;
+
 /** Collect all public paths from all loaded modules (Set for O(1) lookup). */
-export function getModulePublicPaths(): Set<string> {
-  return new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
+export function getModulePublicPaths(): ReadonlySet<string> {
+  _publicPathsCache ??= new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
+  return _publicPathsCache;
 }
 
 /**
@@ -577,12 +779,14 @@ export function getModuleOpenApiTags(): Array<{ name: string; description?: stri
  *
  * OSS invariant: returns `[]` when no module provides `authStrategies()`.
  */
-export function getModuleAuthStrategies(): AuthStrategy[] {
+export function getModuleAuthStrategies(): readonly AuthStrategy[] {
+  if (_authStrategiesCache) return _authStrategiesCache;
   const strategies: AuthStrategy[] = [];
   for (const mod of _modules.values()) {
     const contrib = mod.authStrategies?.();
     if (contrib) strategies.push(...contrib);
   }
+  _authStrategiesCache = strategies;
   return strategies;
 }
 
@@ -593,9 +797,9 @@ export function getModuleAuthStrategies(): AuthStrategy[] {
  * no per-module schema map is passed.
  *
  * `betterAuthPlugins` is erased to `unknown` at this layer — the boot
- * integration site in `packages/db/src/auth.ts` narrows to
- * `BetterAuthPluginList` before calling `createAuth(plugins)`. Keeps Better
- * Auth types out of core.
+ * integration site (`apps/api/src/lib/boot.ts`) narrows to
+ * `BetterAuthPluginList` inside the thunk it hands `createAuth(() => plugins)`,
+ * which takes the list as a factory. Keeps Better Auth types out of core.
  */
 interface ModuleContributions {
   betterAuthPlugins: unknown[];
@@ -785,8 +989,11 @@ export function resetModules(): void {
 function clearAllState(): void {
   _modules.clear();
   _builtinCache = null;
+  _publicPathsCache = null;
+  _authStrategiesCache = null;
   _initialized = false;
   setModulePermissionsProvider(null);
+  setPrincipalPermissionsProviders(null);
   // Drop module-contributed execution backends so a reload (tests) does not
   // trip the duplicate-id guard. Core backends are re-registered inside.
   _resetOrchestratorRegistryForTesting();

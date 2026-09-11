@@ -7,7 +7,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import { RunDuration } from "../run-duration";
 import { getRunTriggerActor, getRunTriggerType } from "../run-trigger";
 import { RunCostReadout } from "../run-cost-readout";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 
 export function RunHeaderSummary({ run }: { run: EnrichedRun }) {
   const { t } = useTranslation("agents");

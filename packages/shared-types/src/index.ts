@@ -25,7 +25,6 @@ export type {
   IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
-  IntegrationDetail,
   IntegrationManifestAuth,
   IntegrationManifestView,
   IntegrationOAuthClient,
@@ -36,11 +35,10 @@ export type {
   IntegrationToolCatalogEntry,
 } from "./integrations.ts";
 
-export type { UserProfile, RunLog } from "@appstrate/db/schema";
+export type { UserProfile } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
-export type { Run } from "@appstrate/db/schema";
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
 import type { RunArtifactsSummary } from "@appstrate/db/schema";
 
@@ -76,7 +74,7 @@ export interface RunWireDto {
   endUserId: string | null;
   apiKeyId: string | null;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   scheduleId: string | null;
   status: _RunStatus;
   input: unknown;
@@ -93,8 +91,6 @@ export interface RunWireDto {
   checkpoint: unknown;
   error: string | null;
   metadata: unknown;
-  config: unknown;
-  config_override: unknown;
   started_at: string | null;
   completed_at: string | null;
   duration: number | null;
@@ -183,18 +179,14 @@ export type EnrichedRun = RunWireDto & {
    */
   unread: boolean;
   /**
-   * Per-run document counts, always present on enriched list rows. `input` is
-   * the number of distinct `document://` references in the run's persisted
-   * input; `output` is the number of documents the run produced.
+   * Per-run file counts, always present on enriched list rows. `input` is
+   * the number of distinct `appfile://` references in
+   * the run's persisted input; `output` is the number of files the run
+   * produced.
    */
-  document_counts: { input: number; output: number };
-  /**
-   * The run's user-facing primary deliverable, selected explicitly by the
-   * publishing agent. Null when the run has no primary output.
-   */
-  primary_document_id: string | null;
+  file_counts: { input: number; output: number };
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
-  package_ephemeral?: boolean;
+  package_ephemeral: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */
   inline_manifest?: Record<string, unknown> | null;
   /** For inline runs only — snapshot of the prompt submitted at run time. Null after compaction. */
@@ -273,10 +265,15 @@ export interface ResourceEntry {
   /**
    * Niveau 2 — agent's tool allowlist for an integration dependency.
    * Drives sidecar `tools/list` filtering and OAuth scope inference.
-   * `undefined` keeps legacy "all tools allowed" semantics. The AFPS §4.4
-   * wildcard literal `"*"` opts the agent into every upstream tool (only
-   * valid when the integration declares `allow_undeclared_tools: true`,
-   * §7.8). Ignored for non-integration resource types.
+   *
+   * Four cases, resolved by `resolveEffectiveToolSelection`
+   * (`apps/api/src/services/integration-spawn-resolver.ts`): omitted inherits
+   * the integration's declared `default_tools` (AFPS §4.4) — it does NOT mean
+   * "all tools" and does NOT collapse to `[]`; `[]` selects none; `[..]`
+   * selects exactly those; and the §4.4 wildcard literal `"*"` opts into every
+   * upstream tool (only valid when the integration declares
+   * `allow_undeclared_tools: true`, §7.8). Ignored for non-integration
+   * resource types.
    */
   tools?: string[] | "*";
   /**
@@ -305,19 +302,24 @@ export interface ResourceEntry {
 // the browser. `run-status.ts` is import-free and is what `runStatusEnum`
 // itself derives from, so there is still exactly one list of statuses.
 export {
-  TERMINAL_RUN_STATUSES,
-  TERMINAL_RUN_EVENT_TYPES,
-  terminalRunStatusValues,
-  ACTIVE_RUN_STATUSES,
   runStatusValues,
+  TERMINAL_RUN_STATUSES,
+  ACTIVE_RUN_STATUSES,
 } from "@appstrate/db/run-status";
 export type { RunStatus, TerminalRunStatus } from "@appstrate/db/run-status";
 
-// --- Schedule Types ---
+// --- Auth policy ---
 
-// `package_schedules` is a legacy DB name — the Drizzle export is `schedules`.
-import type { Schedule } from "@appstrate/db/schema";
-export type { Schedule };
+// Same bundler rule as the run statuses above: `password-policy.ts` is
+// import-free, so re-exporting its values here lets the SPA's auth forms read
+// the bounds Better Auth actually enforces instead of restating them. They
+// restated the minimum as 6 while the server enforced 8.
+// Only the minimum crosses to the SPA: it is the bound the client-side forms
+// state and enforce. The maximum is enforced server-side only (Better Auth +
+// the Zod request schemas), so re-exporting it here would be an unused export.
+export { MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+
+// --- Schedule Types ---
 
 /**
  * Wire-shape Schedule DTO — snake_case fields exposed to the API consumer.
@@ -330,13 +332,12 @@ export interface ScheduleWireDto {
   userId: string | null;
   endUserId: string | null;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   name: string | null;
   enabled: boolean;
   cron_expression: string;
   timezone: string | null;
   input: Record<string, unknown> | null;
-  config_override: Record<string, unknown> | null;
   generation_config_override: ModelGenerationSettings | null;
   model_id_override: string | null;
   proxy_id_override: string | null;
@@ -377,12 +378,32 @@ export type EnrichedSchedule = ScheduleWireDto & {
 // `Record<OrgRole, ReadonlySet<Permission>>` role-grant matrix in
 // `apps/api/src/lib/permissions.ts` (an exhaustive Record fails when a
 // role is added to one side and not the other).
-import type { OrgRole } from "@appstrate/core/permissions";
+import type { OrgRole, SpaceAssignment } from "@appstrate/core/permissions";
 export type { OrgRole };
+
+/** Re-exported from core so the OpenAPI `SpaceAssignment` component can be
+ * registered against it — reached only by name.
+ *
+ * @openapiMirror
+ */
+export type { SpaceAssignment };
 
 import type { orgSettingsSchema } from "@appstrate/core/permissions";
 export type OrgSettings = z.infer<typeof orgSettingsSchema>;
 
+/**
+ * Mirrored by an OpenAPI response schema, and reached only by name.
+ *
+ * `verify:openapi` step #7 walks `responseTypeRegistry` in
+ * `apps/api/src/openapi/response-type-registry.ts`, where the link is the
+ * *string* `sharedTypeName: "OrganizationMember"`, and resolves it through the TypeScript
+ * Compiler API (`scripts/lib/ts-interface-required-keys.ts`, which throws
+ * `"… is not exported from @appstrate/shared-types"` when the name stops being
+ * exported). No import statement exists for the dead-code gate to follow, which
+ * is why this and its siblings carry `@openapiMirror` — see `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface OrganizationMember {
   orgId: string;
   userId: string;
@@ -392,18 +413,34 @@ export interface OrganizationMember {
   email?: string;
 }
 
+/** Mirrored by an OpenAPI response schema and reached only by name — see
+ * `OrganizationMember` above and `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface OrganizationWithRole {
   id: string;
   name: string;
   slug: string;
   createdAt: string;
   role: OrgRole;
+  /** Org-level effective set in this org, ceiling-applied (RBAC spec §6.5). */
+  permissions: string[];
+  /** When this organization's deletion was reserved, or null; repeat the DELETE to recover. */
+  deleting_at: string | null;
 }
 
+/** Mirrored by an OpenAPI response schema and reached only by name — see
+ * `OrganizationMember` above and `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface OrgInvitation {
   id: string;
   email: string;
   role: OrgRole;
+  /** Space memberships applied when the invitation is accepted (RBAC spec §5). */
+  space_assignments: SpaceAssignment[];
   token: string;
   expiresAt: string;
   createdAt: string;
@@ -434,15 +471,15 @@ export interface MeConnectionEntry {
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
   /**
-   * Number of installed agents in this connection's application that
+   * Number of installed agents in this connection's space that
    * declare this integration in their dependencies. Used by the UI to
    * surface "reused by N agents" so members understand that the connection
    * is shared across the org's agents rather than per-agent.
    */
   reused_by_agents: number;
-  /** Where this connection lives (the connection is keyed per-app). */
+  /** Where this connection lives (the connection is keyed per-space). */
   org: { id: string; name: string };
-  application: { id: string; name: string };
+  space: { id: string; name: string };
 }
 
 export interface MeConnectionSourceGroup {
@@ -484,9 +521,11 @@ export interface AgentListItem extends BasePackageListItem {
   author?: string;
   keywords: string[];
   dependencies: {
+    /** Withheld from a summary read — `agents:run` without `agents:read`. */
     skills?: Record<string, string>;
+    /** Withheld from a summary read — `agents:run` without `agents:read`. */
     mcp_servers?: Record<string, string>;
-    integrations?: Record<string, string>;
+    integrations: Record<string, string>;
   };
   running_runs: number;
   type: PackageType;
@@ -505,26 +544,41 @@ export interface AgentDetail {
   description?: string;
   source: "system" | "local";
   dependencies: {
-    // `version`/`name`/`description` are emitted only when present on the
-    // manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
-    skills: { id: string; version?: string; name?: string; description?: string }[];
-    /** AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry). */
-    mcp_servers: { id: string; version: string }[];
+    /**
+     * The agent's composition — withheld from a summary read (`agents:run`
+     * without `agents:read`, RBAC spec §3.4) like `manifest` and `prompt`.
+     *
+     * `version`/`name`/`description` are emitted only when present on the
+     * manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
+     */
+    skills?: { id: string; version?: string; name?: string; description?: string }[];
+    /**
+     * AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry).
+     * Composition too: withheld from a summary read, with `skills`.
+     */
+    mcp_servers?: { id: string; version: string }[];
     /**
      * Niveau 2 — agent's integration declarations (`dependencies.integrations`
      * + `integrations_configuration`) flattened by `parseManifestIntegrations`.
-     * Always populated (system + user
-     * agents), so the dashboard's Connexions tab can render the
-     * integration-connection status without depending on the optional
-     * `manifest` field below.
+     * Always populated (system + user agents, full read + summary read), so the
+     * dashboard's Connexions tab can render the integration-connection status
+     * without depending on the optional `manifest` field below — and so a
+     * runner, who holds `integrations:connect` and no `agents:read`, can see
+     * which accounts the agent it launches needs.
      */
     integrations: AgentIntegrationEntry[];
   };
-  input?: SchemaWrapper;
-  output?: SchemaWrapper;
-  config: SchemaWrapper & {
-    current: Record<string, unknown>;
+  /**
+   * The agent's single parameter schema plus the per-space layers the
+   * launch form needs: `values` are the editor's stored defaults (layer 2 of
+   * the input resolution) and `locked_fields` the fields it froze — not asked
+   * at launch, and refused if a caller sets them.
+   */
+  input: SchemaWrapper & {
+    values: Record<string, unknown>;
+    locked_fields: string[];
   };
+  output?: SchemaWrapper;
   running_runs: number;
   last_run: {
     id: string;
@@ -545,7 +599,8 @@ export interface AgentDetail {
   callback_url?: string;
   version_count?: number;
   has_unarchived_changes?: boolean;
-  forked_from: string | null;
+  /** Authoring history: withheld from a summary read, with `version_count`. */
+  forked_from?: string | null;
   /**
    * Run timeout actually enforced, in seconds: the manifest's `timeout` (or the
    * platform default when it declares none) clamped to this deployment's
@@ -897,21 +952,54 @@ export interface ApiKeyInfo {
   createdAt: string;
 }
 
-// --- Application Types ---
+// --- Space Types ---
 
-export interface ApplicationInfo {
+/** Mirrored by an OpenAPI response schema and reached only by name — see
+ * `OrganizationMember` above and `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
+export interface SpaceInfo {
   id: string;
   name: string;
   isDefault: boolean;
   settings: { allowedRedirectDomains?: string[] };
+  /** Who reaches the space without an explicit membership row (RBAC spec §3.1). */
+  visibility: "open" | "closed" | "private";
+  /** Preset the implicit members of an `open` space hold. */
+  default_role: "admin" | "builder" | "operator" | "viewer";
+  /** Whether the caller may enter — a `closed` space is listed as `"none"`. */
+  access: "member" | "none";
+  /** The caller's role here, or `null` when they have none. */
+  role: { kind: "preset" | "custom"; key: string; name: string } | null;
+  /** The caller's effective permission set in this space, ceiling applied. */
+  permissions: string[];
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
+/** One row of `GET /api/spaces/:id/members` — who reaches the space, and how. */
+export interface SpaceMember {
+  object: "space_member";
+  userId: string;
+  name: string | null;
+  email: string | null;
+  org_role: OrgRole;
+  /** Explicit row, org role (owner/admin), or the open space's default. */
+  source: "explicit" | "org_role" | "open_space";
+  role: { kind: "preset" | "custom"; key: string; name: string } | null;
+  /** When the explicit row was written; null for an implicit member. */
+  createdAt: string | null;
+}
+
+/** Mirrored by an OpenAPI response schema and reached only by name — see
+ * `OrganizationMember` above and `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface InstalledPackage {
   packageId: string;
-  config: Record<string, unknown>;
   generationConfig: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
@@ -925,20 +1013,38 @@ export interface InstalledPackage {
 }
 
 /**
- * Per-application resolved run-config returned by
- * `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`.
- * Single source of truth for both the dashboard's per-app agent run and
+ * Per-space resolved run-config returned by
+ * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
+ * Single source of truth for both the dashboard's per-space agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / version pin.
+ *
+ * `input` carries the per-space stored input layer, because
+ * `appstrate run @scope/agent --local` fetches the bundle and executes it on
+ * the caller's machine: there is no server-side resolution on that path, so
+ * without these members the local run would apply author defaults only and
+ * silently ignore both the editor's values and its locks. Layers 3-4
+ * (schedule values, caller input) stay server-owned — only what
+ * `space_packages` stores is published here.
  */
 export interface ResolvedRunConfig {
-  config: Record<string, unknown>;
-  /** Optional for compatibility with older servers; current API always emits it. */
-  generation?: ModelGenerationSettings | null;
+  generation: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
-  /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
+  /** Pinned semver label (`1.2.3`), or null when the space uses the floating dist-tag. */
   version_pin: string | null;
+  /**
+   * `space_packages.input_settings` — layer 2 of the input resolution
+   * (`apps/api/src/services/input-resolution.ts`), on the wire under the same
+   * `{ values, locked_fields }` pair `PUT /api/agents/{scope}/{name}/input-settings`
+   * reads and writes.
+   */
+  input: {
+    /** Editor-set values, partial by design. */
+    values: Record<string, unknown>;
+    /** Fields the editor froze — a launch may not set them. */
+    locked_fields: string[];
+  };
 }
 
 // --- End-User Types ---
@@ -946,7 +1052,7 @@ export interface ResolvedRunConfig {
 export interface EndUserInfo {
   id: string;
   object: "end_user";
-  applicationId: string;
+  spaceId: string;
   name: string | null;
   email: string | null;
   externalId: string | null;
@@ -955,7 +1061,7 @@ export interface EndUserInfo {
   updatedAt: string;
 }
 
-// --- OIDC Module — per-application auth config view types ---
+// --- OIDC Module — per-space auth config view types ---
 //
 // These OIDC-module-owned wire types live in ./oidc.ts (the frontend cannot
 // cross the module boundary to import from the API). Re-exported here so
@@ -976,10 +1082,8 @@ export {
   runUpdateToRunPatch,
 } from "./realtime-events.ts";
 export type {
-  RunUpdateEvent,
   RunLogEvent,
   RunMetricEvent,
-  ConnectionUpdateEvent,
-  ChatSessionUpdateEvent,
+  RunUpdateEvent,
   RealtimeEvent,
 } from "./realtime-events.ts";

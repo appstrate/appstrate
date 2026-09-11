@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Minimal Appstrate skill extension for the Pi Coding Agent SDK.
  *
@@ -11,7 +13,7 @@
 
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
-const wordCountExtension: ExtensionFactory = (context) => {
+const wordCountExtension: ExtensionFactory = (_context) => {
   return {
     name: "word_count",
     tools: [

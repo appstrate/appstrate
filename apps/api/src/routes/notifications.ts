@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { z } from "zod";
 import { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getActor } from "../lib/actor.ts";
@@ -13,8 +12,9 @@ import {
   listNotifications,
 } from "../services/state/notifications.ts";
 import { notFound } from "../lib/errors.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
+import { parseListPagination } from "../lib/list-query.ts";
 
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
@@ -24,15 +24,10 @@ export function createNotificationsRouter() {
   // cursor (Stripe-style). `?unread=true` filters to unread only.
   router.get("/notifications", async (c) => {
     const actor = getActor(c);
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const unread = c.req.query("unread") === "true";
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(20)
-      .parse(c.req.query("limit") ?? 20);
+    // Keyset-paginated on `startingAfter`, so only the helper's `limit` applies.
+    const { limit } = parseListPagination(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
     const result = await listNotifications(scope, actor, { unread, limit, startingAfter });
     const lastId = result.data.at(-1)?.id;
@@ -43,7 +38,7 @@ export function createNotificationsRouter() {
   // GET /api/notifications/unread-count
   router.get("/notifications/unread-count", async (c) => {
     const actor = getActor(c);
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const count = await getUnreadNotificationCount(scope, actor);
     return c.json({ count });
   });
@@ -51,7 +46,7 @@ export function createNotificationsRouter() {
   // GET /api/notifications/unread-counts-by-agent
   router.get("/notifications/unread-counts-by-agent", async (c) => {
     const actor = getActor(c);
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const counts = await getUnreadCountsByAgent(scope, actor);
     return c.json({ counts });
   });
@@ -59,7 +54,7 @@ export function createNotificationsRouter() {
   // PUT /api/notifications/:id/read
   router.put("/notifications/:id/read", async (c) => {
     const actor = getActor(c);
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const id = c.req.param("id");
     // Idempotent for the recipient (204 whether it was unread or already
     // read); 404 when the notification isn't the caller's — no silent no-op
@@ -76,7 +71,7 @@ export function createNotificationsRouter() {
   // Idempotent 204 — a missing run or non-recipient is a no-op, not a 404.
   router.put("/notifications/read/:runId", async (c) => {
     const actor = getActor(c);
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const runId = c.req.param("runId");
     await markNotificationReadByRun(scope, runId, actor);
     return c.body(null, 204);
@@ -86,7 +81,7 @@ export function createNotificationsRouter() {
   // operation result ({ updated_count }), not a resource (issue #657).
   router.put("/notifications/read-all", async (c) => {
     const actor = getActor(c);
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const updated = await markAllNotificationsRead(scope, actor);
     return c.json({ updated_count: updated });
   });

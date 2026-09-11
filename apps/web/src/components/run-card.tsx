@@ -8,7 +8,7 @@ import { cn } from "@appstrate/ui/cn";
 import { Badge, MetaBadge } from "./status-badge";
 import { RunDuration } from "./run-duration";
 import { RunTrigger } from "./run-trigger";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 /** A second, genuinely card-shaped reading of the rows already fetched by RunList. */
 export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: string }) {
@@ -53,22 +53,22 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
       <div className="text-muted-foreground mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 pt-4 text-xs">
         <RunTrigger run={run} />
         {run.proxy_label && <Shield size={12} aria-label={run.proxy_label} />}
-        {run.document_counts.input > 0 && (
+        {run.file_counts.input > 0 && (
           <span
             className="flex items-center gap-1"
-            title={t("run.inputDocuments", { count: run.document_counts.input })}
+            title={t("run.inputFiles", { count: run.file_counts.input })}
           >
             <FileInput size={12} />
-            {run.document_counts.input}
+            {run.file_counts.input}
           </span>
         )}
-        {run.document_counts.output > 0 && (
+        {run.file_counts.output > 0 && (
           <span
             className="flex items-center gap-1"
-            title={t("run.outputDocuments", { count: run.document_counts.output })}
+            title={t("run.outputFiles", { count: run.file_counts.output })}
           >
             <FileOutput size={12} />
-            {run.document_counts.output}
+            {run.file_counts.output}
           </span>
         )}
         <span className="ml-auto">

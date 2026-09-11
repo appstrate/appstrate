@@ -226,7 +226,7 @@ export function useConnectionColumns({
     {
       id: "status",
       header: t("integration.connection.col.status"),
-      width: "minmax(170px,1fr)",
+      width: "minmax(128px,1fr)",
       tier: 2,
       cell: (c) => <StatusCell connection={c} />,
     },

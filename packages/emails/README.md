@@ -1,6 +1,6 @@
 # @appstrate/emails
 
-Email template registry with locale support and cloud override mechanism.
+Email template registry with locale support and a module override mechanism.
 
 ## Usage
 
@@ -26,6 +26,6 @@ const { subject, html, text } = renderEmail("verification", {
 
 French (`fr`, default) and English (`en`).
 
-## Cloud overrides
+## Module overrides
 
-The cloud module can replace default templates at boot via `registerEmailOverrides()` for branded emails.
+A module can replace default templates at boot via `registerEmailOverrides()` for branded emails — the ee module (`@appstrate/module-ee`) is the one that does.

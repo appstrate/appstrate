@@ -32,30 +32,24 @@ import { Badge, MetaBadge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
 import { EmptyState } from "./page-states";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 function DocumentCounts({ run }: { run: EnrichedRun }) {
   const { t } = useTranslation(["agents"]);
-  const { input, output } = run.document_counts;
+  const { input, output } = run.file_counts;
   if (!input && !output) return null;
   return (
     // `relative z-10`: these carry a `title`, and the row's link overlay would
     // otherwise take the hover with the click (see `data-table.tsx`).
     <span className="text-muted-foreground relative z-10 flex items-center gap-1.5 text-xs">
       {input > 0 && (
-        <span
-          className="flex items-center gap-0.5"
-          title={t("run.inputDocuments", { count: input })}
-        >
+        <span className="flex items-center gap-0.5" title={t("run.inputFiles", { count: input })}>
           <FileInput size={12} className="shrink-0" />
           {input}
         </span>
       )}
       {output > 0 && (
-        <span
-          className="flex items-center gap-0.5"
-          title={t("run.outputDocuments", { count: output })}
-        >
+        <span className="flex items-center gap-0.5" title={t("run.outputFiles", { count: output })}>
           <FileOutput size={12} className="shrink-0" />
           {output}
         </span>

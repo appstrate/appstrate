@@ -7,7 +7,7 @@ const MAX_FILE_SIZE = 1_000_000; // 1 MB per file
 const MAX_TOTAL_SIZE = 5_000_000; // 5 MB total
 const FETCH_TIMEOUT = 30_000; // 30s
 
-export interface GithubRef {
+interface GithubRef {
   owner: string;
   repo: string;
   ref: string | null; // null = default branch

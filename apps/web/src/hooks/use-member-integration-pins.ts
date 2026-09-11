@@ -22,7 +22,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
 
-export interface UpsertMemberPinInput {
+interface UpsertMemberPinInput {
   agentPackageId: string;
   integrationId: string;
   connectionId: string;
@@ -47,7 +47,7 @@ export function useUpsertMemberIntegrationPin() {
   });
 }
 
-export interface DeleteMemberPinInput {
+interface DeleteMemberPinInput {
   agentPackageId: string;
   integrationId: string;
 }

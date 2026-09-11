@@ -28,7 +28,7 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.logger.info).toBe("function");
   });
 
-  it("wires the ledger cursor read (usage.list + usage.settledFrontier — sole cross-tenant consumer: cloud)", () => {
+  it("wires the ledger cursor read (usage.list + usage.settledFrontier — sole cross-tenant consumer: the ee module)", () => {
     expect(typeof services.usage.list).toBe("function");
     expect(typeof services.usage.settledFrontier).toBe("function");
   });
@@ -41,19 +41,20 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.inProcess.dispatch).toBe("function");
   });
 
-  it("wires the subscription-chat channel (resolveSubscriptionChatModel + recordChatUsage + checkUsageAllowed)", () => {
-    expect(typeof services.resolveSubscriptionChatModel).toBe("function");
+  it("wires the subscription-chat channel (resolveChatModel + recordChatUsage + checkUsageAllowed)", () => {
+    expect(typeof services.resolveChatModel).toBe("function");
     expect(typeof services.recordChatUsage).toBe("function");
     expect(typeof services.checkUsageAllowed).toBe("function");
   });
 
-  it("wires the chat document seam (resolveChatAttachment + cleanupSessionDocuments)", () => {
+  it("wires the chat file seam (resolveChatAttachment + cleanupSessionFiles)", () => {
     expect(typeof services.resolveChatAttachment).toBe("function");
-    expect(typeof services.cleanupSessionDocuments).toBe("function");
+    expect(typeof services.cleanupSessionFiles).toBe("function");
   });
 
-  it("wires the org query helpers (getOrgAdminEmails + getOrgName)", () => {
-    expect(typeof ctx.getOrgAdminEmails).toBe("function");
+  it("wires the org query helpers (getOrgOwnerEmails + getOrgMembers + getOrgName)", () => {
+    expect(typeof ctx.getOrgOwnerEmails).toBe("function");
+    expect(typeof ctx.getOrgMembers).toBe("function");
     expect(typeof ctx.getOrgName).toBe("function");
   });
 });

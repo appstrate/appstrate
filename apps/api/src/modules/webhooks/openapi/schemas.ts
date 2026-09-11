@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+
+import { SPACE_ID_RE } from "../../../lib/ids.ts";
 export const webhooksSchemas = {
   WebhookObject: {
     type: "object",
@@ -7,7 +9,7 @@ export const webhooksSchemas = {
       "id",
       "object",
       "level",
-      "applicationId",
+      "spaceId",
       "url",
       "events",
       "packageId",
@@ -21,13 +23,14 @@ export const webhooksSchemas = {
       object: { type: "string", enum: ["webhook"] },
       level: {
         type: "string",
-        enum: ["org", "application"],
+        enum: ["org", "space"],
         description:
-          "Scoping level. `org` webhooks fire for any application in the org; `application` webhooks are pinned via `applicationId`.",
+          "Scoping level. `org` webhooks fire for any space in the org; `space` webhooks are pinned via `spaceId`.",
       },
-      applicationId: {
+      spaceId: {
         type: ["string", "null"],
-        description: "Application ID (app_ prefix) when `level = 'application'`, otherwise null.",
+        pattern: SPACE_ID_RE.source,
+        description: "Space ID (spc_ prefix) when `level = 'space'`, otherwise null.",
       },
       url: { type: "string", format: "uri" },
       events: { type: "array", items: { type: "string" } },

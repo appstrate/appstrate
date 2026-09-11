@@ -1,66 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Appstrate
+
+/**
+ * Coverage for what SURVIVES in `@appstrate/afps-runtime/errors`.
+ *
+ * The previous `errors.test.ts` was deleted with the five unraised error
+ * classes and the `isAfpsError` marker it mostly asserted (see the CHANGELOG's
+ * "Removed — five unraised error classes" entry). Three of its assertions
+ * covered code that did NOT go away and were lost with it:
+ *
+ *   - `AuthorizedUrisError`'s code, and that `details` preserves `provider`
+ *     and `target`. That object IS the allowlist-refusal audit record — the
+ *     only place the refused target is written down — so a change that stopped
+ *     carrying it would be a silent loss of security evidence.
+ *   - `AfpsRuntimeError` forwards `ErrorOptions.cause`.
+ *   - `AfpsRuntimeError` leaves `details` undefined when none is given.
+ */
 
 import { describe, it, expect } from "bun:test";
-import {
-  AfpsRuntimeError,
-  CredentialResolutionError,
-  AuthorizedUrisError,
-  ResolverError,
-  RunCancelledError,
-  RunHistoryError,
-  RunTimeoutError,
-  WorkloadExitError,
-  isAfpsError,
-  toProblem,
-  afpsErrorTypeUri,
-  AFPS_ERROR_CODES,
-} from "../src/errors.ts";
-import { BundleError } from "../src/bundle/errors.ts";
-import { BundleSignaturePolicyError } from "../src/bundle/signature-policy.ts";
-// devDependency, test-only: the platform's RFC 9457 implementation is the
-// reference the runtime's `type` URIs must match byte for byte.
-import { ApiError } from "@appstrate/core/api-errors";
+import { AuthorizedUrisError, ResolverError } from "../src/errors.ts";
 
-describe("AfpsRuntimeError taxonomy", () => {
-  it("each typed error exposes a stable code + name", () => {
-    expect(new RunCancelledError("x").code).toBe("RUN_CANCELLED");
-    expect(new RunCancelledError("x").name).toBe("RunCancelledError");
-
-    expect(new WorkloadExitError("docker", 137).code).toBe("WORKLOAD_EXIT_NONZERO");
-    expect(new WorkloadExitError("docker", 137).name).toBe("WorkloadExitError");
-
-    expect(new RunTimeoutError("timed out").code).toBe("RUN_TIMEOUT");
-    expect(new RunTimeoutError("timed out").name).toBe("RunTimeoutError");
-
+describe("AuthorizedUrisError", () => {
+  it("exposes the code it was constructed with", () => {
     expect(new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", "x").code).toBe(
       "AUTHORIZED_URIS_EMPTY",
     );
-
-    expect(new ResolverError("RESOLVER_MISSING_REQUIRED", "x").code).toBe(
-      "RESOLVER_MISSING_REQUIRED",
+    expect(new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "x").code).toBe(
+      "AUTHORIZED_URIS_MISMATCH",
     );
-
-    expect(new RunHistoryError("RUN_HISTORY_BAD_RESPONSE", "x").code).toBe(
-      "RUN_HISTORY_BAD_RESPONSE",
-    );
-    expect(new CredentialResolutionError("x").code).toBe("CREDENTIAL_RESOLUTION");
+    expect(new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", "x").name).toBe("AuthorizedUrisError");
   });
 
-  it("WorkloadExitError carries exitCode + adapterName + lastError", () => {
-    const err = new WorkloadExitError("docker", 137, "OOM killed");
-    expect(err.exitCode).toBe(137);
-    expect(err.adapterName).toBe("docker");
-    expect(err.message).toBe("OOM killed");
-    expect(err.details).toEqual({ adapterName: "docker", exitCode: 137, lastError: "OOM killed" });
-  });
-
-  it("WorkloadExitError synthesises a default message when no lastError", () => {
-    const err = new WorkloadExitError("docker", 1);
-    expect(err.message).toBe("docker workload exited with code 1");
-    expect(err.details).toEqual({ adapterName: "docker", exitCode: 1 });
-  });
-
-  it("AuthorizedUrisError preserves the security-relevant target + provider in details", () => {
+  it("preserves the security-relevant target + provider in details", () => {
     const err = new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "rejected", {
       provider: "@appstrate/gmail",
       target: "https://evil.com/",
@@ -69,161 +40,44 @@ describe("AfpsRuntimeError taxonomy", () => {
   });
 });
 
-describe("isAfpsError marker", () => {
-  it("is true for every typed error in the package", () => {
-    expect(isAfpsError(new RunCancelledError("x"))).toBe(true);
-    expect(isAfpsError(new WorkloadExitError("d", 1))).toBe(true);
-    expect(isAfpsError(new RunTimeoutError("x"))).toBe(true);
-    expect(isAfpsError(new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", "x"))).toBe(true);
-    expect(isAfpsError(new ResolverError("RESOLVER_MISSING_REQUIRED", "x"))).toBe(true);
-    expect(isAfpsError(new RunHistoryError("RUN_HISTORY_FETCH_FAILED", "x"))).toBe(true);
-    expect(isAfpsError(new CredentialResolutionError("x"))).toBe(true);
-    expect(isAfpsError(new BundleError("INTEGRITY_MISMATCH", "x"))).toBe(true);
-    expect(isAfpsError(new BundleSignaturePolicyError("signature_invalid", "x"))).toBe(true);
-  });
-
-  it("is false for plain Error / non-Error values", () => {
-    expect(isAfpsError(new Error("plain"))).toBe(false);
-    expect(isAfpsError("string")).toBe(false);
-    expect(isAfpsError(null)).toBe(false);
-    expect(isAfpsError(undefined)).toBe(false);
-    expect(isAfpsError({ code: "x" })).toBe(false);
-  });
-});
-
-describe("toProblem (RFC 9457)", () => {
-  it("emits problem+json from typed errors with code in the type URI", () => {
-    const err = new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "rejected", {
-      provider: "@appstrate/gmail",
-      target: "https://evil.com/",
-    });
-    const problem = toProblem(err);
-    expect(problem.code).toBe("AUTHORIZED_URIS_MISMATCH");
-    expect(problem.type).toBe("https://docs.appstrate.dev/errors/afps/AUTHORIZED-URIS-MISMATCH");
-    expect(problem.title).toBe("AuthorizedUrisError");
-    expect(problem.status).toBe(422);
-    expect(problem.detail).toBe("rejected");
-    expect(problem.errors).toEqual({ provider: "@appstrate/gmail", target: "https://evil.com/" });
-  });
-
-  it("respects fallback overrides", () => {
-    const err = new RunCancelledError("aborted");
-    const problem = toProblem(err, { type: "x", title: "y", status: 409 });
-    expect(problem.type).toBe("x");
-    expect(problem.title).toBe("y");
-    expect(problem.status).toBe(409);
-  });
-
-  it("falls back to a 500 envelope for plain Error", () => {
-    const problem = toProblem(new Error("boom"));
-    expect(problem.type).toBe("about:blank");
-    expect(problem.status).toBe(500);
-    expect(problem.detail).toBe("boom");
-    expect(problem.code).toBeUndefined();
-  });
-
-  it("falls back to a 500 envelope for non-Error values", () => {
-    const problem = toProblem("string error");
-    expect(problem.detail).toBe("string error");
-    expect(problem.status).toBe(500);
-  });
-});
-
-/**
- * The runtime and the platform must share ONE documentation host — but not
- * one flat namespace: their code catalogues overlap on names that mean
- * different things (`INTEGRITY_MISMATCH` vs `integrity_mismatch`). The
- * runtime therefore adds an `afps/` segment.
- *
- * These assertions pin the relationship rather than byte-identity: same
- * host and `/errors` root, same slug transform, differing by exactly the
- * namespace segment. Drift in either implementation fails here.
- *
- * Disjointness follows from that relationship, it is not an empirical fact
- * needing a scan of the platform's catalogue: core's `codeToType` maps
- * `_` → `-` and nothing else, so a platform URI has exactly ONE segment
- * under `/errors/`, while `afpsErrorTypeUri` always emits two. A collision
- * would require a platform error code containing a literal `/`. The pair
- * below is the one real name overlap between the two catalogues, kept as a
- * concrete witness that the namespace segment is what keeps them apart.
- */
-describe("toProblem type URI ↔ @appstrate/core namespace relationship", () => {
-  const ERRORS_ROOT = "https://docs.appstrate.dev/errors";
-
-  /** The URI core mints for the same code. */
-  function coreTypeUri(code: string): string {
-    return new ApiError({ status: 422, code, title: "t", detail: "d" }).toProblemDetail("req_test")
-      .type;
-  }
-
-  it("enumerates the AfpsErrorCode union exhaustively", () => {
-    // Compile-time exhaustiveness lives on the `satisfies Record<AfpsErrorCode, true>`
-    // in src/errors.ts; this pins the count so a silent shrink is visible.
-    expect(AFPS_ERROR_CODES).toHaveLength(38);
-    expect(new Set(AFPS_ERROR_CODES).size).toBe(AFPS_ERROR_CODES.length);
-  });
-
-  it("shares core's host and /errors root", () => {
-    for (const code of AFPS_ERROR_CODES) {
-      expect(coreTypeUri(code).startsWith(`${ERRORS_ROOT}/`)).toBe(true);
-      expect(afpsErrorTypeUri(code).startsWith(`${ERRORS_ROOT}/`)).toBe(true);
-    }
-  });
-
-  it("adds exactly the afps/ segment and nothing else", () => {
-    for (const code of AFPS_ERROR_CODES) {
-      expect(afpsErrorTypeUri(code)).toBe(
-        `${ERRORS_ROOT}/afps/${coreTypeUri(code).slice(ERRORS_ROOT.length + 1)}`,
-      );
-    }
-  });
-
-  it("would collide without the afps/ segment", () => {
-    expect(coreTypeUri("integrity_mismatch")).toBe(`${ERRORS_ROOT}/integrity-mismatch`);
-    expect(afpsErrorTypeUri("INTEGRITY_MISMATCH").toLowerCase()).not.toBe(
-      coreTypeUri("integrity_mismatch"),
-    );
-  });
-
-  it("applies an identical code→slug transform (underscores to dashes, no case folding)", () => {
-    for (const code of AFPS_ERROR_CODES) {
-      const coreSlug = coreTypeUri(code).slice(`${ERRORS_ROOT}/`.length);
-      const afpsSlug = afpsErrorTypeUri(code).slice(`${ERRORS_ROOT}/afps/`.length);
-      expect(afpsSlug).toBe(coreSlug);
-      expect(afpsSlug).not.toContain("_");
-      expect(afpsSlug).not.toContain("/");
-    }
-  });
-
-  it("routes toProblem through the namespaced URI — never the dead errors.* subdomain", () => {
-    for (const code of AFPS_ERROR_CODES) {
-      const uri = toProblem(new ResolverError(code as never, "boom")).type;
-      expect(uri).toBe(afpsErrorTypeUri(code));
-      expect(uri).not.toContain("errors.appstrate.dev");
-    }
-    expect(toProblem(new RunCancelledError("x")).type).toBe(
-      "https://docs.appstrate.dev/errors/afps/RUN-CANCELLED",
-    );
-    expect(toProblem(new BundleSignaturePolicyError("unsigned_required", "x")).type).toBe(
-      "https://docs.appstrate.dev/errors/afps/unsigned-required",
-    );
-  });
-});
-
-describe("AfpsRuntimeError abstract base", () => {
+describe("AfpsRuntimeError base, through the classes that actually reach it", () => {
+  // Asserted on both concrete classes on purpose: the base's `options`
+  // parameter is only worth having if a subclass forwards it, and both did
+  // NOT — they called `super(message, details)` with no third argument, which
+  // made the whole `cause` capability unreachable.
   it("forwards ErrorOptions.cause", () => {
-    class MyErr extends AfpsRuntimeError {
-      readonly code = "RUN_CANCELLED" as const;
-    }
     const root = new Error("root");
-    const wrapped = new MyErr("wrapped", undefined, { cause: root });
-    expect(wrapped.cause).toBe(root);
+
+    const resolver = new ResolverError("RESOLVER_BODY_INVALID", "wrapped", undefined, {
+      cause: root,
+    });
+    expect(resolver.cause).toBe(root);
+
+    const allowlist = new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "wrapped", undefined, {
+      cause: root,
+    });
+    expect(allowlist.cause).toBe(root);
+  });
+
+  it("keeps cause out of the details bag", () => {
+    const root = new Error("root");
+    const err = new ResolverError("RESOLVER_BODY_INVALID", "wrapped", { size: 1 }, { cause: root });
+    expect(err.details).toEqual({ size: 1 });
+    expect(err.cause).toBe(root);
   });
 
   it("omits details when not provided", () => {
-    class MyErr extends AfpsRuntimeError {
-      readonly code = "RUN_CANCELLED" as const;
-    }
-    expect(new MyErr("x").details).toBeUndefined();
+    const err = new ResolverError("RESOLVER_MISSING_REQUIRED", "x");
+    expect(err.details).toBeUndefined();
+
+    // NOT `Object.hasOwn(err, "details") === false`. `details` is a declared
+    // class field and the package compiles at `target: "ESNext"`, so
+    // `useDefineForClassFields` defines the own property regardless of the
+    // constructor's `if (details !== undefined)` guard — it exists, holding
+    // `undefined`. Pinned here so a future reader does not "fix" the guard on
+    // a promise the field declaration never kept. What DOES hold, and is what
+    // any serialiser sees, is that no key reaches the wire.
+    expect(Object.hasOwn(err, "details")).toBe(true);
+    expect(JSON.parse(JSON.stringify({ ...err }))).not.toHaveProperty("details");
   });
 });

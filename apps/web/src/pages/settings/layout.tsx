@@ -34,8 +34,8 @@ import { RailLink } from "../../components/settings/rail-link";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { useApplications } from "../../hooks/use-applications";
-import { useAppSwitcher, useCurrentApplicationId } from "../../hooks/use-current-application";
+import { useSpaces } from "../../hooks/use-spaces";
+import { useSpaceSwitcher, useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { modalReturnTarget, openAsModal, useBackgroundLocation } from "../../lib/modal-route";
@@ -150,10 +150,10 @@ export function UnifiedSettingsLayout() {
   const background = useBackgroundLocation();
   const setBreadcrumbEntries = useBreadcrumbStore((state) => state.setEntries);
   const { currentOrg, orgs, switchOrg } = useOrg();
-  const { data: applications = [] } = useApplications();
-  const applicationId = useCurrentApplicationId();
-  const { switchApp } = useAppSwitcher();
-  const { isAdmin } = usePermissions();
+  const { data: applications = [] } = useSpaces();
+  const spaceId = useCurrentSpaceId();
+  const { switchSpace } = useSpaceSwitcher();
+  const { can } = usePermissions();
   const { features } = useAppConfig();
   const shouldOpenMobileNavigationOnEntry =
     isMobile &&
@@ -185,7 +185,10 @@ export function UnifiedSettingsLayout() {
   );
 
   const sections = buildSettingsNavigation({
-    isAdmin,
+    // The navigation builder still asks the question as a single boolean; what
+    // changed is where the answer comes from — the permission matrix, not the
+    // role name.
+    isAdmin: can("org:read"),
     features: {
       oidc: !!features.oidc,
       billing: !!features.billing,
@@ -204,7 +207,7 @@ export function UnifiedSettingsLayout() {
     allItems.find((item) => location.pathname.startsWith(item.to + "/"));
   const activeScope = settingsScopeFromPath(location.pathname);
   const activeSection = sections.find((section) => section.scope === activeScope);
-  const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, applicationId);
+  const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, spaceId);
   const keepOverlay = background ? openAsModal(background) : undefined;
   const label = (key: string) => t(key, { ns: "settings" });
   const settingsBreadcrumbLabel = label("unifiedSettings.title");
@@ -295,7 +298,7 @@ export function UnifiedSettingsLayout() {
     const requestId = ++organizationSwitchRequest.current;
     setSwitchingOrganization(true);
     try {
-      const { data, error } = await client.GET("/api/applications", {
+      const { data, error } = await client.GET("/api/spaces", {
         params: { header: { "X-Org-Id": organizationId } },
       });
       if (organizationSwitchRequest.current !== requestId) return;
@@ -307,7 +310,7 @@ export function UnifiedSettingsLayout() {
       );
       if (!workspace) throw new Error(label("unifiedSettings.noWorkspace"));
 
-      if (applicationId) rememberWorkspace(currentOrg.id, applicationId);
+      if (spaceId) rememberWorkspace(currentOrg.id, spaceId);
       switchOrg(organizationId, workspace.id);
       rememberWorkspace(organizationId, workspace.id);
     } catch (error) {
@@ -321,14 +324,14 @@ export function UnifiedSettingsLayout() {
   };
 
   const changeWorkspace = (workspaceId: string) => {
-    if (!currentOrg || workspaceId === applicationId) return;
-    switchApp(workspaceId);
+    if (!currentOrg || workspaceId === spaceId) return;
+    switchSpace(workspaceId);
     rememberWorkspace(currentOrg.id, workspaceId);
   };
 
   // Workspace settings were admin-only before the shells were unified. A cold
   // or bookmarked workspace URL must keep that permission contract.
-  if (activeScope === "workspace" && !isAdmin) {
+  if (activeScope === "workspace" && !can("org:read")) {
     return <NavigateKeepingState to="/org-settings/general" />;
   }
 
@@ -343,7 +346,7 @@ export function UnifiedSettingsLayout() {
   );
   const workspaceSelector = (
     <ContextSelector
-      value={applicationId ?? ""}
+      value={spaceId ?? ""}
       label={label("unifiedSettings.workspaceSelector")}
       disabled={switchingOrganization || applications.length === 0}
       options={applications}

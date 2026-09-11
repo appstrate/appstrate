@@ -7,7 +7,7 @@
  * The map is a READ-ONLY projection: it owns no data and computes no verdict of
  * its own. Every fact comes from the existing single source of truth for that
  * fact — the effective manifest (`resolveAgentRunVersion`), the app install
- * (`getPackageConfig`), the schedule table (`listPackageSchedules`), the
+ * (`getInstalledPackageSettings`), the schedule table (`listPackageSchedules`), the
  * connection resolver (`resolveAgentConnectionReadiness`) and the readiness
  * gate (`collectAgentReadinessErrors`). Adding a check here would let the map
  * disagree with the run gate, which is the one thing it must never do.
@@ -37,7 +37,7 @@ import {
   VERSION_SELECTOR_DRAFT,
 } from "../../services/agent-version-resolver.ts";
 import { listPackageSchedules } from "../../services/scheduler.ts";
-import { getPackageConfig } from "../../services/application-packages.ts";
+import { getInstalledPackageSettings } from "../../services/space-packages.ts";
 import { resolveAgentConnectionReadiness } from "../../services/integration-pins-service.ts";
 import { collectAgentReadinessErrors } from "../../services/agent-readiness.ts";
 import { listOrgModels } from "../../services/org-models.ts";
@@ -50,8 +50,8 @@ import {
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
 import { RUNTIME_INJECTED_TOOLS } from "@appstrate/runner-pi/runtime-tools";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
-import { getAppScope } from "../../lib/scope.ts";
+import { asJSONSchemaObject, authorDefaults } from "@appstrate/core/form";
+import { getSpaceScope } from "../../lib/scope.ts";
 import { getActor } from "../../lib/actor.ts";
 
 // ---------------------------------------------------------------------------
@@ -356,15 +356,15 @@ export async function buildAgentMap(
   c: Context<AppEnv>,
   opts: { itemId: string; version?: string },
 ): Promise<AgentMap | null> {
-  const scope = getAppScope(c);
-  const { orgId, applicationId } = scope;
+  const scope = getSpaceScope(c);
+  const { orgId, spaceId } = scope;
   const role = c.get("orgRole");
   const isAdmin = role === "admin" || role === "owner";
   const actor = getActor(c);
   const canReadPersistence = c.get("permissions")?.has("persistence:read") ?? false;
   const persistenceScope = scopeFromActor(actor);
 
-  const loaded = await getPackageWithAccess(opts.itemId, orgId, applicationId);
+  const loaded = await getPackageWithAccess(opts.itemId, orgId, spaceId);
   if (!loaded) return null;
 
   // Default to the working copy, matching `connection-readiness` — a map of a
@@ -390,9 +390,9 @@ export async function buildAgentMap(
     pinnedSlots,
     memories,
   ] = await Promise.all([
-    listPackageSchedules(scope, agent.id, actor),
+    listPackageSchedules(scope, agent.id, actor, undefined),
     resolveDeclaredSkills(agent.manifest, orgId),
-    getPackageConfig(applicationId, agent.id),
+    getInstalledPackageSettings(spaceId, agent.id),
     // Skipped entirely when nothing is declared — the resolver would fan out
     // per integration for an empty answer.
     declaredIntegrations.length > 0
@@ -400,7 +400,7 @@ export async function buildAgentMap(
           scope,
           agentPackageId: agent.id,
           actor,
-          isAdmin,
+          canConfigureIntegrations: isAdmin,
           version: versionRef,
         })
       : Promise.resolve(null),
@@ -408,20 +408,16 @@ export async function buildAgentMap(
     // credential probe is what decides which rows are renderable.
     listOrgModels(orgId),
     listOrgProxies(orgId),
-    canReadPersistence
-      ? listPinnedSlots(agent.id, applicationId, persistenceScope)
-      : Promise.resolve([]),
-    canReadPersistence
-      ? listMemories(agent.id, applicationId, persistenceScope)
-      : Promise.resolve([]),
+    canReadPersistence ? listPinnedSlots(agent.id, spaceId, persistenceScope) : Promise.resolve([]),
+    canReadPersistence ? listMemories(agent.id, spaceId, persistenceScope) : Promise.resolve([]),
   ]);
 
-  const configSchema = agent.manifest.config?.schema
-    ? asJSONSchemaObject(agent.manifest.config.schema)
+  const configSchema = agent.manifest.input?.schema
+    ? asJSONSchemaObject(agent.manifest.input.schema)
     : null;
   const effectiveConfig = configSchema
-    ? mergeWithDefaults(configSchema, packageConfig.config)
-    : packageConfig.config;
+    ? { ...authorDefaults(configSchema), ...packageConfig.values }
+    : packageConfig.values;
 
   // Readiness minus connections: the connection verdict already arrives via
   // `connectionReadiness` above, and passing an actor here would run the same
@@ -429,9 +425,8 @@ export async function buildAgentMap(
   const readinessErrors = await collectAgentReadinessErrors({
     agent: agent as LoadedPackage,
     orgId,
-    applicationId,
+    spaceId,
     actor: null,
-    config: effectiveConfig,
   });
 
   const connectionByIntegration = new Map(
@@ -535,7 +530,7 @@ export async function buildAgentMap(
         id: "input_values",
         type: "input_values",
         data: {
-          items: contractFields(agent.manifest.config).map((field) => ({
+          items: contractFields(agent.manifest.input).map((field) => ({
             ...field,
             // The declared shape is only half of it: what makes a config card
             // worth reading is the value this application actually runs with,

@@ -2,7 +2,7 @@
 
 import { db } from "@appstrate/db/client";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
-import { toISORequired } from "../lib/date-helpers.ts";
+import { toISO, toISORequired } from "../lib/date-helpers.ts";
 import {
   organizations,
   organizationMembers,
@@ -14,7 +14,7 @@ import {
   orgInvitations,
   notifications,
   schedules,
-  documents,
+  files,
   uploads,
 } from "@appstrate/db/schema";
 import { and, eq, inArray, notInArray, count, sql } from "drizzle-orm";
@@ -25,6 +25,9 @@ import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
+import { orgApiVersionCache } from "./org-settings-cache.ts";
+import { deleteSpaceMembershipsInOrg } from "./space-members.ts";
+import type { RevokedSpaceAssignment } from "./space-members.ts";
 
 /** Accepts either the base client or an open transaction handle. */
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -38,19 +41,21 @@ interface OrgResult {
   createdAt: string;
   updatedAt: string;
   /**
-   * Running total of durable document bytes stored by this org
-   * (`organizations.documents_bytes_used`) — the value the synchronous
+   * Running total of durable file bytes stored by this org
+   * (`organizations.files_bytes_used`) — the value the synchronous
    * `ORG_STORAGE_QUOTA_BYTES` gate is checked against. Surfaced so the org
    * settings screen can show consumption against the quota.
    */
-  documentsBytesUsed: number;
+  filesBytesUsed: number;
   /**
-   * Per-org durable-document storage limit override in bytes
-   * (`organizations.documents_bytes_limit`), or null when no override is set (the
+   * Per-org durable-file storage limit override in bytes
+   * (`organizations.files_bytes_limit`), or null when no override is set (the
    * org falls back to the global `ORG_STORAGE_QUOTA_BYTES`). Surfaced so the org
    * detail endpoint can report the raw override alongside the effective limit.
    */
-  documentsBytesLimit: number | null;
+  filesBytesLimit: number | null;
+  /** When deletion was reserved (`organizations.deleting_at`), or null. */
+  deletingAt: string | null;
 }
 
 function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
@@ -62,8 +67,9 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     createdBy: row.createdBy ?? "",
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
-    documentsBytesUsed: row.documentsBytesUsed,
-    documentsBytesLimit: row.documentsBytesLimit,
+    filesBytesUsed: row.filesBytesUsed,
+    filesBytesLimit: row.filesBytesLimit,
+    deletingAt: toISO(row.deletingAt),
   };
 }
 
@@ -98,6 +104,11 @@ export async function createOrganization(
     return created;
   });
 
+  // The initial `orgSettings` write above is a settings writer like any other:
+  // a pin read for this id that raced the insert (and cached "no pin" for a
+  // row that did not exist yet) must not outlive the commit.
+  orgApiVersionCache.invalidate(org.id);
+
   return toOrgResult(org);
 }
 
@@ -120,7 +131,7 @@ export async function getUserOrganizations(
 
   return rows.map((row) => ({
     ...toOrgResult(row.org),
-    role: row.role as OrgRole,
+    role: row.role,
   }));
 }
 
@@ -144,10 +155,40 @@ export async function updateOrganization(
   return toOrgResult(row);
 }
 
-export { orgSettingsSchema } from "@appstrate/core/permissions";
-import type { OrgSettings } from "@appstrate/shared-types";
-export type { OrgSettings };
+// Re-exporting `orgSettingsSchema` from here died with the second
+// `.partial()`: the two readers it had now take the base straight from
+// `@appstrate/core/permissions` or the patch schema below.
+import { orgSettingsSchema as orgSettingsBaseSchema } from "@appstrate/core/permissions";
 
+/**
+ * Body of `PUT /api/orgs/{orgId}/settings` — a PATCH over the org settings
+ * document, so every member is optional.
+ *
+ * `.strict()`: an unknown key is a 400, never a silently dropped setting. It
+ * lives HERE rather than at the route because `openapi/zod-schema-registry.ts`
+ * documents this body too, and it built its own `orgSettingsSchema.partial()`
+ * — two expressions of one shape that could disagree.
+ *
+ * This is the ONLY place the shape is enforced, and it has to be: the base
+ * schema in `@appstrate/core/permissions` never parses anything. It has
+ * exactly two consumers — this `.partial().strict()` derivation, and the
+ * `OrgSettings` type alias in `packages/shared-types` (`z.infer`, erased at
+ * runtime). Nothing validates a stored row through it: `getOrgSettings` below
+ * CASTS the JSONB column and returns it. So the base being a plain
+ * `z.object()` is not a read-path affordance — a plain `z.object()` STRIPS
+ * unknown keys rather than tolerating them, and would drop exactly the
+ * newer-writer keys such a rationale would be protecting. Its strictness is
+ * simply unobservable, and the closure that matters is the one on this line.
+ * `test/integration/services/organizations.test.ts` pins both halves.
+ */
+export const orgSettingsPatchSchema = orgSettingsBaseSchema.partial().strict();
+import type { OrgSettings } from "@appstrate/shared-types";
+
+/**
+ * Uncached, deliberately: the oidc `dashboard_sso_enabled` gate reads through
+ * here and a security gate must not depend on a TTL. The one hot-path field
+ * (the `api_version` pin) has its own cached reader below.
+ */
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db
     .select({ orgSettings: organizations.orgSettings })
@@ -156,6 +197,23 @@ export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
     .limit(1);
 
   return (row?.orgSettings as OrgSettings) ?? {};
+}
+
+/**
+ * The org's `api_version` pin (null when unpinned), read through the 10 s
+ * cache in `org-settings-cache.ts`. This is what the api-version middleware
+ * calls for strategy-authenticated requests (chat `chatloop_` hops, API keys)
+ * that did not pass through `requireOrgContext` — otherwise each hop is one
+ * organizations-table query. Every settings writer in this file invalidates
+ * the entry after its write commits; the staleness bound and its rationale
+ * live on the cache module. Built on the uncached `getOrgSettings` so the two
+ * can never read the row differently.
+ */
+export async function getCachedOrgApiVersion(orgId: string): Promise<string | null> {
+  return orgApiVersionCache.get(
+    orgId,
+    async () => (await getOrgSettings(orgId)).api_version ?? null,
+  );
 }
 
 /**
@@ -195,6 +253,11 @@ export async function updateOrgSettings(
     .where(eq(organizations.id, orgId))
     .returning({ orgSettings: organizations.orgSettings });
 
+  // The statement above is auto-committed (no enclosing transaction), so the
+  // row is durable by the time the pin entry is dropped — the next cached
+  // read cannot re-cache the pre-update value.
+  orgApiVersionCache.invalidate(orgId);
+
   return (row?.orgSettings as OrgSettings) ?? {};
 }
 
@@ -227,8 +290,16 @@ export async function getOrgMembers(orgId: string) {
   }));
 }
 
-export async function getOrgMember(orgId: string, userId: string) {
-  const [row] = await db
+/**
+ * The one reader of `org_members` for a `(org, user)` pair. Every caller that
+ * needs a role goes through it.
+ *
+ * `tx` is not a convenience: an invitation accept inserts the membership row
+ * and the space rows in one transaction, so the read that follows must see its
+ * own write.
+ */
+export async function getOrgMember(orgId: string, userId: string, tx: DbOrTx = db) {
+  const [row] = await tx
     .select()
     .from(organizationMembers)
     .where(
@@ -284,12 +355,13 @@ export async function addMember(
 }
 
 export async function removeMember(orgId: string, userId: string): Promise<void> {
-  // One transaction: the member row, the member's notifications, AND the
-  // member's schedules in this org are handled atomically. The member's runs
+  // One transaction: the member row, the member's notifications, the member's
+  // explicit space roles AND the member's schedules in this org are handled
+  // atomically. The member's runs
   // stay in the org for history, so their notifications are not cascaded away
   // — and since notifications carry the recipient as a polymorphic
   // (recipientType, recipientId) tuple with NO foreign key, nothing else would
-  // clean them up (org/application FK cascades only fire on org/app deletion).
+  // clean them up (org/space FK cascades only fire on org/space deletion).
   // Schedules similarly only cascade on user-ACCOUNT or org deletion, and a
   // removed member's user row survives (multi-org) — without the disable here
   // their schedules would keep firing under the revoked identity (CRIT-13).
@@ -319,6 +391,12 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
         ),
       );
 
+    // `space_members` does NOT cascade here: its foreign keys point at
+    // `spaces` and `user`, and removing an org membership deletes neither.
+    // Left behind, the rows would silently restore every space role the moment
+    // the person is re-invited.
+    await deleteSpaceMembershipsInOrg(tx, orgId, userId);
+
     // Disable (not delete — the row is org history) every schedule the
     // removed member owns as its execution actor in THIS org.
     const disabled = await tx
@@ -338,25 +416,36 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
   await removeScheduleJobs(disabledScheduleIds);
 }
 
+/** @returns the explicit space grants the promotion revoked, for the audit trail. */
 export async function updateMemberRole(
   orgId: string,
   userId: string,
   role: OrgRole,
-): Promise<void> {
-  const updated = await db
-    .update(organizationMembers)
-    .set({ role })
-    .where(
-      scopedWhere(organizationMembers, {
-        orgId,
-        extra: [eq(organizationMembers.userId, userId)],
-      }),
-    )
-    .returning({ orgId: organizationMembers.orgId });
+): Promise<RevokedSpaceAssignment[]> {
+  // One transaction: promoting someone to admin/owner makes their explicit
+  // space roles unreadable (the resolver answers `admin` from the org role
+  // before it looks at the row), so the rows go with the promotion rather than
+  // lying in wait for a later demotion to silently restore a role nobody
+  // re-granted. RBAC spec §3.2.
+  return db.transaction(async (tx) => {
+    const updated = await tx
+      .update(organizationMembers)
+      .set({ role })
+      .where(
+        scopedWhere(organizationMembers, {
+          orgId,
+          extra: [eq(organizationMembers.userId, userId)],
+        }),
+      )
+      .returning({ orgId: organizationMembers.orgId });
 
-  if (updated.length === 0) {
-    throw new Error("Failed to update member role: member not found");
-  }
+    if (updated.length === 0) {
+      throw new Error("Failed to update member role: member not found");
+    }
+    return role === "owner" || role === "admin"
+      ? await deleteSpaceMembershipsInOrg(tx, orgId, userId)
+      : [];
+  });
 }
 
 /**
@@ -387,12 +476,12 @@ async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<numbe
 }
 
 /**
- * Pre-flight: is this organization deletable at all?
+ * Reserve the deletion of this organization.
  *
  * MUST be awaited by callers BEFORE anything observes the deletion —
  * concretely, before the route emits `onOrgDelete`. The ordering is
  * load-bearing and irreversible if inverted: module handlers on that event
- * perform destructive, non-transactional work outside our database (the cloud
+ * perform destructive, non-transactional work outside our database (the ee
  * module drains billing then CANCELS the Stripe subscription and drops the
  * billing account; the mcp module drops the org from the RFC 8707 audience
  * allowlist). If `deleteOrganization` then throws — which it does, from inside
@@ -402,36 +491,41 @@ async function countInProgressRuns(handle: DbOrTx, orgId: string): Promise<numbe
  * consumed free-tier claim does not come back). So: refuse first, notify
  * second, delete third.
  *
- * This is a precondition, NOT the race guard. It reads outside any
- * transaction, so a run admitted between here and the delete slips through;
- * the in-transaction check in `deleteOrganization` (which holds the per-org
- * run-admission advisory lock) is what closes that window. Keep both.
+ * The check and the stamp commit TOGETHER under the per-org advisory key
+ * `createRun` takes, so no run can be admitted behind the modules' back.
+ * Idempotent: a standing reservation is the state a retried DELETE finds.
  *
  * Throws the same `Error` messages the transaction would, so the route maps
  * either failure onto the same `400 delete_failed` response.
  */
-export async function assertOrgDeletable(orgId: string): Promise<void> {
-  const [org] = await db
-    .select({ id: organizations.id })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1);
-  if (!org) throw new Error("Failed to delete organization: not found");
+export async function reserveOrgDeletion(orgId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(orgId)})::bigint)`,
+    );
 
-  if ((await countInProgressRuns(db, orgId)) > 0) {
-    throw new Error("Cannot delete organization: runs are in progress");
-  }
+    const [org] = await tx
+      .select({ id: organizations.id, deletingAt: organizations.deletingAt })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1)
+      .for("update");
+    if (!org) throw new Error("Failed to delete organization: not found");
+
+    if ((await countInProgressRuns(tx, orgId)) > 0) {
+      throw new Error("Cannot delete organization: runs are in progress");
+    }
+
+    if (org.deletingAt) return;
+    await tx
+      .update(organizations)
+      .set({ deletingAt: new Date() })
+      .where(eq(organizations.id, orgId));
+  });
 }
 
 export async function deleteOrganization(orgId: string): Promise<void> {
-  // Delete in FK-safe order within a transaction. The in-progress-runs check
-  // lives INSIDE the transaction (was previously a separate read before it):
-  // outside, a run could transition pending/running in the window between the
-  // check and the delete (TOCTOU), so we'd cascade-delete a live run's rows.
-  // Doing the count in the same transaction as the deletes — which take row
-  // locks on the runs being removed — closes that window. `assertOrgDeletable`
-  // is the caller-facing precondition, not a replacement for this check: it
-  // reads without the lock, so only the count below is race-free.
+  // Delete in FK-safe order within a transaction.
   await db.transaction(async (tx) => {
     // Serialize against concurrent run admission. `createRun` acquires this
     // same per-org advisory lock before its count + INSERT. Taking it here
@@ -461,15 +555,15 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // Enumerate every storage object this org owns BEFORE the FK cascade drops
     // the rows, and enqueue its physical deletion into the transactional outbox
     // (same transaction). Without this the cascade would silently orphan the
-    // org's documents / uploads / run-workspace / package objects in S3/FS. The
-    // worker expands each run manifest into its document keys and deletes the
+    // org's files / uploads / run-workspace / package objects in S3/FS. The
+    // worker expands each run manifest into its file keys and deletes the
     // manifest last, so this transaction does no storage I/O and cleanup remains
     // replayable. (Queries are sequential — a Drizzle tx multiplexes one
     // connection, so concurrent queries on `tx` are unsafe.)
     const docRows = await tx
-      .select({ storageKey: documents.storageKey })
-      .from(documents)
-      .where(eq(documents.orgId, orgId));
+      .select({ storageKey: files.storageKey })
+      .from(files)
+      .where(eq(files.orgId, orgId));
     const uploadRows = await tx
       .select({ storageKey: uploads.storageKey })
       .from(uploads)
@@ -497,9 +591,9 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // Org-scoped tables (package_schedules, org_models, model_provider_credentials,
     // and module-owned tables like webhooks) cascade via their orgId FK —
     // no explicit delete needed.
-    // applicationPackages cascade through applications → orgId
+    // spacePackages cascade through spaces → orgId
     await tx.delete(packages).where(eq(packages.orgId, orgId));
-    // integration_connections cascade through applications → orgId — no explicit delete needed
+    // integration_connections cascade through spaces → orgId — no explicit delete needed
     await tx.delete(orgInvitations).where(eq(orgInvitations.orgId, orgId));
     // org_members cascades from organizations (onDelete: "cascade")
 
@@ -511,6 +605,10 @@ export async function deleteOrganization(orgId: string): Promise<void> {
       throw new Error("Failed to delete organization: not found");
     }
   });
+
+  // Hygiene, not a confinement boundary: a cached pin for a deleted org is
+  // inert (membership is gone, org-context 403s), but it need not linger.
+  orgApiVersionCache.invalidate(orgId);
 }
 
 export async function isSlugAvailable(slug: string): Promise<boolean> {

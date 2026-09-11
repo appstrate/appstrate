@@ -76,16 +76,46 @@ _appstrate_runner_bootstrap() {
   # Same key as scripts/bootstrap.sh — signs every release's checksums.txt.
   APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
 
-  if [ "$VERSION" = "latest" ]; then
-    URL_BASE="https://github.com/appstrate/appstrate/releases/latest/download"
-  else
-    URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
-  fi
-
   TMPDIR=$(mktemp -d)
   trap 'rm -rf "$TMPDIR"' EXIT
   log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
   err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
+
+  # Same resolver as scripts/bootstrap.sh — see the comment there. Only a
+  # platform `v*` Release carries the CLI binaries; `releases/latest` can name
+  # an npm-package Release instead.
+  resolve_latest_platform_release() {
+    local page fields tag
+    for page in 1 2 3 4 5; do
+      fields=$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30&page=${page}" |
+        grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)') || true
+      [ -z "$fields" ] && return 1
+      tag=$(printf '%s\n' "$fields" | awk -F': *' '
+          $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
+          $1 ~ /"draft"/    { draft = $2 }
+          $1 ~ /prerelease/ { pre = $2 }
+          tag != "" && draft != "" && pre != "" {
+            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+/ && draft == "false" && pre == "false") { print tag; exit }
+            tag = ""
+          }')
+      if [ -n "$tag" ]; then
+        printf '%s\n' "$tag"
+        return 0
+      fi
+    done
+    return 1
+  }
+
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_platform_release || true)
+    if [ -z "$VERSION" ]; then
+      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    fi
+    log "Resolved latest platform release: $VERSION"
+  fi
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
 
   log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
   curl -fsSL "${URL_BASE}/${ASSET}" -o "$TMPDIR/$ASSET"
@@ -112,8 +142,20 @@ _appstrate_runner_bootstrap() {
     fi
     (
       cd "$TMPDIR"
-      grep " ${ASSET}\$" checksums.txt > checksums.local.txt || true
-      if [ ! -s checksums.local.txt ] || [ "$(wc -l < checksums.local.txt)" -ne 1 ]; then
+      # Only the line for our asset matters — filtering keeps the tool from
+      # failing on missing sibling binaries we didn't download. The `|| true`
+      # lets us own the empty-result error path below instead of dying inside
+      # `grep` with a generic exit 1.
+      grep " ${ASSET}\$" checksums.txt >checksums.local.txt || true
+      # CRITICAL: `sha256sum -c` on an EMPTY manifest exits 0 silently ("0 lines
+      # processed, 0 failures"), so a validly signed checksums.txt that simply
+      # does not list our asset would sail through — a broken release matrix, an
+      # asset-rename typo, or targeted tampering. Assert the line EXISTS, and
+      # belt-and-braces assert it is the ONLY line for our asset (a duplicate
+      # entry could otherwise mask a real mismatch). `scripts/bootstrap.sh`
+      # carries the same two assertions, split across two branches with their
+      # own messages; keep the two in step.
+      if [ ! -s checksums.local.txt ] || [ "$(wc -l <checksums.local.txt)" -ne 1 ]; then
         err "Asset ${ASSET} not uniquely listed in the signed manifest — refusing to install."
         exit 1
       fi

@@ -41,7 +41,7 @@ import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 const ENV_KEY = "CONFORMANCE_TOKENS";
 
 /** A refresh credential — mints a fresh access token each run. */
-export interface RefreshCredential {
+interface RefreshCredential {
   refresh_token: string;
   client_id: string;
   /** Required for confidential clients (client_secret_*), e.g. Google. */
@@ -111,7 +111,7 @@ function manifestIssuer(manifest: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-export interface ResolveDeps {
+interface ResolveDeps {
   resolveEndpoints?: typeof resolveOAuthEndpoints;
   exchange?: typeof performRefreshTokenExchange;
 }

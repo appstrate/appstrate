@@ -9,7 +9,7 @@ const read = (relative: string) =>
 
 describe("unified settings route wiring", () => {
   it("keeps settings detail transitions inside the modal and carries its background", () => {
-    const applications = read("../../org-settings/applications.tsx");
+    const applications = read("../../org-settings/spaces.tsx");
     expect(applications).toContain(
       'navigate("/workspace-settings/general", { state: location.state })',
     );
@@ -25,7 +25,7 @@ describe("unified settings route wiring", () => {
 
     const workspaceGeneral = read("../../org-settings/app/general.tsx");
     expect(workspaceGeneral).toContain(
-      'navigate("/org-settings/applications", { state: location.state })',
+      'navigate("/org-settings/spaces", { state: location.state })',
     );
   });
 
@@ -42,14 +42,16 @@ describe("unified settings route wiring", () => {
   });
 
   it("preserves the modal background through every settings guard", () => {
+    // `library-page.tsx` left this list when the org-wide gate gave way to a
+    // per-space one: the page now renders for everyone and each install
+    // checkbox carries its own permission, so there is no redirect to preserve.
     const guardedPages = [
       "../../org-settings/models.tsx",
       "../../org-settings/proxies.tsx",
       "../../org-settings/billing.tsx",
       "../../org-settings/oauth.tsx",
-      "../../library-page.tsx",
       "../../org-settings/app/auth.tsx",
-      "../../org-settings/app/oauth.tsx",
+      "../../org-settings/space/oauth.tsx",
     ];
 
     for (const page of guardedPages) {

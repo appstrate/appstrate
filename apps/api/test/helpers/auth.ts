@@ -14,22 +14,24 @@
  * interstitial, signup gates, …) POST `/api/auth/sign-up/email` directly
  * via `app.request()`.
  *
- * Organizations, memberships, and applications are seeded directly in the DB.
+ * Organizations, memberships, and spaces are seeded directly in the DB.
  */
 import { eq, sql } from "drizzle-orm";
 import { getAuth } from "@appstrate/db/auth";
 import { db } from "./db.ts";
+import { seedSpaceMember } from "./seed.ts";
+import { prefixedId, SPACE_ID_RE } from "../../src/lib/ids.ts";
 import {
   organizations,
   organizationMembers,
-  applications,
+  spaces,
   user as userTable,
   session as sessionTable,
   account as accountTable,
   profiles,
 } from "@appstrate/db/schema";
+import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { OrgRole } from "@appstrate/shared-types";
-import { getTestApp } from "./app.ts";
 
 let counter = 0;
 function nextId() {
@@ -53,7 +55,7 @@ export interface TestContext {
   org: TestOrg;
   cookie: string;
   orgId: string;
-  defaultAppId: string;
+  defaultSpaceId: string;
 }
 
 // ─── Session-cookie crafting (fast path) ─────────────────────────────────────
@@ -167,48 +169,20 @@ export async function createTestUser(
 }
 
 /**
- * Create a session for an existing user via sign-in.
- * Returns the signed session cookie.
- */
-export async function createTestSession(
-  email: string,
-  password: string = "TestPassword123!",
-): Promise<string> {
-  const app = getTestApp();
-
-  const res = await app.request("/api/auth/sign-in/email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (res.status !== 200) {
-    const body = await res.text();
-    throw new Error(`Sign-in failed (${res.status}): ${body}`);
-  }
-
-  const setCookie = res.headers.get("set-cookie") ?? "";
-  const match = setCookie.match(/better-auth\.session_token=([^;]+)/);
-  if (!match) {
-    throw new Error(`No session cookie in sign-in response: ${setCookie}`);
-  }
-  return `better-auth.session_token=${match[1]}`;
-}
-
-/**
  * Create a test organization and add the given user as owner.
- * Also creates a default application (required by many flows).
+ * Also creates a default space (required by many flows). Pass `id` when the
+ * test must know the org id before the row exists.
  */
 export async function createTestOrg(
   userId: string,
-  overrides: Partial<{ name: string; slug: string }> = {},
-): Promise<{ org: TestOrg; defaultAppId: string }> {
+  overrides: Partial<{ id: string; name: string; slug: string }> = {},
+): Promise<{ org: TestOrg; defaultSpaceId: string }> {
   const slug = overrides.slug ?? `test-org-${nextId()}`;
   const name = overrides.name ?? `Test Org ${slug}`;
 
   const [org] = await db
     .insert(organizations)
-    .values({ name, slug, createdBy: userId })
+    .values({ ...(overrides.id ? { id: overrides.id } : {}), name, slug, createdBy: userId })
     .returning();
 
   // Add user as owner
@@ -218,10 +192,17 @@ export async function createTestOrg(
     role: "owner",
   });
 
-  // Create default application
-  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  await db.insert(applications).values({
-    id: applicationId,
+  // Create the default space. The id MUST be minted the way production mints
+  // it (`prefixedId("spc")`): `assertSpaceId` in `src/lib/ids.ts` rejects any
+  // other shape, and this fixture previously minted `app_` + a 16-char dashless
+  // uuid slice — a shape the real guard refuses on both counts. Asserted here
+  // rather than left to the first 400 in an unrelated test.
+  const spaceId = prefixedId("spc");
+  if (!SPACE_ID_RE.test(spaceId)) {
+    throw new Error(`test fixture minted a space id the platform rejects: ${spaceId}`);
+  }
+  await db.insert(spaces).values({
+    id: spaceId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
@@ -230,7 +211,7 @@ export async function createTestOrg(
 
   return {
     org: { id: org!.id, name: org!.name, slug: org!.slug },
-    defaultAppId: applicationId,
+    defaultSpaceId: spaceId,
   };
 }
 
@@ -246,9 +227,37 @@ export async function addOrgMember(
 }
 
 /**
+ * A `TestContext` for a second user in `ctx`'s org — same org and space, a
+ * different session. `spaceRole` also seeds the explicit `space_members` row
+ * in `ctx.defaultSpaceId`; without it the user reaches that space only through
+ * its visibility and default role. Seed a custom bundle with `seedSpaceMember`
+ * on the returned `user.id`.
+ */
+export async function memberContext(
+  ctx: TestContext,
+  role: OrgRole,
+  spaceRole?: SpaceRolePreset,
+): Promise<TestContext> {
+  const member = await createTestUser();
+  await addOrgMember(ctx.orgId, member.id, role);
+  if (spaceRole) {
+    await seedSpaceMember({
+      spaceId: ctx.defaultSpaceId,
+      userId: member.id,
+      presetRole: spaceRole,
+    });
+  }
+  return {
+    ...ctx,
+    user: { id: member.id, email: member.email, name: member.name },
+    cookie: member.cookie,
+  };
+}
+
+/**
  * Build authentication headers for test requests.
- * Includes session cookie, org ID, and app ID from a TestContext.
- * For org-only routes that don't need X-Application-Id, use orgOnlyHeaders() instead.
+ * Includes session cookie, org ID, and space ID from a TestContext.
+ * For org-only routes that don't need X-Space-Id, use orgOnlyHeaders() instead.
  */
 export function authHeaders(
   ctx: TestContext,
@@ -257,13 +266,13 @@ export function authHeaders(
   return {
     Cookie: ctx.cookie,
     "X-Org-Id": ctx.orgId,
-    "X-Application-Id": ctx.defaultAppId,
+    "X-Space-Id": ctx.defaultSpaceId,
     ...extra,
   };
 }
 
 /**
- * Build authentication headers WITHOUT X-Application-Id — for org-scoped routes only.
+ * Build authentication headers WITHOUT X-Space-Id — for org-scoped routes only.
  */
 export function orgOnlyHeaders(
   ctx: TestContext,
@@ -297,7 +306,7 @@ export async function createTestContext(
     email: overrides.email,
     name: overrides.name,
   });
-  const { org, defaultAppId } = await createTestOrg(testUser.id, {
+  const { org, defaultSpaceId } = await createTestOrg(testUser.id, {
     name: overrides.orgName,
     slug: overrides.orgSlug,
   });
@@ -307,6 +316,6 @@ export async function createTestContext(
     org,
     cookie: testUser.cookie,
     orgId: org.id,
-    defaultAppId,
+    defaultSpaceId,
   };
 }

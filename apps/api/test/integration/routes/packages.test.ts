@@ -4,20 +4,26 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { zipSync } from "fflate";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  addOrgMember,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedAgent,
   seedPackage,
   seedPackageVersion,
-  seedApplication,
+  seedSpace,
   seedInstalledPackage,
 } from "../../helpers/seed.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
   mcpServerManifest,
   remoteIntegrationManifest,
@@ -66,10 +72,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@pkgorg/list-agent",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/list-agent");
 
       const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
@@ -135,10 +138,7 @@ describe("Packages API", () => {
         },
         draftContent: "# My Skill\nDo something useful.",
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@pkgorg/my-skill",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-skill");
 
       const res = await app.request("/api/packages/skills", {
         headers: authHeaders(ctx),
@@ -157,6 +157,77 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
+  // Cross-space isolation of the package LIST routes
+  //
+  // The whole space boundary of every `GET /api/packages/{type}` list is one
+  // term in a LEFT JOIN's ON clause (`services/package-items/crud.ts` →
+  // `eq(spacePackages.spaceId, spaceId)`). Drop it and any package installed
+  // ANYWHERE in the org joins a row in every space, so the full org
+  // catalogue appears in a space it was never installed in — while the
+  // detail route, which resolves through a different function, keeps 404ing
+  // and hides the breakage. The space cases above all exercise DETAIL; these
+  // are the only ones that issue a LIST with a non-default `X-Space-Id`.
+  // ═══════════════════════════════════════════════
+
+  describe("GET /api/packages/{type} — cross-space isolation", () => {
+    /** ids the list route reports for `type`, seen from `spaceId`. */
+    async function listedIds(type: string, spaceId: string): Promise<string[]> {
+      const res = await app.request(`/api/packages/${type}`, {
+        headers: { ...authHeaders(ctx), "X-Space-Id": spaceId },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string }> };
+      return body.data.map((p) => p.id);
+    }
+
+    it("does not list an agent installed only in another space of the same org", async () => {
+      await seedAgent({ id: "@pkgorg/space-a-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@pkgorg/space-a-agent",
+      );
+      const spaceB = await seedSpace({
+        orgId: ctx.orgId,
+        name: "Space B",
+        createdBy: ctx.user.id,
+      });
+
+      expect(await listedIds("agents", spaceB.id)).not.toContain("@pkgorg/space-a-agent");
+      // Control: from the space it IS installed in, the same list serves it —
+      // so the absence above is the space predicate, not an unrelated filter.
+      expect(await listedIds("agents", ctx.defaultSpaceId)).toContain("@pkgorg/space-a-agent");
+    });
+
+    it("does not list a skill installed only in another space of the same org", async () => {
+      await seedPackage({
+        id: "@pkgorg/space-a-skill",
+        orgId: ctx.orgId,
+        type: "skill",
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: "@pkgorg/space-a-skill",
+          version: "0.1.0",
+          type: "skill",
+          description: "Installed in the default space only",
+        },
+        draftContent: "# Space A",
+      });
+      await installPackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@pkgorg/space-a-skill",
+      );
+      const spaceB = await seedSpace({
+        orgId: ctx.orgId,
+        name: "Skill Space B",
+        createdBy: ctx.user.id,
+      });
+
+      expect(await listedIds("skills", spaceB.id)).not.toContain("@pkgorg/space-a-skill");
+      expect(await listedIds("skills", ctx.defaultSpaceId)).toContain("@pkgorg/space-a-skill");
+    });
+  });
+
+  // ═══════════════════════════════════════════════
   // GET /api/packages/agents/:scope/:name — agent detail
   // ═══════════════════════════════════════════════
 
@@ -168,7 +239,7 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/detail-agent",
       );
 
@@ -191,7 +262,7 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/encoded-detail-agent",
       );
 
@@ -211,7 +282,7 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/versioned-agent",
       );
 
@@ -238,6 +309,11 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+      // Agents answer this route through their own `agentDetailHandler`, which
+      // spells the word itself — pinned here so it cannot drift away from the
+      // wording the generic handlers derive from `labelSingular`.
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Agent '@pkgorg/does-not-exist' not found");
     });
 
     it("returns 404 for package from another org", async () => {
@@ -281,7 +357,7 @@ describe("Packages API", () => {
         draftContent: "# Detail Skill",
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/detail-skill",
       );
 
@@ -301,9 +377,14 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+      // The detail names ONE skill, not the plural route label. The singular is
+      // declared per route config (`labelSingular`) rather than sliced off the
+      // plural, so this pins the text a reader of the error actually sees.
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Skill '@pkgorg/nope' not found");
     });
 
-    it("returns 404 from custom app when skill is not installed", async () => {
+    it("returns 404 from custom space when skill is not installed", async () => {
       await seedPackage({
         id: "@pkgorg/hidden-skill",
         orgId: ctx.orgId,
@@ -313,25 +394,25 @@ describe("Packages API", () => {
           name: "@pkgorg/hidden-skill",
           version: "0.1.0",
           type: "skill",
-          description: "Hidden from custom app",
+          description: "Hidden from custom space",
         },
         draftContent: "# Hidden",
       });
 
-      const customApp = await seedApplication({
+      const customApp = await seedSpace({
         orgId: ctx.orgId,
         name: "Skill Custom",
         createdBy: ctx.user.id,
       });
 
       const res = await app.request("/api/packages/skills/@pkgorg/hidden-skill", {
-        headers: { ...authHeaders(ctx), "X-Application-Id": customApp.id },
+        headers: { ...authHeaders(ctx), "X-Space-Id": customApp.id },
       });
 
       expect(res.status).toBe(404);
     });
 
-    it("returns 200 from custom app when skill is installed", async () => {
+    it("returns 200 from custom space when skill is installed", async () => {
       await seedPackage({
         id: "@pkgorg/installed-skill",
         orgId: ctx.orgId,
@@ -341,23 +422,20 @@ describe("Packages API", () => {
           name: "@pkgorg/installed-skill",
           version: "0.1.0",
           type: "skill",
-          description: "Installed in custom app",
+          description: "Installed in custom space",
         },
         draftContent: "# Installed",
       });
 
-      const customApp = await seedApplication({
+      const customApp = await seedSpace({
         orgId: ctx.orgId,
         name: "Skill Installed",
         createdBy: ctx.user.id,
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: customApp.id },
-        "@pkgorg/installed-skill",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@pkgorg/installed-skill");
 
       const res = await app.request("/api/packages/skills/@pkgorg/installed-skill", {
-        headers: { ...authHeaders(ctx), "X-Application-Id": customApp.id },
+        headers: { ...authHeaders(ctx), "X-Space-Id": customApp.id },
       });
 
       expect(res.status).toBe(200);
@@ -539,7 +617,7 @@ describe("Packages API", () => {
       await seedPackage({ id: ENV_SYSTEM, orgId: null, type: "integration", source: "system" });
       await seedPackage({ id: PLAIN, orgId: ctx.orgId, type: "integration" });
       await seedPackage({ id: INSTALLED, orgId: ctx.orgId, type: "integration" });
-      await seedInstalledPackage(ctx.defaultAppId, INSTALLED, { enabled: true });
+      await seedInstalledPackage(ctx.defaultSpaceId, INSTALLED, { enabled: true });
     });
 
     afterEach(() => {
@@ -571,7 +649,7 @@ describe("Packages API", () => {
     });
 
     it("excludes a SYSTEM integration with a sticky explicit disable", async () => {
-      await seedInstalledPackage(ctx.defaultAppId, ENV_SYSTEM, { enabled: false });
+      await seedInstalledPackage(ctx.defaultSpaceId, ENV_SYSTEM, { enabled: false });
       const ids = await activeIds();
       expect(ids.has(ENV_SYSTEM)).toBe(false);
     });
@@ -682,14 +760,17 @@ describe("Packages API", () => {
       expect(body.lock_version).toBeGreaterThan(created.lock_version);
     });
 
-    // `source_code` was dropped from both JSON-body schemas once the last
-    // reader died with the `tool` package type. Neither schema is `.strict()`,
-    // so Zod strips the unknown key instead of rejecting it — a client still
-    // sending it must keep working exactly as before (it was already a no-op:
-    // no route config ever declared the `sourceFileName` that would have
-    // written it). This pins that the removal did not tighten validation.
-    it("still accepts a body carrying the retired source_code key", async () => {
-      const createRes = await app.request("/api/packages/integrations", {
+    // `source_code` was dropped from the JSON-body schemas once the last reader
+    // died with the `tool` package type, and the schemas are `.strict()` since
+    // the retirement was finished: the key now fails loudly instead of being
+    // stripped in silence, which is what a retired name owes its callers
+    // (`docs/NO_TRANSITIONAL_CODE.md` §1) and what #1187 gave the launch
+    // surfaces. Each refusal is asserted through `expectRejectedField` rather
+    // than a bare status — a 400 on these routes is reachable for reasons that
+    // have nothing to do with the schema rule — and each is paired with the
+    // same body MINUS the key, so a 400 can only mean the key was refused.
+    it("rejects a body carrying the retired source_code key", async () => {
+      const rejectedCreate = await app.request("/api/packages/integrations", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -698,9 +779,18 @@ describe("Packages API", () => {
         }),
       });
 
+      await expectRejectedField(rejectedCreate, "source_code");
+
+      const createRes = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: remoteIntegrationManifest("@pkgorg/legacy-source-code"),
+        }),
+      });
+
       expect(createRes.status).toBe(201);
       const created = (await createRes.json()) as any;
-      expect(created.source_code).toBeUndefined();
 
       const updateRes = await app.request("/api/packages/integrations/@pkgorg/legacy-source-code", {
         method: "PUT",
@@ -715,9 +805,31 @@ describe("Packages API", () => {
         }),
       });
 
-      expect(updateRes.status).toBe(200);
-      const updated = (await updateRes.json()) as any;
-      expect(updated.source_code).toBeUndefined();
+      await expectRejectedField(updateRes, "source_code");
+
+      // The control for that refusal, and the only place this file pins that
+      // `.strict()` left the ordinary update path alone: the same body MINUS
+      // the retired key is a 200. The refused PUT wrote nothing, so it still
+      // carries the `lock_version` the create returned.
+      const acceptedUpdate = await app.request(
+        "/api/packages/integrations/@pkgorg/legacy-source-code",
+        {
+          method: "PUT",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            manifest: {
+              ...remoteIntegrationManifest("@pkgorg/legacy-source-code"),
+              display_name: "Renamed Integration",
+            },
+            lock_version: created.lock_version,
+          }),
+        },
+      );
+
+      expect(acceptedUpdate.status).toBe(200);
+      expect(((await acceptedUpdate.json()) as any).lock_version).toBeGreaterThan(
+        created.lock_version,
+      );
     });
   });
 
@@ -804,7 +916,7 @@ describe("Packages API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 403 when trying to update package from another org", async () => {
+    it("returns 404 when trying to update package from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "foreignorg" });
       await seedAgent({
         id: "@foreignorg/their-agent",
@@ -829,7 +941,7 @@ describe("Packages API", () => {
         }),
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
     });
 
     it("updates a package the org owns even when its scope differs from the org slug", async () => {
@@ -1883,7 +1995,7 @@ describe("Packages API", () => {
       expect(auditRows[0]!.after).toMatchObject({ type: "agent" });
     });
 
-    it("returns 403 when trying to delete package from another org", async () => {
+    it("returns 404 when trying to delete package from another org", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherdelorg" });
       await seedAgent({
         id: "@otherdelorg/their-agent",
@@ -1896,7 +2008,7 @@ describe("Packages API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
     });
 
     it("returns 401 without authentication", async () => {
@@ -1921,7 +2033,7 @@ describe("Packages API", () => {
       await assertDbMissing(packages, eq(packages.id, "@foreignscope/imported-agent"));
     });
 
-    it("returns 403 when trying to delete a package owned by another org (DB check)", async () => {
+    it("returns 404 when trying to delete a package owned by another org (DB check)", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherdelorg2" });
       await seedAgent({
         id: "@foreignscope/other-org-agent",
@@ -1934,7 +2046,7 @@ describe("Packages API", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
     });
   });
 
@@ -1992,6 +2104,8 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Agent '@pkgorg/no-such-agent' not found");
     });
 
     it("returns 401 without authentication", async () => {
@@ -2165,7 +2279,9 @@ describe("Packages API", () => {
             description: "Imported via ZIP",
           }),
         ),
-        "SKILL.md": enc("---\nname: @pkgorg/imported-skill\n---\n\nSkill body."),
+        "SKILL.md": enc(
+          "---\nname: imported-skill\ndescription: An imported skill.\n---\n\nSkill body.",
+        ),
       });
       const formData = new FormData();
       formData.append("file", new File([new Uint8Array(afps)], "skill.afps"));
@@ -2357,17 +2473,14 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@pkgorg/my-agent",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-agent");
       await seedAgent({
         id: "@isolatedorg/their-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
       await installPackage(
-        { orgId: otherCtx.orgId, applicationId: otherCtx.defaultAppId },
+        { orgId: otherCtx.orgId, spaceId: otherCtx.defaultSpaceId },
         "@isolatedorg/their-agent",
       );
 
@@ -2495,6 +2608,8 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Agent '@pkgorg/ghost' not found");
     });
   });
 
@@ -2530,7 +2645,7 @@ describe("Packages API", () => {
       expect(body.id).toBe("@pkgorg/res-agent");
       expect(body.display_name).toBe("Resource Agent");
       expect(body.dependencies).toBeDefined();
-      expect(body.config).toBeDefined();
+      expect(body.input).toBeDefined();
       expect(body.version_count).toBeNumber();
       // `lock_version` is resource state (draft optimistic-lock token).
       expect(body.lock_version).toBeNumber();
@@ -2622,7 +2737,7 @@ describe("Packages API", () => {
       expect(body.id).toBe("@pkgorg/upd-res-agent");
       expect(body.lock_version).toBeGreaterThan(created.lock_version);
       expect(body.dependencies).toBeDefined();
-      expect(body.config).toBeDefined();
+      expect(body.input).toBeDefined();
       // No operation envelope.
       expect(body.packageId).toBeUndefined();
       expect(body.warnings).toBeUndefined();
@@ -2707,6 +2822,7 @@ describe("Packages API", () => {
       // Fork requires a source in ANOTHER org with a published version whose
       // ZIP exists in storage — go through the API end to end.
       const srcCtx = await createTestContext({ orgSlug: "forksrc" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const create = await app.request("/api/packages/agents", {
         method: "POST",
         headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
@@ -2747,6 +2863,7 @@ describe("Packages API", () => {
 
     it("POST fork returns the bare forked SKILL detail DTO (oneOf non-agent arm)", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forksrc2" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const create = await app.request("/api/packages/skills", {
         method: "POST",
         headers: authHeaders(srcCtx, { "Content-Type": "application/json" }),
@@ -2759,7 +2876,8 @@ describe("Packages API", () => {
             display_name: "Forkable Skill",
             description: "Skill arm of the fork oneOf",
           },
-          content: "# Skill\nDo the thing.",
+          content:
+            "---\nname: forkable-skill\ndescription: Skill arm of the fork oneOf.\n---\n# Skill\nDo the thing.",
         }),
       });
       expect(create.status).toBe(201);
@@ -2869,6 +2987,7 @@ describe("Packages API", () => {
 
     it("drops a retired runtime tool from all three fork sinks", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkret" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkret/legacy-agent";
       await seedPublishedSource(sourceId, srcCtx.orgId, {
         name: sourceId,
@@ -2903,6 +3022,7 @@ describe("Packages API", () => {
 
     it("removes the runtime_tools key entirely when every tool was retired", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkret2" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkret2/all-retired";
       await seedPublishedSource(sourceId, srcCtx.orgId, {
         name: sourceId,
@@ -2936,6 +3056,7 @@ describe("Packages API", () => {
 
     it("forks a clean manifest unchanged — nothing reordered, nothing defaulted", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkclean" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkclean/clean-agent";
       await seedPublishedSource(sourceId, srcCtx.orgId, {
         name: sourceId,
@@ -2976,6 +3097,7 @@ describe("Packages API", () => {
       // `runtime_tools` is agent vocabulary, so the normalisation must be
       // invisible to the other three package types.
       const srcCtx = await createTestContext({ orgSlug: "forkskill" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkskill/plain-skill";
       await seedPublishedSource(
         sourceId,
@@ -3018,6 +3140,7 @@ describe("Packages API", () => {
     // into a 500.
     it("forks a published manifest whose type drifted from its row (#481 legacy)", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkdrift" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkdrift/legacy-provider";
       await seedPublishedSource(
         sourceId,
@@ -3128,7 +3251,7 @@ describe("Packages API", () => {
       // Pin the id the rest of the test reads its rows by — a change in how the
       // route derives it would otherwise surface as "row not found".
       expect(((await res.json()) as { id: string }).id).toBe(targetId);
-      // The route auto-installs the fork in the calling application, which is
+      // The route auto-installs the fork in the calling space, which is
       // what satisfies the explorer's `hasPackageAccess` gate below — so no
       // install of our own, which would 409 as `already_installed`. The `200`
       // asserted in `fileIndex` is the proof that it happened.
@@ -3150,7 +3273,7 @@ describe("Packages API", () => {
      * `loadFileExplorerPackage`). Inserting `integrations/` makes
      * `SCOPED_PACKAGE_ROUTE` fail to match `:scope{@…}` and Hono answers 404
      * before any handler runs — a routing miss that looks exactly like the
-     * app-install 404 this suite would otherwise be probing.
+     * space-install 404 this suite would otherwise be probing.
      */
     async function fileIndex(
       packageId: string,
@@ -3165,6 +3288,7 @@ describe("Packages API", () => {
 
     it("carries a forked integration's INTEGRATION.md through to the explorer", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkdoc" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkdoc/documented";
       await publishIntegration(sourceId, srcCtx.orgId, {
         "INTEGRATION.md": new TextEncoder().encode(INTEGRATION_DOC),
@@ -3188,6 +3312,7 @@ describe("Packages API", () => {
 
     it('stores the manifest text — not `""` — when the source ships no doc', async () => {
       const srcCtx = await createTestContext({ orgSlug: "forknodoc" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forknodoc/bare";
       await publishIntegration(sourceId, srcCtx.orgId, {});
 
@@ -3212,6 +3337,7 @@ describe("Packages API", () => {
 
     it("still reads an agent's prompt.md — the required entries are unchanged", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkprompt" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkprompt/agent";
       const manifest = {
         name: sourceId,
@@ -3265,6 +3391,7 @@ describe("Packages API", () => {
   describe("POST fork — source artifact decompression ceiling", () => {
     it("422s on a source that expands past the ceiling, and mints nothing", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkbomb" });
+      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkbomb/high-ratio-agent";
       const manifest = {
         name: sourceId,

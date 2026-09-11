@@ -5,7 +5,7 @@
  * Derive {@link PlatformPromptOptions} from a {@link Bundle} alone.
  *
  * The bundle is self-describing — its root package holds the prompt
- * template + input/config/output schemas, and every non-root package
+ * template + input/output schemas, and every non-root package
  * declares its own `type` (skill / mcp-server / integration) in its
  * manifest. That is enough to compute every section of the platform
  * preamble that does not require live platform state (DB, sidecar,
@@ -53,12 +53,12 @@ function readTimeoutSeconds(bundle: Bundle): number | undefined {
 
 /**
  * Extract the AFPS `{ schema, file_constraints?, ui_hints?, … }` wrapper
- * for input/config/output sections. Returns the inner JSON Schema when
+ * for input/output sections. Returns the inner JSON Schema when
  * present, or `undefined`.
  */
 function readSchemaSection(
   manifest: Record<string, unknown> | undefined,
-  key: "input" | "config" | "output",
+  key: "input" | "output",
 ): Record<string, unknown> | undefined {
   const section = manifest?.[key];
   if (!isPlainObject(section)) return undefined;
@@ -147,7 +147,6 @@ export function buildPlatformPromptInputs(
   const { skills } = walkDependencies(bundle);
 
   const inputSchema = asPromptSchema(readSchemaSection(rootManifest, "input"));
-  const configSchema = asPromptSchema(readSchemaSection(rootManifest, "config"));
   const outputSchema = readSchemaSection(rootManifest, "output");
 
   const derived: PlatformPromptOptions = {
@@ -158,7 +157,6 @@ export function buildPlatformPromptInputs(
       : {}),
     availableSkills: skills,
     ...(inputSchema ? { inputSchema } : {}),
-    ...(configSchema ? { configSchema } : {}),
     ...(outputSchema ? { outputSchema } : {}),
   };
 

@@ -12,6 +12,7 @@ import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
 import { SocialSignInButton } from "./social-sign-in-button";
+import { EmailField, PasswordField } from "./auth-fields";
 import { LegalFooter } from "./legal-footer";
 
 type RegisterFormData = {
@@ -137,54 +138,22 @@ export function RegisterForm({
               <div className="text-destructive text-sm">{errors.displayName?.message}</div>
             )}
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="email">{t("login.email")}</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="email@example.com"
-              autoComplete="email"
-              readOnly={!!fixedEmail}
-              aria-invalid={showError("email") ? true : undefined}
-              className={cn(
-                showError("email") && "border-destructive",
-                fixedEmail && "cursor-not-allowed opacity-60",
-              )}
-              {...(fixedEmail
-                ? { value: fixedEmail }
-                : register("email", {
-                    required: t("validation.required", { ns: "common" }),
-                    pattern: {
-                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                      message: t("validation.emailFormat", { ns: "common" }),
-                    },
-                  }))}
-            />
-            {showError("email") && (
-              <div className="text-destructive text-sm">{errors.email?.message}</div>
-            )}
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="password">{t("login.password")}</Label>
-            <Input
-              id="password"
-              type="password"
-              placeholder="••••••••"
-              autoComplete="new-password"
-              aria-invalid={showError("password") ? true : undefined}
-              className={cn(showError("password") && "border-destructive")}
-              {...register("password", {
-                required: t("validation.required", { ns: "common" }),
-                minLength: {
-                  value: 6,
-                  message: t("validation.minLength", { ns: "common", min: 6 }),
-                },
-              })}
-            />
-            {showError("password") && (
-              <div className="text-destructive text-sm">{errors.password?.message}</div>
-            )}
-          </div>
+          <EmailField
+            register={register}
+            name="email"
+            label={t("login.email")}
+            invalid={showError("email")}
+            error={errors.email?.message}
+            fixedValue={fixedEmail}
+          />
+          <PasswordField
+            register={register}
+            name="password"
+            label={t("login.password")}
+            invalid={showError("password")}
+            error={errors.password?.message}
+            autoComplete="new-password"
+          />
           {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
         </div>
         <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>

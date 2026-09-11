@@ -50,8 +50,10 @@ import {
   activeRunMetricThrottleCount,
 } from "../../../src/services/run-metric-broadcaster.ts";
 import { getRunFull } from "../../../src/services/state/runs.ts";
+import { getEventBuffer } from "../../../src/infra/index.ts";
 import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import type { RunArtifactsSummary } from "@appstrate/db/schema";
+import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { AppstrateModule, ModelCost, RunStatusChangeParams } from "@appstrate/core/module";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 
@@ -96,7 +98,7 @@ async function seedRunWithSink(
     id: runId,
     packageId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: overrides.status ?? "running",
     ...(overrides.versionRef !== undefined ? { versionRef: overrides.versionRef } : {}),
     runOrigin: "platform",
@@ -148,6 +150,11 @@ function buildEnvelope(
     data,
     sequence,
   };
+}
+
+/** The already-decoded shape `drainBufferedEvents` reads back out of the buffer. */
+function bufferedProgress(runId: string, message: string): RunEvent {
+  return { type: "appstrate.progress", runId, timestamp: Date.now(), message };
 }
 
 describe("POST /api/runs/:runId/events — ingestion without Redis-specific coupling", () => {
@@ -206,10 +213,13 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   });
 
   // The envelope schema is `.strict()`, so every CloudEvents attribute the
-  // runtime emits must be modelled or the whole POST 400s. The runtime now
-  // stamps the OPTIONAL `dataschema` attribute on canonical events — assert
-  // the sink accepts it, and that strictness still rejects anything else.
-  it("accepts an envelope carrying the optional dataschema attribute", async () => {
+  // runtime emits must be modelled or the whole POST 400s. `dataschema` was
+  // modelled-and-ignored while a pre-removal runtime image could still stamp
+  // it; the runtime withdrew the attribute and the platform/runtime image trio
+  // is now version-locked at boot, so the field is gone from the schema. The
+  // assertion here is that its removal FAILS LOUDLY — a 400 naming the
+  // envelope, never a silently dropped event.
+  it("rejects an envelope carrying the withdrawn dataschema attribute", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
     const envelope = {
@@ -218,15 +228,11 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     };
     const res = await postEvent(runId, envelope);
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; outcome: string; sequence: number };
-    expect(body).toMatchObject({ ok: true, outcome: "persisted", sequence: 1 });
+    expect(res.status).toBe(400);
 
-    // `dataschema` is envelope metadata — it must not leak into the
-    // reconstructed RunEvent payload written to run_logs.
+    // Loud means loud: nothing was persisted behind the 400.
     const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
-    expect(logs).toHaveLength(1);
-    expect(JSON.stringify(logs[0])).not.toContain("schemas.afps.dev");
+    expect(logs).toHaveLength(0);
   });
 
   it("still rejects an unmodelled envelope attribute (strictness preserved)", async () => {
@@ -414,6 +420,110 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       (l) => typeof l.message === "string" && l.message.startsWith("gap-"),
     );
     expect(gapLogs.length).toBe(10);
+  });
+
+  // Regression for the dead buffer head. `buffer.remove` runs OUTSIDE the
+  // transaction that commits the event, so a committed sequence can survive in
+  // the buffer (failed removal, or a stale-snapshot POST re-inserting it).
+  // The drain used to treat that head as a gap and bail, stranding every later
+  // event — including under `allowGaps`, so finalize could not rescue them.
+  it("drains past a buffered head the run already persisted", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const first = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "head-1", timestamp: Date.now() }, 1),
+    );
+    expect(first.status).toBe(200);
+
+    // seq=1 is committed; plant it back in the buffer, ahead of the seq=2 it strands.
+    const buffer = await getEventBuffer();
+    await buffer.put(runId, 1, bufferedProgress(runId, "dead-head-1"), 60);
+    await buffer.put(runId, 2, bufferedProgress(runId, "stranded-2"), 60);
+
+    const res = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "live-3", timestamp: Date.now() }, 3),
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { outcome: string }).outcome).toBe("persisted");
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(3);
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    const messages = logs.map((l) => l.message);
+    expect(messages).toContain("stranded-2");
+    expect(messages).toContain("live-3");
+    expect(await buffer.peekLowest(runId)).toBeNull();
+  });
+
+  it("finalize drains past a buffered head the run already persisted", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    const first = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "head-1", timestamp: Date.now() }, 1),
+    );
+    expect(first.status).toBe(200);
+
+    const buffer = await getEventBuffer();
+    await buffer.put(runId, 1, bufferedProgress(runId, "dead-head-1"), 60);
+    await buffer.put(runId, 2, bufferedProgress(runId, "stranded-2"), 60);
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(2);
+    expect(row?.sinkClosedAt).not.toBeNull();
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.map((l) => l.message)).toContain("stranded-2");
+    // Post-CAS cleanup: nothing will ever drain this buffer again.
+    expect(await buffer.peekLowest(runId)).toBeNull();
+  });
+
+  // The Postgres commit is authoritative — a buffer removal that fails after it
+  // must not throw out of ingestion. It used to bubble up to `ingestRunEvent`,
+  // which released the replay key and answered 500 for an event already on disk.
+  it("answers 200 when the buffer removal fails after a committed drain", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+
+    await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "head-1", timestamp: Date.now() }, 1),
+    );
+    const buffered = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "ooo-3", timestamp: Date.now() }, 3),
+    );
+    expect(((await buffered.json()) as { outcome: string }).outcome).toBe("buffered");
+
+    const buffer = await getEventBuffer();
+    const remove = buffer.remove.bind(buffer);
+    buffer.remove = () => Promise.reject(new Error("buffer backend unavailable"));
+    try {
+      const res = await postEvent(
+        runId,
+        buildEnvelope(runId, "appstrate.progress", { message: "fill-2", timestamp: Date.now() }, 2),
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      buffer.remove = remove;
+      await buffer.clear(runId);
+    }
+
+    // Both the fast-path event and the drained one committed.
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.lastEventSequence).toBe(3);
+
+    const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
+    expect(logs.map((l) => l.message)).toContain("ooo-3");
   });
 
   // Regression for the HttpSink off-by-one: the first event emitted by
@@ -619,21 +729,24 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     }
   });
 
-  // Phase 2: a `document.published` event (emitted by the publish_document
-  // tool / outputs sweep once the documents row already exists) must persist a
-  // run_log so the published document streams over the run_log SSE and replays.
-  it("document.published events persist as run_logs(type='result', event='document')", async () => {
+  // Phase 2: a `file.published` event (emitted by the publish_file
+  // tool / outputs sweep once the files row already exists) must persist a
+  // run_log so the published file streams over the run_log SSE and replays.
+  it("file.published events persist as run_logs(type='result', event='file')", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
     const payload = {
-      document_id: "doc_abc12345",
-      uri: "document://doc_abc12345",
+      file_id: "file_abc12345",
+      uri: "appfile://file_abc12345",
       name: "report.html",
       mime: "text/html",
       size: 1234,
       sha256: "f".repeat(64),
+      // Version skew (issue #1177): an older runtime-pi image still emits the
+      // retired `presentation` field. Ingestion must accept the event and drop
+      // the field, never fail on it.
       presentation: "primary",
     };
-    const envelope = buildEnvelope(runId, "document.published", payload, 1);
+    const envelope = buildEnvelope(runId, "file.published", payload, 1);
     const res = await postEvent(runId, envelope);
     expect(res.status).toBe(200);
     expect(((await res.json()) as { outcome: string }).outcome).toBe("persisted");
@@ -641,17 +754,17 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const docLogs = await db
       .select()
       .from(runLogs)
-      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "document")));
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "file")));
     expect(docLogs).toHaveLength(1);
     expect(docLogs[0]!.type).toBe("result");
     expect(docLogs[0]!.data).toMatchObject({
-      document_id: "doc_abc12345",
-      uri: "document://doc_abc12345",
+      file_id: "file_abc12345",
+      uri: "appfile://file_abc12345",
       name: "report.html",
       mime: "text/html",
       size: 1234,
-      presentation: "primary",
     });
+    expect(docLogs[0]!.data).not.toHaveProperty("presentation");
   });
 });
 
@@ -713,7 +826,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.artifacts).toEqual(artifacts);
 
     // The run DTO exposes `artifacts` snake_case (field + inner keys).
-    const dto = await getRunFull({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, runId);
+    const dto = await getRunFull({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, runId);
     expect(dto?.artifacts).toEqual(artifacts);
   });
 
@@ -763,13 +876,15 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.artifacts).toBeNull();
   });
 
-  it("STRIPS unknown artifacts keys instead of rejecting them (deployments are not atomic)", async () => {
+  it("STRIPS unknown artifacts keys instead of rejecting them", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    // A runtime image newer than the platform can legitimately add a field to
-    // the summary — or to a `failed` entry. An extra cosmetic key must not
-    // cost the run its finalize, so unknown keys are stripped and everything
-    // the platform DOES understand is persisted.
+    // Where the trio tag rule is blind — a floating tag rebuilt on one side, a
+    // digest-pinned ref, a platform with no build identity — a runtime image
+    // newer than the platform can legitimately add a field to the summary, or
+    // to a `failed` entry. An extra cosmetic key must not cost the run its
+    // finalize, so unknown keys are stripped and everything the platform DOES
+    // understand is persisted.
     const res = await postFinalize(runId, {
       memories: [],
       output: { ok: true },
@@ -825,9 +940,13 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(persisted?.failed.every((f) => f.name.length <= 512 && f.code.length <= 64)).toBe(true);
   });
 
-  // The `report` channel is gone: a runner older than the platform may still
-  // send the field, and it must be ignored without costing the run its
-  // finalize (no 400, no `runs.result` row invented from it).
+  // The `report` channel is gone. Finalize reports an ALREADY-FINISHED run, so
+  // a 400 there is a lost run, not a validation win — the field must be ignored
+  // whatever sends it (no 400, no `runs.result` row invented from it). The
+  // sender that still would is a runner older than the platform, which the
+  // image-trio tag rule refuses at boot except where it is blind: a floating
+  // tag rebuilt on one side, a digest-pinned ref, a platform with no build
+  // identity.
   it("ignores a retired report field on the finalize body", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {
@@ -1624,9 +1743,14 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
       const row = await finalizeAndRead(runId);
       expect(row?.costPricingStatus).toBe("unpriced");
-      // The cached cost still sums both rows — the status qualifies it, it
-      // does not replace it.
-      expect(row?.cost).toBeCloseTo(0.012, 5);
+      // The cached cost still sums both rows — the status qualifies it, it does
+      // not replace it. The runner row contributes exactly 0: its cost is the
+      // platform's own product of `runs.model_cost` × tokens, and there are no
+      // rates, so the `$0.002` the container reported is not summed in. That
+      // zero and this `unpriced` verdict are now the same fact, which is the
+      // point — a total the platform cannot price says so instead of quietly
+      // adopting the container's figure.
+      expect(row?.cost).toBeCloseTo(0.01, 5);
     });
 
     it("mixed rows: `partial` wins over `priced` but loses to `unpriced`", async () => {
@@ -1702,8 +1826,9 @@ describe("POST /api/runs/:runId/events/finalize — terminal broadcast params", 
     await loadModulesFromInstances([mod], {
       redisUrl: null,
       appUrl: "http://localhost:3000",
-      getSendMail: async () => () => {},
-      getOrgAdminEmails: async () => [],
+      getSendMail: async () => async () => {},
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
       getOrgName: async () => null,
       services: {} as never,
     });
@@ -1781,7 +1906,7 @@ describe("runs liveness — unified last_heartbeat_at bumps", () => {
       id: runId,
       packageId: "@test/beat-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
       runOrigin: "remote",
       sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
@@ -1813,7 +1938,7 @@ describe("runs liveness — unified last_heartbeat_at bumps", () => {
       id: runId,
       packageId: "@test/beat-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
       runOrigin: "remote",
       sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
@@ -1852,7 +1977,7 @@ describe("runs liveness — unified last_heartbeat_at bumps", () => {
       id: runId,
       packageId: "@test/beat-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
       runOrigin: "remote",
       sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
@@ -1912,8 +2037,9 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     await loadModulesFromInstances([mod], {
       redisUrl: null,
       appUrl: "http://localhost:3000",
-      getSendMail: async () => () => {},
-      getOrgAdminEmails: async () => [],
+      getSendMail: async () => async () => {},
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
       getOrgName: async () => null,
       services: {} as never,
     });
@@ -1957,7 +2083,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
       id: runId,
       packageId: "@test/started-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "pending",
       runOrigin: "remote",
       sinkSecretEncrypted: encrypt(RUN_SECRET),

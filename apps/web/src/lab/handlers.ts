@@ -148,7 +148,7 @@ function agentDetailFixture(packageId: string): LabAgentDetail {
       display_name: displayName,
       description: listed?.description ?? f.agentDetail.description,
       _meta: listed?.color ? { "dev.appstrate/ui": { color: listed.color } } : baseManifest._meta,
-      dependencies: {},
+      dependencies: { integrations: {} },
     },
     dependencies: { skills: [], mcp_servers: [], integrations: [] },
   };
@@ -156,8 +156,10 @@ function agentDetailFixture(packageId: string): LabAgentDetail {
   return {
     ...detail,
     prompt: "",
-    config: {
-      ...detail.config,
+    // `config` became `input`, and the per-space values moved into it
+    // alongside the schema (`values` / `locked_fields`).
+    input: {
+      ...detail.input,
       schema: {
         type: "object",
         properties: {
@@ -165,7 +167,8 @@ function agentDetailFixture(packageId: string): LabAgentDetail {
         },
         required: ["editorial_period"],
       } as never,
-      current: {},
+      values: {},
+      locked_fields: [],
     },
   };
 }
@@ -515,8 +518,8 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
-    pattern: /^\/api\/applications\/[^/]+$/,
-    handler: () => ({ status: 200, body: f.applications.data[0] }),
+    pattern: /^\/api\/spaces\/[^/]+$/,
+    handler: () => ({ status: 200, body: f.spaces.data[0] }),
   },
   {
     method: "GET",
@@ -533,16 +536,16 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
-    pattern: /^\/api\/applications$/,
+    pattern: /^\/api\/spaces$/,
     // Answers for the org the request asks for, not the one the app is in: the
     // org switcher reads another org's workspaces before switching to it.
     handler: (_u, s, headers) => {
       const orgId = headers.get("X-Org-Id") ?? "";
-      const rows = f.applicationsByOrg[orgId] ?? f.applications.data;
+      const rows = f.spacesByOrg[orgId] ?? f.spaces.data;
       return {
         status: 200,
         body: {
-          ...f.applications,
+          ...f.spaces,
           data: isPermanentPackageDetail(headers) ? rows : list(rows, s),
         },
       };
@@ -1151,7 +1154,7 @@ const ERROR_SCENARIO_SURVIVORS = [
   /^\/api\/auth\//,
   /^\/api\/profile$/,
   /^\/api\/orgs$/,
-  /^\/api\/applications$/,
+  /^\/api\/spaces$/,
   // The same reasoning, one level in: on a DETAIL page the resource the page is
   // ABOUT survives, and everything hanging off it fails. Without this the page
   // itself 500s and you get its page-level error, so no panel on it ever draws

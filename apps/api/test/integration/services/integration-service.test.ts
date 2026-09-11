@@ -3,7 +3,7 @@
 /**
  * Integration tests for `integration-service.ts` — INTEGRATIONS_PROPOSAL
  * Phase 1.0 read path. Covers org/system scoping, manifest validation
- * fallback, version lookup, and the installed-in-app join used by the
+ * fallback, version lookup, and the installed-in-space join used by the
  * future runtime resolver.
  */
 

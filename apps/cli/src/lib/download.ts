@@ -39,9 +39,9 @@ export interface DownloadProgress {
 export type ProgressFn = (p: DownloadProgress) => void;
 
 /** The subset of `fetch` this helper uses — lets tests inject a plain function. */
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
-export interface StreamDownloadOptions {
+interface StreamDownloadOptions {
   onProgress?: ProgressFn;
   /**
    * Abort if no bytes arrive for this many ms. This is the primary watchdog —
@@ -55,7 +55,7 @@ export interface StreamDownloadOptions {
   fetchImpl?: FetchLike;
 }
 
-export interface StreamDownloadResult {
+interface StreamDownloadResult {
   bytesWritten: number;
   /** Lowercase hex SHA-256 of the downloaded bytes. */
   sha256: string;

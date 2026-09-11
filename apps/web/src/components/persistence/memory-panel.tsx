@@ -15,7 +15,7 @@ import { EmptyState, ErrorState, LoadingState } from "../page-states";
 import { ActorBadge } from "./actor-badge";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Modal } from "../modal";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import {
   useAgentMemories,
@@ -26,7 +26,7 @@ import {
 } from "../../hooks/use-persistence";
 import { useDeleteMemory } from "../../hooks/use-mutations";
 
-export interface MemoryPanelProps {
+interface MemoryPanelProps {
   packageId: string;
   /** Run-scoped view: filter all rows by `runId`, hide scope filter, hide delete buttons. */
   runId?: string;

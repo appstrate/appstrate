@@ -60,7 +60,7 @@ async function seedRunWithSink(ctx: TestContext, packageId: string): Promise<str
     id: runId,
     packageId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(RUN_SECRET),

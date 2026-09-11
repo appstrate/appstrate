@@ -46,7 +46,7 @@ import * as docker from "../docker.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export interface RuntimeImageWarmerDeps {
+interface RuntimeImageWarmerDeps {
   /** Image references to keep warm, one pin slot each. */
   readonly images: readonly { image: string; slot: string }[];
   /** Injection seam for tests. Defaults to the real Docker call. */
@@ -56,7 +56,7 @@ export interface RuntimeImageWarmerDeps {
   ) => Promise<"unchanged" | "created" | "replaced">;
 }
 
-export interface RuntimeImageWarmerReport {
+interface RuntimeImageWarmerReport {
   /** Slots whose pin container was created or replaced by this pass. */
   readonly pinned: string[];
 }
@@ -99,7 +99,7 @@ export async function reconcileRuntimeImages(
 let warmerTimer: ReturnType<typeof setTimeout> | null = null;
 let stopped = false;
 
-export interface RuntimeImageWarmerConfig extends RuntimeImageWarmerDeps {
+interface RuntimeImageWarmerConfig extends RuntimeImageWarmerDeps {
   /** Sweep cadence in seconds. `0` disables the warmer entirely. */
   readonly intervalSeconds: number;
 }

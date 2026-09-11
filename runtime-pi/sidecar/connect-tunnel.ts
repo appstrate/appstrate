@@ -18,7 +18,7 @@ import type { Socket } from "node:net";
 /** Idle window after which a relayed tunnel is torn down (no data flowing). */
 export const TUNNEL_IDLE_TIMEOUT_MS = 120_000; // 2 min
 /** Max time to wait for the upstream TCP connection to establish. */
-export const TUNNEL_CONNECT_TIMEOUT_MS = 10_000;
+const TUNNEL_CONNECT_TIMEOUT_MS = 10_000;
 
 /**
  * Parse a CONNECT target (`host:port`, IPv6 `[::1]:443`, or bare `host`).

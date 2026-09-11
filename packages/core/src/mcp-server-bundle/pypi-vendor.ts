@@ -36,7 +36,7 @@ const DEFAULT_PYPI_REGISTRY = "https://pypi.org/pypi";
  * Minimal slice of the pypi JSON-API response we depend on. The full
  * response is much larger; we only narrow what's load-bearing.
  */
-export interface PypiRegistryResponse {
+interface PypiRegistryResponse {
   info: {
     name: string;
     version: string;
@@ -66,7 +66,7 @@ export interface PypiVendorDeps {
   now?: () => Date;
 }
 
-export interface PypiVendorInput {
+interface PypiVendorInput {
   identifier: string;
   versionRange: string;
 }

@@ -133,6 +133,14 @@ export async function recordLlmUsageReliably(
         directError: getErrorMessage(directError),
         queueError: getErrorMessage(queueError),
       });
+      // `AggregateError.errors` IS the preservation mechanism here: both caught
+      // errors are carried in it, in full, and both are also logged one line
+      // above. `preserve-caught-error` only recognises the `cause` option, so it
+      // reads this as a discard. Adding `{ cause: queueError }` would duplicate
+      // `errors[1]` and assert that the enqueue failure caused the direct-write
+      // failure — it did not. They are two independent attempts at the same
+      // write, which is the exact shape AggregateError exists to express.
+      // eslint-disable-next-line preserve-caught-error -- see above: both caught errors are in `.errors`
       throw new AggregateError(
         [directError, queueError],
         "llm_usage persistence and durable retry enqueue both failed",
@@ -141,12 +149,27 @@ export async function recordLlmUsageReliably(
   }
 }
 
-export async function shutdownLlmUsageRetryWorker(): Promise<void> {
-  await usageRetryQueue?.shutdown();
+async function closeQueue(graceMs?: number): Promise<void> {
+  await usageRetryQueue?.shutdown(graceMs);
   usageRetryQueue = null;
 }
 
-/** Test-only reset for files that create the queue lifecycle explicitly. */
+export async function shutdownLlmUsageRetryWorker(): Promise<void> {
+  // Production grace: a row 500ms into backoff when SIGTERM arrives is billable
+  // traffic, and the queue's default budget lets its remaining attempts run.
+  await closeQueue();
+}
+
+/**
+ * Test-only reset for files that create the queue lifecycle explicitly.
+ *
+ * Zero grace, deliberately. This queue is process-global: under a full-suite
+ * run the jobs sleeping between attempts here were enqueued by OTHER test
+ * files — a ledger row whose org was truncated out from under it retries every
+ * 500ms/1s/2s/4s/8s and never succeeds. Inheriting the production budget makes
+ * a test's own teardown block on that foreign work until it times out. A test
+ * owns nothing it has not already asserted, so it waits for nothing.
+ */
 export async function _resetLlmUsageRetryWorkerForTests(): Promise<void> {
-  await shutdownLlmUsageRetryWorker();
+  await closeQueue(0);
 }

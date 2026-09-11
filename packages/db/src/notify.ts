@@ -22,8 +22,17 @@ export interface RunMetricNotifyPayload {
   run_id: string;
   /** Owning org (cross-tenant isolation gate). */
   org_id: string;
-  /** Owning application (cross-app isolation gate). */
-  application_id: string;
+  /** Owning space (cross-space isolation gate). */
+  space_id: string;
+  /**
+   * The run's actor — the run-read gate on the SSE fan-out
+   * (`services/realtime.ts`): a subscriber without `runs:read-all` receives a
+   * metric frame only for the runs it launched. Exactly one of the two is set:
+   * no live launch path writes a row with both NULL, and such a row reaches
+   * `runs:read-all` subscribers alone.
+   */
+  user_id: string | null;
+  end_user_id: string | null;
   /** Agent id, used by the per-agent runs SSE stream filter. */
   package_id: string;
   /** Cumulative token usage as last reported by the runner. */
@@ -78,7 +87,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'user_id', NEW.user_id,
         'end_user_id', NEW.end_user_id,
         'org_id', NEW.org_id,
-        'application_id', NEW.application_id,
+        'space_id', NEW.space_id,
         'schedule_id', NEW.schedule_id,
         -- Bound the error text: the whole NOTIFY payload must stay under
         -- Postgres' 8 KB limit, else pg_notify raises and aborts the
@@ -99,21 +108,35 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
     CREATE OR REPLACE FUNCTION notify_run_log_insert()
     RETURNS TRIGGER AS $$
     DECLARE
-      _application_id text;
+      _space_id text;
+      _user_id text;
+      _end_user_id text;
     BEGIN
-      SELECT application_id INTO _application_id FROM runs WHERE id = NEW.run_id;
+      -- The run actor rides along with its space: the SSE fan-out gates each
+      -- log frame on runs:read-all OR ownership, and run_logs itself carries
+      -- no actor column to decide that from.
+      SELECT space_id, user_id, end_user_id
+        INTO _space_id, _user_id, _end_user_id
+        FROM runs WHERE id = NEW.run_id;
       PERFORM pg_notify('run_log_insert', json_build_object(
         'id', NEW.id,
         'run_id', NEW.run_id,
         'org_id', NEW.org_id,
-        'application_id', _application_id,
+        'space_id', _space_id,
+        'user_id', _user_id,
+        'end_user_id', _end_user_id,
         'type', NEW.type,
         'level', NEW.level,
         'event', NEW.event,
+        -- Payload budget: pg_notify raises above 8 000 bytes, and it raises
+        -- INSIDE this trigger, so an over-long frame aborts the run_logs INSERT
+        -- rather than merely losing a frame. The two caps below (2 000 for the
+        -- message, 5 000 for the data) plus the fixed keys, the two ids and the
+        -- two actor columns stay under that ceiling with room to spare.
         'message', LEFT(NEW.message, 2000),
         'data', CASE
           WHEN NEW.data IS NULL THEN NULL
-          WHEN octet_length(NEW.data::text) <= 6000 THEN NEW.data
+          WHEN octet_length(NEW.data::text) <= 5000 THEN NEW.data
           ELSE '"[payload too large]"'::jsonb
         END,
         'created_at', to_char(NEW.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
@@ -180,7 +203,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           OR OLD.user_id IS DISTINCT FROM NEW.user_id
           OR OLD.end_user_id IS DISTINCT FROM NEW.end_user_id
           OR OLD.org_id IS DISTINCT FROM NEW.org_id
-          OR OLD.application_id IS DISTINCT FROM NEW.application_id
+          OR OLD.space_id IS DISTINCT FROM NEW.space_id
           OR OLD.schedule_id IS DISTINCT FROM NEW.schedule_id
           OR OLD.error IS DISTINCT FROM NEW.error
           OR OLD.started_at IS DISTINCT FROM NEW.started_at
@@ -208,10 +231,10 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   // integration detail, status cards). Without this, the badge only
   // refreshes on window-focus refetch and stays stale across tabs.
   //
-  // Tenant scope: the payload carries `application_id` only — the table
-  // has no `org_id` column (org is enforced via the `applications` row).
+  // Tenant scope: the payload carries `space_id` only — the table
+  // has no `org_id` column (org is enforced via the `spaces` row).
   // The realtime subscriber filter relies on the SSE auth gate
-  // (`validateSSEAuth`) having proven `applicationId ∈ orgId`, so this
+  // (`validateSSEAuth`) having proven `spaceId ∈ orgId`, so this
   // payload-side scope is sufficient.
   //
   // DELETE branch carries the OLD row's identifiers so the frontend can
@@ -233,7 +256,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'auth_key', OLD.auth_key,
           'user_id', OLD.user_id,
           'end_user_id', OLD.end_user_id,
-          'application_id', OLD.application_id,
+          'space_id', OLD.space_id,
           'needs_reconnection', NULL,
           'deleted', TRUE
         )::text);
@@ -246,7 +269,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'auth_key', NEW.auth_key,
           'user_id', NEW.user_id,
           'end_user_id', NEW.end_user_id,
-          'application_id', NEW.application_id,
+          'space_id', NEW.space_id,
           'needs_reconnection', NEW.needs_reconnection,
           'deleted', FALSE
         )::text);

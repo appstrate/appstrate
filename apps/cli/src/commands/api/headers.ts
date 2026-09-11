@@ -6,7 +6,7 @@ export function buildHeaders(args: {
   userHeaders: string[];
   token: string;
   orgId?: string;
-  applicationId?: string;
+  spaceId?: string;
   userAgent?: string;
   referer?: string;
   cookie?: string;
@@ -20,7 +20,7 @@ export function buildHeaders(args: {
     Authorization: `Bearer ${args.token}`,
   };
   if (args.orgId) out["X-Org-Id"] = args.orgId;
-  if (args.applicationId) out["X-Application-Id"] = args.applicationId;
+  if (args.spaceId) out["X-Space-Id"] = args.spaceId;
   if (args.compressed) out["Accept-Encoding"] = "gzip, deflate, br";
   if (args.range) out["Range"] = `bytes=${args.range}`;
   if (args.referer) out["Referer"] = args.referer;

@@ -8,7 +8,7 @@
  *   - Cancellation: close() terminates the subprocess.
  *   - Crash handling: surfaces non-zero exit as transport error.
  *   - Stderr capture: stays separate from JSON-RPC channel.
- *   - Env scrubbing: only allowlist vars cross the boundary (I3 invariant).
+ *   - Env hygiene: only allowlist vars are HANDED to the child.
  *   - Rate-limit guards: stdout flood does not OOM, stderr flood is shed.
  *
  * The fixture `test/fixtures/echo-server.ts` is a minimal MCP server
@@ -157,7 +157,15 @@ describe("SubprocessTransport — failure surfaces", () => {
   });
 });
 
-describe("SubprocessTransport — env scrubbing (security invariant I3)", () => {
+/**
+ * Env hygiene — what we hand the child, NOT what the child can reach.
+ * These tests pin the allowlist behaviour; they prove nothing about
+ * containment, because the child runs on this process's uid and can read
+ * this process's environ (`/proc/<ppid>/environ`) whatever we pass it.
+ * The boundary lives in the spawner — see
+ * `runtime-pi/sidecar/integration-runtime-adapter-process.ts`.
+ */
+describe("SubprocessTransport — env hygiene (allowlist on what is handed over)", () => {
   it("does NOT propagate non-allowlisted env vars to the subprocess", async () => {
     process.env.SECRET_TOKEN = "should-not-cross";
     process.env.RUN_TOKEN = "also-should-not-cross";

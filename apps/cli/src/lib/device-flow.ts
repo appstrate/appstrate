@@ -56,7 +56,7 @@ function safeHostname(): string | null {
   }
 }
 
-export interface DeviceCodeResponse {
+interface DeviceCodeResponse {
   deviceCode: string;
   userCode: string;
   verificationUri: string;
@@ -67,7 +67,7 @@ export interface DeviceCodeResponse {
   interval: number;
 }
 
-export interface DeviceTokenResponse {
+interface DeviceTokenResponse {
   accessToken: string;
   /**
    * 30-day rotating refresh token issued by `/api/auth/cli/token`
@@ -173,7 +173,7 @@ export async function startDeviceFlow(
   };
 }
 
-export interface PollOptions {
+interface PollOptions {
   /** Starting poll interval in seconds. Bumped on `slow_down`. */
   interval: number;
   /** Total wait budget in seconds — usually the `expires_in` from the code response. */

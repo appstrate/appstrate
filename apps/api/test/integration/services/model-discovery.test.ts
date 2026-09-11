@@ -2,10 +2,10 @@
 
 /**
  * Integration tests for `discoverAvailableModels` — empirical model
- * discovery against a credential, with the prober injected so no
+ * discovery against a credential, with the model listing injected so no
  * network leaves the process.
  *
- * Uses a synthetic `test-oauth-discovery` provider (registered here,
+ * Uses a synthetic `test-listing-discovery` provider (registered here,
  * baseline restored in `afterAll`) so the zero-footprint invariant
  * holds — no module knowledge in core tests.
  */
@@ -16,7 +16,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
+import { seedOrgModelProviderKey, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { registerCatalog } from "../../../src/services/pricing-catalog.ts";
@@ -25,15 +25,15 @@ import {
   type ModelDiscoveryDeps,
 } from "../../../src/services/model-providers/model-discovery.ts";
 import { getOrgModelProviderCredential } from "../../../src/services/model-providers/credentials.ts";
-import type { TestResult } from "@appstrate/shared-types";
+import type { ListServedModelsResult } from "../../../src/services/model-providers/model-listing.ts";
 
-const PROVIDER_ID = "test-oauth-discovery";
+const PROVIDER_ID = "test-listing-discovery";
 const OFFLINE_PROVIDER_ID = "test-offline-discovery";
 
 /**
  * Synthetic provider declaring `modelDiscovery: { mode: "static" }` — exercises
  * the no-network discovery path (subscription providers codex/claude-code).
- * Reuses the same catalog as the probe provider. Candidate "m-uncatalogued"
+ * Reuses the same catalog as the listing provider. Candidate "m-uncatalogued"
  * is intentionally absent from the catalog to pin the ∩-catalog filter.
  */
 function registerOfflineDiscoveryProvider(): void {
@@ -81,45 +81,39 @@ function registerDiscoveryProvider(): void {
   });
   registerModelProvider({
     providerId: PROVIDER_ID,
-    displayName: "Test OAuth Discovery",
+    displayName: "Test Listing Discovery",
     iconUrl: "openai",
     description: "Synthetic provider exercising model discovery.",
     apiShape: "openai-responses",
     defaultBaseUrl: "https://discovery.example.test/v1",
     baseUrlOverridable: false,
-    authMode: "oauth2",
-    oauth: {
-      clientId: "test-discovery-client",
-      authorizationUrl: "https://auth.example.test/authorize",
-      tokenUrl: "https://auth.example.test/token",
-      refreshUrl: "https://auth.example.test/token",
-      scopes: ["openid"],
-      pkce: "S256",
-    },
+    // API-key: the listing path is the only one an oauth2 provider may not
+    // take — `registerModelProvider` refuses one that is not `mode: "static"`.
+    authMode: "api_key",
     catalogProviderId: "test-discovery-catalog",
     featuredModels: ["m-featured"],
     modelDiscoveryCandidates: ["m-featured", "m-extra", "m-gone"],
   });
 }
 
-/** Prober answering from a fixed (modelId → result) table; records calls. */
-function tableProber(table: Record<string, TestResult | TestResult[]>): {
+/**
+ * Listing stub answering from a scripted queue (the last entry repeats);
+ * records how many listing requests discovery spent.
+ */
+function scriptedListing(results: ListServedModelsResult[]): {
   deps: ModelDiscoveryDeps;
-  calls: string[];
+  calls: () => number;
 } {
-  const calls: string[] = [];
-  const remaining = new Map(
-    Object.entries(table).map(([k, v]) => [k, Array.isArray(v) ? [...v] : [v]]),
-  );
+  let calls = 0;
+  const queue = [...results];
   return {
-    calls,
+    calls: () => calls,
     deps: {
       sleep: async () => {},
-      probe: async ({ modelId }) => {
-        calls.push(modelId);
-        const queue = remaining.get(modelId);
-        if (!queue || queue.length === 0) {
-          return { ok: false, latency: 1, error: "PROVIDER_ERROR", status: 404 };
+      listModels: async () => {
+        calls++;
+        if (queue.length === 0) {
+          return { ok: false, error: "UNREACHABLE", message: "no scripted listing" };
         }
         return queue.length === 1 ? queue[0]! : queue.shift()!;
       },
@@ -127,19 +121,41 @@ function tableProber(table: Record<string, TestResult | TestResult[]>): {
   };
 }
 
-const OK: TestResult = { ok: true, latency: 1, status: 200 };
-const NOT_SERVED: TestResult = {
+/** A listing stub that fails the test if discovery touches the network. */
+function forbiddenListing(): { deps: ModelDiscoveryDeps; calls: () => number } {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    deps: {
+      sleep: async () => {},
+      listModels: async () => {
+        calls++;
+        throw new Error("static discovery must not list models upstream");
+      },
+    },
+  };
+}
+
+const served = (...modelIds: string[]): ListServedModelsResult => ({
+  ok: true,
+  models: modelIds.map((id) => ({ id, hints: {} })),
+});
+const AUTH_FAILED: ListServedModelsResult = {
   ok: false,
-  latency: 1,
-  error: "PROVIDER_ERROR",
-  status: 404,
+  error: "AUTH_FAILED",
+  status: 401,
+  message: "Authentication failed",
 };
-const AUTH_FAILED: TestResult = { ok: false, latency: 1, error: "AUTH_FAILED", status: 401 };
-const RATE_LIMITED: TestResult = {
+const RATE_LIMITED: ListServedModelsResult = {
   ok: false,
-  latency: 1,
-  error: "PROVIDER_ERROR",
+  error: "RATE_LIMITED",
   status: 429,
+  message: "Rate limited",
+};
+const UNREACHABLE: ListServedModelsResult = {
+  ok: false,
+  error: "UNREACHABLE",
+  message: "Request timed out (10s)",
 };
 
 describe("discoverAvailableModels", () => {
@@ -167,111 +183,142 @@ describe("discoverAvailableModels", () => {
     }
   });
 
-  it("persists the ids that answered 2xx, in candidate order", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    const { deps } = tableProber({ "m-featured": OK, "m-extra": OK, "m-gone": NOT_SERVED });
+  it("persists the candidates the provider lists, in candidate order", async () => {
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    // Response order is deliberately the reverse of the declaration order, and
+    // carries an id the provider declares no candidate for.
+    const { deps, calls } = scriptedListing([served("m-unrelated", "m-extra", "m-featured")]);
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("ok");
-    expect(result.persisted).toBe(true);
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    // One listing request for the whole candidate list.
+    expect(calls()).toBe(1);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
   });
 
   it("aborts without persisting on AUTH_FAILED (an auth outage must not wipe a good list)", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    const { deps, calls } = tableProber({ "m-featured": AUTH_FAILED });
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    const { deps, calls } = scriptedListing([AUTH_FAILED]);
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("auth_failed");
-    expect(result.persisted).toBe(false);
-    // Aborted on the first candidate — no further probes burned.
-    expect(calls).toEqual(["m-featured"]);
-    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
-    // `[]`, not null: the DTO resolves through `resolveCredentialModelIds`,
-    // which coalesces a never-written column to an empty list. What matters
-    // is that the failed round wrote nothing.
-    expect(info?.available_model_ids).toEqual([]);
+    // A dead credential is not retried.
+    expect(calls()).toBe(1);
+    // Read the RAW column, not the DTO. The DTO resolves through
+    // `resolveCredentialModelIds`, which coalesces a never-written column to
+    // `[]` — so asserting `[]` there cannot tell "never wrote" from "wrote an
+    // empty list", and a regression that WIPES a good list on `auth_failed`
+    // would pass. The whole point of this test is that the failed round wrote
+    // nothing, so it has to assert on the thing that would have been written.
+    const [row] = await db
+      .select({ ids: modelProviderCredentials.availableModelIds })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, cred.id));
+    expect(row?.ids).toBeNull();
   });
 
-  it("keeps the previous list when nothing verifies (network incident ≠ empty plan)", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    const first = tableProber({ "m-featured": OK, "m-extra": NOT_SERVED, "m-gone": NOT_SERVED });
-    await discoverAvailableModels(ctx.org.id, cred.id, first.deps);
+  it("keeps the previous list when the provider is unreachable", async () => {
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([served("m-featured")]).deps,
+    );
 
-    const allDown = tableProber({});
-    const result = await discoverAvailableModels(ctx.org.id, cred.id, allDown.deps);
+    const result = await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([UNREACHABLE]).deps,
+    );
 
     expect(result.outcome).toBe("nothing_verified");
-    expect(result.persisted).toBe(false);
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured"]);
   });
 
-  it("retries a 429 once and counts the model when the retry succeeds", async () => {
-    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.org.id, providerId: PROVIDER_ID });
-    const { deps, calls } = tableProber({
-      "m-featured": [RATE_LIMITED, OK],
-      "m-extra": NOT_SERVED,
-      "m-gone": NOT_SERVED,
-    });
+  it("keeps the previous list when no candidate appears in the listing", async () => {
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([served("m-featured")]).deps,
+    );
+
+    const result = await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([served("m-something-else")]).deps,
+    );
+
+    expect(result.outcome).toBe("nothing_verified");
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured"]);
+  });
+
+  it("retries a 429 once and persists when the retry succeeds", async () => {
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    const { deps, calls } = scriptedListing([RATE_LIMITED, served("m-featured")]);
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(result.outcome).toBe("ok");
-    expect(result.verifiedModelIds).toEqual(["m-featured"]);
-    expect(calls.filter((m) => m === "m-featured")).toHaveLength(2);
+    expect(calls()).toBe(2);
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured"]);
+  });
+
+  it("keeps the previous list when the retry is rate limited too", async () => {
+    const cred = await seedOrgModelProviderKey({ orgId: ctx.org.id, providerId: PROVIDER_ID });
+    await discoverAvailableModels(
+      ctx.org.id,
+      cred.id,
+      scriptedListing([served("m-featured")]).deps,
+    );
+    const { deps, calls } = scriptedListing([RATE_LIMITED]);
+
+    const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
+
+    expect(result.outcome).toBe("nothing_verified");
+    // One retry, not a loop.
+    expect(calls()).toBe(2);
+    const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
+    expect(info?.available_model_ids).toEqual(["m-featured"]);
   });
 
   it("returns credential_not_found for an unknown id", async () => {
     const result = await discoverAvailableModels(
       ctx.org.id,
       "00000000-0000-0000-0000-000000000000",
-      tableProber({}).deps,
+      scriptedListing([]).deps,
     );
     expect(result.outcome).toBe("credential_not_found");
   });
 
   // --- Offline providers (subscription: codex, claude-code) ---
 
-  /** A prober that fails the test if the discovery path touches the network. */
-  function forbiddenProber(): { deps: ModelDiscoveryDeps; calls: () => number } {
-    let probeCalls = 0;
-    return {
-      calls: () => probeCalls,
-      deps: {
-        sleep: async () => {},
-        probe: async () => {
-          probeCalls++;
-          throw new Error("offline discovery must not probe the network");
-        },
-      },
-    };
-  }
-
-  it("offline provider: resolves static candidates (∩ catalog) with NO probe call", async () => {
+  it("offline provider: resolves static candidates (∩ catalog) with NO listing call", async () => {
     const cred = await seedOrgModelProviderOAuth({
       orgId: ctx.org.id,
       providerId: OFFLINE_PROVIDER_ID,
     });
     // Proves the platform issues zero network calls validating a
     // subscription credential's models.
-    const { deps, calls } = forbiddenProber();
+    const { deps, calls } = forbiddenListing();
 
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
     expect(calls()).toBe(0);
     expect(result.outcome).toBe("ok");
-    // Nothing is written — the list is derived on every read instead.
-    expect(result.persisted).toBe(false);
-    // Zero upstream requests were spent, so nothing was "probed".
-    expect(result.probedCount).toBe(0);
-    // "m-uncatalogued" is filtered out (not in the catalog); the rest come
-    // back in declaration order.
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    // Every declared candidate is counted (including the uncatalogued one) —
+    // the same meaning the listing path gives the number — without a single
+    // upstream request.
+    expect(result.candidateCount).toBe(3);
+    // Derived on read, not written: "m-uncatalogued" is filtered out (not in
+    // the catalog); the rest come back in declaration order. That nothing was
+    // written is pinned by the raw-column assertion in the next test.
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
   });
@@ -289,10 +336,10 @@ describe("discoverAvailableModels", () => {
       .set({ availableModelIds: ["m-ancient"] })
       .where(eq(modelProviderCredentials.id, cred.id));
 
-    const { deps } = forbiddenProber();
+    const { deps } = forbiddenListing();
     const result = await discoverAvailableModels(ctx.org.id, cred.id, deps);
 
-    expect(result.verifiedModelIds).toEqual(["m-featured", "m-extra"]);
+    expect(result.outcome).toBe("ok");
     const info = await getOrgModelProviderCredential(ctx.org.id, cred.id);
     expect(info?.available_model_ids).toEqual(["m-featured", "m-extra"]);
     // The column itself is still the stale value — discovery wrote nothing.

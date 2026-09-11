@@ -85,7 +85,7 @@ export function normalizeInstance(url: string): string {
   return stripTrailingSlash(trimmed);
 }
 
-export function isLoopback(hostname: string): boolean {
+function isLoopback(hostname: string): boolean {
   if (LOOPBACK_STATIC_HOSTS.has(hostname)) return true;
   // IPv6 literals arrive from `URL.hostname` wrapped in `[…]`. The parser
   // also *canonicalizes* them: `[::ffff:127.0.0.1]` becomes

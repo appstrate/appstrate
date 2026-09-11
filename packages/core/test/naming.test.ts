@@ -9,7 +9,6 @@ import {
   encodePackageIdPath,
   isOwnedByOrg,
   isValidToolName,
-  normalizeToolName,
   TOOL_NAME_MAX_LEN,
   sanitizeFilename,
   attachmentDisposition,
@@ -198,29 +197,6 @@ describe("isValidToolName", () => {
   });
 });
 
-describe("normalizeToolName", () => {
-  it("returns valid names unchanged", () => {
-    expect(normalizeToolName("fs__read_file")).toBe("fs__read_file");
-  });
-
-  it("converts hyphens to underscores", () => {
-    expect(normalizeToolName("mcp-fs__read-file")).toBe("mcp_fs__read_file");
-  });
-
-  it("promotes the first single-underscore boundary when no __ exists", () => {
-    expect(normalizeToolName("fs_read_file")).toBe("fs__read_file");
-  });
-
-  it("lowercases mixed case", () => {
-    expect(normalizeToolName("FS__readFile")).toBe("fs__readfile");
-  });
-
-  it("caps to TOOL_NAME_MAX_LEN", () => {
-    const big = "a".repeat(80) + "__b";
-    expect(normalizeToolName(big).length).toBe(TOOL_NAME_MAX_LEN);
-  });
-});
-
 describe("sanitizeFilename", () => {
   it("leaves a plain name untouched, accents included", () => {
     expect(sanitizeFilename("report.html")).toBe("report.html");
@@ -246,6 +222,51 @@ describe("sanitizeFilename", () => {
 
   it("caps at MAX_FILENAME_LEN", () => {
     expect(sanitizeFilename("x".repeat(400))).toHaveLength(MAX_FILENAME_LEN);
+  });
+
+  it("never mints a name that no download can serve", () => {
+    // The cut is on UTF-16 code units, so a name whose 255th unit is the FIRST
+    // half of a surrogate pair used to be truncated to a lone high surrogate —
+    // a string `encodeURIComponent` throws `URIError` on. That name is durable
+    // (`files.name`, and part of the `(run_id, sha256, name)` dedup identity),
+    // so every later download of the file 500'd, on both serving branches.
+    const name = "a".repeat(MAX_FILENAME_LEN - 1) + "\u{1f4ca}";
+    const cut = sanitizeFilename(name);
+
+    expect(cut.length).toBeLessThanOrEqual(MAX_FILENAME_LEN);
+    // The orphaned half is dropped, not kept: the string is well-formed UTF-16.
+    expect(cut).toBe("a".repeat(MAX_FILENAME_LEN - 1));
+    expect(() => attachmentDisposition(cut)).not.toThrow();
+    expect(() => encodeFilenameHeader(cut)).not.toThrow();
+
+    // A pair that ends BEFORE the cut is untouched — the fix must not eat a
+    // legitimate emoji.
+    const fits = "a".repeat(MAX_FILENAME_LEN - 3) + "\u{1f4ca}";
+    expect(sanitizeFilename(fits)).toBe(fits);
+  });
+});
+
+describe("filename encoders are total", () => {
+  // Both sit on the last line before a response header is written, so a throw
+  // here is a 500 on a download that would otherwise have worked. A lone
+  // surrogate can reach them from any producer, not just the truncation above.
+  const LONE_HIGH = "rapport\ud83d.pdf";
+  const LONE_LOW = "rapport\ude00.pdf";
+
+  it("substitutes U+FFFD for an unpaired surrogate instead of throwing", () => {
+    for (const name of [LONE_HIGH, LONE_LOW]) {
+      expect(() => encodeURIComponent(name)).toThrow();
+      expect(() => encodeFilenameHeader(name)).not.toThrow();
+      expect(() => attachmentDisposition(name)).not.toThrow();
+      expect(encodeFilenameHeader(name)).toBe("rapport%EF%BF%BD.pdf");
+    }
+  });
+
+  it("leaves a well-formed name byte-identical (control)", () => {
+    expect(attachmentDisposition("rapport été.pdf")).toBe(
+      "attachment; filename=\"rapport _t_.pdf\"; filename*=UTF-8''rapport%20%C3%A9t%C3%A9.pdf",
+    );
+    expect(encodeFilenameHeader("\u{1f4ca}.png")).toBe("%F0%9F%93%8A.png");
   });
 });
 
@@ -277,14 +298,14 @@ describe("encodeFilenameHeader / decodeFilenameHeader", () => {
     //    retryable network fault: 3 attempts, backoff, then the deliverable is
     //    permanently lost as `upload_failed`.
     for (const name of ["报告.md", "\u{1f4ca}.png"]) {
-      expect(() => new Headers({ "X-Document-Name": name })).toThrow();
-      expect(() => new Headers({ "X-Document-Name": encodeFilenameHeader(name) })).not.toThrow();
+      expect(() => new Headers({ "X-File-Name": name })).toThrow();
+      expect(() => new Headers({ "X-File-Name": encodeFilenameHeader(name) })).not.toThrow();
     }
     // 2. Inside Latin-1 (a French accent) it is ACCEPTED, which is worse: the
     //    value survives the send and is silently mojibaked by the UTF-8 write /
     //    Latin-1 read round-trip on the way in. Encoding removes the ambiguity.
     const accented = "rapport-été.md";
-    expect(() => new Headers({ "X-Document-Name": accented })).not.toThrow();
+    expect(() => new Headers({ "X-File-Name": accented })).not.toThrow();
     expect(encodeFilenameHeader(accented)).not.toBe(accented);
   });
 

@@ -18,10 +18,14 @@ import { getEnv } from "@appstrate/env";
 import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
+import { flushRedis } from "../../../../../test/helpers/redis.ts";
 import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
 import { seedApiKey } from "../../../../../test/helpers/seed.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
+import { drainAudits, pendingAuditCount } from "../../../../services/audit.ts";
 import { getCatalog, resetCatalog } from "../../catalog.ts";
+import { createMcpRouter } from "../../router.ts";
+import mcpModule from "../../index.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app (production sets this in
@@ -71,7 +75,7 @@ async function apiKeyHeaders(scopes: string[]): Promise<Record<string, string>> 
   const ctx = await createTestContext();
   const key = await seedApiKey({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     createdBy: ctx.user.id,
     scopes,
   });
@@ -102,7 +106,7 @@ describe("mcp discovery + auth gate", () => {
   });
 
   it("advertises an authorization_servers entry that byte-matches the live AS issuer (RFC 8414 §3.3)", async () => {
-    // Cross-document contract: the `authorization_servers` entry in the
+    // Cross-file contract: the `authorization_servers` entry in the
     // protected-resource metadata is an AS *issuer identifier*. A strict client
     // (the claude.ai connector) discovers the AS metadata from it and rejects
     // the handshake unless the `issuer` it reads back is byte-identical
@@ -178,6 +182,39 @@ describe("mcp discovery + auth gate", () => {
     expect(challenge!).toContain('error="insufficient_scope"');
     expect(challenge!).toContain('scope="mcp:read mcp:invoke"');
     expect(challenge!).toContain("resource_metadata=");
+  });
+
+  it("403s a guest with no space row and serves the same caller once a row exists", async () => {
+    // RBAC spec §7.3: the per-org endpoint pins an org, resolves the ORG'S
+    // DEFAULT SPACE, and reads the caller's role there. `mcp` is a space-level
+    // resource, so a `guest` — implicit in no space — cannot pass its guard.
+    // A session caller is used because it takes the same `resolveMcpSpaceRow` →
+    // `applySpacePermissions` path a per-org bearer does; only the credential
+    // that resolved the org role differs.
+    const { createTestUser, addOrgMember } = await import("../../../../../test/helpers/auth.ts");
+    const { seedSpaceMember } = await import("../../../../../test/helpers/seed.ts");
+    const owner = await createTestContext();
+    const guest = await createTestUser();
+    await addOrgMember(owner.orgId, guest.id, "guest");
+    const headers = { Cookie: guest.cookie, "X-Org-Id": owner.orgId };
+
+    const denied = await app.request(mcpPath(headers), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
+    });
+    expect(denied.status).toBe(403);
+
+    // The control: one `operator` row in the default space, same caller, same
+    // request — and now the tool list is served.
+    await seedSpaceMember({
+      spaceId: owner.defaultSpaceId,
+      userId: guest.id,
+      presetRole: "operator",
+    });
+    const listed = await rpc(headers, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    expect(listed.status).toBe(200);
+    expect((listed.envelope.result?.tools as unknown[]).length).toBeGreaterThan(0);
   });
 
   it("rejects GET on the per-org endpoint with 405 for an authenticated caller", async () => {
@@ -256,11 +293,11 @@ describe("mcp tool round-trip", () => {
       "get_me",
       "get_runtime_capabilities",
       "invoke_operation",
-      "list_documents",
-      "read_document",
+      "list_files",
+      "read_file",
       "run_and_wait",
       "search_operations",
-      "validate_package_document",
+      "validate_package_file",
     ]);
     const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
     expect((runAndWait.annotations as Record<string, unknown>).destructiveHint).toBe(true);
@@ -416,6 +453,13 @@ describe("mcp tool round-trip", () => {
 describe("mcp audit + rate limiting", () => {
   beforeEach(async () => {
     await truncateAll();
+    // The burst assertion below counts requests against a Redis-backed limiter
+    // whose keys `truncateAll()` does not touch. Without this the test silently
+    // depends on every suite that ran before it having spent none of that
+    // budget — it passes alone and gets a premature 429 in a full run, which is
+    // exactly what happened once this branch added request-making tests
+    // upstream of it. 24 other suites already flush for the same reason.
+    await flushRedis();
     resetCatalog();
   });
 
@@ -430,7 +474,9 @@ describe("mcp audit + rate limiting", () => {
       method: "tools/call",
       params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
     });
-    // Audit inserts are flushed before the response returns, so the row exists.
+    // The insert is tracked, not awaited, on the response path — drain the
+    // registry (what shutdown does) before asserting on the row.
+    expect((await drainAudits(5_000)).drained).toBe(true);
     const rows = await db
       .select()
       .from(auditEvents)
@@ -455,12 +501,61 @@ describe("mcp audit + rate limiting", () => {
       method: "tools/call",
       params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
     });
+    expect((await drainAudits(5_000)).drained).toBe(true);
     const rows = await db
       .select()
       .from(auditEvents)
       .where(eq(auditEvents.action, "mcp.operation.denied"));
     expect(rows.length).toBe(1);
     expect((rows[0]!.after as Record<string, unknown>).outcome).toBe("denied");
+  });
+
+  it("returns the MCP response before the audit insert settles — the insert is tracked, not awaited", async () => {
+    // The same module, with a router whose audit sink is an insert that does
+    // not settle until this test says so.
+    let settleInsert!: () => void;
+    const insert = new Promise<void>((resolve) => {
+      settleInsert = resolve;
+    });
+    const stubbedApp = getTestApp({
+      modules: [
+        { ...mcpModule, createRouter: () => createMcpRouter({ recordAudit: () => insert }) },
+      ],
+    });
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const op = [...getCatalog().operations.values()].find(
+      (o) => o.method === "GET" && o.pathParams.length === 0,
+    )!;
+    const pendingBefore = pendingAuditCount();
+
+    try {
+      const request = Promise.resolve(
+        stubbedApp.request(mcpPath(headers), {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name: "invoke_operation", arguments: { operation_id: op.operationId } },
+          }),
+        }),
+      );
+      // Negative control: a router that awaits the insert cannot answer while
+      // it is pending — this `await` then never resolves and the test times out.
+      expect((await request).status).toBe(200);
+
+      // The insert is registered and still pending — a bounded drain reports
+      // it as not drained rather than losing it.
+      expect(pendingAuditCount()).toBe(pendingBefore + 1);
+      expect((await drainAudits(20)).drained).toBe(false);
+    } finally {
+      settleInsert();
+    }
+
+    // Once the insert settles, the drain shutdown relies on completes.
+    expect((await drainAudits(1_000)).drained).toBe(true);
+    expect(pendingAuditCount()).toBe(pendingBefore);
   });
 
   it("does NOT audit read-only search/describe calls", async () => {
@@ -478,9 +573,18 @@ describe("mcp audit + rate limiting", () => {
     expect(rows.length).toBe(0);
   });
 
-  it("emits IETF RateLimit headers and rejects bursts beyond the limit with 429", async () => {
-    // One fixed identity (same API key) so every request keys to the same
-    // rate-limit bucket. The limit is 120/min; fire enough to trip it.
+  // What is unique to THIS layer is the WIRING: that `/api/mcp/o/:org` is
+  // actually mounted behind `rateLimitMcp(MCP_RATE_LIMIT_PER_MIN)` and charges
+  // the caller's API key. The limiter's own semantics — IETF headers, 429,
+  // Retry-After, the identity ladder, one bucket across paths — are pinned in
+  // `apps/api/test/unit/rate-limit.test.ts` against small limits.
+  //
+  // This used to fire 125 sequential envelopes to burn a 120/min budget down
+  // to a 429. That re-proved the unit-tested behaviour at the cost of ~5s of
+  // in-process HTTP, and CI timed it out. Two requests prove the wiring: the
+  // advertised limit is the mounted constant, and the second request is
+  // charged to the same bucket as the first.
+  it("charges the mounted 120/min MCP limiter, keyed on the caller", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const init = {
       jsonrpc: "2.0",
@@ -492,27 +596,29 @@ describe("mcp audit + rate limiting", () => {
         clientInfo: { name: "t", version: "1" },
       },
     } as const;
-
-    const first = await app.request(mcpPath(headers), {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
-      body: JSON.stringify(init),
-    });
-    expect(first.status).toBe(200);
-    expect(first.headers.get("RateLimit")).toContain("limit=120");
-
-    let sawRateLimit = false;
-    for (let i = 0; i < 125 && !sawRateLimit; i++) {
-      const res = await app.request(mcpPath(headers), {
+    const post = () =>
+      app.request(mcpPath(headers), {
         method: "POST",
         headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
         body: JSON.stringify(init),
       });
-      if (res.status === 429) {
-        sawRateLimit = true;
-        expect(res.headers.get("Retry-After")).not.toBeNull();
-      }
-    }
-    expect(sawRateLimit).toBe(true);
+
+    const first = await post();
+    expect(first.status).toBe(200);
+    expect(first.headers.get("RateLimit")).toContain("limit=120");
+    const firstRemaining = Number(
+      /remaining=(\d+)/.exec(first.headers.get("RateLimit") ?? "")?.[1],
+    );
+    expect(firstRemaining).toBe(119);
+
+    // Same API key, same bucket: one more point gone. A route mounted behind a
+    // per-request limiter, or keyed on something that varies per call, would
+    // hand back 119 again here.
+    const second = await post();
+    expect(second.status).toBe(200);
+    const secondRemaining = Number(
+      /remaining=(\d+)/.exec(second.headers.get("RateLimit") ?? "")?.[1],
+    );
+    expect(secondRemaining).toBe(118);
   });
 });

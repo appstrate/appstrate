@@ -18,16 +18,17 @@
  * Escape hatch: pass `{ modules: [...] }` to bypass discovery and get a fresh
  * app with an explicit module list. Use `{ modules: [] }` to assert the
  * zero-footprint invariant (no modules → no module routes, no module
- * app-scoped prefixes). The explicit path never touches the singleton cache.
+ * space-scoped prefixes). The explicit path never touches the singleton cache.
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { requestId } from "../../src/middleware/request-id.ts";
+import { clientIp } from "../../src/middleware/client-ip.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
-import { requireAppContext } from "../../src/middleware/app-context.ts";
+import { isSpaceScopedPath, requireSpaceContext } from "../../src/middleware/space-context.ts";
 import { idempotencyGuard } from "../../src/middleware/idempotency-guard.ts";
-import { getOrgSettings } from "../../src/services/organizations.ts";
+import { getCachedOrgApiVersion } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
 import { initSystemModelProviderKeys } from "../../src/services/model-registry.ts";
 import { initSystemIntegrations } from "../../src/services/integration-client-registry.ts";
@@ -36,9 +37,13 @@ import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { seedTestModelProviders } from "./model-providers.ts";
 import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
 import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
-import { collectModulePermissions } from "../../src/lib/modules/module-loader.ts";
+import {
+  collectModulePermissions,
+  collectPrincipalPermissions,
+} from "../../src/lib/modules/module-loader.ts";
 import { setModulePermissionsProvider } from "@appstrate/core/permissions";
-import { initAppConfig } from "../../src/lib/app-config.ts";
+import { setPrincipalPermissionsProviders } from "@appstrate/core/principal-permissions";
+import { getAppConfig, initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
 import { createResponseValidationMiddleware } from "./response-validation.ts";
@@ -49,6 +54,7 @@ import { createRunsRouter } from "../../src/routes/runs.ts";
 import { createRunsEventsRouter } from "../../src/routes/runs-events.ts";
 import { createRunsRemoteRouter } from "../../src/routes/runs-remote.ts";
 import { createSchedulesRouter } from "../../src/routes/schedules.ts";
+import { createLibraryRouter } from "../../src/routes/library.ts";
 import { createUserAgentsRouter } from "../../src/routes/user-agents.ts";
 import { createApiKeysRouter } from "../../src/routes/api-keys.ts";
 import { createProxiesRouter } from "../../src/routes/proxies.ts";
@@ -56,13 +62,14 @@ import { createModelsRouter } from "../../src/routes/models.ts";
 import { createModelProvidersOAuthRouter } from "../../src/routes/model-providers-oauth.ts";
 import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
-import { createApplicationsRouter } from "../../src/routes/applications.ts";
+import { createSpacesRouter } from "../../src/routes/spaces.ts";
+import { createRolesRouter } from "../../src/routes/roles.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "../../src/routes/uploads.ts";
-import { createDocumentsRouter, createDocumentPreviewRouter } from "../../src/routes/documents.ts";
+import { createFilesRouter, createFilePreviewRouter } from "../../src/routes/files.ts";
 import { createAdminStorageDeletionRouter } from "../../src/routes/admin-storage-deletion.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
@@ -70,6 +77,7 @@ import { getDiscoveredModules } from "./test-modules.ts";
 import healthRouter from "../../src/routes/health.ts";
 import { createIntegrationsRouter } from "../../src/routes/integrations.ts";
 import orgsRouter from "../../src/routes/organizations.ts";
+import { ORG_PATH_MIDDLEWARE } from "../../src/middleware/org-path-context.ts";
 import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
@@ -78,19 +86,40 @@ import welcomeRouter from "../../src/routes/welcome.ts";
 import type { AppstrateModule } from "@appstrate/core/module";
 import type { AppEnv } from "../../src/types/index.ts";
 
-export interface GetTestAppOptions {
+interface GetTestAppOptions {
   /**
    * Explicit module list to mount. When provided, bypasses the preload-
    * populated discovery registry and returns a fresh (non-cached) app.
    *
    * Pass `[]` to assert the zero-footprint invariant: a core-only app with
-   * no module routes, no module app-scoped prefixes, no module-contributed
+   * no module routes, no module space-scoped prefixes, no module-contributed
    * middleware. Core tests that want to prove isolation should use this.
    */
   modules?: readonly AppstrateModule[];
 }
 
 let cachedApp: Hono<AppEnv> | null = null;
+
+/**
+ * Turn a module-contributed feature flag on (or off) for the duration of a
+ * test, returning the restore function.
+ *
+ * Production merges these flags into `AppConfig` once, at boot, from the loaded
+ * modules (`applyModuleFeatures`) — and the test harness deliberately never
+ * boots. A test that needs `features.custom_roles` on and off in the SAME file
+ * therefore has nothing to reach for, which is why this seam exists: it writes
+ * the same object the routes read (`getAppConfig().features`), so what is
+ * exercised is the real gate, not a stand-in.
+ */
+export function setFeatureFlag(name: string, value: boolean): () => void {
+  const features = getAppConfig().features as Record<string, boolean | undefined>;
+  const previous = features[name];
+  features[name] = value;
+  return () => {
+    if (previous === undefined) delete features[name];
+    else features[name] = previous;
+  };
+}
 
 // Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)
@@ -114,19 +143,20 @@ await initAppConfig(); // initializes app config (routes like organizations.ts c
  * Mirrors the production middleware chain from index.ts:
  * CORS → error handler → request ID → Better Auth → API key auth → org context → routes
  *
- * Skips: boot(), static files, SPA fallback, shutdown gate, OpenAPI docs, cloud routes.
+ * Skips: boot(), static files, SPA fallback, shutdown gate, OpenAPI docs, ee routes.
  */
 export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Explicit module list → always return a fresh app (never touches the
   // singleton cache, so core "modules: []" tests stay isolated from the
-  // preload-discovered default app used by every other test).
+  // preload-discovered default space used by every other test).
   const explicit = options?.modules !== undefined;
   const extraModules = explicit ? options!.modules! : getDiscoveredModules();
 
   // Register module RBAC contributions BEFORE returning the app — mirrors
   // production wiring in `initSortedModules()`, which calls
   // `setModulePermissionsProvider` before init() runs so
-  // `resolvePermissions(role)` already sees module grants when modules are
+  // `orgPermissions(role)` / `presetPermissions(preset)` already see module
+  // grants when modules are
   // loaded. Without this, module-owned resources (e.g. `webhooks:*`,
   // `oauth-clients:*` after they were extracted out of the static core
   // catalog) are absent from the session's permission Set and every
@@ -140,6 +170,9 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // contributions array — so re-registering per call is acceptable.
   const rbacSnapshot = collectModulePermissions(extraModules);
   setModulePermissionsProvider(() => rbacSnapshot);
+  // Same order as `initSortedModules()`: `mayGrant` is validated against the
+  // merged vocabulary the line above just registered.
+  setPrincipalPermissionsProviders(collectPrincipalPermissions(extraModules));
 
   if (!explicit && cachedApp) return cachedApp;
 
@@ -150,6 +183,13 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
 
   // Request-Id
   app.use("*", requestId());
+
+  // Client IP — same position as production (`apps/api/src/index.ts`): it
+  // resolves the address under `TRUST_PROXY` and stamps it on the inbound
+  // Request, so Better Auth reads the platform's answer here too. Under
+  // `app.request()` there is no socket, `getConnInfo` throws and the
+  // middleware absorbs it.
+  app.use("*", clientIp());
 
   // CORS
   app.use("*", cors({ origin: "*", credentials: true }));
@@ -180,9 +220,9 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/", healthRouter);
 
   // Cookie-less HTML preview — mounted BEFORE the auth pipeline (mirrors
-  // production wiring in `apps/api/src/index.ts`) so no cookie/API-key/org/app
+  // production wiring in `apps/api/src/index.ts`) so no cookie/API-key/org/space
   // middleware runs on it; authorized solely by the signed `?t=` token.
-  app.route("/", createDocumentPreviewRouter());
+  app.route("/", createFilePreviewRouter());
 
   // Module-contributed public paths (e.g. inbound webhooks, OIDC login page).
   // The test harness collects from `extraModules` directly — it does not go
@@ -204,38 +244,26 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     authStrategies: () => moduleAuthStrategies,
   });
 
-  // App context middleware: resolve X-Application-Id for app-scoped routes.
-  // Core-only prefix list — modules own app-scoping for their own routes.
-  const APP_SCOPED_PREFIXES = [
-    "/api/agents",
-    "/api/runs",
-    "/api/schedules",
-    "/api/end-users",
-    "/api/api-keys",
-    "/api/notifications",
-    "/api/packages",
-    "/api/integrations",
-    "/api/uploads",
-    "/api/documents",
-  ];
-
-  const appContextMiddleware = requireAppContext();
+  // Space context middleware: resolve X-Space-Id for space-scoped routes.
+  // The prefix list is imported, not re-listed — see `isSpaceScopedPath`.
+  const spaceContextMiddleware = requireSpaceContext();
   app.use("*", async (c, next) => {
-    if (skipAuth(c.req.path, modulePublicPaths)) return next();
+    if (skipAuth(c.req.path, modulePublicPaths, c.req.raw.headers)) return next();
     if (!c.get("user")) return next();
-    if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
-    return appContextMiddleware(c, next);
+    if (!isSpaceScopedPath(c.req.path)) return next();
+    return spaceContextMiddleware(c, next);
   });
 
   // API versioning — mirrors production: read settings stashed on context
-  // by `requireOrgContext` (session auth), fall back to a direct lookup for
-  // auth paths that resolve orgId inline (API key, module strategies).
+  // by `requireOrgContext` (session auth), fall back to the cached pin reader
+  // for auth paths that resolve orgId inline (API key, module strategies).
   const apiVersionMiddleware = apiVersion(async (orgId, c) => {
-    const settings = c.get("orgSettings") ?? (await getOrgSettings(orgId));
-    return settings.api_version ?? null;
+    const settings = c.get("orgSettings");
+    if (settings) return settings.api_version ?? null;
+    return getCachedOrgApiVersion(orgId);
   });
   app.use("*", async (c, next) => {
-    if (skipAuth(c.req.path, modulePublicPaths)) return next();
+    if (skipAuth(c.req.path, modulePublicPaths, c.req.raw.headers)) return next();
     if (!c.get("user")) return next();
     return apiVersionMiddleware(c, next);
   });
@@ -250,8 +278,15 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   const runsRouter = createRunsRouter();
   const schedulesRouter = createSchedulesRouter();
 
+  // Org context for the `/api/orgs/:orgId*` family, where the org comes from the
+  // PATH. Mounted here — before the orgs router AND before every module router
+  // below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
+  // `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+  app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
+
   app.route("/api/orgs", orgsRouter);
   app.route("/api/me", meRouter);
+  app.route("/api/library", createLibraryRouter());
   app.route("/api/agents", userAgentsRouter);
   app.route("/api/agents", agentsRouter);
   app.route("/api", createNotificationsRouter());
@@ -271,7 +306,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // path first. Mirrors production wiring in `apps/api/src/index.ts`.
   app.route("/api/uploads/_content", createUploadContentRouter());
   app.route("/api/uploads", createUploadsRouter());
-  app.route("/api", createDocumentsRouter());
+  app.route("/api", createFilesRouter());
   // Platform-operator storage-deletion outbox. Mirrors production wiring; the
   // route family carries its own operator guard (session + `platform` realm +
   // `AUTH_PLATFORM_ADMIN_EMAILS`), which is what its tests exercise.
@@ -289,7 +324,8 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/models", createModelsRouter());
   app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
   app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
-  app.route("/api/applications", createApplicationsRouter());
+  app.route("/api/spaces", createSpacesRouter());
+  app.route("/api/roles", createRolesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());

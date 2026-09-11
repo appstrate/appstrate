@@ -92,3 +92,29 @@ export function getMcpServerRuntime(manifest: McpServerManifest): McpServerRunti
   const appstrate = meta?.[MCP_SERVER_APPSTRATE_META_KEY] as { runtime?: unknown } | undefined;
   return isMcpServerRuntime(appstrate?.runtime) ? appstrate.runtime : undefined;
 }
+
+/**
+ * The runtime an mcp-server ACTUALLY spawns under: the Appstrate `_meta`
+ * override when present, the MCPB `server.type` otherwise.
+ *
+ * Every caller that needs a runtime must decide it the same way, and the
+ * fallback is the half that drifts. It already did: the connect-login path
+ * forwarded `server.type` verbatim while the agent-run path applied the
+ * override, so the SAME bun-native package spawned under `bun` for an agent run
+ * and under `node` for a connect login. The rule lives here so a third reader
+ * cannot re-derive it a fourth way.
+ *
+ * `server.type` is returned VERBATIM rather than narrowed to
+ * {@link McpServerRuntime}: the SPA reads unvalidated DRAFT manifests, where an
+ * author's typo must still be displayed as written instead of silently
+ * vanishing. Spawn callers read a schema-validated manifest, where the value is
+ * always an MCPB type. `undefined` means neither source declared one — for a
+ * spawn that is "not runnable", and it is the caller's job to fail closed on it.
+ */
+export function effectiveMcpServerType(manifest: McpServerManifest): string | undefined {
+  const type = (manifest as { server?: { type?: unknown } }).server?.type;
+  return (
+    getMcpServerRuntime(manifest) ??
+    (typeof type === "string" && type.trim() !== "" ? type : undefined)
+  );
+}

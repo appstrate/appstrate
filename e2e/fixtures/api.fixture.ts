@@ -2,7 +2,7 @@
 
 /**
  * Playwright fixture that provides an authenticated API client
- * with org + app context, ready for app-scoped API tests.
+ * with org + space context, ready for space-scoped API tests.
  *
  * Usage in tests:
  *   import { test, expect } from "../fixtures/api.fixture.ts";
@@ -13,15 +13,15 @@ import { test as base, expect } from "@playwright/test";
 import { createApiClient, createOrgOnlyClient, type ApiClient } from "../helpers/api-client.ts";
 import { registerUser, createOrg, type AuthResult, type OrgResult } from "../helpers/seed.ts";
 
-export interface OrgContext {
+interface OrgContext {
   auth: AuthResult;
   org: OrgResult;
 }
 
 interface ApiFixtures {
-  /** Authenticated API client scoped to a fresh org + default app */
+  /** Authenticated API client scoped to a fresh org + default space */
   apiClient: ApiClient;
-  /** Org-only client (no X-Application-Id) for org-scoped routes */
+  /** Org-only client (no X-Space-Id) for org-scoped routes */
   orgOnlyClient: ReturnType<typeof createOrgOnlyClient>;
   /** Auth + org details for the current test context */
   orgContext: OrgContext;
@@ -38,7 +38,7 @@ export const test = base.extend<ApiFixtures>({
     const client = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
-      applicationId: orgContext.org.defaultAppId,
+      spaceId: orgContext.org.defaultSpaceId,
     });
     await use(client);
   },

@@ -13,7 +13,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
 import { RunsTable, useRunColumns } from "../runs-table.tsx";
 import { makeRun, render, STARTED_AT } from "./run-fixture.tsx";
-import { formatDateField } from "../../lib/markdown.ts";
+import { formatDateField } from "../../lib/format-date.ts";
 
 const STARTED_AT_LABEL = formatDateField(STARTED_AT);
 const agentName = () => "Rapport trimestriel";

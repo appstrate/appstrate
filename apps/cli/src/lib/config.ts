@@ -5,9 +5,9 @@
  *
  * File: `$XDG_CONFIG_HOME/appstrate/config.toml` (or `~/.config/appstrate/`
  * when `XDG_CONFIG_HOME` is unset). One `[profile.<name>]` section per
- * profile holds the non-secret state (`instance`, `user_id`, `email`,
- * `org_id`). Access tokens live in the OS keyring, not here — see
- * `./keyring.ts`.
+ * profile holds the non-secret state, keyed exactly as the `Profile`
+ * fields below (`instance`, `userId`, `email`, `orgId`, `spaceId`).
+ * Access tokens live in the OS keyring, not here — see `./keyring.ts`.
  *
  * Profile resolution order (same convention as AWS / gcloud / doctl):
  *   1. `--profile <name>` CLI flag  (caller passes explicitly)
@@ -24,13 +24,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
+import { DEFAULT_IO, type CommandIO } from "./io.ts";
 
 export interface Profile {
   instance: string;
   userId: string;
   email: string;
   orgId?: string;
-  applicationId?: string;
+  spaceId?: string;
+  syncSpaces?: string[];
 }
 
 export interface Config {
@@ -58,7 +60,29 @@ export function getConfigDir(): string {
   return join(homedir(), ".config", "appstrate");
 }
 
-export function getConfigPath(): string {
+/**
+ * `HOME` first, because that is what Codex and Claude Code resolve and Bun's
+ * `os.homedir()` reads the passwd entry once. Shared with
+ * `lib/skills-sync/targets.ts` so the ownership ledger and the directories it
+ * claims cannot disagree about where home is.
+ */
+export function homeDir(): string {
+  const fromEnv = process.env.HOME;
+  return fromEnv && fromEnv.length > 0 ? fromEnv : homedir();
+}
+
+/**
+ * What the CLI materializes for other tools to read, as opposed to the user's
+ * configuration: separate from `getConfigDir` because wiping the generated
+ * plugin must never take `config.toml` with it.
+ */
+export function getDataDir(): string {
+  const xdg = process.env.XDG_DATA_HOME;
+  if (xdg && xdg.length > 0) return join(xdg, "appstrate");
+  return join(homeDir(), ".local", "share", "appstrate");
+}
+
+function getConfigPath(): string {
   return join(getConfigDir(), "config.toml");
 }
 
@@ -109,10 +133,26 @@ export async function readConfig(): Promise<Config> {
       userId: row.userId,
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
-      applicationId: typeof row.applicationId === "string" ? row.applicationId : undefined,
+      spaceId: typeof row.spaceId === "string" ? row.spaceId : undefined,
+      ...(row.syncSpaces === undefined ? {} : { syncSpaces: readSyncSpaces(name, row.syncSpaces) }),
     };
   }
   return { defaultProfile, profiles };
+}
+
+/**
+ * Hand-edited, unlike every other field here, so a malformed value is a typo to
+ * report rather than a corrupt write to ignore: a skipped row would surface as
+ * "profile not configured" and send the user to `login`, which overwrites the
+ * pins they were editing. The message names the profile and the fix instead.
+ * Trimming and deduplicating here keeps the rest of the CLI comparing raw IDs.
+ */
+function readSyncSpaces(profileName: string, value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id.trim().length > 0))
+    throw new Error(
+      `Invalid syncSpaces for profile "${profileName}" in ${getConfigPath()}: expected an array of space IDs, e.g. syncSpaces = ["spc_abc123"].`,
+    );
+  return [...new Set((value as string[]).map((id) => id.trim()))];
 }
 
 /** Overwrite the config file atomically (tmp + rename). */
@@ -146,8 +186,8 @@ export async function getProfile(name: string): Promise<Profile | null> {
 
 /**
  * Merge a partial update into an existing profile. Used by the login
- * org→app cascade and the `org switch` / `app switch` commands to rewrite
- * a single field (`orgId`, `applicationId`) without re-reading the whole profile
+ * org→space cascade and the `org switch` / `space switch` commands to rewrite
+ * a single field (`orgId`, `spaceId`) without re-reading the whole profile
  * at each call site.
  *
  * `undefined` in the patch means "clear the key" — strip it before write
@@ -160,6 +200,7 @@ export async function updateProfile(name: string, patch: Partial<Profile>): Prom
     throw new Error(`Profile "${name}" missing from config — internal invariant broken.`);
   }
   const next: Profile = { ...existing, ...patch };
+  if ("orgId" in patch && patch.orgId !== existing.orgId) delete next.syncSpaces;
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) delete (next as unknown as Record<string, unknown>)[k];
   }
@@ -183,21 +224,45 @@ export async function resolveActiveProfile(
 }
 
 /**
+ * `resolveActiveProfile` for callers that can proceed without a profile at
+ * all — `appstrate run` with an `ask_…` API key is the whole reason this
+ * exists. An unreadable or unparseable `config.toml` degrades to `null` so a
+ * corrupt file cannot block a run that never needed the file.
+ *
+ */
+export async function resolveActiveProfileOrNull(
+  explicit: string | undefined,
+): Promise<{ profileName: string; profile: Profile | undefined } | null> {
+  try {
+    return await resolveActiveProfile(explicit);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Narrow `profile` from `Profile | undefined` to `Profile`, hard-exiting
  * with an actionable hint when the resolved profile has no config entry.
- * Used by every `appstrate org …` / `appstrate app …` subcommand —
+ * Used by every `appstrate org …` / `appstrate space …` subcommand —
  * centralized so the phrasing stays in sync across the two command
  * families.
+ *
+ * Takes the caller's `io` so the "not configured" branch lands in the same
+ * sink as the rest of the command. A test that injects a memory sink into
+ * `orgListCommand` would otherwise still hit the real `process.exit` here
+ * and kill the test worker (issue #1180). `models.ts` and any other caller
+ * that passes nothing keeps the production wiring via the default.
  */
 export function requireLoggedIn(
   profileName: string,
   profile: Profile | undefined,
+  io: CommandIO = DEFAULT_IO,
 ): asserts profile is Profile {
   if (!profile) {
-    process.stderr.write(
+    io.stderr.write(
       `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
     );
-    process.exit(1);
+    io.exit(1);
   }
 }
 

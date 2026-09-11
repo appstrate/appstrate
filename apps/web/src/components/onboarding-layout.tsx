@@ -11,7 +11,7 @@ import { useAppConfig } from "../hooks/use-app-config";
 import { NavUser } from "./nav-user";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
-export type StepKey = "create" | "plan" | "model" | "members" | "complete";
+type StepKey = "create" | "plan" | "model" | "members" | "complete";
 
 interface StepDef {
   key: StepKey;
@@ -28,8 +28,8 @@ const ALL_STEPS: (StepDef & { showWhen?: "billing" })[] = [
 
 /**
  * Returns the active onboarding steps filtered by feature flags.
- * OSS: create → model → members → complete
- * Cloud: create → plan → members → complete
+ * Without billing: create → model → members → complete
+ * With billing (`@appstrate/module-ee`): create → plan → members → complete
  */
 function useOnboardingSteps(): StepDef[] {
   const { features } = useAppConfig();

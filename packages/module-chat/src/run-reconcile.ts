@@ -4,13 +4,13 @@
  * Reconciliation of a run that OUTLIVES the chat turn that launched it (C3/D5).
  *
  * The audited session produced a 22 846-byte `report.html` two minutes AFTER its
- * turn was killed by the turn deadline. The document exists, attached to the
+ * turn was killed by the turn deadline. The file exists, attached to the
  * run, and no message in the session ever mentioned it — 4.68 USD of work
  * delivered to nobody.
  *
- * The fix is a MESSAGE, not a change of ownership: `documents.run_id` and
- * `documents.chat_session_id` are an exclusive container pair
- * (`chk_documents_single_container`), so there is no re-parenting a run's
+ * The fix is a MESSAGE, not a change of ownership: `files.run_id` and
+ * `files.chat_session_id` are an exclusive container pair
+ * (`chk_files_single_container`), so there is no re-parenting a run's
  * deliverable into the conversation. This module therefore does two things:
  *
  *  1. {@link stampChatSessionOnRun} — at launch, record WHICH chat session
@@ -21,7 +21,7 @@
  *     session" reachable from the public run routes.
  *  2. {@link reconcileChatRun} — on the terminal `onRunStatusChange` event, if
  *     that session has no live turn, post a notice naming the run and its
- *     published documents.
+ *     published files.
  *
  * Liveness is `chat_sessions.active_stream_id IS NULL`. That column is the
  * platform's existing single source of truth for "a turn is generating" (the
@@ -31,6 +31,10 @@
  * rather than merely the convenient one: chat persistence is single-writer, and
  * a notice inserted while a turn is mid-flight would chain onto the in-progress
  * user message and race the assistant message that turn is about to persist.
+ * This module does NOT evaluate it — `persistNotice` does, inside the same
+ * transaction as the insert and behind a row lock. Reading it here first and
+ * writing after would be exactly the read-then-write the rule exists to
+ * prevent: `setActiveStream` can start a turn in the gap between the two.
  *
  * Consequences, accepted deliberately:
  *  - a run still being awaited by its own live turn is skipped — that turn's
@@ -39,20 +43,20 @@
  *    duplicate what the user is already reading;
  *  - if a NEWER turn happens to be generating at the instant the orphan
  *    finalizes, the notice is skipped and not retried. The deliverable is still
- *    reachable (run page, documents gallery). Retrying would mean a queue, a
+ *    reachable (run page, files gallery). Retrying would mean a queue, a
  *    worker or a table — all three out of proportion for this.
  */
 
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatSessions, documents, runs } from "@appstrate/db/schema";
-import { documentUri } from "@appstrate/core/document-uri";
+import { files, runs } from "@appstrate/db/schema";
+import { fileUri } from "@appstrate/core/file-uri";
 import { persistNotice } from "./persistence.ts";
-import { buildRunPageHref } from "./ui/run-events.ts";
+import { buildRunPageHref, UNNAMED_FILE } from "./ui/run-events.ts";
 import { logger } from "./logger.ts";
 
-/** One document named in the notice. */
-interface NoticedDocument {
+/** One file named in the notice. */
+interface NoticedFile {
   id: string;
   name: string;
   size: number;
@@ -68,11 +72,11 @@ export function runNoticeMessageId(runId: string): string {
   return `run_notice_${runId}`;
 }
 
-/** Display ceiling for a document name inside the notice. */
+/** Display ceiling for a file name inside the notice. */
 const NOTICE_NAME_MAX_CHARS = 80;
 
 /**
- * Render an agent-chosen document name safely inside the notice.
+ * Render an agent-chosen file name safely inside the notice.
  *
  * The name is UNTRUSTED: a sub-agent processing injected third-party content
  * picks it, and `sanitizeFilename` only strips path separators and control
@@ -80,8 +84,8 @@ const NOTICE_NAME_MAX_CHARS = 80;
  * persisted with `role: "assistant"` and replayed to the model on the next
  * turn, so an unquoted name would let a file name become text the orchestrator
  * reads back as its OWN prior statement — prompt injection with the assistant's
- * authority. Document names already reach the model through `run_and_wait`'s
- * `documents` list, but that is a tool result, not the assistant channel.
+ * authority. File names already reach the model through `run_and_wait`'s
+ * `files` list, but that is a tool result, not the assistant channel.
  *
  * Two defences: a hard length cap well under `sanitizeFilename`'s 255, and a
  * code span. Backticks in the name are stripped rather than escaped — a name is
@@ -93,7 +97,7 @@ function renderNoticeName(name: string): string {
     flattened.length > NOTICE_NAME_MAX_CHARS
       ? `${flattened.slice(0, NOTICE_NAME_MAX_CHARS - 1)}…`
       : flattened;
-  return `\`${clipped || "document"}\``;
+  return `\`${clipped || UNNAMED_FILE}\``;
 }
 
 /**
@@ -105,11 +109,11 @@ export function runNoticeText(input: {
   runId: string;
   packageId: string | null;
   status: string;
-  documents: readonly NoticedDocument[];
+  files: readonly NoticedFile[];
 }): string {
   const href = buildRunPageHref(input.packageId ?? undefined, input.runId);
-  const lines = input.documents.map(
-    (doc) => `- ${renderNoticeName(doc.name)} (${doc.size} o) — \`${documentUri(doc.id)}\``,
+  const lines = input.files.map(
+    (file) => `- ${renderNoticeName(file.name)} (${file.size} o) — \`${fileUri(file.id)}\``,
   );
   const label = href ? `[\`${input.runId}\`](${href})` : `\`${input.runId}\``;
   return (
@@ -152,10 +156,10 @@ export async function stampChatSessionOnRun(
  * deliberate skip:
  *
  *  - the run was not launched from a chat session;
- *  - its session is gone;
- *  - a turn is generating on that session (see the liveness rationale above);
- *  - the run published no document, so there is nothing to announce;
- *  - the notice for this run is already in the transcript.
+ *  - the run published no file, so there is nothing to announce;
+ *  - `persistNotice` refused: the session is gone, a turn is generating on it
+ *    (see the liveness rationale above), or the notice is already in the
+ *    transcript.
  */
 export async function reconcileChatRun(input: { runId: string; orgId: string }): Promise<boolean> {
   const [run] = await db
@@ -170,44 +174,35 @@ export async function reconcileChatRun(input: { runId: string; orgId: string }):
   const chatSessionId = run?.chatSessionId;
   if (!run || !chatSessionId) return false;
 
-  const [session] = await db
-    .select({ activeStreamId: chatSessions.activeStreamId })
-    .from(chatSessions)
-    .where(and(eq(chatSessions.id, chatSessionId), eq(chatSessions.orgId, input.orgId)))
-    .limit(1);
-  if (!session) return false;
-  // A live turn owns the conversation: it is awaiting this very run (or writing
-  // its own reply) and is the single writer until it finalizes.
-  if (session.activeStreamId !== null) return false;
-
   const published = await db
-    .select({ id: documents.id, name: documents.name, size: documents.size })
-    .from(documents)
+    .select({ id: files.id, name: files.name, size: files.size })
+    .from(files)
     .where(
       and(
-        eq(documents.runId, input.runId),
-        eq(documents.orgId, input.orgId),
-        eq(documents.purpose, "agent_output"),
+        eq(files.runId, input.runId),
+        eq(files.orgId, input.orgId),
+        eq(files.purpose, "agent_output"),
       ),
     )
-    .orderBy(asc(documents.createdAt));
+    .orderBy(asc(files.createdAt));
   if (published.length === 0) return false;
 
-  const posted = await persistNotice(
-    chatSessionId,
-    runNoticeMessageId(input.runId),
-    runNoticeText({
+  const posted = await persistNotice({
+    sessionId: chatSessionId,
+    orgId: input.orgId,
+    messageId: runNoticeMessageId(input.runId),
+    text: runNoticeText({
       runId: input.runId,
       packageId: run.packageId,
       status: run.status,
-      documents: published,
+      files: published,
     }),
-  );
+  });
   if (posted) {
-    logger.info("chat: announced an orphaned run's documents in its session", {
+    logger.info("chat: announced an orphaned run's files in its session", {
       runId: input.runId,
       chatSessionId,
-      documents: published.length,
+      files: published.length,
     });
   }
   return posted;

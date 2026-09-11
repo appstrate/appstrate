@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OIDC module — End-User Identity Provider for Appstrate applications.
+ * OIDC module — End-User Identity Provider for Appstrate spaces.
  *
- * When loaded, turns each Appstrate application into an OAuth 2.1 /
+ * When loaded, turns each Appstrate space into an OAuth 2.1 /
  * OpenID Connect authorization server for its end-users. External apps
  * (satellites, mobile apps, partner integrations) register an OAuth client,
  * run the PKCE flow against `/api/auth/oauth2/*`, and exchange the resulting
@@ -26,7 +26,7 @@
  *  - `init()` installs the realm resolver and syncs instance clients. The
  *    Better Auth oauth-provider tables and the `oidc_end_user_profiles`
  *    shadow table live in the core schema and are created by the system
- *    migration pipeline — the module no longer owns migrations.
+ *    migration pipeline; modules own no tables and run no migrations.
  */
 
 import { z } from "zod";
@@ -59,6 +59,7 @@ import {
   createOAuthClientSchema,
   updateOAuthClientSchema,
   smtpConfigUpsertSchema,
+  smtpConfigTestSchema,
   socialProviderUpsertSchema,
 } from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
@@ -91,7 +92,7 @@ const oidcModule: AppstrateModule = {
     // auto-registered via the core schema barrel in `packages/db/src/auth.ts`.
     //
     // Install the realm resolver so the BA user-create hook tags new
-    // end-user rows with `realm="end_user:<applicationId>"`. Platform-side
+    // end-user rows with `realm="end_user:<spaceId>"`. Platform-side
     // signups (dashboard, org invitation, instance/org-level OIDC clients)
     // keep the default "platform" realm. See the resolver file header and
     // `packages/db/src/auth.ts::setRealmResolver` for the full contract.
@@ -146,8 +147,8 @@ const oidcModule: AppstrateModule = {
   },
 
   // OIDC admin routes are org-scoped (dashboard clients) — end_user clients
-  // are created with a `referencedApplicationId` passed explicitly in the
-  // request body. No `X-Application-Id` header is required.
+  // are created with a `referencedSpaceId` passed explicitly in the
+  // request body. No `X-Space-Id` header is required.
   publicPaths: [
     "/api/oauth/login",
     "/api/oauth/register",
@@ -178,8 +179,8 @@ const oidcModule: AppstrateModule = {
     return oidcBetterAuthPlugins({ cachedTrustedClientIds });
   },
 
-  // No `drizzleSchemas()`: the OIDC tables (jwks, oauth_clients, …) live in the
-  // core schema barrel, which the Better Auth adapter resolves directly.
+  // The OIDC tables (jwks, oauth_clients, …) live in the core schema barrel —
+  // modules own no tables; the Better Auth adapter resolves them from there.
 
   openApiPaths() {
     return oidcPaths;
@@ -200,9 +201,9 @@ const oidcModule: AppstrateModule = {
     return [
       { name: "OAuth Clients", description: "OAuth 2.1 client registry for end-user auth" },
       {
-        name: "Application Auth Config",
+        name: "Space Auth Config",
         description:
-          "Per-application SMTP + social OAuth App configuration for `level: application` OIDC clients",
+          "Per-space SMTP + social OAuth App configuration for `level: space` OIDC clients",
       },
       {
         name: "Device Authorization",
@@ -227,15 +228,21 @@ const oidcModule: AppstrateModule = {
       },
       {
         method: "PUT",
-        path: "/api/applications/{id}/smtp-config",
+        path: "/api/spaces/{id}/smtp-config",
         jsonSchema: z.toJSONSchema(smtpConfigUpsertSchema) as Record<string, unknown>,
-        description: "Upsert per-application SMTP configuration",
+        description: "Upsert per-space SMTP configuration",
+      },
+      {
+        method: "POST",
+        path: "/api/spaces/{id}/smtp-config/test",
+        jsonSchema: z.toJSONSchema(smtpConfigTestSchema) as Record<string, unknown>,
+        description: "Send a test email through the space's SMTP configuration",
       },
       {
         method: "PUT",
-        path: "/api/applications/{id}/social-providers/{provider}",
+        path: "/api/spaces/{id}/social-providers/{provider}",
         jsonSchema: z.toJSONSchema(socialProviderUpsertSchema) as Record<string, unknown>,
-        description: "Upsert per-application social auth provider",
+        description: "Upsert per-space social auth provider",
       },
     ];
   },
@@ -271,6 +278,7 @@ const oidcModule: AppstrateModule = {
     {
       resource: "oauth-clients",
       actions: ["read", "write", "delete"],
+      level: "org",
       grantTo: ["owner", "admin"],
       apiKeyGrantable: true,
     },
@@ -285,6 +293,7 @@ const oidcModule: AppstrateModule = {
     {
       resource: "cli-sessions",
       actions: ["read", "delete"],
+      level: "org",
       grantTo: ["owner", "admin"],
       apiKeyGrantable: false,
     },

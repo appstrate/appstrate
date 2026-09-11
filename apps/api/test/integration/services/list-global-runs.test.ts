@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "../../helpers/db.ts";
 import { eq } from "drizzle-orm";
-import { packages, documents, runs, chatSessions } from "@appstrate/db/schema";
+import { packages, files, runs, chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
@@ -21,6 +21,7 @@ import { seedPackage, seedRun } from "../../helpers/seed.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import { listGlobalRuns } from "../../../src/services/state/runs.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
+import { prefixedId } from "../../../src/lib/ids.ts";
 
 const inlineManifest = {
   name: "@inline/r-test",
@@ -49,7 +50,7 @@ describe("listGlobalRuns", () => {
     return seedRun({
       packageId: shadowId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status,
       startedAt: new Date(),
     });
@@ -64,14 +65,14 @@ describe("listGlobalRuns", () => {
     return seedRun({
       packageId: pkg.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status,
       startedAt: new Date(),
     });
   }
 
   it("returns empty list when no runs exist", async () => {
-    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     expect(result.data).toEqual([]);
     expect(result.total).toBe(0);
   });
@@ -80,7 +81,7 @@ describe("listGlobalRuns", () => {
     const inline = await seedInlineRun();
     const pkg = await seedPackageRun();
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     expect(result.total).toBe(2);
 
     const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
@@ -94,7 +95,7 @@ describe("listGlobalRuns", () => {
     await seedPackageRun();
 
     const result = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { kind: "inline" },
     );
     expect(result.total).toBe(2);
@@ -109,7 +110,7 @@ describe("listGlobalRuns", () => {
     await seedPackageRun();
 
     const result = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { kind: "package" },
     );
     expect(result.total).toBe(2);
@@ -123,7 +124,7 @@ describe("listGlobalRuns", () => {
     await seedPackageRun();
 
     const all = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { kind: "all" },
     );
     expect(all.total).toBe(2);
@@ -134,7 +135,7 @@ describe("listGlobalRuns", () => {
     await seedPackageRun("failed");
 
     const result = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { status: "failed" },
     );
     expect(result.total).toBe(1);
@@ -146,6 +147,7 @@ describe("listGlobalRuns", () => {
     await db.insert(chatSessions).values({
       id: ownSessionId,
       orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const linked = await seedPackageRun();
@@ -153,7 +155,7 @@ describe("listGlobalRuns", () => {
     await seedPackageRun();
 
     const result = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { chatSessionId: ownSessionId, actor: { type: "user", id: ctx.user.id } },
     );
     expect(result.data.map((run) => run.id)).toEqual([linked.id]);
@@ -161,7 +163,7 @@ describe("listGlobalRuns", () => {
     const other = await createTestUser({ email: "other-run-chat-owner@test.local" });
     await addOrgMember(ctx.orgId, other.id, "member");
     const denied = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { chatSessionId: ownSessionId, actor: { type: "user", id: other.id } },
     );
     expect(denied.data).toEqual([]);
@@ -183,50 +185,45 @@ describe("listGlobalRuns", () => {
     const recent = await seedPackageRun();
 
     const since2024 = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { startDate: new Date("2024-01-01") },
     );
     expect(since2024.data.map((r) => r.id)).toEqual([recent.id]);
 
     const until2023 = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { endDate: new Date("2023-01-01") },
     );
     expect(until2023.data.map((r) => r.id)).toEqual([old.id]);
   });
 
-  it("respects the applicationId filter (cross-app isolation)", async () => {
+  it("respects the spaceId filter (cross-space isolation)", async () => {
     await seedPackageRun();
 
-    // Different application in the same org — seedApplication directly
-    const { applications } = await import("@appstrate/db/schema");
-    const [otherApp] = await db
-      .insert(applications)
+    // Different space in the same org — seedSpace directly
+    const { spaces } = await import("@appstrate/db/schema");
+    const [otherSpace] = await db
+      .insert(spaces)
       .values({
-        id: `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-        name: "Other App",
+        id: prefixedId("spc"),
+        name: "Other Space",
         orgId: ctx.orgId,
       })
       .returning();
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: otherApp!.id });
+    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: otherSpace!.id });
     expect(result.total).toBe(0);
   });
 
-  async function seedRunDocument(
-    runId: string,
-    purpose: "agent_output" | "user_upload",
-    presentation: "primary" | null = null,
-  ) {
-    const docId = `doc_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
-    await db.insert(documents).values({
+  async function seedRunFile(runId: string, purpose: "agent_output" | "user_upload") {
+    const docId = `file_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+    await db.insert(files).values({
       id: docId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       purpose,
-      presentation,
       runId,
-      storageKey: `documents/${ctx.defaultAppId}/${docId}/out.txt`,
+      storageKey: `files/${ctx.defaultSpaceId}/${docId}/out.txt`,
       name: "out.txt",
       mime: "text/plain",
       size: 3,
@@ -235,50 +232,73 @@ describe("listGlobalRuns", () => {
     return docId;
   }
 
-  const seedOutputDocument = (runId: string) => seedRunDocument(runId, "agent_output");
+  const seedOutputFile = (runId: string) => seedRunFile(runId, "agent_output");
 
-  it("reports document_counts: input from run.input URIs, output from documents rows", async () => {
+  it("reports file_counts: input from run.input URIs, output from files rows", async () => {
     const pkg = await seedPackage({
       id: `@globalruns/agent-${crypto.randomUUID().slice(0, 8)}`,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    // Two distinct input document URIs (one duplicated → deduped to 2), plus a
-    // malformed one that must be ignored by extractDocumentIds.
+    // Two distinct input file URIs (one duplicated → deduped to 2), plus a
+    // malformed one that must be ignored by extractFileIds.
     const withDocs = await seedRun({
       packageId: pkg.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
       startedAt: new Date(),
       input: {
-        file: "document://doc_aaaaaaaa",
-        again: "document://doc_aaaaaaaa",
-        nested: { other: "document://doc_bbbbbbbb" },
-        bogus: "document://doc_x",
+        file: "appfile://file_aaaaaaaa",
+        again: "appfile://file_aaaaaaaa",
+        nested: { other: "appfile://file_bbbbbbbb" },
+        bogus: "appfile://file_x",
       },
     });
-    const primaryDocumentId = await seedRunDocument(withDocs.id, "agent_output", "primary");
-    await seedOutputDocument(withDocs.id);
-    await seedOutputDocument(withDocs.id);
+    await seedOutputFile(withDocs.id);
+    await seedOutputFile(withDocs.id);
+    await seedOutputFile(withDocs.id);
 
-    // A run with null input and no documents → both counts zero.
+    // A run with null input and no files → both counts zero.
     const empty = await seedPackageRun();
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
 
-    expect(byId[withDocs.id]?.document_counts).toEqual({ input: 2, output: 3 });
-    expect(byId[withDocs.id]?.primary_document_id).toBe(primaryDocumentId);
-    expect(byId[empty.id]?.document_counts).toEqual({ input: 0, output: 0 });
-    expect(byId[empty.id]?.primary_document_id).toBeNull();
+    expect(byId[withDocs.id]?.file_counts).toEqual({ input: 2, output: 3 });
+    expect(byId[empty.id]?.file_counts).toEqual({ input: 0, output: 0 });
+    // The derived presentation rule (0 → nothing, 1 → shown, N → a list) reads
+    // ONLY this count. The run projection carries no primary/featured field for
+    // a client to prefer over it.
+    expect(byId[withDocs.id]).not.toHaveProperty("primary_file_id");
+    expect(byId[empty.id]).not.toHaveProperty("primary_file_id");
   });
 
-  it("does not count a materialized INPUT upload as an output document", async () => {
+  it("exposes the produced-file count a client derives its presentation from", async () => {
+    // The three cases the client-side rule distinguishes, end to end.
+    const zero = await seedPackageRun();
+    const one = await seedPackageRun();
+    await seedOutputFile(one.id);
+    const many = await seedPackageRun();
+    await seedOutputFile(many.id);
+    await seedOutputFile(many.id);
+
+    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
+
+    expect(byId[zero.id]?.file_counts.output).toBe(0);
+    expect(byId[one.id]?.file_counts.output).toBe(1);
+    expect(byId[many.id]?.file_counts.output).toBe(2);
+    for (const run of [zero, one, many]) {
+      expect(byId[run.id]).not.toHaveProperty("primary_file_id");
+    }
+  });
+
+  it("does not count a materialized INPUT upload as an output file", async () => {
     // A run triggered with one file input and publishing nothing. The
     // materialized `user_upload` carries the SAME run_id as any output would, so
     // an unfiltered count reported it twice — once as input (from the run's
-    // `document://` URI) and once as output.
+    // `appfile://` URI) and once as output.
     const pkg = await seedPackage({
       id: `@globalruns/agent-${crypto.randomUUID().slice(0, 8)}`,
       orgId: ctx.orgId,
@@ -287,34 +307,34 @@ describe("listGlobalRuns", () => {
     const run = await seedRun({
       packageId: pkg.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
       startedAt: new Date(),
       input: {},
     });
-    const docId = await seedRunDocument(run.id, "user_upload");
+    const docId = await seedRunFile(run.id, "user_upload");
     await db
       .update(runs)
-      .set({ input: { file: `document://${docId}` } })
+      .set({ input: { file: `appfile://${docId}` } })
       .where(eq(runs.id, run.id));
 
-    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const result = await listGlobalRuns({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const row = result.data.find((r) => r.id === run.id);
-    expect(row?.document_counts).toEqual({ input: 1, output: 0 });
+    expect(row?.file_counts).toEqual({ input: 1, output: 0 });
   });
 
   it("orders by startedAt DESC and paginates", async () => {
     for (let i = 0; i < 5; i++) await seedPackageRun();
 
     const page1 = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { limit: 2, offset: 0 },
     );
     expect(page1.data).toHaveLength(2);
     expect(page1.total).toBe(5);
 
     const page2 = await listGlobalRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { limit: 2, offset: 2 },
     );
     expect(page2.data).toHaveLength(2);

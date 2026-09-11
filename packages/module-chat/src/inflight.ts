@@ -15,10 +15,6 @@ export function trackTurn(promise: Promise<unknown>): void {
   void promise.finally(() => inflight.delete(promise));
 }
 
-export function inflightCount(): number {
-  return inflight.size;
-}
-
 /**
  * Await all in-flight turns, capped at `timeoutMs`. Returns the number of turns
  * that were pending when the drain started.

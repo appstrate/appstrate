@@ -92,7 +92,6 @@
   "emptyConfig": "Aucun réglage déclaré",
   "configUnset": "non défini",
   "editConfig": "Modifier la configuration",
-  "editConfigSchema": "Modifier les réglages déclarés",
   "concept.config.title": "Configuration",
   "concept.config.body": "Un réglage que l'auteur de l'agent a rendu modifiable sans toucher au prompt.\n\nPrenez l'agent « Rapport hebdomadaire ». Le canal Slack où il publie ne change jamais d'une semaine sur l'autre, mais il change d'une entreprise à l'autre : c'est une configuration, réglée une fois à l'installation. La semaine à analyser, elle, change à chaque lancement : c'est une entrée.\n\nMême forme dans le manifeste, deux durées de vie. D'où la place de cette carte, à côté du modèle plutôt que sur l'axe de l'agent : configuration et modèle sont tous deux des réglages de votre installation, pas des données qui traversent l'agent.\n\nDeux choses se modifient ici. Le crayon de l'en-tête change les réglages que l'agent DÉCLARE, ce qui touche son manifeste. Cliquer une ligne change sa VALEUR pour cette application : la même définition installée deux fois peut publier dans deux canaux différents.",
   "concept.schedules.title": "Planifications",

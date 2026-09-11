@@ -8,7 +8,7 @@
  * from the ambient `oidc_pending_client` browser cookie: the caller controls
  * whether their browser presents the cookie (strip it → the old resolver
  * saw "no OIDC flow" and minted a full platform-realm user for an
- * application signup), and the single global cookie is clobbered by a
+ * space signup), and the single global cookie is clobbered by a
  * concurrent flow in a second tab.
  *
  * These tests drive `oidcRealmResolver` / `enforceMagicLinkSignupPolicy`
@@ -29,6 +29,7 @@ import { createClient, _resetClientCache } from "../../../services/oauth-admin.t
 import { oidcRealmResolver } from "../../../services/oidc-realm-resolver.ts";
 import {
   persistMagicLinkClientBinding,
+  resolvePendingClientBinding,
   MAGIC_LINK_VERIFY_PATH,
 } from "../../../services/oauth-transaction-binding.ts";
 import { enforceMagicLinkSignupPolicy } from "../../../auth/guards.ts";
@@ -51,7 +52,7 @@ function verifyLegCtx(token: string, cookie?: string) {
 
 describe("magic-link verify realm binding (CRIT-15)", () => {
   let appClientId: string;
-  let applicationId: string;
+  let spaceId: string;
   let orgId: string;
 
   beforeEach(async () => {
@@ -59,12 +60,12 @@ describe("magic-link verify realm binding (CRIT-15)", () => {
     _resetClientCache();
     const ctx = await createTestContext({ orgSlug: "mlbind" });
     orgId = ctx.orgId;
-    applicationId = ctx.defaultAppId;
+    spaceId = ctx.defaultSpaceId;
     const created = await createClient({
-      level: "application",
+      level: "space",
       name: "Binding App",
       redirectUris: ["https://rp.example.com/cb"],
-      referencedApplicationId: applicationId,
+      referencedSpaceId: spaceId,
       allowSignup: true,
     });
     appClientId = created.clientId;
@@ -75,7 +76,7 @@ describe("magic-link verify realm binding (CRIT-15)", () => {
     await persistMagicLinkClientBinding(token, appClientId);
 
     const realm = await oidcRealmResolver(verifyLegCtx(token));
-    expect(realm).toBe(`end_user:${applicationId}`);
+    expect(realm).toBe(`end_user:${spaceId}`);
   });
 
   it("token binding WINS over a conflicting cookie from a concurrent tab", async () => {
@@ -92,7 +93,7 @@ describe("magic-link verify realm binding (CRIT-15)", () => {
     });
 
     const realm = await oidcRealmResolver(verifyLegCtx(token, pendingClientCookie(other.clientId)));
-    expect(realm).toBe(`end_user:${applicationId}`);
+    expect(realm).toBe(`end_user:${spaceId}`);
   });
 
   it("fails CLOSED when the binding names a client that no longer resolves", async () => {
@@ -105,6 +106,30 @@ describe("magic-link verify realm binding (CRIT-15)", () => {
   it("resolves platform for a verify with no binding and no cookie (direct BA magic-link)", async () => {
     const realm = await oidcRealmResolver(verifyLegCtx(`ml_${crypto.randomUUID()}`));
     expect(realm).toBe("platform");
+  });
+
+  it("refuses the ambient cookie on a verify with NO binding (unrelated tab must not leak in)", async () => {
+    // A direct, non-OIDC magic-link signup while an OIDC tab has left its
+    // global `oidc_pending_client` cookie behind: the cookie belongs to a
+    // different transaction, so it decides nothing here. The verify leg used
+    // to fall through to it, inheriting that client's realm and signup policy.
+    const ctx = verifyLegCtx(`ml_${crypto.randomUUID()}`, pendingClientCookie(appClientId));
+
+    expect(await resolvePendingClientBinding(ctx)).toEqual({ kind: "none" });
+    expect(await oidcRealmResolver(ctx)).toBe("platform");
+  });
+
+  it("control: the same verify WITH a server-side binding still binds its client", async () => {
+    const token = `ml_${crypto.randomUUID()}`;
+    await persistMagicLinkClientBinding(token, appClientId);
+    const ctx = verifyLegCtx(token, pendingClientCookie(appClientId));
+
+    expect(await resolvePendingClientBinding(ctx)).toEqual({
+      kind: "bound",
+      clientId: appClientId,
+      source: "magic-link",
+    });
+    expect(await oidcRealmResolver(ctx)).toBe(`end_user:${spaceId}`);
   });
 
   it("ignores an expired binding row", async () => {
@@ -125,10 +150,10 @@ describe("magic-link verify realm binding (CRIT-15)", () => {
 
   it("closed-signup gate fires from the binding alone (no cookie) on the verify pre-check", async () => {
     const closed = await createClient({
-      level: "application",
+      level: "space",
       name: "Closed Binding App",
       redirectUris: ["https://rp.example.com/cb"],
-      referencedApplicationId: applicationId,
+      referencedSpaceId: spaceId,
       allowSignup: false,
     });
     const token = `ml_${crypto.randomUUID()}`;

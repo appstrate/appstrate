@@ -30,7 +30,7 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 
 describe("NOTIFY triggers (regression)", () => {
   let ctx: TestContext;
@@ -77,7 +77,7 @@ describe("NOTIFY triggers (regression)", () => {
     await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "pending",
     });
@@ -87,7 +87,7 @@ describe("NOTIFY triggers (regression)", () => {
     const run = await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "pending",
     });
@@ -107,7 +107,7 @@ describe("NOTIFY triggers (regression)", () => {
     const run = await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "pending",
     });
@@ -159,20 +159,95 @@ describe("NOTIFY triggers (regression)", () => {
     expect(received.every((r) => r.status === "running")).toBe(true);
   });
 
-  it("notify_run_log_insert fires on run_logs INSERT", async () => {
+  it("notify_run_log_insert emits the run's scope AND its actor", async () => {
+    // `run_logs` carries no actor column: the trigger resolves it from `runs`
+    // alongside the space, because the SSE fan-out gates each log frame on
+    // `runs:read-all` OR ownership and has nothing else to decide from.
     const run = await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
+
+    const received: Array<Record<string, unknown>> = [];
+    await listenClient.listen("run_log_insert", (raw) => {
+      try {
+        const payload = JSON.parse(raw) as Record<string, unknown>;
+        if (payload.run_id === run.id) received.push(payload);
+      } catch {
+        /* ignore */
+      }
+    });
+
     await seedRunLog({
       runId: run.id,
       orgId: ctx.orgId,
       level: "info",
       message: "trigger smoke test",
     });
+    for (let i = 0; i < 40 && received.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      run_id: run.id,
+      org_id: ctx.orgId,
+      space_id: ctx.defaultSpaceId,
+      user_id: ctx.user.id,
+      end_user_id: null,
+      message: "trigger smoke test",
+    });
+  });
+
+  // The budget the trigger body documents: pg_notify raises above 8 000 bytes,
+  // and it raises INSIDE the trigger, so an over-long payload does not lose a
+  // frame — it aborts the `run_logs` INSERT. Both sides of the `data` cap are
+  // pinned here because the actor columns added to the payload spend part of
+  // the same 8 000.
+  it("notify_run_log_insert replaces oversized log data and keeps the INSERT", async () => {
+    const run = await seedRun({
+      packageId: "@notifyorg/trigger-agent",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      status: "running",
+    });
+
+    const received: Array<Record<string, unknown>> = [];
+    await listenClient.listen("run_log_insert", (raw) => {
+      try {
+        const payload = JSON.parse(raw) as Record<string, unknown>;
+        if (payload.run_id === run.id) received.push(payload);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // `{"blob":"…"}` — 12 bytes of JSON around the string, so 4 900 characters
+    // is comfortably under the 5 000-byte cap and 6 000 comfortably over it.
+    await seedRunLog({
+      runId: run.id,
+      orgId: ctx.orgId,
+      message: "small data",
+      data: { blob: "x".repeat(4_900) },
+    });
+    await seedRunLog({
+      runId: run.id,
+      orgId: ctx.orgId,
+      message: "large data",
+      data: { blob: "x".repeat(6_000) },
+    });
+    for (let i = 0; i < 40 && received.length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    expect(received).toHaveLength(2);
+    expect(received[0]).toMatchObject({ message: "small data" });
+    expect((received[0]!.data as { blob: string }).blob).toHaveLength(4_900);
+    expect(received[1]).toMatchObject({ message: "large data", data: "[payload too large]" });
   });
 
   // Drives the live "Reconnection required" badge end-to-end: trigger →
@@ -204,22 +279,22 @@ describe("NOTIFY triggers (regression)", () => {
         },
       }),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEG);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
 
     // Local accumulator — the listener handler stays attached for the
     // process lifetime (the ListenClient abstraction in db/client.ts hides
     // postgres.js's unlisten by casting to Promise<void>). `afterAll` drops
     // the trigger so no more NOTIFYs fire on integration_connections, and
-    // the application_id filter inside the handler scopes to this test only.
+    // the space_id filter inside the handler scopes to this test only.
     const received: Array<{ operation: string; needs_reconnection: boolean | null }> = [];
     await listenClient.listen("connection_update", (raw) => {
       try {
         const payload = JSON.parse(raw) as {
           operation: string;
-          application_id: string;
+          space_id: string;
           needs_reconnection: boolean | null;
         };
-        if (payload.application_id !== ctx.defaultAppId) return;
+        if (payload.space_id !== ctx.defaultSpaceId) return;
         received.push({
           operation: payload.operation,
           needs_reconnection: payload.needs_reconnection,
@@ -235,7 +310,7 @@ describe("NOTIFY triggers (regression)", () => {
         integrationId: INTEG,
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "v1" } }),

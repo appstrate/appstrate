@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
- * Page Object for the sidebar navigation — org/app switcher and nav links.
+ * Page Object for the sidebar navigation — org/space switcher and nav links.
  */
 export class Sidebar {
   constructor(private page: Page) {}
@@ -17,11 +17,11 @@ export class Sidebar {
     return this.page.locator("[role='menu']");
   }
 
-  get appSubmenuTrigger() {
-    return this.page.getByTestId("app-submenu-trigger");
+  get spaceSubmenuTrigger() {
+    return this.page.getByTestId("space-submenu-trigger");
   }
 
-  /** Open the org/app switcher dropdown and wait for it to render. */
+  /** Open the org/space switcher dropdown and wait for it to render. */
   async openSwitcher() {
     await this.switcherButton.click();
     await expect(this.page.locator("[role='menu']")).toBeVisible();
@@ -35,14 +35,29 @@ export class Sidebar {
     await expect(this.page).toHaveURL("/");
   }
 
-  /** Open the app submenu and click an app by name. */
-  async switchApp(appName: string) {
+  /** Open the space submenu and click a space by name. */
+  async switchSpace(spaceName: string) {
+    // The item's accessible name appends the role label, so match the name on
+    // its own element, exactly: "Default" must not pick "Default 2" or "My Default".
+    await this.clickSpaceItem(
+      this.page
+        .getByRole("menuitem")
+        .filter({ has: this.page.getByText(spaceName, { exact: true }) }),
+    );
+  }
+
+  /** Open the space submenu and click a space by id. */
+  async switchSpaceById(spaceId: string) {
+    await this.clickSpaceItem(this.page.getByTestId(`space-item-${spaceId}`));
+  }
+
+  private async clickSpaceItem(item: Locator) {
     await this.openSwitcher();
-    // Hover the app submenu trigger to open the sub-content
-    await this.appSubmenuTrigger.hover();
-    await expect(this.page.getByText(appName)).toBeVisible();
-    await this.page.getByText(appName).click();
-    // Wait for the app switch to take effect
-    await this.page.waitForLoadState("domcontentloaded");
+    // Click, not hover: a pointer already resting on the trigger when the menu
+    // opens fires no `pointerenter`, and the sub-content never appears.
+    await this.spaceSubmenuTrigger.click();
+    await expect(item).toBeVisible();
+    await item.click();
+    await expect(this.dropdownMenu).toHaveCount(0);
   }
 }

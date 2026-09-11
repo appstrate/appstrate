@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  effectiveMcpServerType,
   getMcpServerRuntime,
   getMcpServerWorkspaceMount,
   mcpServerManifestSchema,
@@ -219,6 +220,49 @@ describe("mcpServerManifestSchema — _meta.workspace install-time validation", 
         ),
       ).toBe(true);
     }
+  });
+});
+
+describe("effectiveMcpServerType", () => {
+  it("prefers the _meta override over the MCPB server.type", () => {
+    // The whole reason the helper exists: `server.type` says `node` because
+    // MCPB has no `bun`, and the package still runs under bun.
+    const m = manifest({ "dev.appstrate/mcp-server": { runtime: "bun" } });
+    expect((m as unknown as { server: { type: string } }).server.type).toBe("node");
+    expect(effectiveMcpServerType(m)).toBe("bun");
+  });
+
+  it("falls back to the MCPB server.type when no override is declared", () => {
+    expect(effectiveMcpServerType(manifest())).toBe("node");
+    expect(effectiveMcpServerType(manifest({ "dev.appstrate/mcp-server": {} }))).toBe("node");
+  });
+
+  it("falls back to server.type when the override is not a runtime we know", () => {
+    // `_meta` is author-controlled jsonb. An unrecognised value is not a
+    // runtime, so it must not shadow the MCPB type — a caller that spawned on
+    // it would exec an interpreter that does not exist.
+    expect(
+      effectiveMcpServerType(manifest({ "dev.appstrate/mcp-server": { runtime: "deno" } })),
+    ).toBe("node");
+    expect(effectiveMcpServerType(manifest({ "dev.appstrate/mcp-server": { runtime: 42 } }))).toBe(
+      "node",
+    );
+  });
+
+  it("returns server.type VERBATIM, unnarrowed", () => {
+    // The SPA reads unvalidated DRAFT manifests: an author's typo must reach
+    // the view as written rather than vanish. Narrowing this half to
+    // `McpServerRuntime` would silently blank the field being edited.
+    const draft = { ...manifest(), server: { type: "nodejs", entry_point: "./server.ts" } };
+    expect(effectiveMcpServerType(draft as unknown as McpServerManifest)).toBe("nodejs");
+  });
+
+  it("is undefined when neither source declares a runtime", () => {
+    // Not runnable. Every spawn caller fails closed on this.
+    const headless = { ...manifest(), server: { entry_point: "./server.ts" } };
+    expect(effectiveMcpServerType(headless as unknown as McpServerManifest)).toBeUndefined();
+    const blank = { ...manifest(), server: { type: "  ", entry_point: "./server.ts" } };
+    expect(effectiveMcpServerType(blank as unknown as McpServerManifest)).toBeUndefined();
   });
 });
 

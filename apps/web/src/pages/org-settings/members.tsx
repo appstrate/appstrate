@@ -22,10 +22,10 @@ import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
-import { ConfirmModal } from "../../components/confirm-modal";
 import { Modal } from "../../components/modal";
+import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
-import { ErrorState, EmptyState } from "../../components/page-states";
+import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../../components/page-actions-menu";
@@ -40,17 +40,18 @@ import {
 } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
-
 export function OrgSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
   const { user } = useAuth();
-  const { role, isAdmin } = usePermissions();
+  const { can, orgRole } = usePermissions();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
+  const canInvite = can("members:invite");
+  const canChangeRole = can("members:change-role");
 
   const inviteForm = useForm<{ email: string; role: AssignableOrgRole }>({
     defaultValues: { email: "", role: "member" },
@@ -70,7 +71,6 @@ export function OrgSettingsMembersPage() {
 
   const members = orgData?.members ?? [];
   const invitations = orgData?.invitations ?? [];
-
   const invalidateOrg = () => {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
   };
@@ -146,17 +146,17 @@ export function OrgSettingsMembersPage() {
 
   const memberColumns = useMemberColumns({
     assignableRoles: (member) =>
-      role
+      orgRole && canChangeRole
         ? assignableRolesForMember({
-            actorRole: role,
+            actorRole: orgRole,
             targetRole: member.role,
             isSelf: member.userId === user?.id,
           })
         : [],
     canRemove: (member) =>
-      role
+      orgRole
         ? canRemoveMember({
-            actorRole: role,
+            actorRole: orgRole,
             targetRole: member.role,
             isSelf: member.userId === user?.id,
           })
@@ -167,9 +167,14 @@ export function OrgSettingsMembersPage() {
     onRemove: handleRemove,
   });
 
+  // Below the hooks: an early return above `useMemberColumns` would change
+  // the hook order between a loading render and a loaded one.
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
+
   return (
     <>
-      {isAdmin && (
+      {canInvite && (
         <SettingsPageActions>
           <PageActionsMenu>
             <DropdownMenuItem data-page-action="invite" onSelect={() => setInviteOpen(true)}>
@@ -180,7 +185,7 @@ export function OrgSettingsMembersPage() {
         </SettingsPageActions>
       )}
 
-      {isAdmin && (
+      {canInvite && (
         <Modal
           open={inviteOpen}
           onClose={handleInviteClose}
@@ -272,7 +277,7 @@ export function OrgSettingsMembersPage() {
                   <Badge variant="pending">{t("orgSettings.invited")}</Badge>
                 </div>
                 <div className="border-border mt-3 flex gap-2 border-t pt-3">
-                  {isAdmin && (
+                  {canChangeRole && (
                     <Select
                       value={inv.role}
                       onValueChange={(v) =>
@@ -296,7 +301,7 @@ export function OrgSettingsMembersPage() {
                     </Select>
                   )}
                   <CopyLinkButton token={inv.token} />
-                  {isAdmin && (
+                  {canChangeRole && (
                     <Button
                       variant="destructive"
                       size="sm"

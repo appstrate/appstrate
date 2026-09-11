@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * E2E test for the upload:// protocol — covers the full direct-upload flow:
  *
@@ -38,7 +40,7 @@ async function createAgentWithFileInput(client: ApiClient, scope: string, name: 
 
   const res = await client.post("/packages/agents", {
     manifest,
-    content: "Echo the uploaded document.",
+    content: "Echo the uploaded file.",
   });
   if (res.status() !== 201 && res.status() !== 200) {
     throw new Error(`Create upload agent failed (${res.status()}): ${await res.text()}`);

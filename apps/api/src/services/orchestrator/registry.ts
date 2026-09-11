@@ -24,8 +24,6 @@ import type { ExecutionMode } from "../../infra/mode.ts";
 import { DockerOrchestrator } from "./docker-orchestrator.ts";
 import { ProcessOrchestrator } from "./process-orchestrator.ts";
 
-export type { OrchestratorRegistration } from "@appstrate/core/platform-types";
-
 interface OwnedRegistration extends OrchestratorRegistration {
   /** Module id that contributed this backend ("core" for built-in ones). */
   readonly owner: string;
@@ -99,6 +97,10 @@ function registerCoreOrchestrators(): void {
       isolatesWorkloads: true,
       supportsSidecarOnly: true,
       agentResources: { semantics: "limits" },
+      // `createIsolationBoundary` creates the per-run workspace volume with
+      // tmpfs driver options sized from `WORKSPACE_TMPFS_SIZE_MB` (0 = plain
+      // disk-backed volume, and the accessor reports the 0 verbatim).
+      appliesWorkspaceTmpfsCap: true,
       create: () => new DockerOrchestrator(),
     },
     "core",
@@ -155,6 +157,16 @@ export function orchestratorAgentResources(
   id: ExecutionMode,
 ): OrchestratorAgentResourceCapabilities | undefined {
   return ORCHESTRATORS.get(id)?.agentResources;
+}
+
+/**
+ * Whether the backend registered under `id` sizes the run workspace from
+ * `WORKSPACE_TMPFS_SIZE_MB`. Fail-closed: an unknown or undeclared backend
+ * answers `false`, so the prompt stays silent rather than claiming a cap the
+ * backend never applies.
+ */
+export function orchestratorAppliesWorkspaceTmpfsCap(id: ExecutionMode): boolean {
+  return ORCHESTRATORS.get(id)?.appliesWorkspaceTmpfsCap ?? false;
 }
 
 /** Ids of the backends that provide per-run isolation (sorted). */

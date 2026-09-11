@@ -24,10 +24,10 @@
  *      exactly once for this request. The bypass is scoped — it does
  *      NOT skip an active `AUTH_ALLOWED_SIGNUP_DOMAINS` allowlist (see
  *      `packages/db/src/auth.ts`).
- *   8. Create the bootstrap org. The post-bootstrap hook (default app
+ *   8. Create the bootstrap org. The post-bootstrap hook (default space
  *      + hello-world agent) fires uniformly via `triggerPostBootstrapOrg`.
  *      Its failures are logged + surfaced in the response `warnings`
- *      array so the operator can self-heal (createDefaultApplication
+ *      array so the operator can self-heal (createDefaultSpace
  *      is idempotent — first manual call after login backfills).
  *   9. Mark the in-memory consume flag so a concurrent retry sees an
  *      already-redeemed instance even before the org row is committed.
@@ -47,7 +47,7 @@ import { user as userTable } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { ApiError } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { logger } from "../lib/logger.ts";
 import { getClientIp } from "../lib/client-ip.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -59,14 +59,23 @@ import {
   verifyBootstrapToken,
 } from "../lib/bootstrap-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { triggerPostBootstrapOrg } from "../lib/post-bootstrap-hook.ts";
 
-const redeemSchema = z.object({
-  token: z.string().min(1).max(128),
-  email: z.email().toLowerCase().trim(),
-  name: z.string().min(1).max(120).trim(),
-  password: z.string().min(8).max(256),
-});
+export const redeemSchema = z
+  .object({
+    token: z.string().min(1).max(128),
+    email: z.email().toLowerCase().trim(),
+    name: z.string().min(1).max(120).trim(),
+    // Both bounds shared with Better Auth's own config. The cap used to be a
+    // local 256, above the 128 Better Auth actually enforced, so a 200-character
+    // password cleared this schema and was refused downstream — surfacing as the
+    // catch-all `bootstrap_signup_rejected` 400 below (or `bootstrap_signup_failed`
+    // 500 on the throw branch): RFC 9457 either way, but naming neither the length
+    // nor the bound. The Zod bound turns that into a 400 that does.
+    password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
+  })
+  .strict();
 
 // Stable bigint key for the cluster-wide advisory lock. Picked outside
 // the range used by core migrations and module migrations so collisions
@@ -211,11 +220,17 @@ export function createAuthBootstrapRouter(): Hono {
               "Use an allowlisted email for the bootstrap owner.",
           });
         }
+        // The two branches above are diagnoses the code is confident of, and
+        // both are logged with `msg` already. This one is the fall-through —
+        // "something in Better Auth's signup threw" — so it is the branch that
+        // needs the original attached: the error handler renders the chain
+        // against this request's id, which the WARN line above cannot do.
         throw new ApiError({
           status: 500,
           code: "bootstrap_signup_failed",
           title: "Internal Server Error",
           detail: "Signup failed during bootstrap redemption.",
+          cause: err,
         });
       }
 
@@ -282,11 +297,11 @@ export function createAuthBootstrapRouter(): Hono {
             orgId: result.orgId,
             slug: result.slug,
           });
-          // Best-effort post-bootstrap (default app + agent). On failure
+          // Best-effort post-bootstrap (default space + agent). On failure
           // we still return 200 — the org/user exist and login works —
           // but surface a `warnings` array so the SPA can show a "default
-          // app provisioning failed, retry by visiting /settings/apps"
-          // banner. `createDefaultApplication` is idempotent so any
+          // space provisioning failed, retry by visiting /settings/spaces"
+          // banner. `createDefaultSpace` is idempotent so any
           // subsequent call (manual or boot-time backfill) self-heals.
           await triggerPostBootstrapOrg({
             orgId: result.orgId,
@@ -296,7 +311,7 @@ export function createAuthBootstrapRouter(): Hono {
           }).catch((err: unknown) => {
             const msg = getErrorMessage(err);
             logger.error("bootstrap-redeem: post-hook failed", { error: msg });
-            warnings.push("default_app_provisioning_failed");
+            warnings.push("default_space_provisioning_failed");
           });
         }
       } catch (err) {
@@ -310,6 +325,9 @@ export function createAuthBootstrapRouter(): Hono {
           code: "bootstrap_org_failed",
           title: "Internal Server Error",
           detail: "Bootstrap org creation failed after signup; instance is in a partial state.",
+          // A 500 that leaves the instance half-provisioned: the operator will
+          // be reading logs, and the chain is what says which step failed.
+          cause: err,
         });
       }
 

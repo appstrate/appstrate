@@ -11,7 +11,7 @@
  * The resolver does NOT take an injectable refresh function. It calls
  * `forceRefreshIntegrationConnection` directly, which in turn builds a
  * `RefreshContext` from the manifest's `auths.{key}.tokenUrl` + the seeded
- * per-application `integration_oauth_clients` row, then POSTs the
+ * per-space `integration_oauth_clients` row, then POSTs the
  * `refresh_token` to that token URL via the shared
  * `performRefreshTokenExchange`.
  *
@@ -31,7 +31,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
@@ -172,12 +172,12 @@ describe("resolveLiveIntegrationCredentials", () => {
       source: "local",
       draftManifest: gmailManifest(token.url),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
-    // Per-app OAuth client → makes the auth refreshable (buildIntegrationOAuthRefreshContext).
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
+    // Per-space OAuth client → makes the auth refreshable (buildIntegrationOAuthRefreshContext).
     const [oauthClient] = await db
       .insert(integrationOauthClients)
       .values({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         clientId: "cid",
@@ -198,13 +198,14 @@ describe("resolveLiveIntegrationCredentials", () => {
     scopes?: string[];
     accountId?: string;
     expiresAt?: Date;
+    /** `false` seeds the "IdP never issued one" shape (no `access_type=offline`). */
+    withRefreshToken?: boolean;
   }): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
         access_token: "old-access",
         accessToken: "old-access",
-        refresh_token: "rt-1",
-        refreshToken: "rt-1",
+        ...(opts.withRefreshToken === false ? {} : { refresh_token: "rt-1", refreshToken: "rt-1" }),
       },
     });
     const [row] = await db
@@ -213,12 +214,12 @@ describe("resolveLiveIntegrationCredentials", () => {
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: opts.accountId ?? "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: opts.scopes ?? ["read", "send"],
-        // oauth2 connection → pins the org's custom per-app client by id (seeded above).
+        // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
         ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
       })
@@ -230,7 +231,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     return {
       runId: "run_test",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       agentPackageId: "@creds/agent",
       actor: { type: "user" as const, id: ctx.user.id },
     };
@@ -444,6 +445,58 @@ describe("resolveLiveIntegrationCredentials", () => {
     });
   }
 
+  it("forced refresh reaches the IdP even when the stored token is far from expiry", async () => {
+    // The matrix above seeds connections with a NULL `expires_at`, so it never
+    // exercised the freshness short-circuit. This is the shape that broke: a
+    // token issued 10:00/expiring 11:00 and revoked upstream at 10:05. At 10:10
+    // the sidecar's 401 forces a refresh, the resolver decides to refresh — and
+    // the flag stopped there. `dedupedRefresh`'s post-lock re-read saw 50
+    // minutes of remaining lifetime, returned the revoked ciphertext as
+    // `{status:"refreshed"}`, and `needs_reconnection` was never written, so
+    // the banner / readiness gate / badge all read healthy for another 50 min.
+    const connId = await seedConnection({
+      userId: ctx.user.id,
+      expiresAt: new Date(Date.now() + 50 * 60_000),
+    });
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+    const result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+      forceRefresh: true,
+    });
+
+    const primary = result.auths.find((a) => a.authKey === "primary");
+    expect(primary?.fields.access_token).toBe("rotated");
+    expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("forced refresh of a connection with no stored refresh_token → 410 + flagged", async () => {
+    // Terminal, and it must SAY so. The helper flagged the row and then
+    // returned `{ fields: <the dead token> }` as a success, so the sidecar
+    // re-injected the credential that had just 401'd and answered the run 200 —
+    // contradicting both the flag it had written and the 410 contract.
+    const connId = await seedConnection({ userId: ctx.user.id, withRefreshToken: false });
+    // The IdP is reachable and would answer — proving the refusal comes from
+    // the missing refresh_token, not from an upstream failure.
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+    let status: number | undefined;
+    let message: string | undefined;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+        forceRefresh: true,
+      });
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (err) {
+      status = (err as { status?: number }).status;
+      message = (err as Error).message;
+    }
+    expect(status).toBe(410);
+    // Named for what it is — not "refresh token revoked", which would send an
+    // operator hunting upstream for a revocation that never happened.
+    expect(message).toContain("no stored refresh_token");
+    expect(await needsReconnection(connId)).toBe(true);
+  });
+
   it("does NOT flag on a TRANSIENT token-endpoint discovery failure (issuer-only) — 502", async () => {
     // Major-regression guard: an issuer-only manifest (Drive/OneDrive shape)
     // whose discovery transiently fails must NOT be flagged needsReconnection —
@@ -535,10 +588,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       type: "agent",
       draftManifest: agentManifest("@creds/agent-deleter", ["delete_message"]),
     });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@creds/agent-deleter",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-deleter");
     const connId = await seedConnection({
       userId: ctx.user.id,
       scopes: ["read", "send", "delete"],
@@ -562,10 +612,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       type: "agent",
       draftManifest: agentManifest("@creds/agent-reader", ["list_messages"]),
     });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@creds/agent-reader",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-reader");
     const connId = await seedConnection({
       userId: ctx.user.id,
       scopes: ["read", "send", "delete"],
@@ -604,7 +651,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(foreignId)).toBe(false);
   });
 
-  it("throws 404 when the integration is not installed in the application", async () => {
+  it("throws 404 when the integration is not installed in the space", async () => {
     // A different integration the agent never declared / installed.
     await seedPackage({
       id: "@official/uninstalled",

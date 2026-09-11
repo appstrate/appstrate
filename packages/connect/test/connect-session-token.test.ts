@@ -12,7 +12,7 @@ function baseClaims(overrides?: Partial<ConnectSessionClaims>): ConnectSessionCl
   return {
     v: 1,
     org_id: "org_1",
-    application_id: "app_1",
+    space_id: "spc_1",
     user_id: "user_1",
     package_id: "@acme/widget",
     auth_key: "api_key",

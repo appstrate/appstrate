@@ -7,7 +7,13 @@
  *   - `chat_sessions` / `chat_messages` persistence (tables live in the core
  *     schema per the "modules own no tables" rule — this module only reads
  *     and writes them).
- *   - REST surface under `/api/chat/*` (sessions CRUD + message append).
+ *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume and
+ *     stop — none of which writes a message. Persistence is server-authoritative
+ *     and its two writers both live in `persistence.ts`; exactly ONE route
+ *     reaches them, `POST /api/chat` (the conversational loop below), which
+ *     stores the user turn before inference and the assistant turn when the
+ *     stream finalizes. The second writer, `persistNotice`, has no route at all
+ *     — it is driven by the `onRunStatusChange` event. See routes.ts.
  *     Auto-exposed over MCP through the `mcp` module's `invoke_operation`
  *     once documented in the OpenAPI spec — no dedicated MCP tool needed.
  *   - Full-page React UI exported from `@appstrate/module-chat/ui`
@@ -15,7 +21,8 @@
  *
  * The conversational loop (`POST /api/chat`) is the transplant of the
  * appstrate-chat satellite: one in-process Pi engine over the org's configured
- * models (via the llm-proxy — no key held here) + the `/api/mcp` meta-tools
+ * models (llm-proxy for API-key models, native provider call for OAuth
+ * subscriptions — no long-lived key held here either way) + the `/api/mcp` meta-tools
  * so the assistant pilots the platform with the caller's own permissions.
  */
 
@@ -25,8 +32,15 @@ import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-services.ts";
 import { drainTurns } from "./inflight.ts";
+import {
+  closeResumableStore,
+  configureResumableStore,
+  sweepStaleActiveStreams,
+} from "./resumable.ts";
 import { reconcileChatRun } from "./run-reconcile.ts";
 import { logger } from "./logger.ts";
+import { warnIfDefaultChatConcurrency } from "./pi-chat/concurrency.ts";
+import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { z } from "zod";
 
 // Platform deps captured at init from `ctx.services` (immutable; no module-level
@@ -52,9 +66,47 @@ const chatModule: AppstrateModule = {
     // Tables are centralized in the core schema — nothing to migrate. No
     // workers: chat is request-driven. Capture the platform deps once: the
     // rate limiter, the in-process dispatcher (re-enters the platform app for
-    // /api/models, /api/applications, /api/me/context, the llm-proxy — loopback
-    // fetch fallback inside), and the subscription-model resolution + usage metering.
+    // /api/models, /api/spaces, /api/me/context and the MCP hops —
+    // loopback fetch fallback inside; inference does NOT ride it, pi-ai opens a
+    // real socket to the llm-proxy at `CHAT_SELF_ORIGIN`), and the chat-model
+    // resolution + usage metering.
     deps = buildChatPlatformDeps(ctx);
+    // Resume tiering comes from the platform's own Redis decision, not from a
+    // second read of the environment inside the module.
+    configureResumableStore(ctx.redisUrl);
+    // No Redis → in-memory store, single replica: no recording survived the
+    // restart, so every `active_stream_id` still set is stale by construction
+    // (see `sweepStaleActiveStreams`). With Redis this is deliberately NOT
+    // done — another replica may own a live turn — and the resume route clears
+    // a stale marker on its first miss instead. Best-effort: a failure here
+    // is logged, not fatal, since that same resume-miss sweep covers it.
+    if (!ctx.redisUrl) {
+      try {
+        const swept = await sweepStaleActiveStreams();
+        if (swept > 0) {
+          logger.info("chat: cleared stale active stream markers at boot", { count: swept });
+        }
+      } catch (err) {
+        logger.warn("chat: stale active stream sweep failed at boot", { err: String(err) });
+      }
+    }
+    // Chat now runs entirely in-process, so its concurrency cap is a capacity
+    // decision an operator must make deliberately. Say so at boot.
+    warnIfDefaultChatConcurrency();
+    // Warm the Pi SDK's value graph. `loadPiCodingAgentSdk()` is a dynamic
+    // import of the single most expensive module in the runtime graph (~200 ms
+    // to evaluate, see `packages/runner-pi/src/pi-sdk.ts`), memoized by the ESM
+    // registry after the first call. The container entrypoint already warms it
+    // during its network-bound provisioning phase; nothing did on the API side,
+    // so the first chat turn after every deploy paid it inline, on the
+    // time-to-first-token path. Fire-and-forget: a failure here is not fatal
+    // (the turn re-awaits the same import and surfaces the real error there),
+    // so it is logged and swallowed rather than allowed to fail boot.
+    void loadPiCodingAgentSdk().catch((err: unknown) => {
+      logger.warn("pi sdk warm-up failed — the first chat turn will pay the import", {
+        err: String(err),
+      });
+    });
   },
 
   createRouter() {
@@ -127,24 +179,38 @@ const chatModule: AppstrateModule = {
 
   features: { chat: true },
 
-  // Chat sessions are personal (scoped org + user) — every org member can
-  // read/write their own. Not API-key-grantable for now (the dashboard and
-  // embedded panels authenticate with the user session); end-user chat via
-  // OIDC tokens is a follow-up (flip `endUserGrantable` when the embedded
-  // B2B2C chat ships).
+  // Chat sessions are personal (scoped org + user) — everyone with access to
+  // the space can read/write their own. Read reaches `viewer` too: a
+  // read-only preset that cannot open a chat transcript is a preset with a
+  // hole. Write reaches `runner`, for which chat is the friendly way to launch
+  // an agent — and every write a turn can trigger is gated by the principal's
+  // own permissions, so it grants nothing the preset withholds. Neither
+  // API-key- nor end-user-grantable: every chat surface there is — the
+  // dashboard and the embedded panels — authenticates with the user session,
+  // so there is no key- or OIDC-token-shaped caller to grant.
   permissionsContribution: () => [
     {
       resource: "chat",
-      actions: ["read", "write"],
-      grantTo: ["owner", "admin", "member"],
+      actions: ["read"],
+      level: "space",
+      presets: ["admin", "builder", "operator", "runner", "viewer"],
+    },
+    {
+      resource: "chat",
+      actions: ["write"],
+      level: "space",
+      presets: ["admin", "builder", "operator", "runner"],
     },
   ],
 
   // Graceful shutdown: await in-flight turns so a deploy/restart does not drop a
-  // reply that was mid-generation (bounded — a wedged turn cannot block exit).
+  // reply that was mid-generation (bounded — a wedged turn cannot block exit),
+  // THEN release the resumable store's Redis connection — the turns still
+  // draining are recording into it.
   async shutdown() {
     const drained = await drainTurns();
     if (drained > 0) logger.info("chat: drained in-flight turns on shutdown", { count: drained });
+    await closeResumableStore();
   },
 };
 

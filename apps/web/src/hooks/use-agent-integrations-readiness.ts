@@ -2,7 +2,7 @@
 
 import { useAgentConnectionReadiness } from "./use-integrations";
 
-export interface AgentIntegrationsReadiness {
+interface AgentIntegrationsReadiness {
   /** True while the readiness verdict is still loading. */
   loading: boolean;
   /** Declared integrations whose connection would 412 at run kickoff. */

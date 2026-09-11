@@ -18,11 +18,11 @@ import { renderTemplate } from "../template/mustache.ts";
 /**
  * Upload surfaced to 1.2+ templates — a single file the agent can read
  * from the workspace filesystem. Shape matches what an agent template
- * typically renders when listing available documents.
+ * typically renders when listing available files.
  */
 export interface PromptViewUpload {
   name: string;
-  /** Relative path from the workspace root (e.g. `./documents/file.pdf`). */
+  /** Relative path from the workspace root (e.g. `./files/file.pdf`). */
   path: string;
   size: number;
   /** MIME type if known — e.g. `application/pdf`. */
@@ -34,13 +34,6 @@ export interface PromptView {
   runId: string;
   /** User / caller-supplied input, passed through verbatim. */
   input: unknown;
-  /**
-   * Agent configuration values resolved for this run (from the agent's
-   * `config` schema + caller overrides). Passed through verbatim so
-   * templates can reference `{{config.*}}`. Absent when the agent
-   * declares no config.
-   */
-  config?: Record<string, unknown>;
   /** Prior memories, most recent first. Empty array when none. */
   memories: ReadonlyArray<{ content: string; createdAt: number }>;
   /** Snapshot of the agent's previous checkpoint. `null` if none. */
@@ -118,7 +111,6 @@ export async function buildPromptView(
   return {
     runId: context.runId,
     input: context.input,
-    ...(context.config !== undefined ? { config: context.config } : {}),
     memories: sliceMemories(context.memories, memoryLimit),
     checkpoint: context.checkpoint ?? null,
     history: sliceHistory(context.history, historyLimit),

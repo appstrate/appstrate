@@ -909,6 +909,66 @@ describe("Models API", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it("projects a model alias on the update response — parity with the list (Threat A)", async () => {
+      const credentialId = await createProviderKey();
+      // A distinctive backing id so the payload grep below is unambiguous.
+      const realModelId = "secret-backing-put-7k4v";
+
+      const create = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: realModelId,
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as any;
+
+      // A no-op update: the caller supplies NOTHING about the binding. This is
+      // what separates PUT from POST — the create response may echo the
+      // binding back because the operator just sent it in the request body,
+      // but an `{ enabled }` update discloses fields the caller never had.
+      const put = await app.request(`/api/models/${created.id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ enabled: true }),
+      });
+      expect(put.status).toBe(200);
+      const updated = (await put.json()) as any;
+
+      // The update response must hide exactly what the list response hides.
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const listRow = (((await list.json()) as any).data as any[]).find((m) => m.id === created.id);
+      expect(listRow).toBeDefined();
+      for (const field of [
+        "apiShape",
+        "providerId",
+        "providerName",
+        "baseUrl",
+        "modelId",
+        "credentialId",
+        "contextWindow",
+        "maxTokens",
+        "cost",
+      ]) {
+        expect(listRow[field]).toBeNull();
+        expect(updated[field]).toBeNull();
+      }
+
+      // The alias identity itself still round-trips — projection, not erasure.
+      expect(updated.id).toBe(created.id);
+      expect(updated.label).toBe("Appstrate Medium");
+      expect(updated.aliased).toBe(true);
+      expect(updated.enabled).toBe(true);
+
+      // Hard guarantee: the real upstream id never appears anywhere in the
+      // update payload (mirrors the list-projection test above).
+      expect(JSON.stringify(updated)).not.toContain(realModelId);
+    });
   });
 
   describe("PUT /api/models/default", () => {
@@ -1371,7 +1431,7 @@ describe("Models API", () => {
       return {
         Cookie: member.cookie,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         ...extra,
       };
     }
@@ -1423,6 +1483,127 @@ describe("Models API", () => {
       // The owner passes the permission guard; the body may then succeed or
       // surface a provider error, but it is never an authorization failure.
       expect(res.status).not.toBe(403);
+    });
+  });
+
+  describe("POST /api/models/:id/test — model alias", () => {
+    it("refuses the connection test for an alias (timing + upstream-status oracle)", async () => {
+      const credentialId = await createProviderKey();
+      const realModelId = "secret-backing-test-9m2p";
+
+      const create = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: realModelId,
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as any;
+
+      const res = await app.request(`/api/models/${created.id}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+
+      // Refused server-side, BEFORE any upstream fetch: a `{ ok, latency,
+      // status }` answer would report the backing's own round-trip time and
+      // HTTP status back to the caller, and spend the platform credential
+      // doing it.
+      expect(res.status).toBe(400);
+      const body = await res.text();
+      expect(body).not.toContain(realModelId);
+      // The refusal names no backing detail either.
+      expect(body).not.toContain("openai");
+      expect(body).not.toContain("api.openai.com");
+    });
+
+    it("still tests a NON-aliased model (the refusal is alias-scoped)", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: key.id,
+        modelId: "gpt-4o",
+        label: "Plain model",
+      });
+      const res = await app.request(`/api/models/${model.id}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+      // The upstream call may succeed or fail on its own merits; what must NOT
+      // happen is the alias refusal.
+      expect(res.status).not.toBe(400);
+    });
+  });
+
+  describe("custom (OpenAI-compatible) endpoint — the sequence the SPA emits", () => {
+    it("creates the credential then the model, and lists it", async () => {
+      const credentialRes = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "openai-compatible",
+          apiKey: "sk-test",
+          baseUrlOverride: "http://localhost:11434/v1",
+        }),
+      });
+      expect(credentialRes.status).toBe(201);
+      const credential = (await credentialRes.json()) as any;
+
+      const createRes = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Local Qwen",
+          modelId: "qwen3:8b",
+          credentialId: credential.id,
+          contextWindow: 32768,
+          maxTokens: 8192,
+          input: ["text"],
+          reasoning: false,
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as any;
+      // The credential's provider owns both — `org_models` stores neither.
+      expect(created.apiShape).toBe("openai-completions");
+      expect(created.baseUrl).toBe("http://localhost:11434/v1");
+      // No catalog backs this provider, so the typed capabilities are the
+      // only source there is and must round-trip verbatim.
+      expect(created.contextWindow).toBe(32768);
+      expect(created.maxTokens).toBe(8192);
+      expect(created.input).toEqual(["text"]);
+      expect(created.reasoning).toBe(false);
+
+      const listRes = await app.request("/api/models", { headers: authHeaders(ctx) });
+      expect(listRes.status).toBe(200);
+      const list = (await listRes.json()) as any;
+      expect(list.data.map((m: any) => m.id)).toContain(created.id);
+    });
+
+    it("refuses a client-side sentinel as a providerId", async () => {
+      // What the model form used to send for a custom endpoint. The registry
+      // is the only namespace of provider ids — pinned here so the client can
+      // never quietly go back to inventing one.
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "__custom__",
+          apiKey: "sk-test",
+          baseUrlOverride: "http://localhost:11434/v1",
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.param).toBe("providerId");
     });
   });
 });

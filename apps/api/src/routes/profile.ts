@@ -5,31 +5,41 @@ import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { profiles, user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 import { conflict, forbidden, internalError, notFound } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { setDisplayName } from "../services/profile.ts";
 
-export const profileUpdateSchema = z.object({
-  language: z.enum(["fr", "en"]).optional(),
-  displayName: z.string().min(1).max(100).optional(),
-});
+export const profileUpdateSchema = z
+  .object({
+    language: z.enum(["fr", "en"]).optional(),
+    displayName: z.string().min(1).max(100).optional(),
+  })
+  .strict();
 
-export const batchLookupSchema = z.object({
-  ids: z.array(z.string()).max(100),
-});
+export const batchLookupSchema = z
+  .object({
+    ids: z.array(z.string()).max(100),
+  })
+  .strict();
 
-// Bounds mirror the Better Auth password config (`minPasswordLength: 8` in
-// packages/db/src/auth.ts) so validation fails here with a proper RFC 9457
-// response instead of surfacing a BA APIError.
-const setPasswordSchema = z.object({
-  newPassword: z.string().min(8).max(128),
-});
+// BOTH bounds are imported from the Better Auth password config
+// (`packages/db/src/password-policy.ts`) so validation fails here with a proper
+// RFC 9457 response instead of surfacing a BA APIError. The maximum is shared
+// for the same reason as the minimum, not held locally: it is a fact about the
+// credential, and while it was per-endpoint this route said 128 and
+// `auth-bootstrap` said 256 for the same password.
+export const setPasswordSchema = z
+  .object({
+    newPassword: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
+  })
+  .strict();
 
 const profileRouter = new Hono<AppEnv>();
 

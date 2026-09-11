@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 /**
  * User-scoped identity routes (`/api/me/*`).
  *
@@ -8,7 +10,7 @@
  * session, API key, OAuth2 instance/dashboard/end-user JWTs) is accepted,
  * and the route does NOT require `X-Org-Id` itself.
  *
- * The other routes in this namespace run inside org (or application) context.
+ * The other routes in this namespace run inside org (or space) context.
  */
 
 export const mePaths = {
@@ -20,15 +22,13 @@ export const mePaths = {
       description:
         "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see " +
         "every org the user is a member of. API keys see only their bound org. OIDC end-user " +
-        "JWTs see the single org owning their application. " +
+        "JWTs see the single org owning their space. " +
         "**Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
+      parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
         "200": {
           description: "Orgs accessible to the caller",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -47,9 +47,15 @@ export const mePaths = {
                         slug: { type: "string" },
                         role: {
                           type: "string",
-                          enum: ["owner", "admin", "member", "viewer", "end_user"],
+                          enum: ["owner", "admin", "member", "guest", "end_user"],
                           description:
                             "Org role for member callers; `end_user` for OIDC end-user JWTs.",
+                        },
+                        permissions: {
+                          type: "array",
+                          items: { type: "string" },
+                          description:
+                            "The caller's ORG-LEVEL effective permissions in this org, ceiling-applied. Absent for OIDC end-user JWTs, which hold no org role.",
                         },
                         createdAt: { type: "string", format: "date-time" },
                       },
@@ -67,6 +73,7 @@ export const mePaths = {
                     name: "Acme Corp",
                     slug: "acme",
                     role: "owner",
+                    permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
                   },
                 ],
@@ -74,7 +81,10 @@ export const mePaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ViewAsRefused" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -82,20 +92,17 @@ export const mePaths = {
     get: {
       operationId: "listMyConnections",
       tags: ["Profile"],
-      summary: "List the caller's connections across every org/app",
+      summary: "List the caller's connections across every org/space",
       description:
         "Unified user-scope view of the caller's integration connections under a " +
         "single shape, grouped by source package. For interactive user credentials " +
-        "(cookie session, dashboard/instance JWT) it crosses orgs/applications by " +
+        "(cookie session, dashboard/instance JWT) it crosses orgs/spaces by " +
         "design — does NOT require `X-Org-Id`. For an API key the list is scoped " +
-        "to the key's bound organization and application only.",
+        "to the key's bound organization and space only.",
       responses: {
         "200": {
           description: "Connection groups",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -138,7 +145,7 @@ export const mePaths = {
                               "shared_with_org",
                               "reused_by_agents",
                               "org",
-                              "application",
+                              "space",
                             ],
                             properties: {
                               connection_id: { type: "string" },
@@ -162,7 +169,7 @@ export const mePaths = {
                                   name: { type: "string" },
                                 },
                               },
-                              application: {
+                              space: {
                                 type: "object",
                                 required: ["id", "name"],
                                 properties: {
@@ -195,10 +202,10 @@ export const mePaths = {
         "Returns the caller's own (integration, authKey) → connectionId pins for the " +
         "given agent. Used by the agent-page picker to render the collapsed default " +
         "row. Member-only; end-user callers receive an empty list. Requires " +
-        "`X-Application-Id`.",
+        "`X-Space-Id`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "agent_package_id",
           in: "query",
@@ -254,7 +261,7 @@ export const mePaths = {
         "Idempotent — repeated calls update the row in place.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -264,10 +271,11 @@ export const mePaths = {
               type: "object",
               required: ["agent_package_id", "integration_package_id", "connection_id"],
               properties: {
-                agent_package_id: { type: "string" },
-                integration_package_id: { type: "string" },
+                agent_package_id: { type: "string", minLength: 1 },
+                integration_package_id: { type: "string", minLength: 1 },
                 connection_id: { type: "string", format: "uuid" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -299,7 +307,7 @@ export const mePaths = {
         "(accessible connections). Idempotent — 204 even when no row exists.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "agent_package_id",
           in: "query",
@@ -336,7 +344,7 @@ export const mePaths = {
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
         "With an API key, only connections inside the key's bound organization and " +
-        "application can be deleted (204 with no effect otherwise).",
+        "space can be deleted (204 with no effect otherwise).",
       parameters: [
         {
           name: "connectionId",
@@ -358,22 +366,19 @@ export const mePaths = {
       summary: "The caller's working context for an AI agent",
       description:
         "Returns the caller's identity, their role in the pinned org, and the integrations " +
-        "they could attach when building an agent in the current application (their own or " +
+        "they could attach when building an agent in the current space (their own or " +
         "org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and " +
         "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
-        "respect the caller's role (operations beyond it 403 at invoke time). App context " +
-        "resolves from `X-Application-Id`, the API key's application, or the org default.",
+        "respect the caller's role (operations beyond it 403 at invoke time). Space context " +
+        "resolves from `X-Space-Id`, the API key's space, or the org default.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
         "200": {
           description: "Caller context",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -407,7 +412,7 @@ export const mePaths = {
                       id: { type: "string" },
                       role: {
                         type: "string",
-                        enum: ["owner", "admin", "member", "viewer", "end_user"],
+                        enum: ["owner", "admin", "member", "guest", "end_user"],
                       },
                       name: {
                         type: ["string", "null"],
@@ -471,7 +476,7 @@ export const mePaths = {
                   agents: {
                     type: "array",
                     description:
-                      "Agents the caller can run in the current application (capped). Only " +
+                      "Agents the caller can run in the current space (capped). Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
                       "When `agents_truncated` is true, the full list is reachable via the " +
                       "`listAgents` operation.",
@@ -521,7 +526,7 @@ export const mePaths = {
                   skills: {
                     type: "array",
                     description:
-                      "Skills the caller could attach to an agent in the current application " +
+                      "Skills the caller could attach to an agent in the current space " +
                       "(capped). Only present when the caller holds the `agents:run` permission; " +
                       "empty otherwise. Skills are not run directly — declare them under an agent " +
                       "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +

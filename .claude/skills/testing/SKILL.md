@@ -21,11 +21,13 @@ Requires Docker (PostgreSQL :5433, Redis :6380, MinIO :9012, DinD :2375 — star
 
 Single root `bunfig.toml` drives core tests; each module has its own pointing at the same root preload. Root preload (`test/setup/preload.ts`) runs Docker Compose, sets env, applies core migrations, then auto-discovers built-in modules (`apps/api/src/modules/*/`) **and** workspace modules (`packages/module-*/src/`) and wires:
 
-- `drizzle/migrations/*.sql` → applied alphabetically via `apply-module-migration.ts`
 - `index.ts` → dynamic-imported, registered in `test-modules.ts` for `getTestApp()`
 - `test/tables.ts` → `string[]` registered via `registerTruncationTables()`
+- `test/requirements.ts` → `{ postgres?: boolean; env?: Record<string, string> }`. `env` is applied with `Object.assign` before the module entry is imported, so it OVERRIDES the ambient environment on purpose — the suite truncates and drops the tables it is pointed at, and a developer `.env` (Bun auto-loads it) may name a real database; `postgres: true` means the module is not imported, not initialized, and its own test files are not collected under `bun run test:tier0` (`scripts/test-tier0.ts` derives the exclusion from the same file — see `test/setup/modules.ts`)
 
-Adding a built-in module is mechanical: drop directory with `index.ts`, `drizzle/migrations/`, `test/tables.ts`. No edits to core test infra.
+There is no per-module migration step: **modules own no tables**, so a module's tables are created by the core migration step above. `apps/api/src/modules/README.md` ("Database ownership rules") owns that rule and the reasoning behind it.
+
+Adding a built-in module is mechanical: drop a directory with `index.ts` and `test/tables.ts`. No edits to core test infra.
 
 **Zero-footprint invariant**: core tests have zero knowledge of any module. `getTestApp()` takes optional `{ modules }` — core calls with none, module helpers pass their own. Cross-module behavior covered by e2e, not by loading multiple modules in one process.
 
@@ -46,15 +48,15 @@ Instead of `mock.module()` (banned, see root `CLAUDE.md`), use dependency inject
 
 ## Helpers (`apps/api/test/helpers/`)
 
-| Helper            | Purpose                                                                                                                                                         |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app.ts`          | `getTestApp()` — full Hono replica (production middleware chain, no boot/Docker/scheduler)                                                                      |
-| `auth.ts`         | `createTestUser/Org/Context()`, `authHeaders()`, `orgOnlyHeaders()` — real Better Auth sign-up. `authHeaders()` auto-injects `X-Application-Id`                 |
-| `db.ts`           | `truncateAll()` — DELETE FROM all tables in FK-safe order                                                                                                       |
-| `seed.ts`         | Factories: `seedPackage()`, `seedInstalledPackage()`, `seedRun()`, `seedApiKey()`, `seedApplication()`, `seedEndUser()`, … (app-scoped require `applicationId`) |
-| `assertions.ts`   | `assertDbHas/Missing/Count()`, `getDbRow()`                                                                                                                     |
-| `redis.ts`        | `getRedis()`, `flushRedis()`                                                                                                                                    |
-| `sse.ts`          | SSE stream parsing                                                                                                                                              |
-| `oauth-server.ts` | Mock OAuth2 provider                                                                                                                                            |
+| Helper            | Purpose                                                                                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.ts`          | `getTestApp()` — full Hono replica (production middleware chain, no boot/Docker/scheduler)                                                            |
+| `auth.ts`         | `createTestUser/Org/Context()`, `authHeaders()`, `orgOnlyHeaders()` — real Better Auth sign-up. `authHeaders()` auto-injects `X-Space-Id`             |
+| `db.ts`           | `truncateAll()` — DELETE FROM all tables in FK-safe order                                                                                             |
+| `seed.ts`         | Factories: `seedPackage()`, `seedInstalledPackage()`, `seedRun()`, `seedApiKey()`, `seedSpace()`, `seedEndUser()`, … (space-scoped require `spaceId`) |
+| `assertions.ts`   | `assertDbHas/Missing/Count()`, `getDbRow()`                                                                                                           |
+| `redis.ts`        | `flushRedis()`, `closeRedis()`                                                                                                                        |
+| `sse.ts`          | SSE stream parsing                                                                                                                                    |
+| `oauth-server.ts` | Mock OAuth2 provider                                                                                                                                  |
 
 To write a new test, copy the nearest existing one in the matching directory (unit = pure, integration = `getTestApp()` + `truncateAll()` + `createTestContext()`).

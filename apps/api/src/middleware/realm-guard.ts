@@ -5,10 +5,10 @@
  *
  * The Better Auth `user` table is shared across audiences — platform
  * operators (dashboard signup, org invitations, instance/org-level OIDC
- * clients) AND end-users of third-party applications using Appstrate as
+ * clients) AND end-users of third-party spaces using Appstrate as
  * their OIDC IdP. Without the realm column + this guard, a BA cookie
- * session minted via the OIDC end-user flow for application A would also
- * grant access to the Appstrate platform itself (`/api/apps`, `/api/runs`,
+ * session minted via the OIDC end-user flow for space A would also
+ * grant access to the Appstrate platform itself (`/api/spaces`, `/api/runs`,
  * etc.) because the session row is indistinguishable from a platform
  * session at the middleware layer.
  *
@@ -24,7 +24,7 @@
  *     identity regardless of realm.
  *
  * Non-session auth methods (Bearer API key, OIDC JWT via auth strategies)
- * are untouched: API keys carry their own `applicationId` scope and JWTs
+ * are untouched: API keys carry their own `spaceId` scope and JWTs
  * set `endUser` context explicitly, so realm enforcement there is
  * redundant. Only cookie sessions need this protection.
  */
@@ -47,7 +47,7 @@ function isRealmAgnosticPath(path: string): boolean {
 export function requirePlatformRealm() {
   return async (c: Context<AppEnv>, next: Next) => {
     // Only cookie-session auth needs the guard. API keys and module auth
-    // strategies have their own scope enforcement (applicationId,
+    // strategies have their own scope enforcement (spaceId,
     // endUser) and don't read/set `sessionRealm`.
     if (c.get("authMethod") !== "session") return next();
 

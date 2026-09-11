@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Versioned auth secrets — the foundation for online rotation of every
  * cookie/HMAC the platform itself signs.

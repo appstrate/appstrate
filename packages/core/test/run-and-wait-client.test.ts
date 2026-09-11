@@ -2,10 +2,11 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  fetchRunDocuments,
+  fetchRunFiles,
   launchRunAndWait,
+  RUN_CONNECT_OFFERS_HEADER,
   runAndWaitSteps,
-  runAndWaitStepsWithDocuments,
+  runAndWaitStepsWithFiles,
 } from "../src/run-and-wait-client.ts";
 import { agentManifestSchema } from "../src/validation.ts";
 
@@ -91,7 +92,6 @@ describe("run_and_wait client", () => {
         tokenUsage: { input: 1200, output: 300 },
         startedAt: "2026-07-01T09:00:00.000Z",
         completedAt: "2026-07-01T09:01:30.000Z",
-        config: { secret: "echo" },
         result: { summary: "partial" },
       }),
     ];
@@ -218,19 +218,19 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  it("enriches the terminal step with the run's published documents", async () => {
+  it("enriches the terminal step with the run's published files", async () => {
     const fetchImpl = fakeFetch(async (input) => {
       const url = String(input);
       if (url.endsWith("/run")) {
         return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" });
       }
-      if (url.includes("/api/documents")) {
+      if (url.includes("/api/files")) {
         return jsonResponse({
           object: "list",
           data: [
             {
-              id: "doc_1",
-              uri: "document://doc_1",
+              id: "file_1",
+              uri: "appfile://file_1",
               name: "report.html",
               mime: "text/html",
               size: 2048,
@@ -246,7 +246,7 @@ describe("run_and_wait client", () => {
     });
 
     const steps: Record<string, unknown>[] = [];
-    for await (const step of runAndWaitStepsWithDocuments(
+    for await (const step of runAndWaitStepsWithFiles(
       { kind: "agent", scope: "@acme", name: "writer" },
       { origin: "https://test.local", headers: { authorization: "Bearer tok" }, fetch: fetchImpl },
     )) {
@@ -264,10 +264,10 @@ describe("run_and_wait client", () => {
       packageId: "@acme/writer",
       status: "success",
       done: true,
-      documents: [
+      files: [
         {
-          id: "doc_1",
-          uri: "document://doc_1",
+          id: "file_1",
+          uri: "appfile://file_1",
           name: "report.html",
           mime: "text/html",
           size: 2048,
@@ -276,39 +276,39 @@ describe("run_and_wait client", () => {
     });
   });
 
-  it("leaves the payload document-free when the run published none", async () => {
+  it("leaves the payload file-free when the run published none", async () => {
     const fetchImpl = fakeFetch(async (input) => {
       const url = String(input);
       if (url.endsWith("/run")) {
         return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" });
       }
-      if (url.includes("/api/documents")) {
+      if (url.includes("/api/files")) {
         return jsonResponse({ object: "list", data: [], hasMore: false });
       }
       return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "success" });
     });
 
     const steps: Record<string, unknown>[] = [];
-    for await (const step of runAndWaitStepsWithDocuments(
+    for await (const step of runAndWaitStepsWithFiles(
       { kind: "agent", scope: "@acme", name: "writer" },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     )) {
       steps.push(step.payload);
     }
-    expect(steps[1]).not.toHaveProperty("documents");
+    expect(steps[1]).not.toHaveProperty("files");
   });
 
-  it("fetchRunDocuments keeps only documents this run produced", async () => {
-    // The documents container of a run also holds the documents mounted as its
-    // INPUT — a chained `document://` from an earlier run carries
+  it("fetchRunFiles keeps only files this run produced", async () => {
+    // The files container of a run also holds the files mounted as its
+    // INPUT — a chained `appfile://` from an earlier run carries
     // `purpose: 'agent_output'` too, so only its `run_id` distinguishes it.
     const fetchImpl = fakeFetch(async () =>
       jsonResponse({
         object: "list",
         data: [
           {
-            id: "doc_in",
-            uri: "document://doc_in",
+            id: "file_in",
+            uri: "appfile://file_in",
             name: "input.pdf",
             mime: "application/pdf",
             size: 10,
@@ -316,8 +316,8 @@ describe("run_and_wait client", () => {
             run_id: "run_0",
           },
           {
-            id: "doc_out",
-            uri: "document://doc_out",
+            id: "file_out",
+            uri: "appfile://file_out",
             name: "report.html",
             mime: "text/html",
             size: 20,
@@ -325,8 +325,8 @@ describe("run_and_wait client", () => {
             run_id: "run_1",
           },
           {
-            id: "doc_detached",
-            uri: "document://doc_detached",
+            id: "file_detached",
+            uri: "appfile://file_detached",
             name: "orphan.txt",
             mime: "text/plain",
             size: 30,
@@ -339,15 +339,15 @@ describe("run_and_wait client", () => {
     );
 
     await expect(
-      fetchRunDocuments("run_1", {
+      fetchRunFiles("run_1", {
         origin: "https://test.local",
         headers: {},
         fetch: fetchImpl,
       }),
     ).resolves.toEqual([
       {
-        id: "doc_out",
-        uri: "document://doc_out",
+        id: "file_out",
+        uri: "appfile://file_out",
         name: "report.html",
         mime: "text/html",
         size: 20,
@@ -355,10 +355,10 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  it("fetchRunDocuments swallows a non-2xx response", async () => {
+  it("fetchRunFiles swallows a non-2xx response", async () => {
     const fetchImpl = fakeFetch(async () => jsonResponse({ error: "nope" }, 500));
     await expect(
-      fetchRunDocuments("run_1", {
+      fetchRunFiles("run_1", {
         origin: "https://test.local",
         headers: {},
         fetch: fetchImpl,
@@ -392,7 +392,7 @@ describe("launchRunAndWait launch body", () => {
     type: "agent",
     version: "1.0.0",
     dependencies: {},
-    runtime_tools: ["log", "output", "publish_document"],
+    runtime_tools: ["log", "output", "publish_file"],
     output: { schema: { type: "object", properties: {}, additionalProperties: true } },
     ...overrides,
   });
@@ -413,7 +413,7 @@ describe("launchRunAndWait launch body", () => {
     return { fetchImpl, captured: () => seen };
   }
 
-  it("kind:inline materializes a minimal manifest and forwards prompt, input, and config", async () => {
+  it("kind:inline materializes a minimal manifest and forwards prompt and input", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -421,8 +421,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { display_name: "Analyse café" },
         prompt: "do it",
-        input: { screenshot: "document://doc_abc12345" },
-        config: { model: "x" },
+        input: { screenshot: "appfile://file_abc12345" },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -437,8 +436,7 @@ describe("launchRunAndWait launch body", () => {
           display_name: "Analyse café",
         }),
         prompt: expect.stringContaining("do it"),
-        input: { screenshot: "document://doc_abc12345" },
-        config: { model: "x" },
+        input: { screenshot: "appfile://file_abc12345" },
       },
     });
     const body = captured()?.body as { manifest?: unknown } | undefined;
@@ -552,9 +550,9 @@ describe("launchRunAndWait launch body", () => {
   });
 
   // Fan-in by reference: the tool argument has to survive body construction,
-  // otherwise the model is told the documents were delivered and nothing is
+  // otherwise the model is told the files were delivered and nothing is
   // mounted — the silent failure this feature exists to remove.
-  it("kind:inline forwards context_documents", async () => {
+  it("kind:inline forwards context_files", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     await launchRunAndWait(
@@ -562,17 +560,17 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "compile",
-        context_documents: ["document://doc_abc12345", "document://doc_def67890"],
+        context_files: ["appfile://file_abc12345", "appfile://file_def67890"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
     expect(captured()?.body).toMatchObject({
-      context_documents: ["document://doc_abc12345", "document://doc_def67890"],
+      context_files: ["appfile://file_abc12345", "appfile://file_def67890"],
     });
   });
 
-  it("kind:inline omits an empty context_documents", async () => {
+  it("kind:inline omits an empty context_files", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     await launchRunAndWait(
@@ -580,7 +578,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        context_documents: [],
+        context_files: [],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -591,7 +589,96 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
-  it("kind:agent rejects context_documents before dispatch (never silently drops it)", async () => {
+  // The pre-#1177 spelling is no longer canonicalized — but it must not become
+  // INVISIBLE either. The launch body is built from an allowlist, so an
+  // argument nobody names is dropped before the HTTP call, the route never
+  // sees it, and the run launches with nothing mounted while every layer
+  // reports success. These two assert the refusal, which is the only place
+  // that signal can exist.
+  it("kind:inline refuses an undeclared file-argument spelling", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        contextDocuments: ["appfile://file_abc12345"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/Unknown argument `contextDocuments`/);
+    // Nothing launched — the model is told to resend, not handed a fileless run.
+    expect(captured()).toBeUndefined();
+  });
+
+  it("refuses it even when the canonical spelling is also present", async () => {
+    // Ambiguity resolves to a refusal, not to a silent preference: two file
+    // lists in one call means the caller believes something untrue about the
+    // tool, and picking one would launch a run it did not ask for.
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        context_files: ["appfile://file_abc12345"],
+        contextDocuments: ["appfile://file_def67890"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(captured()).toBeUndefined();
+  });
+
+  // A wrong-typed argument used to be indistinguishable from an absent one:
+  // dropped on the floor, run launched with no file, nothing anywhere saying so.
+  it("refuses a context_files that is not an array instead of dropping it", async () => {
+    for (const value of ["appfile://file_abc12345", '["appfile://file_abc12345"]', 42]) {
+      const { fetchImpl, captured } = captureLaunch();
+
+      const result = await launchRunAndWait(
+        { kind: "inline", manifest: { name: "tmp" }, prompt: "compile", context_files: value },
+        { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(
+        String((result as { step: { payload: { error?: string } } }).step.payload.error),
+      ).toMatch(/`context_files` must be a JSON array of appfile:\/\/ URIs/);
+      // Nothing was launched — the model gets the signal, not a fileless run.
+      expect(captured()).toBeUndefined();
+    }
+  });
+
+  it("refuses the retired spelling whatever its type", async () => {
+    // A wrong-typed retired argument is refused for BEING retired, before any
+    // shape check — the caller's first problem is the name, not the value.
+    const { fetchImpl } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        contextDocuments: "appfile://file_abc12345",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/Unknown argument `contextDocuments`/);
+  });
+
+  it("kind:agent rejects the retired spelling too (never silently drops it)", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -599,7 +686,24 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        context_documents: ["document://doc_abc12345"],
+        contextDocuments: ["appfile://file_abc12345"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(captured()).toBeUndefined();
+  });
+
+  it("kind:agent rejects context_files before dispatch (never silently drops it)", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "agent",
+        scope: "@acme",
+        name: "writer",
+        context_files: ["appfile://file_abc12345"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -729,10 +833,10 @@ describe("launchRunAndWait launch body", () => {
     expect(captured()).toBeUndefined();
   });
 
-  // The name inside `config` belongs to the AGENT, not to us: an agent whose own
-  // config schema declares a `connection_overrides` property must stay launchable
+  // The name inside `input` belongs to the AGENT, not to us: an agent whose own
+  // input schema declares a `connection_overrides` property must stay launchable
   // and get that property through untouched, whatever the top-level argument says.
-  it("forwards the top-level connection_overrides and leaves config's own property alone", async () => {
+  it("forwards the top-level connection_overrides and leaves input's own property alone", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -741,7 +845,9 @@ describe("launchRunAndWait launch body", () => {
         manifest: { name: "tmp" },
         prompt: "do it",
         connection_overrides: { "@appstrate/gmail": "conn_top" },
-        config: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
+        // An agent whose input schema happens to declare a property with this
+        // name: it is data for the run, never a source for the top-level field.
+        input: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -749,11 +855,11 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(true);
     expect(captured()?.body).toMatchObject({
       connection_overrides: { "@appstrate/gmail": "conn_top" },
-      config: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
+      input: { connection_overrides: { "@appstrate/gmail": "conn_nested" } },
     });
   });
 
-  it("launches an agent whose config declares its own connection_overrides property", async () => {
+  it("launches an agent whose input declares its own connection_overrides property", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -761,7 +867,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        config: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+        input: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -769,11 +875,62 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(true);
     // Verbatim, and nothing synthesised at top level from it.
     expect(captured()?.body).toMatchObject({
-      config: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
+      input: { connection_overrides: { "@appstrate/gmail": "conn_abc" } },
     });
     expect(Object.keys(captured()?.body as Record<string, unknown>)).not.toContain(
       "connection_overrides",
     );
+  });
+
+  it("sends the connect-offer opt-in on the LAUNCH only, never on the poll", async () => {
+    const seen: Array<{ method: string; header: string | null }> = [];
+    const responses = [
+      jsonResponse({ id: "run_1", status: "pending" }),
+      jsonResponse({ id: "run_1", status: "success" }),
+    ];
+    const fetchImpl = fakeFetch(async (_input, init) => {
+      seen.push({
+        method: init?.method ?? "GET",
+        header: new Headers(init?.headers).get(RUN_CONNECT_OFFERS_HEADER),
+      });
+      const res = responses.shift();
+      if (!res) throw new Error("unexpected fetch");
+      return res;
+    });
+
+    for await (const _step of runAndWaitSteps(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      {
+        origin: "https://test.local",
+        headers: { authorization: "Bearer tok" },
+        fetch: fetchImpl,
+        connectOffers: true,
+      },
+    )) {
+      // Drained for the effect on `seen`.
+    }
+
+    expect(seen).toEqual([
+      { method: "POST", header: "1" },
+      // The poll can only ever answer 200/404 — a connect link on it would be a
+      // capability minted for nothing, so the opt-in must not survive here.
+      { method: "GET", header: null },
+    ]);
+  });
+
+  it("omits the connect-offer opt-in when the caller does not ask for it", async () => {
+    let header: string | null | undefined;
+    const fetchImpl = fakeFetch(async (_input, init) => {
+      header = new Headers(init?.headers).get(RUN_CONNECT_OFFERS_HEADER);
+      return jsonResponse({ id: "run_1", status: "pending" });
+    });
+
+    await launchRunAndWait(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(header).toBeNull();
   });
 
   it("exposes the launch HTTP status on success", async () => {

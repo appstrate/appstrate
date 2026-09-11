@@ -12,7 +12,7 @@
  */
 
 /** Placeholder the manifest writes. Consumer-substituted, NOT a runtime expression. */
-export const CALLBACK_URL_PLACEHOLDER = "{{callback_url}}";
+const CALLBACK_URL_PLACEHOLDER = "{{callback_url}}";
 
 /**
  * Substitute every `{{callback_url}}` occurrence with the effective callback.

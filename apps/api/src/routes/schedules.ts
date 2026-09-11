@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
+import { connectionOverridesSchema, dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import {
-  ModelGenerationError,
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
-  resolveModelGenerationSettings,
-  type ModelGenerationCapabilities,
-  type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import {
@@ -19,37 +17,161 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../services/scheduler.ts";
-import { isValidCron } from "../lib/cron.ts";
-import { validateInput } from "../services/schema.ts";
+import { computeNextRun, isValidCron } from "../lib/cron.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
+import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
-import { getAppScope, type AppScope } from "../lib/scope.ts";
+import { getSpaceScope, type SpaceScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
-import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
-import { getPackageConfig } from "../services/application-packages.ts";
+import {
+  assertExplicitModelExists,
+  resolveModel,
+  validateGenerationOverride,
+} from "../services/org-models.ts";
+import {
+  getInstalledPackageSettings,
+  type InstalledPackageSettings,
+} from "../services/space-packages.ts";
+import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
+import { getPackage } from "../services/package-catalog.ts";
+import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { parseRunListFilters } from "../lib/run-list-filters.ts";
 import { listResponse } from "../lib/list-response.ts";
-import { runConfigOverrideSchema, scheduleInputSchema } from "../lib/jsonb-schemas.ts";
+import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
-// Per-integration connection picks frozen on the schedule row (cascade
-// mechanism #3). Same wire shape as the run-route's connection_overrides;
-// loses to admin pins at fire time. Shape: { "@scope/integration": "<connection_id>" }.
-const connectionOverridesSchema = z.record(z.string(), z.string());
+// Both maps are the shared launch rules (`lib/launch-schemas.ts`). A schedule
+// freezes them onto the row and replays them on every tick, which is what makes
+// a second, drifting copy expensive here: the write answers 200 once and every
+// subsequent fire is silently wrong.
 
-// Per-dependency version overrides frozen on the schedule row (#666/#686).
-// Same wire shape as the run-route's dependency_overrides; keys may name a
-// declared skill OR integration. Shape: { "@scope/dep": "draft" | "<spec>" }.
-const dependencyOverridesSchema = z.record(z.string(), z.string());
+/**
+ * The 400 a schedule's stored input earns when it no longer satisfies the
+ * agent's schema. One shape for the create route and the update route, so the
+ * two cannot answer the same bad body differently.
+ */
+function scheduleInputInvalid(errors: { field: string; message: string }[]): ApiError {
+  return validationFailed(
+    errors.map((e) => ({
+      field: e.field ? `input.${e.field}` : "input",
+      code: "invalid_input",
+      title: "Invalid Input",
+      message: e.message,
+    })),
+  );
+}
+
+/**
+ * Refuse a cron/timezone pair the scheduler could never turn into a fire.
+ *
+ * `timezone` used to be a bare `z.string()` next to an `isValidCron`-gated
+ * `cron_expression`, and an unknown zone is silent all the way down:
+ * `CronExpressionParser.parse(expr, { tz })` accepts it and only `.next()`
+ * throws, which `computeNextRun` swallows into `null` (row written with
+ * `next_run_at = NULL`) and BullMQ's `getNextMillis` swallows into `undefined`
+ * (no repeat job registered at all). The API answered `201 { enabled: true }`
+ * for a schedule that would never run — no log line, no failed run, no
+ * `failSchedule`.
+ *
+ * The gate is `computeNextRun` ITSELF rather than a zone allowlist
+ * (`Intl.supportedValuesOf("timeZone")`) or a `new Intl.DateTimeFormat` probe.
+ * An allowlist is a second source of truth that can disagree with the parser
+ * — it already does, on the offset and `Etc/*` forms cron-parser accepts —
+ * whereas this runs the exact function `createSchedule` / `updateSchedule`
+ * call to fill `next_run_at`, over the same `cron-parser` version BullMQ
+ * resolves for `getNextMillis`. Whatever this accepts therefore produces a
+ * real `next_run_at` AND a registered repeat job, by construction.
+ *
+ * The cron check stays separate so a bad expression keeps blaming
+ * `cron_expression`; past it, a `null` can only come from the zone.
+ */
+function assertFirable(cronExpression: string, timezone: string): void {
+  if (!isValidCron(cronExpression)) {
+    throw invalidRequest("Invalid cron expression", "cron_expression");
+  }
+  if (computeNextRun(cronExpression, timezone) === null) {
+    throw invalidRequest(`Invalid timezone '${timezone}'`, "timezone");
+  }
+}
+
+/**
+ * Validate a schedule's stored input against the manifest the schedule will
+ * actually FIRE — not the editor's working copy.
+ *
+ * `getPackage()` returns `packages.draft_manifest`, but the fire path resolves
+ * `version_override` through `resolveAgentRunVersion` (`services/scheduler.ts`),
+ * and with no override that selector means the PUBLISHED version, never the
+ * draft. Validating the draft here judged a definition the schedule will never
+ * execute, and every disagreement between the two became a `201` followed by a
+ * permanent, silent failure at every tick:
+ *
+ *  - a published schema requiring a field the draft dropped → accepted, then
+ *    `failSchedule` on every fire;
+ *  - an agent with NO published version → accepted, then a 404
+ *    `no_published_version` on every fire (while `POST …/run` correctly 404s
+ *    at the call);
+ *  - the file-input refusal below — the whole reason this check exists — read
+ *    a manifest that never runs, so an agent whose PUBLISHED schema has a file
+ *    field was schedulable.
+ *
+ * Resolving first is what `routes/runs.ts` already does for a manual launch;
+ * this is the same order on the surface that keeps its verdict forever.
+ */
+async function assertScheduleTargetValid(args: {
+  agent: LoadedPackage;
+  /** `version_override` as this request leaves it — the selector every fire replays. */
+  versionOverride: string | undefined;
+  packageSettings: InstalledPackageSettings;
+  input: Record<string, unknown> | undefined;
+}): Promise<void> {
+  const { agent: effectiveAgent } = await resolveAgentRunVersion(args.agent, args.versionOverride);
+  const inputSchema = effectiveAgent.manifest.input?.schema;
+
+  if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
+    throw invalidRequest("Cannot schedule agents with file inputs");
+  }
+
+  // The author defaults and the editor's stored values sit UNDER the
+  // schedule's own frozen values, so a required field the editor already
+  // answers must not be demanded again here. A schedule value naming a locked
+  // field is refused (400 `locked_input_field`) at this write rather than
+  // silently each tick.
+  const resolution = resolveAndValidateScheduleInput({
+    inputSchema,
+    editorDefaults: args.packageSettings.values,
+    lockedFields: args.packageSettings.locked,
+    input: args.input,
+  });
+  if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
+}
+
+/**
+ * Load a schedule in the caller's scope, or 404 with the message the three
+ * `/schedules/:id` routes have always answered.
+ *
+ * The row is rendered for the CALLER: `unread_count` against their recipient
+ * tuple, `running_runs` and `last_run_number` against the runs they may read.
+ * The two write routes use it as an existence check and discard those counters,
+ * so the caller's scoping is the one rule here rather than a per-route choice.
+ */
+async function loadScheduleOr404(c: Context<AppEnv>, id: string, scope: SpaceScope) {
+  const schedule = await getSchedule(id, scope, getActor(c), runVisibilityFilter(c));
+  if (!schedule) {
+    throw notFound(`Schedule '${id}' not found`);
+  }
+  return schedule;
+}
 
 // #738: schedule execution identity, chosen by an admin from the form.
 // XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
@@ -65,13 +187,13 @@ const actorSchema = z
   });
 
 /**
- * Resolves + validates a selected schedule actor against the org/app scope.
- * Validates org membership (user) or app ownership (end-user) so a schedule
+ * Resolves + validates a selected schedule actor against the org/space scope.
+ * Validates org membership (user) or space ownership (end-user) so a schedule
  * can never be pinned to an identity outside the caller's tenant. Returns
  * `fallback` when no actor was selected (the create-route default).
  */
 async function resolveScheduleActor(
-  scope: AppScope,
+  scope: SpaceScope,
   selected: { user_id?: string; end_user_id?: string } | undefined,
   fallback?: Actor,
 ): Promise<Actor> {
@@ -96,7 +218,7 @@ async function resolveScheduleActor(
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       throw invalidRequest(
-        "actor.end_user_id is not an end-user of this application",
+        "actor.end_user_id is not an end-user of this space",
         "actor.end_user_id",
       );
     }
@@ -105,76 +227,78 @@ async function resolveScheduleActor(
   return { type: "end_user", id: selected.end_user_id! };
 }
 
-const createScheduleSchema = z.object({
-  name: z.string().optional(),
-  cron_expression: z.string().min(1, "cron_expression is required"),
-  timezone: z.string().default("UTC"),
-  input: scheduleInputSchema.default({}),
-  // Per-schedule override layer — frozen at create/update and deep-merged
-  // with the application's persisted config every time the schedule
-  // fires. Mirrors the per-run override pipeline (POST /run body) so a
-  // schedule is "a recurring run with frozen overrides".
-  config_override: runConfigOverrideSchema.optional(),
-  model_id_override: z.string().optional(),
-  generation_config_override: modelGenerationSettingsSchema.optional(),
-  proxy_id_override: z.string().optional(),
-  version_override: z.string().optional(),
-  connection_overrides: connectionOverridesSchema.optional(),
-  dependency_overrides: dependencyOverridesSchema.optional(),
-  actor: actorSchema.optional(),
-});
+/**
+ * `.strict()` (#1187's rule, extended to this surface): an unknown field is a
+ * 400, never a silent drop. A schedule is the strongest case for it — the other
+ * launch surfaces mis-execute ONE run, whereas a schedule freezes exactly these
+ * fields onto `package_schedules` and replays them on every fire, so a stripped
+ * field is a wrong run forever with a 201 as the only receipt.
+ */
+export const createScheduleSchema = z
+  .object({
+    name: z.string().optional(),
+    cron_expression: z.string().min(1, "cron_expression is required"),
+    timezone: z.string().default("UTC"),
+    input: scheduleInputSchema.default({}),
+    model_id_override: z.string().optional(),
+    generation_config_override: modelGenerationSettingsSchema.optional(),
+    proxy_id_override: z.string().optional(),
+    version_override: z.string().optional(),
+    connection_overrides: connectionOverridesSchema.optional(),
+    dependency_overrides: dependencyOverridesSchema.optional(),
+    actor: actorSchema.optional(),
+  })
+  .strict();
 
-const updateScheduleSchema = z.object({
-  name: z.string().optional(),
-  cron_expression: z.string().optional(),
-  timezone: z.string().optional(),
-  input: scheduleInputSchema.optional(),
-  enabled: z.boolean().optional(),
-  // `null` clears the override; omitted leaves it untouched.
-  config_override: runConfigOverrideSchema.nullable().optional(),
-  model_id_override: z.string().nullable().optional(),
-  generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
-  proxy_id_override: z.string().nullable().optional(),
-  version_override: z.string().nullable().optional(),
-  connection_overrides: connectionOverridesSchema.nullable().optional(),
-  dependency_overrides: dependencyOverridesSchema.nullable().optional(),
-  // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
-  actor: actorSchema.optional(),
-});
-
-function validateGenerationOverride(
-  generation: ModelGenerationSettings,
-  capabilities?: ModelGenerationCapabilities | null,
-): ModelGenerationSettings {
-  try {
-    return resolveModelGenerationSettings({ capabilities, override: generation });
-  } catch (error) {
-    if (error instanceof ModelGenerationError) {
-      throw invalidRequest(error.message, "generation_config_override");
-    }
-    throw error;
-  }
-}
+/** `.strict()` for the same reason as {@link createScheduleSchema}. */
+export const updateScheduleSchema = z
+  .object({
+    name: z.string().optional(),
+    cron_expression: z.string().optional(),
+    timezone: z.string().optional(),
+    input: scheduleInputSchema.optional(),
+    enabled: z.boolean().optional(),
+    // `null` clears the override; omitted leaves it untouched.
+    model_id_override: z.string().nullable().optional(),
+    generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
+    proxy_id_override: z.string().nullable().optional(),
+    version_override: z.string().nullable().optional(),
+    connection_overrides: connectionOverridesSchema.nullable().optional(),
+    dependency_overrides: dependencyOverridesSchema.nullable().optional(),
+    // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
+    actor: actorSchema.optional(),
+  })
+  .strict();
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/schedules — list all schedules (app-scoped)
-  router.get("/schedules", async (c) => {
-    const scope = getAppScope(c);
+  // GET /api/schedules — list all schedules (space-scoped)
+  router.get("/schedules", requirePermission("schedules", "read"), async (c) => {
+    const scope = getSpaceScope(c);
     // The caller is the VIEWER of the run counters (`unread_count` is
     // recipient-scoped), never the schedules' own execution actor.
-    const schedules = await listSchedules(scope, getActor(c));
+    const schedules = await listSchedules(scope, getActor(c), runVisibilityFilter(c));
     return c.json(listResponse(schedules));
   });
 
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
-  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/schedules`, requireAgent(), async (c) => {
-    const scope = getAppScope(c);
-    const agent = c.get("package");
-    const schedules = await listPackageSchedules(scope, agent.id, getActor(c));
-    return c.json(listResponse(schedules));
-  });
+  router.get(
+    `/agents/${SCOPED_PACKAGE_ROUTE}/schedules`,
+    requirePermission("schedules", "read"),
+    requireAgent(),
+    async (c) => {
+      const scope = getSpaceScope(c);
+      const agent = c.get("package");
+      const schedules = await listPackageSchedules(
+        scope,
+        agent.id,
+        getActor(c),
+        runVisibilityFilter(c),
+      );
+      return c.json(listResponse(schedules));
+    },
+  );
 
   // POST /api/agents/:scope/:name/schedules — create a schedule
   router.post(
@@ -187,36 +311,21 @@ export function createSchedulesRouter() {
 
       const data = await readJsonBody(c, createScheduleSchema);
 
-      // Block scheduling for agents with file inputs
-      const inputSchema = agent.manifest.input?.schema;
-      if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
-        throw invalidRequest("Cannot schedule agents with file inputs");
-      }
+      // Request-local refusals first — no lookup needed to answer them.
+      assertFirable(data.cron_expression, data.timezone);
 
-      // Validate cron expression
-      if (!isValidCron(data.cron_expression)) {
-        throw invalidRequest("Invalid cron expression", "cron_expression");
-      }
+      const scope = getSpaceScope(c);
 
-      // Validate input against agent's input schema (catches missing required fields even when input is undefined)
-      if (inputSchema) {
-        const inputValidation = validateInput(data.input, asJSONSchemaObject(inputSchema));
-        if (!inputValidation.valid) {
-          throw validationFailed(
-            inputValidation.errors.map((e) => ({
-              field: e.field ? `input.${e.field}` : "input",
-              code: "invalid_input",
-              title: "Invalid Input",
-              message: e.message,
-            })),
-          );
-        }
-      }
-
-      const scope = getAppScope(c);
+      const packageSettings = await getInstalledPackageSettings(scope.spaceId, agent.id);
+      await assertScheduleTargetValid({
+        agent,
+        versionOverride: data.version_override,
+        packageSettings,
+        input: data.input,
+      });
 
       // #738: actor defaults to the caller; an admin may override it from the
-      // form (validated against this org/app scope).
+      // form (validated against this org/space scope).
       const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
 
       // Reject a `model_id_override` that references no real model up front, so
@@ -224,18 +333,17 @@ export function createSchedulesRouter() {
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
       let generationConfigOverride = data.generation_config_override;
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
-        const config = await getPackageConfig(scope.applicationId, agent.id);
         const selectedModel =
           explicitModel ??
-          (await resolveModel(scope.orgId, agent.id, data.model_id_override ?? config.modelId));
-        if (!selectedModel) {
-          throw invalidRequest(
-            "A model must be configured before generation settings can be saved",
-          );
-        }
+          (await resolveModel(
+            scope.orgId,
+            agent.id,
+            data.model_id_override ?? packageSettings.modelId,
+          ));
         generationConfigOverride = validateGenerationOverride(
           generationConfigOverride,
-          selectedModel.generation,
+          selectedModel,
+          "generation_config_override",
         );
       }
 
@@ -244,7 +352,6 @@ export function createSchedulesRouter() {
         cronExpression: data.cron_expression,
         timezone: data.timezone,
         input: data.input,
-        configOverride: data.config_override ?? null,
         modelIdOverride: data.model_id_override ?? null,
         generationConfigOverride: generationConfigOverride ?? null,
         proxyIdOverride: data.proxy_id_override ?? null,
@@ -269,29 +376,77 @@ export function createSchedulesRouter() {
   );
 
   // GET /api/schedules/:id — get a single schedule
-  router.get("/schedules/:id", async (c) => {
-    const id = c.req.param("id");
-    const schedule = await getSchedule(id, getAppScope(c), getActor(c));
-    if (!schedule) {
-      throw notFound(`Schedule '${id}' not found`);
-    }
+  router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
+    const id = c.req.param("id")!;
+    const schedule = await loadScheduleOr404(c, id, getSpaceScope(c));
     return c.json(schedule);
   });
 
   // PUT /api/schedules/:id — update a schedule
   router.put("/schedules/:id", requirePermission("schedules", "write"), async (c) => {
     const id = c.req.param("id")!;
-    const scope = getAppScope(c);
-    const existing = await getSchedule(id, scope);
-    if (!existing) {
-      throw notFound(`Schedule '${id}' not found`);
-    }
+    const scope = getSpaceScope(c);
+    const existing = await loadScheduleOr404(c, id, scope);
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
-    // Validate cron expression if provided
-    if (data.cron_expression && !isValidCron(data.cron_expression)) {
-      throw invalidRequest("Invalid cron expression", "cron_expression");
+    // Only when this patch touches either half: an unrelated patch (say
+    // `{enabled:false}`) on a row written before this gate existed must stay
+    // applicable. `updateSchedule` recomputes `next_run_at` from the EFFECTIVE
+    // pair, so that is the pair checked here — same `??` fallbacks, same
+    // "UTC" default.
+    if (data.cron_expression !== undefined || data.timezone !== undefined) {
+      assertFirable(
+        data.cron_expression ?? existing.cron_expression,
+        data.timezone ?? existing.timezone ?? "UTC",
+      );
+    }
+
+    // The agent's per-space settings — read once and shared by the
+    // locked-field refusal and the generation-config reconciliation below,
+    // which can both run on the same request.
+    const packageSettings = await getInstalledPackageSettings(scope.spaceId, existing.packageId);
+
+    // Same resolve-and-validate the create route runs, for the same stated
+    // reason: refuse at THIS write rather than silently at every tick. A PUT
+    // replacing `input` with a wrong-typed or incomplete value used to answer
+    // 200 and then die on every subsequent fire, visible only in the
+    // schedule's failure record.
+    //
+    // Gated on the patch actually MOVING the manifest decision, which is
+    // exactly `input` and `version_override` — the only two request fields
+    // `assertScheduleTargetValid` reads (its other two arguments, the agent
+    // and the space-level `packageSettings`, are not patchable from here). Run
+    // unconditionally, it also judged patches that cannot invalidate anything,
+    // and its resolve step 404s `no_published_version` on an agent that has
+    // never been published. Schedules on such agents exist — POST accepted
+    // them before this gate — so `{"enabled": false}` on one answered 404 and
+    // an operator could no longer disable a misfiring legacy schedule, only
+    // delete it. A patch that merely REDUCES what the row does must always be
+    // applicable; one that changes what it fires is what has to prove itself.
+    //
+    // `data.input ?? existing.input` because a patch that moves only
+    // `version_override` must still be checked against the input the row will
+    // keep replaying (and vice versa) — the pair is validated together, the
+    // gate only decides whether to look at all.
+    if (data.input !== undefined || data.version_override !== undefined) {
+      const agentForInput = await getPackage(existing.packageId, scope.orgId);
+      // `package_schedules.package_id` is `ON DELETE CASCADE` and `getPackage`
+      // admits system packages, so this is unreachable in practice — it exists
+      // so the impossible case is a typed 404 rather than a schedule validated
+      // against nothing.
+      if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
+      await assertScheduleTargetValid({
+        agent: agentForInput,
+        // `null` clears the override, i.e. back to the unified default; omitted
+        // leaves whatever the row already replays.
+        versionOverride:
+          (data.version_override !== undefined
+            ? data.version_override
+            : existing.version_override) ?? undefined,
+        packageSettings,
+        input: data.input ?? existing.input ?? undefined,
+      });
     }
 
     // Reject a `model_id_override` that references no real model (no-op when
@@ -304,7 +459,6 @@ export function createSchedulesRouter() {
         data.model_id_override !== undefined &&
         existing.generation_config_override)
     ) {
-      const config = await getPackageConfig(scope.applicationId, existing.packageId);
       const effectiveModelOverride =
         data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
       const selectedModel =
@@ -312,18 +466,14 @@ export function createSchedulesRouter() {
         (await resolveModel(
           scope.orgId,
           existing.packageId,
-          effectiveModelOverride ?? config.modelId,
+          effectiveModelOverride ?? packageSettings.modelId,
         ));
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
-        if (!selectedModel) {
-          throw invalidRequest(
-            "A model must be configured before generation settings can be saved",
-          );
-        }
         generationConfigOverride = validateGenerationOverride(
           generationConfigOverride,
-          selectedModel.generation,
+          selectedModel,
+          "generation_config_override",
         );
       } else if (existing.generation_config_override) {
         generationConfigOverride = reconcileModelGenerationSettings(
@@ -334,7 +484,7 @@ export function createSchedulesRouter() {
     }
 
     // #738: re-point the actor when the caller selected one (validated against
-    // this org/app scope). `undefined` leaves the existing actor untouched.
+    // this org/space scope). `undefined` leaves the existing actor untouched.
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
     // Only a *real* identity change invalidates frozen connection picks. Picking
@@ -360,7 +510,6 @@ export function createSchedulesRouter() {
         timezone: data.timezone,
         input: data.input,
         enabled: data.enabled,
-        configOverride: data.config_override,
         modelIdOverride: data.model_id_override,
         generationConfigOverride,
         proxyIdOverride: data.proxy_id_override,
@@ -373,6 +522,7 @@ export function createSchedulesRouter() {
       // identity; the run counters in the response belong to whoever is
       // looking at it.
       getActor(c),
+      runVisibilityFilter(c),
     );
     // Mirror schedule.created: explicit camelCase keys (dominant audit
     // convention — see api-keys.ts, modules/webhooks/routes.ts). Only
@@ -384,7 +534,6 @@ export function createSchedulesRouter() {
     if (data.timezone !== undefined) auditAfter.timezone = data.timezone;
     if (data.input !== undefined) auditAfter.input = data.input;
     if (data.enabled !== undefined) auditAfter.enabled = data.enabled;
-    if (data.config_override !== undefined) auditAfter.configOverride = data.config_override;
     if (data.model_id_override !== undefined) auditAfter.modelIdOverride = data.model_id_override;
     if (generationConfigOverride !== undefined)
       auditAfter.generationConfigOverride = generationConfigOverride;
@@ -410,11 +559,8 @@ export function createSchedulesRouter() {
   // DELETE /api/schedules/:id — delete a schedule
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
-    const scope = getAppScope(c);
-    const existing = await getSchedule(id, scope);
-    if (!existing) {
-      throw notFound(`Schedule '${id}' not found`);
-    }
+    const scope = getSpaceScope(c);
+    await loadScheduleOr404(c, id, scope);
     await deleteSchedule(scope, id);
     await recordAuditFromContext(c, {
       action: "schedule.deleted",
@@ -425,28 +571,20 @@ export function createSchedulesRouter() {
   });
 
   // GET /api/schedules/:id/runs — list runs for a schedule
-  router.get("/schedules/:id/runs", async (c) => {
-    const scheduleId = c.req.param("id");
-    const scope = getAppScope(c);
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(20)
-      .parse(c.req.query("limit") ?? 20);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
+  router.get("/schedules/:id/runs", requirePermission("schedules", "read"), async (c) => {
+    const scheduleId = c.req.param("id")!;
+    const scope = getSpaceScope(c);
+    const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+    // `schedules:read` is space-wide, so the schedule itself is readable to
+    // every member — but its RUNS are runs, and follow the run predicate:
+    // without `runs:read-all` a colleague's schedule lists nothing.
     const filters = parseRunListFilters({ status: c.req.query("status"), q: c.req.query("q") });
     const result = await listScheduleRuns(scope, scheduleId, {
       ...filters,
       limit,
       offset,
       actor: getActor(c),
+      visibility: runVisibilityFilter(c),
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);

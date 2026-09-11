@@ -45,9 +45,9 @@ export function isBlockedEgressUrl(url: string): boolean {
 }
 
 /** Why {@link checkEgressUrl} refused a URL. `detail` (host block only) is for logs, never a secret. */
-export type EgressUrlBlockReason = "invalid-url" | "blocked-scheme" | "blocked-host";
+type EgressUrlBlockReason = "invalid-url" | "blocked-scheme" | "blocked-host";
 
-export type EgressUrlCheck =
+type EgressUrlCheck =
   | {
       ok: true;
       hostname: string;
@@ -64,7 +64,7 @@ export type EgressUrlCheck =
     }
   | { ok: false; reason: EgressUrlBlockReason; hostname: string | null; detail?: string };
 
-export interface CheckEgressUrlOptions {
+interface CheckEgressUrlOptions {
   /**
    * When true, plain `http://` is refused for any host NOT on the operator's
    * internal-host allowlist — only `https://` (or an operator-trusted host on
@@ -81,9 +81,8 @@ export interface CheckEgressUrlOptions {
 /**
  * Canonical platform-egress guard for a fetch to an operator/agent-supplied
  * URL. ONE decision site for {parse, scheme floor, allowlist-aware literal +
- * DNS-rebind host gate} so the egress sites (LLM upstream, Claude Code
- * subscription gateway, org proxy test, org model test, credential proxy
- * target, remote-MCP spawn) cannot drift apart.
+ * DNS-rebind host gate} so the egress sites (LLM upstream, org proxy test, org
+ * model test, credential proxy target, remote-MCP spawn) cannot drift apart.
  *
  * Non-throwing: returns a discriminated result so each caller maps a block to
  * its own shape (invalidRequest / TestResult / ProxyAuthorizationError / skip).

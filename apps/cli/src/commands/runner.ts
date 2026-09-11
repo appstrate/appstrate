@@ -17,9 +17,18 @@
  * unit-testable without a real KVM host.
  */
 
-import * as clack from "@clack/prompts";
 import { dirname, isAbsolute, normalize } from "node:path";
-import { intro, outro, askText, confirm, exitWithError } from "../lib/ui.ts";
+import {
+  intro,
+  outro,
+  askText,
+  cancel,
+  confirm,
+  exitWithError,
+  note,
+  select,
+  withSpinner,
+} from "../lib/ui.ts";
 import { CLI_VERSION, DEV_CLI_VERSION } from "../lib/version.ts";
 import {
   RUNNER_BIN_PATH,
@@ -68,7 +77,7 @@ type GetJsonResult =
  * Bun's `fetch(…, { unix })` dials the socket and only uses the http://
  * authority for the Host header.
  */
-export type RunnerUnixGetJson = (
+type RunnerUnixGetJson = (
   socketPath: string,
   path: string,
   token: string,
@@ -95,7 +104,7 @@ const defaultUnixGetJson: RunnerUnixGetJson = async (socketPath, path, token) =>
 };
 
 /** Shared DI surface for every runner subcommand. */
-export interface RunnerDeps {
+interface RunnerDeps {
   exec?: RunnerExec;
   fs?: RunnerFs;
   http?: RunnerHttp;
@@ -145,7 +154,7 @@ function requireRoot(getuid: () => number, verb: string): void {
 
 // ─── install ─────────────────────────────────────────────────────────────
 
-export interface RunnerInstallOptions {
+interface RunnerInstallOptions {
   platformUrl?: string;
   token?: string;
   port?: string;
@@ -286,10 +295,11 @@ export async function resolveInstallConfig(
     !opts.yes &&
     process.stdin.isTTY
   ) {
-    const chosen = await clack.select<"unix" | "tcp">({
-      message: "How does the platform reach this daemon?",
-      initialValue: "unix",
-      options: [
+    // `select` (lib/ui.ts) owns the Ctrl-C branch — "Cancelled." on exit 130,
+    // the same treatment every other prompt in this CLI gets.
+    const chosen = await select<"unix" | "tcp">(
+      "How does the platform reach this daemon?",
+      [
         {
           value: "unix",
           label: `Unix socket at ${RUNNER_DEFAULT_SOCKET_PATH}`,
@@ -301,11 +311,8 @@ export async function resolveInstallConfig(
           hint: "Remote platform — reachable over the network",
         },
       ],
-    });
-    if (clack.isCancel(chosen)) {
-      clack.cancel("Cancelled.");
-      process.exit(130);
-    }
+      "unix",
+    );
     if (chosen === "unix") socketPath = RUNNER_DEFAULT_SOCKET_PATH;
   }
 
@@ -384,37 +391,42 @@ async function downloadAndInstallBinaries(
   const paths = runnerDataPaths(config.dataDir);
   await d.fs.mkdirp(paths.binDir);
 
-  const daemonSpin = clack.spinner();
   const daemonLabel = `Downloading runner daemon ${version} (${arch})`;
-  daemonSpin.start(daemonLabel);
-  const { stagedPath } = await downloadDaemon({
-    http: d.http,
-    exec: d.exec,
-    fs: d.fs,
-    version,
-    arch,
-    destPath: RUNNER_BIN_PATH,
-    onProgress: (p) => daemonSpin.message(`${daemonLabel} — ${formatProgress(p)}`),
-  });
-  await promoteStagedDaemon(d, stagedPath);
-  daemonSpin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
+  await withSpinner(
+    daemonLabel,
+    async (spin) => {
+      const { stagedPath } = await downloadDaemon({
+        http: d.http,
+        exec: d.exec,
+        fs: d.fs,
+        version,
+        arch,
+        destPath: RUNNER_BIN_PATH,
+        onProgress: (p) => spin.message(`${daemonLabel} — ${formatProgress(p)}`),
+      });
+      await promoteStagedDaemon(d, stagedPath);
+    },
+    `Installed daemon → ${RUNNER_BIN_PATH}`,
+  );
 
-  const fcSpin = clack.spinner();
   const fcLabel = `Downloading firecracker + jailer v${FIRECRACKER_VERSION} (${arch})`;
-  fcSpin.start(fcLabel);
-  await installFirecracker({
-    http: d.http,
-    exec: d.exec,
-    fs: d.fs,
-    version: FIRECRACKER_VERSION,
-    arch,
-    destPath: paths.firecrackerBin,
-    // Same verified tarball — the daemon requires firecracker + jailer
-    // to come from one release (FIRECRACKER_JAILER=on confinement).
-    jailerDestPath: paths.jailerBin,
-    onProgress: (p) => fcSpin.message(`${fcLabel} — ${formatProgress(p)}`),
-  });
-  fcSpin.stop(`Installed firecracker → ${paths.firecrackerBin} (+ jailer → ${paths.jailerBin})`);
+  await withSpinner(
+    fcLabel,
+    (spin) =>
+      installFirecracker({
+        http: d.http,
+        exec: d.exec,
+        fs: d.fs,
+        version: FIRECRACKER_VERSION,
+        arch,
+        destPath: paths.firecrackerBin,
+        // Same verified tarball — the daemon requires firecracker + jailer
+        // to come from one release (FIRECRACKER_JAILER=on confinement).
+        jailerDestPath: paths.jailerBin,
+        onProgress: (p) => spin.message(`${fcLabel} — ${formatProgress(p)}`),
+      }),
+    `Installed firecracker → ${paths.firecrackerBin} (+ jailer → ${paths.jailerBin})`,
+  );
 }
 
 async function writeHostFiles(config: RunnerConfig, d: ResolvedDeps): Promise<void> {
@@ -433,30 +445,33 @@ async function writeHostFiles(config: RunnerConfig, d: ResolvedDeps): Promise<vo
 }
 
 export async function enableService(d: ResolvedDeps): Promise<void> {
-  const spin = clack.spinner();
-  spin.start("Enabling systemd unit");
-  const reload = await d.exec.run("systemctl", ["daemon-reload"]);
-  if (!reload.ok)
-    throw new Error(`systemctl daemon-reload failed: ${reload.stderr || reload.exitCode}`);
-  // `enable` (persistence) then `restart` — NOT `enable --now`: on a re-install
-  // over an already-active unit `enable --now` is a no-op that leaves the OLD
-  // binary running, so the health poll would validate the stale daemon. `restart`
-  // is idempotent (starts if stopped, restarts if running) → always the new binary.
-  const enable = await d.exec.run("systemctl", ["enable", RUNNER_SERVICE_NAME]);
-  if (!enable.ok) {
-    throw new Error(
-      `systemctl enable ${RUNNER_SERVICE_NAME} failed: ${enable.stderr || enable.exitCode}. ` +
-        `Inspect with \`journalctl -u ${RUNNER_SERVICE_NAME} -n 50\`.`,
-    );
-  }
-  const restart = await d.exec.run("systemctl", ["restart", RUNNER_SERVICE_NAME]);
-  if (!restart.ok) {
-    throw new Error(
-      `systemctl restart ${RUNNER_SERVICE_NAME} failed: ${restart.stderr || restart.exitCode}. ` +
-        `Inspect with \`journalctl -u ${RUNNER_SERVICE_NAME} -n 50\`.`,
-    );
-  }
-  spin.stop("systemd unit enabled + started");
+  await withSpinner(
+    "Enabling systemd unit",
+    async () => {
+      const reload = await d.exec.run("systemctl", ["daemon-reload"]);
+      if (!reload.ok)
+        throw new Error(`systemctl daemon-reload failed: ${reload.stderr || reload.exitCode}`);
+      // `enable` (persistence) then `restart` — NOT `enable --now`: on a re-install
+      // over an already-active unit `enable --now` is a no-op that leaves the OLD
+      // binary running, so the health poll would validate the stale daemon. `restart`
+      // is idempotent (starts if stopped, restarts if running) → always the new binary.
+      const enable = await d.exec.run("systemctl", ["enable", RUNNER_SERVICE_NAME]);
+      if (!enable.ok) {
+        throw new Error(
+          `systemctl enable ${RUNNER_SERVICE_NAME} failed: ${enable.stderr || enable.exitCode}. ` +
+            `Inspect with \`journalctl -u ${RUNNER_SERVICE_NAME} -n 50\`.`,
+        );
+      }
+      const restart = await d.exec.run("systemctl", ["restart", RUNNER_SERVICE_NAME]);
+      if (!restart.ok) {
+        throw new Error(
+          `systemctl restart ${RUNNER_SERVICE_NAME} failed: ${restart.stderr || restart.exitCode}. ` +
+            `Inspect with \`journalctl -u ${RUNNER_SERVICE_NAME} -n 50\`.`,
+        );
+      }
+    },
+    "systemd unit enabled + started",
+  );
 }
 
 /**
@@ -540,7 +555,7 @@ function printPreflight(pf: PreflightResult): void {
     const base = `${glyph} ${c.label}: ${c.detail}`;
     return c.ok || !c.remedy ? base : `${base}\n    → ${c.remedy}`;
   });
-  clack.note(lines.join("\n"), "Host preflight");
+  note(lines.join("\n"), "Host preflight");
 }
 
 function printPostInstall(config: RunnerConfig, source: TokenSource, healthy: boolean): void {
@@ -575,7 +590,7 @@ function printPostInstall(config: RunnerConfig, source: TokenSource, healthy: bo
         `and use https:// in FIRECRACKER_RUNNER_URL — the wire carries run credentials.`,
       ];
 
-  clack.note(
+  note(
     [
       `Platform config (set on the containerized platform):`,
       `  RUN_ADAPTER=firecracker`,
@@ -600,12 +615,12 @@ function detectFirewallCommands(port: number): ReturnType<typeof firewallCommand
 
 // ─── doctor ──────────────────────────────────────────────────────────────
 
-export interface RunnerDoctorOptions {
+interface RunnerDoctorOptions {
   json?: boolean;
   deps?: RunnerDeps;
 }
 
-export interface RunnerDoctorReport {
+interface RunnerDoctorReport {
   preflight: PreflightResult;
   service: { installed: boolean; active: boolean; enabled: boolean; state: string };
   health: {
@@ -732,21 +747,21 @@ export async function runnerDoctorCommand(opts: RunnerDoctorOptions = {}): Promi
     : `✗ jailer: missing at ${report.jailer.path} — the daemon refuses to boot with ` +
       `FIRECRACKER_JAILER=on (the default); re-run \`appstrate runner install\` to fetch it`;
 
-  clack.note(
-    [...pfLines, "", svcLine, healthLine, artLine, jailerLine].join("\n"),
-    "Runner diagnostics",
-  );
+  note([...pfLines, "", svcLine, healthLine, artLine, jailerLine].join("\n"), "Runner diagnostics");
   if (report.ok) {
     outro("Runner is healthy.");
   } else {
-    clack.cancel("Runner has issues — see the diagnostics above.");
+    // Not `exitWithError`: `doctor` reports, it does not abort. The process
+    // runs to completion and only sets a non-zero code, so a wrapper script
+    // can branch on it while the diagnostics above stay on screen.
+    cancel("Runner has issues — see the diagnostics above.");
     process.exitCode = 1;
   }
 }
 
 // ─── update ──────────────────────────────────────────────────────────────
 
-export interface RunnerUpdateOptions {
+interface RunnerUpdateOptions {
   deps?: RunnerDeps;
 }
 
@@ -758,22 +773,25 @@ export async function runnerUpdateCommand(opts: RunnerUpdateOptions = {}): Promi
     const arch = resolveRunnerArch();
     const version = resolveDaemonVersion();
 
-    const spin = clack.spinner();
     const label = `Downloading runner daemon ${version} (${arch})`;
-    spin.start(label);
-    const { stagedPath } = await downloadDaemon({
-      http: d.http,
-      exec: d.exec,
-      fs: d.fs,
-      version,
-      arch,
-      destPath: RUNNER_BIN_PATH,
-      onProgress: (p) => spin.message(`${label} — ${formatProgress(p)}`),
-    });
-    // Atomic swap over the live binary — rename(2) keeps the running
-    // process's fd valid; the restart below picks up the new inode.
-    await promoteStagedDaemon(d, stagedPath);
-    spin.stop(`Installed daemon → ${RUNNER_BIN_PATH}`);
+    await withSpinner(
+      label,
+      async (spin) => {
+        const { stagedPath } = await downloadDaemon({
+          http: d.http,
+          exec: d.exec,
+          fs: d.fs,
+          version,
+          arch,
+          destPath: RUNNER_BIN_PATH,
+          onProgress: (p) => spin.message(`${label} — ${formatProgress(p)}`),
+        });
+        // Atomic swap over the live binary — rename(2) keeps the running
+        // process's fd valid; the restart below picks up the new inode.
+        await promoteStagedDaemon(d, stagedPath);
+      },
+      `Installed daemon → ${RUNNER_BIN_PATH}`,
+    );
 
     // Re-pin the guest artifacts to the new daemon version BEFORE the restart:
     // if this update crosses a guest-protocol bump, a pin still pointing at the
@@ -801,7 +819,7 @@ export async function runnerUpdateCommand(opts: RunnerUpdateOptions = {}): Promi
 
 // ─── status / logs ─────────────────────────────────────────────────────────
 
-export interface RunnerStatusOptions {
+interface RunnerStatusOptions {
   deps?: RunnerDeps;
 }
 
@@ -815,7 +833,7 @@ export async function runnerStatusCommand(opts: RunnerStatusOptions = {}): Promi
   if (!res.ok && res.exitCode !== 3) process.exitCode = res.exitCode === -1 ? 1 : res.exitCode;
 }
 
-export interface RunnerLogsOptions {
+interface RunnerLogsOptions {
   follow?: boolean;
   deps?: RunnerDeps;
 }
@@ -831,7 +849,7 @@ export async function runnerLogsCommand(opts: RunnerLogsOptions = {}): Promise<v
 
 // ─── uninstall ──────────────────────────────────────────────────────────────
 
-export interface RunnerUninstallOptions {
+interface RunnerUninstallOptions {
   /** Preserve the state dir (kernel/rootfs/runs/firecracker). */
   keepData?: boolean;
   /** Skip the destructive confirmation (or set APPSTRATE_YES=1). */
@@ -917,46 +935,48 @@ export async function runnerUninstallCommand(opts: RunnerUninstallOptions = {}):
             `This removes:\n${willRemove}\n\nRe-run with --yes (or APPSTRATE_YES=1) to proceed.`,
         );
       }
-      clack.note(willRemove, "This will remove");
+      note(willRemove, "This will remove");
       if (!(await confirm(`Remove the ${RUNNER_SERVICE_NAME} daemon?`, false))) {
         outro("Uninstall cancelled — nothing was removed.");
         return;
       }
     }
 
-    const spin = clack.spinner();
-    spin.start("Removing appstrate-runner");
+    const removed = await withSpinner(
+      "Removing appstrate-runner",
+      async () => {
+        // 1. Stop + disable the unit. Both tolerate an absent/inactive unit
+        //    (systemctl exits non-zero, which we intentionally ignore here).
+        await d.exec.run("systemctl", ["stop", RUNNER_SERVICE_NAME]);
+        await d.exec.run("systemctl", ["disable", RUNNER_SERVICE_NAME]);
 
-    // 1. Stop + disable the unit. Both tolerate an absent/inactive unit
-    //    (systemctl exits non-zero, which we intentionally ignore here).
-    await d.exec.run("systemctl", ["stop", RUNNER_SERVICE_NAME]);
-    await d.exec.run("systemctl", ["disable", RUNNER_SERVICE_NAME]);
+        // 2. Remove the unit + any drop-in dir, reload, and clear a lingering
+        //    failed state so a later reinstall starts clean. `remove` is
+        //    rm -rf (force) → removing a missing path is a no-op.
+        const paths: string[] = [];
+        for (const p of [RUNNER_UNIT_PATH, `${RUNNER_UNIT_PATH}.d`]) {
+          await d.fs.remove(p);
+          paths.push(p);
+        }
+        await d.exec.run("systemctl", ["daemon-reload"]);
+        await d.exec.run("systemctl", ["reset-failed", RUNNER_SERVICE_NAME]);
 
-    // 2. Remove the unit + any drop-in dir, reload, and clear a lingering
-    //    failed state so a later reinstall starts clean. `remove` is
-    //    rm -rf (force) → removing a missing path is a no-op.
-    const removed: string[] = [];
-    for (const p of [RUNNER_UNIT_PATH, `${RUNNER_UNIT_PATH}.d`]) {
-      await d.fs.remove(p);
-      removed.push(p);
-    }
-    await d.exec.run("systemctl", ["daemon-reload"]);
-    await d.exec.run("systemctl", ["reset-failed", RUNNER_SERVICE_NAME]);
+        // 3. Binary + config (token).
+        for (const p of [RUNNER_BIN_PATH, RUNNER_ETC_DIR]) {
+          await d.fs.remove(p);
+          paths.push(p);
+        }
 
-    // 3. Binary + config (token).
-    for (const p of [RUNNER_BIN_PATH, RUNNER_ETC_DIR]) {
-      await d.fs.remove(p);
-      removed.push(p);
-    }
-
-    // 4. State dir — only when not preserving it.
-    if (removeData) {
-      await d.fs.remove(dataDir);
-      removed.push(dataDir);
-    }
-
-    spin.stop("appstrate-runner removed");
-    clack.note(removed.map((p) => `  • ${p}`).join("\n"), "Removed");
+        // 4. State dir — only when not preserving it.
+        if (removeData) {
+          await d.fs.remove(dataDir);
+          paths.push(dataDir);
+        }
+        return paths;
+      },
+      "appstrate-runner removed",
+    );
+    note(removed.map((p) => `  • ${p}`).join("\n"), "Removed");
     outro(
       removeData
         ? "Runner fully uninstalled."

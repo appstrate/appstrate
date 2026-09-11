@@ -10,19 +10,20 @@ import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
-import { invalidateOrgStorage } from "../hooks/use-documents";
+import { invalidateOrgStorage } from "../hooks/use-files";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
 import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
+import { isPublishedFileLogEvent } from "../lib/files";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
@@ -41,6 +42,14 @@ import type { JournalOverviewFilter } from "../components/log-viewer";
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
 
+/**
+ * Has this React Query subscription reached a state that will not change on its
+ * own? Either it answered (data or error, so no longer `pending`), or it is
+ * disabled and will never run (`pending` with an idle fetch). A query still
+ * `fetching` — including the very first render, where v5 already reports the
+ * optimistic `fetching` — has not.
+ */
+
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
@@ -52,7 +61,7 @@ export function RunDetailPage() {
   const navigate = useNavigate();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -91,7 +100,7 @@ export function RunDetailPage() {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
       markRead.mutate({ params: { path: { runId } } });
-      void invalidateRunLogs(qc, orgId, applicationId, runId);
+      void invalidateRunLogs(qc, orgId, spaceId, runId);
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -104,7 +113,8 @@ export function RunDetailPage() {
     }
     const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
     // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
-    // and projected here into the Info tab's per-turn table instead.
+    // and projected here into the Exécution pane's per-turn table instead
+    // (`TurnsTable` in `run-execution-tab.tsx`, fed by the `turns` prop below).
     return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
   }, [logs, isTerminal]);
 
@@ -122,15 +132,11 @@ export function RunDetailPage() {
   const { data: runPinned } = useRunPinned(packageId, runId);
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
-  const hasDurableResults =
-    hasOutput ||
-    (run?.document_counts.output ?? 0) > 0 ||
-    hasRunMemory ||
-    Boolean(run?.primary_document_id);
+  const hasDurableResults = hasOutput || (run?.file_counts.output ?? 0) > 0 || hasRunMemory;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
-  // directly into the same `["run", orgId, applicationId, runId]`
+  // directly into the same `["run", orgId, spaceId, runId]`
   // cache key. Terminal-status refetch is also already triggered
   // globally via `invalidateRunAndNotificationQueries`.
   useRunRealtime(isRunning ? runId : null, {
@@ -151,28 +157,30 @@ export function RunDetailPage() {
           ...newLog,
           data: (newLog.data ?? null) as RunLogEntry["data"],
         };
-        qc.setQueryData<RunLogEntry[]>(runKeys.logs(orgId, applicationId, runId), (prev) => {
+        qc.setQueryData<RunLogEntry[]>(runKeys.logs(orgId, spaceId, runId), (prev) => {
           if (!prev) return [entry];
           if (prev.some((l) => l.id === entry.id)) return prev;
           return [...prev, entry];
         });
-        // A published document arrives as a `type='result' event='document'`
-        // log frame — invalidate the run's documents list (the tab body), the
-        // run itself (its `document_counts` drives the tab badge) and the org
+        // A published file arrives as a `type='result' event='file'`
+        // log frame — invalidate the run's files list (the tab body), the
+        // run itself (its `file_counts` drives the tab badge) and the org
         // storage total those new bytes just moved, without a dedicated SSE
-        // channel.
-        if (entry.type === "result" && entry.event === "document") {
-          void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
-          void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, applicationId, runId) });
+        // channel. `isPublishedFileLogEvent` tests membership of the set the
+        // sink's own tag is built from — it carries no legacy spelling.
+        if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
+          void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
+          void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, spaceId, runId) });
           invalidateOrgStorage(qc);
         }
       },
-      [qc, orgId, applicationId, runId],
+      [qc, orgId, spaceId, runId],
     ),
     onMetric: useCallback(
       (metric: RunMetricEvent) => {
         // Patch the cached run row with the running token usage + cost
-        // so the Info tab reflects live progress without polling.
+        // so the header readout above and the Exécution pane's Usage card
+        // (`run-execution-tab.tsx`) reflect live progress without polling.
         // `runs.cost` is the cached aggregate written at finalize on
         // the server; mid-run we render the broadcaster's
         // `cost_so_far` instead. The next terminal-status invalidation
@@ -183,7 +191,7 @@ export function RunDetailPage() {
         // live `cost` paired with the stale (or absent) status of the
         // previous read is how a run nothing could price ends up showing a
         // confident $0.0000 for its whole duration.
-        qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) => {
+        qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, spaceId, runId), (prev) => {
           if (!prev) return prev;
           return {
             ...prev,
@@ -193,7 +201,7 @@ export function RunDetailPage() {
           };
         });
       },
-      [qc, orgId, applicationId, runId],
+      [qc, orgId, spaceId, runId],
     ),
   });
 
@@ -203,7 +211,7 @@ export function RunDetailPage() {
 
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";
-  const isInline = enrichedRun.package_ephemeral === true;
+  const isInline = enrichedRun.package_ephemeral;
   const hasInlineName = !!enrichedRun.agent_name?.trim();
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 

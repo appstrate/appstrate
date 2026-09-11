@@ -40,7 +40,7 @@ export const SHORT_LIVED_CACHE_CONTROL = "public, max-age=300";
 
 /**
  * The SPA shell. `no-cache` does NOT mean "do not store" — it means "always
- * revalidate before reuse", which is exactly right for a document that carries
+ * revalidate before reuse", which is exactly right for a file that carries
  * per-request config and must never pin an old build's asset hashes.
  */
 export const SPA_HTML_CACHE_CONTROL = "no-cache";

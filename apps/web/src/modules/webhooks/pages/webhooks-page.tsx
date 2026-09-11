@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Webhook } from "lucide-react";
-import { usePermissions } from "@/hooks/use-permissions";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useWebhooks } from "../hooks/use-webhooks";
 import { ErrorState, EmptyState } from "@/components/page-states";
@@ -18,13 +17,10 @@ import { getErrorMessage } from "@appstrate/core/errors";
 export function WebhooksPage() {
   const location = useLocation();
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
   const [createOpen, setCreateOpen] = useState(false);
 
   const { data: webhooks, isLoading, error } = useWebhooks();
   const columns = useWebhookColumns();
-
-  if (!isAdmin) return null;
 
   return (
     <div>

@@ -3,13 +3,15 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import {
   OnboardingLayout,
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { useBilling, useCheckout } from "../../hooks/use-billing";
+import { useBilling, useCheckout, type CheckoutPlanId } from "../../hooks/use-billing";
 import { Spinner } from "../../components/spinner";
 import { PlanGrid } from "../../components/plan-card";
 
@@ -27,20 +29,21 @@ export function OnboardingPlanStep() {
     }
   }, [features.billing, navigate, nextRoute]);
 
-  const { data: billing, isLoading } = useBilling({ enabled: !!orgId });
+  const { data: billing, isLoading } = useBilling({ enabled: !!orgId && features.billing });
   const checkoutMutation = useCheckout();
 
   const goNext = () => nextRoute && navigate(nextRoute);
 
   const currentPlanId = billing?.plan.id ?? "free";
-  const upgradeIds = new Set(billing?.upgrades.map((u) => u.id));
-
-  const handleSelectPlan = (planId: string) => {
+  const handleSelectPlan = (planId: CheckoutPlanId) => {
     checkoutMutation.mutate(
-      { planId, returnUrl: "/onboarding/plan" },
+      { body: { plan_id: planId, return_url: "/onboarding/plan" } },
       {
-        onSuccess: (url) => {
+        onSuccess: ({ url }) => {
           window.location.href = url;
+        },
+        onError: (err) => {
+          toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
         },
       },
     );
@@ -63,7 +66,7 @@ export function OnboardingPlanStep() {
         <PlanGrid
           plans={billing?.plans ?? []}
           currentPlanId={currentPlanId}
-          upgradeIds={upgradeIds}
+          upgrades={billing?.upgrades.map((u) => u.id)}
           disabled={checkoutMutation.isPending}
           onSelect={handleSelectPlan}
         />

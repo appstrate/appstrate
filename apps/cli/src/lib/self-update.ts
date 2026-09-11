@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { runCommand, type CommandResult } from "./install/os.ts";
 import { CLI_USER_AGENT, CLI_VERSION, DEV_CLI_VERSION } from "./version.ts";
 import { streamDownload, type ProgressFn } from "./download.ts";
+import { DEFAULT_IO } from "./io.ts";
 import { normalizeVersion, stripVersionPrefix } from "@appstrate/core/semver";
 
 // Re-exported so `normalizeVersion` stays importable from this module (its
@@ -34,7 +35,27 @@ export { normalizeVersion };
 export const APPSTRATE_MINISIGN_PUBKEY = "RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e";
 
 const RELEASE_URL_BASE = "https://github.com/appstrate/appstrate/releases";
-const LATEST_API_URL = "https://api.github.com/repos/appstrate/appstrate/releases/latest";
+/**
+ * The newest releases, not `releases/latest`. GitHub's `latest` is whichever
+ * non-prerelease Release was created last, whatever its tag — a `cli@`, `core@`
+ * or `afps-shared@` Release created without `make_latest: false`, or by hand in
+ * the UI, would be handed back here and carries no CLI binary. Listing lets the
+ * CLI pick the newest platform `v<semver>` Release itself, so nothing outside
+ * `release.yml` can steer an update.
+ */
+const RELEASES_API_URL = "https://api.github.com/repos/appstrate/appstrate/releases";
+const RELEASES_PAGE_SIZE = 30;
+/**
+ * Pages scanned before giving up: 150 releases. Every platform cycle creates
+ * one `v*` plus at most three npm Releases, so a `v*` sits inside the first
+ * page in practice; the cap only bounds the API calls when it does not.
+ */
+const RELEASES_MAX_PAGES = 5;
+const PLATFORM_TAG = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+function releasesPageUrl(page: number): string {
+  return `${RELEASES_API_URL}?per_page=${RELEASES_PAGE_SIZE}&page=${page}`;
+}
 
 /**
  * Error thrown by the default fetch deps when an HTTP request returns a
@@ -101,7 +122,7 @@ export function assetName(info: PlatformInfo): string {
   return `appstrate-${info.platform}-${info.arch}`;
 }
 
-export interface ReleaseUrls {
+interface ReleaseUrls {
   binary: string;
   checksums: string;
   checksumsSig: string;
@@ -113,10 +134,9 @@ export interface ReleaseUrls {
  * UX is identical whether the user is bootstrapping or self-updating.
  */
 export function releaseUrls(version: string, info: PlatformInfo): ReleaseUrls {
-  const base =
-    version === "latest"
-      ? `${RELEASE_URL_BASE}/latest/download`
-      : `${RELEASE_URL_BASE}/download/v${stripVersionPrefix(version)}`;
+  // Always a pinned tag: `resolveTargetVersion` turns "latest" into the newest
+  // platform `v*` Release first, so `releases/latest/download` is never built.
+  const base = `${RELEASE_URL_BASE}/download/v${stripVersionPrefix(version)}`;
   const asset = assetName(info);
   return {
     binary: `${base}/${asset}`,
@@ -332,8 +352,9 @@ export interface ResolveTargetVersionDeps {
 }
 
 /**
- * Resolve the tag name to install. Defaults to `latest` (queries the GitHub
- * Releases API), but accepts an explicit version (`1.2.3` or `v1.2.3`).
+ * Resolve the tag name to install. Defaults to the newest platform `v*`
+ * Release (lists the GitHub Releases API), but accepts an explicit version
+ * (`1.2.3` or `v1.2.3`).
  *
  * The API call is cheap (one GET) and avoids the GitHub-issued redirect chain
  * on `releases/latest/download/<asset>` which otherwise costs three round-trips
@@ -354,9 +375,47 @@ export async function resolveTargetVersion(
     }
     return v;
   }
+  // Newest first, as the API orders them. Only a platform `v<semver>` release
+  // carries the CLI binaries; the npm workflows (`cli@`, `core@`,
+  // `afps-shared@`) publish their own Releases and are skipped by tag, the
+  // same way `releases/latest` skips drafts and prereleases. Within the newest
+  // page that holds any candidate, the HIGHEST version wins, not the newest by
+  // creation date: a hotfix for an older line published after a newer release
+  // must not become "latest".
+  const skipped: string[] = [];
+  for (let page = 1; page <= RELEASES_MAX_PAGES; page++) {
+    const releases = await fetchReleasesPage(deps, page);
+    if (releases.length === 0) break;
+    const candidates: string[] = [];
+    for (const release of releases) {
+      if (!release || typeof release !== "object") continue;
+      const { tag_name, draft, prerelease } = release as {
+        tag_name?: unknown;
+        draft?: unknown;
+        prerelease?: unknown;
+      };
+      if (typeof tag_name !== "string") continue;
+      if (draft === true || prerelease === true) continue;
+      if (PLATFORM_TAG.test(tag_name)) candidates.push(tag_name);
+      else skipped.push(tag_name);
+    }
+    if (candidates.length > 0) {
+      candidates.sort(compareSemver);
+      return normalizeVersion(candidates[candidates.length - 1]!);
+    }
+  }
+  throw new Error(
+    `No platform v* release among the newest ${skipped.length} GitHub Releases` +
+      (skipped.length > 0 ? ` (${skipped.slice(0, 5).join(", ")})` : "") +
+      `. Pin one with --release X.Y.Z.`,
+  );
+}
+
+/** One page of the Releases list, newest first. Empty past the last page. */
+async function fetchReleasesPage(deps: ResolveTargetVersionDeps, page: number): Promise<unknown[]> {
   let body: string;
   try {
-    body = await deps.fetchText(LATEST_API_URL);
+    body = await deps.fetchText(releasesPageUrl(page));
   } catch (err) {
     // GitHub's unauthenticated API caps at 60 req/h per IP. On shared CI
     // runners this often surfaces as a 403 with X-RateLimit-Remaining: 0;
@@ -367,6 +426,10 @@ export async function resolveTargetVersion(
         `GitHub Releases API returned 403 (likely rate-limited). ` +
           `Pin a specific version with --release X.Y.Z, or wait for the ` +
           `60 req/h-per-IP limit to reset.`,
+        // "likely" is a guess from the status code alone. The HttpError holds
+        // GitHub's actual response body, which says whether it was the rate
+        // limit or something else — keep it reachable instead of guessing.
+        { cause: err },
       );
     }
     throw err;
@@ -377,17 +440,13 @@ export async function resolveTargetVersion(
   } catch {
     throw new Error(`GitHub Releases API returned non-JSON; cannot determine latest version.`);
   }
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    typeof (parsed as { tag_name?: unknown }).tag_name !== "string"
-  ) {
-    throw new Error(`GitHub Releases API response missing tag_name.`);
+  if (!Array.isArray(parsed)) {
+    throw new Error(`GitHub Releases API response is not a release list.`);
   }
-  return normalizeVersion((parsed as { tag_name: string }).tag_name);
+  return parsed as unknown[];
 }
 
-export interface PerformCurlUpdateOptions {
+interface PerformCurlUpdateOptions {
   /** Resolved tag name without the `v` prefix, e.g. `1.2.3`. */
   targetVersion: string;
   /** Detected platform (also used for the asset name). */
@@ -398,7 +457,12 @@ export interface PerformCurlUpdateOptions {
   currentVersion?: string;
   /** Override deps for tests. */
   deps?: SelfUpdateDeps;
-  /** Logger sink — defaults to `console.error` so tests can collect output. */
+  /**
+   * Progress-line sink. Defaults to the CLI's stderr seam (`DEFAULT_IO`), the
+   * same channel every other command reports on; tests pass their own
+   * collector. Never `console.*` — the repo routes all CLI output through
+   * `CommandIO` (`lib/io.ts`) so nothing writes to a global stream by name.
+   */
   log?: (line: string) => void;
   /** Download-progress sink for the CLI binary (bytes/percent/rate). */
   onProgress?: ProgressFn;
@@ -421,7 +485,7 @@ export async function performCurlUpdate(
   opts: PerformCurlUpdateOptions,
 ): Promise<PerformCurlUpdateResult> {
   const deps = opts.deps ?? defaultSelfUpdateDeps;
-  const log = opts.log ?? ((l) => console.error(l));
+  const log = opts.log ?? ((l: string) => DEFAULT_IO.stderr.write(`${l}\n`));
   const current = opts.currentVersion ?? CLI_VERSION;
   const target = opts.targetVersion;
 

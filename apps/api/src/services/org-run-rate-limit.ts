@@ -26,7 +26,7 @@ interface OrgRateLimitAllowed {
   ok: true;
 }
 
-export type OrgRateLimitResult = OrgRateLimitDenied | OrgRateLimitAllowed;
+type OrgRateLimitResult = OrgRateLimitDenied | OrgRateLimitAllowed;
 
 let limiter: RateLimiterAbstract | null = null;
 let currentCap = -1;

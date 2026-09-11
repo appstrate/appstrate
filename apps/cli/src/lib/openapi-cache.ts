@@ -3,7 +3,7 @@
 /**
  * Per-profile OpenAPI schema cache with ETag/304 revalidation.
  *
- * Why cache at all: `GET /api/openapi.json` returns ~191 endpoints
+ * Why cache at all: `GET /api/openapi.json` returns ~290 endpoints
  * (~several MB of JSON with all component schemas). Users typically
  * invoke `appstrate openapi list` / `show` many times in quick
  * succession while exploring. Re-downloading the full schema on every
@@ -72,7 +72,7 @@ export interface OpenApiOperation {
  * "invalidate and re-warm" without losing cache benefits on the next
  * invocation.
  */
-export interface FetchOptions {
+interface FetchOptions {
   noCache?: boolean;
   refresh?: boolean;
 }
@@ -250,7 +250,9 @@ export async function fetchOpenApi(
   try {
     doc = (await res.json()) as OpenApiDocument;
   } catch (err) {
-    throw new Error(`OpenAPI schema response was not valid JSON: ${getErrorMessage(err)}`);
+    throw new Error(`OpenAPI schema response was not valid JSON: ${getErrorMessage(err)}`, {
+      cause: err,
+    });
   }
   if (!doc || typeof doc !== "object") {
     throw new Error("OpenAPI schema response was empty or not an object.");

@@ -6,7 +6,7 @@ import { ExternalLink, KeyRound, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
   useApiKeys,
   useAvailableScopes,
@@ -23,8 +23,8 @@ import { useApiKeyColumns } from "./api-key-columns";
 
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
-  const applicationId = useCurrentApplicationId();
+  const { can } = usePermissions();
+  const spaceId = useCurrentSpaceId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
   const revokeApiKeyMutation = useRevokeApiKey();
@@ -40,9 +40,8 @@ export function ApiKeysPage() {
     onRevoke: handleRevoke,
   });
 
-  if (!isAdmin) return null;
-  if (!applicationId)
-    return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
+  if (!can("api-keys:read")) return null;
+  if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
 
   return (
     <div>

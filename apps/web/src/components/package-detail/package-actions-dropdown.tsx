@@ -27,6 +27,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageEditPath } from "../../lib/package-paths";
+import { PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
 import { usePermissions } from "../../hooks/use-permissions";
 
 interface PackageActionsDropdownProps {
@@ -63,11 +64,11 @@ interface PackageActionsDropdownProps {
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
-  // Uninstall from current app
+  // Uninstall from current space
   canUninstall?: boolean;
   onUninstall?: () => void;
-  // Integration-specific: deactivate in the current app (non-destructive —
-  // removes the application_packages row, keeps connections).
+  // Integration-specific: deactivate in the current space (non-destructive —
+  // removes the space_packages row, keeps connections).
   canDeactivate?: boolean;
   onDeactivate?: () => void;
   deactivatePending?: boolean;
@@ -109,25 +110,39 @@ export function PackageActionsDropdown({
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
-  const { isAdmin, isMember } = usePermissions();
+  const { can } = usePermissions();
 
   const isAgent = type === "agent";
-  const isMutable = isAdmin && !isBuiltIn && !isHistoricalVersion && isOwned;
-  const hasAgentBuildActions = isAgent && (isMutable || (isMember && !isOwned && Boolean(onFork)));
+  // Each package family is its own permission resource, so every gate below
+  // asks for the string the matching route checks.
+  const resource = PACKAGE_PERMISSIONS[type].resource;
+  const canWrite = can(`${resource}:write`);
+  // The exports carry the manifest and every authored file, so the two download
+  // routes ask for `<type>:read` — the permission a summary-only caller (an
+  // `agents:run` runner) does not hold. Without this the items 403 on click.
+  const canRead = can(`${resource}:read`);
+  const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
+  const canDelete = can(`${resource}:delete`);
+  // Deactivating / uninstalling an integration is the same route pair as
+  // `integrations:uninstall`; the props say whether the action EXISTS here.
+  const showDeactivate = !!canDeactivate && can("integrations:uninstall") && !!onDeactivate;
+  const showUninstall = !!canUninstall && can("integrations:uninstall") && !!onUninstall;
+  const showDelete = !isBuiltIn && isOwned && canDelete;
+  const hasAgentBuildActions = isAgent && (isMutable || (canWrite && !isOwned && Boolean(onFork)));
   const hasAgentExecutionActions =
     isAgent &&
-    ((isMember && Boolean(onRunWithOptions)) ||
-      (isAdmin && !hasFileInput && Boolean(onAddSchedule)));
+    ((can("agents:run") && Boolean(onRunWithOptions)) ||
+      (can("schedules:write") && !hasFileInput && Boolean(onAddSchedule)));
   const hasAgentExportActions =
-    isAgent && Boolean((downloadVersion && onDownload) || onDownloadBundle);
+    isAgent && canRead && Boolean((downloadVersion && onDownload) || onDownloadBundle);
   const hasAgentAdministrationActions =
     isAgent &&
-    isAdmin &&
+    canDelete &&
     Boolean(
       (hasRuns && onDeleteRuns) ||
       (hasMemories && onDeleteMemories) ||
-      (canUninstall && onUninstall) ||
-      (!isBuiltIn && isOwned && onDeleteAgent),
+      (showUninstall && onUninstall) ||
+      (showDelete && onDeleteAgent),
     );
 
   // The manifest is no longer reachable from here, and does not need to be:
@@ -177,7 +192,7 @@ export function PackageActionsDropdown({
                     {t("version.createVersion")}
                   </DropdownMenuItem>
                 )}
-                {isMember && !isOwned && onFork && (
+                {canWrite && !isOwned && onFork && (
                   <DropdownMenuItem onSelect={onFork}>
                     <GitFork size={14} />
                     {t("fork.button")}
@@ -190,13 +205,13 @@ export function PackageActionsDropdown({
               <>
                 {hasAgentBuildActions && <DropdownMenuSeparator />}
                 <DropdownMenuLabel>{t("detail.actions.execution")}</DropdownMenuLabel>
-                {isMember && onRunWithOptions && (
+                {can("agents:run") && onRunWithOptions && (
                   <DropdownMenuItem onSelect={onRunWithOptions}>
                     <SlidersHorizontal size={14} />
                     {t("run.options.menuItem")}
                   </DropdownMenuItem>
                 )}
-                {isAdmin && !hasFileInput && onAddSchedule && (
+                {can("schedules:write") && !hasFileInput && onAddSchedule && (
                   <DropdownMenuItem onSelect={onAddSchedule}>
                     <CalendarPlus size={14} />
                     {t("schedule.titleNew")}
@@ -297,13 +312,13 @@ export function PackageActionsDropdown({
                 {editLabel ?? t("btn.edit")}
               </DropdownMenuItem>
             )}
-            {isMember && !isOwned && onFork && (
+            {canWrite && !isOwned && onFork && (
               <DropdownMenuItem onSelect={onFork}>
                 <GitFork size={14} />
                 {t("fork.button")}
               </DropdownMenuItem>
             )}
-            {isAdmin && (canDeactivate || canUninstall || (!isBuiltIn && isOwned)) && (
+            {(showDeactivate || showUninstall || showDelete) && (
               <>
                 <DropdownMenuSeparator />
                 {canDeactivate && onDeactivate && (

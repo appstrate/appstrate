@@ -16,7 +16,7 @@
  * injected `extraModules` list). Callers collect them and pass them in.
  */
 
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
 import { parseBearer } from "@appstrate/core/bearer";
 import { eq } from "drizzle-orm";
@@ -26,18 +26,19 @@ import { getAuth } from "@appstrate/db/auth";
 import { validateApiKey } from "../services/api-keys.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
-import { isEndUserInApp } from "../services/end-users.ts";
+import { isEndUserInSpace } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
 import { clearStaleAuthCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
-import { resolvePermissions, resolveApiKeyPermissions } from "./permissions.ts";
+import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
+import { principalGrants } from "./principal-permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
-import type { AppEnv } from "../types/index.ts";
+import type { AppEnv, OrgRole } from "../types/index.ts";
 
-export interface AuthPipelineOptions {
+interface AuthPipelineOptions {
   /**
    * Accessor for paths that bypass the auth middleware entirely.
    * Module-contributed public paths (e.g. a module's inbound webhook
@@ -47,7 +48,7 @@ export interface AuthPipelineOptions {
    * before `await boot()` finishes loading modules, so a snapshot at
    * wire-time would miss module contributions.
    */
-  publicPaths: () => Set<string>;
+  publicPaths: () => ReadonlySet<string>;
   /**
    * Accessor for module-contributed auth strategies, iterated in order.
    * The first strategy returning a non-null resolution claims the
@@ -108,6 +109,9 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // endpoints (issue #165). Tracked in
   // https://github.com/appstrate/appstrate/issues/166.
   app.on(["POST", "GET"], "/api/auth/*", async (c) => {
+    // `CLIENT_IP_HEADER` is already on `c.req.raw` (the edge `clientIp()`
+    // middleware), and both rewrites below copy the inbound headers, so the
+    // address Better Auth reads survives them.
     const req = withPublicAppOrigin(await maybeTransformDeviceFlowFormBody(c.req.raw));
     return getAuth().handler(req);
   });
@@ -136,12 +140,30 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.orgId !== undefined) c.set("orgId", resolution.orgId);
         if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
         if (resolution.orgRole !== undefined) c.set("orgRole", resolution.orgRole);
-        if (resolution.permissions.length > 0) {
-          c.set("permissions", new Set(resolution.permissions));
+        // Before the permission write: `applyOrgPermissions` reads the persona.
+        adoptViewAs(c, resolution.orgId, resolution.extra);
+        // The strategy's list is the CEILING (a token's scope claim), not the
+        // grant: with an org role the grant is the role's org set narrowed by
+        // it, plus the space slice once `requireSpaceContext` runs. Written for
+        // an EMPTY list too — an undefined `scopeCeiling` would later hand an
+        // identity-only OIDC token the space preset's full set (RBAC spec §7.2).
+        if (resolution.orgRole !== undefined) {
+          const ceiling = new Set<string>(resolution.permissions);
+          c.set("scopeCeiling", ceiling);
+          c.set("permissions", applyOrgPermissions(c, resolution.orgRole));
+        } else if (!resolution.deferOrgResolution) {
+          // No org role and not deferring: the strategy's list IS the whole
+          // answer (an OIDC end-user token's fixed allowlist), empty included.
+          const ceiling = new Set<string>(resolution.permissions);
+          c.set("scopeCeiling", ceiling);
+          c.set("permissions", new Set(ceiling));
         }
+        // No org role + `deferOrgResolution` writes NO ceiling: the OIDC
+        // instance token (CLI as the full user) picks its org via `X-Org-Id`
+        // like a cookie session. A strategy meaning "nothing" must not defer.
         c.set("authMethod", resolution.authMethod);
-        if (resolution.applicationId !== undefined) {
-          c.set("applicationId", resolution.applicationId);
+        if (resolution.spaceId !== undefined) {
+          c.set("spaceId", resolution.spaceId);
         }
         if (resolution.endUser) {
           c.set("endUser", resolution.endUser);
@@ -176,10 +198,15 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       c.set("orgId", keyInfo.orgId);
       c.set("orgSlug", keyInfo.orgSlug);
       c.set("orgRole", keyInfo.creatorRole);
-      c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
+      // The key's scopes are the ceiling; the grant is the creator's live
+      // authority narrowed by them. The space half arrives in
+      // `requireSpaceContext` from the CREATOR's membership (RBAC spec §7.1).
+      const keyCeiling = new Set<string>(keyInfo.scopes);
+      c.set("scopeCeiling", keyCeiling);
+      c.set("permissions", applyOrgPermissions(c, keyInfo.creatorRole));
       c.set("authMethod", "api_key");
       c.set("apiKeyId", keyInfo.keyId);
-      c.set("applicationId", keyInfo.applicationId);
+      c.set("spaceId", keyInfo.spaceId);
 
       // Appstrate-User header: resolve end-user context (API key only)
       const targetEndUserId = c.req.header("Appstrate-User");
@@ -193,13 +220,13 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
             param: "Appstrate-User",
           });
         }
-        const endUser = await isEndUserInApp(keyInfo.applicationId, targetEndUserId);
+        const endUser = await isEndUserInSpace(keyInfo.spaceId, targetEndUserId);
         if (!endUser) {
           throw new ApiError({
             status: 403,
             code: "invalid_end_user",
             title: "Invalid End-User",
-            detail: `End-user '${targetEndUserId}' does not exist or does not belong to this application`,
+            detail: `End-user '${targetEndUserId}' does not exist or does not belong to this space`,
             param: "Appstrate-User",
           });
         }
@@ -208,7 +235,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           apiKeyId: keyInfo.keyId,
           authenticatedMember: keyInfo.userId,
           endUserId: endUser.id,
-          applicationId: endUser.applicationId,
+          spaceId: endUser.spaceId,
           method: c.req.method,
           path: c.req.path,
           ip: getClientIp(c),
@@ -247,10 +274,18 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // end-users) from hitting platform routes. The realm is denormalized
     // onto the session row at create time (`databaseHooks.session.create
     // .before` + `session.additionalFields.realm` in packages/db/src/
-    // auth.ts), and `cookieCache` is disabled, so `getSession` always
-    // returns the fresh DB row with the declared additionalField — read
-    // it from there instead of re-querying the user table on every
-    // session-backed request. Fall back to the user-table lookup only
+    // auth.ts), so `getSession` returns it with the declared additionalField
+    // — read it from there instead of re-querying the user table on every
+    // session-backed request.
+    //
+    // This used to say "and `cookieCache` is disabled", which is no longer
+    // true in the absolute: it is an operator knob
+    // (`AUTH_SESSION_COOKIE_CACHE_SECONDS`, `packages/db/src/auth.ts`),
+    // defaulting to off. Nothing here depends on which way it is set — the
+    // cached cookie carries the same declared fields — but the fallback
+    // below is what keeps the read correct either way.
+    //
+    // Fall back to the user-table lookup only
     // when the field is absent (sessions created before the
     // denormalization shipped, or a BA version stripping undeclared
     // output fields) so audience enforcement never silently degrades.
@@ -290,6 +325,15 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       }
     }
     return next();
+  });
+
+  // Role-preview eligibility + the `X-View-As-Active` marker: a header the
+  // transport cannot honour is refused before any org is resolved.
+  const viewAsGuard = viewAsTransportGuard();
+  app.use("*", async (c, next) => {
+    if (skipAuth(c.req.path, publicPaths(), c.req.raw.headers)) return next();
+    if (!c.get("user")) return next();
+    return viewAsGuard(c, next);
   });
 
   // Realm guard: reject BA cookie sessions belonging to a non-platform
@@ -342,10 +386,31 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (authMethod !== "session" && !c.get("deferOrgResolution")) return next();
     const orgRole = c.get("orgRole");
     if (orgRole) {
-      c.set("permissions", resolvePermissions(orgRole));
+      // Preview eligibility is judged against the REAL org role, before the write.
+      await resolveViewAs(c, c.get("orgId"), orgRole);
+      // Session + `deferOrgResolution` is exactly the population eligible for
+      // per-principal grants (`lib/principal-permissions.ts`).
+      const granted = await principalGrants(c, c.get("orgId"));
+      c.set("permissions", applyOrgPermissions(c, orgRole, granted));
     }
     return next();
   });
+}
+
+/**
+ * Write `orgPermissions` and return the org-level effective set (persona and
+ * ceiling applied, via `orgHalfFor`). Principal grants go into `orgPermissions`
+ * rather than the returned set: `requireSpaceContext` re-derives `permissions`
+ * from that key.
+ */
+function applyOrgPermissions(
+  c: Context<AppEnv>,
+  role: OrgRole,
+  principal?: ReadonlySet<string>,
+): Set<string> {
+  const { orgPermissions, effective } = orgHalfFor(c, c.get("orgId"), role, principal);
+  c.set("orgPermissions", orgPermissions);
+  return effective;
 }
 
 /**
@@ -354,13 +419,25 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
  * core allowlist.
  *
  * Exported so call sites that need to gate downstream middleware on the
- * same rule (e.g. app-context, api-version) can share this function.
+ * same rule (e.g. space-context, api-version) can share this function.
  *
- * `headers` is optional and lets callers signal a request-scoped bypass
- * (e.g. pairing-token bearer auth on /pair/redeem) without polluting the
- * static `publicPaths` allowlist with conditionals.
+ * `headers` carries the request-scoped bypasses (e.g. pairing-token bearer
+ * auth on /pair/redeem) that would otherwise have to be encoded as
+ * conditionals inside the static `publicPaths` allowlist.
+ *
+ * It is REQUIRED, and deliberately so: it used to be optional, and the test
+ * harness (`apps/api/test/helpers/app.ts`) silently omitted it on the two
+ * middlewares it wires after the pipeline — the omission type-checked, so the
+ * harness evaluated a different predicate from production with nothing to say
+ * so. Every call site has a `Context` in hand and can pass `c.req.raw.headers`;
+ * making the parameter mandatory turns that class of drift into a compile
+ * error.
  */
-export function skipAuth(path: string, publicPaths: Set<string>, headers?: Headers): boolean {
+export function skipAuth(
+  path: string,
+  publicPaths: ReadonlySet<string>,
+  headers: Headers,
+): boolean {
   if (!path.startsWith("/api/")) return true;
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
@@ -375,7 +452,7 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   // Unified-runner run-scoped routes: event ingestion
   // (`/api/runs/:runId/events[/finalize|/heartbeat]`) and the agent
   // workspace self-provisioning fetches (`/api/runs/:runId/workspace`,
-  // `/documents`, `/documents/:name`). All authenticate via a Standard
+  // `/files`, `/files/:name`). All authenticate via a Standard
   // Webhooks HMAC signature at the route layer — not via JWT / API key /
   // cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
@@ -386,7 +463,7 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   // providerId become the request context, replacing the cookie/API-key
   // chain entirely. Requests without the bearer reach the route handler
   // and 401 there.
-  if (path === "/api/model-providers-oauth/pair/redeem" && headers) {
+  if (path === "/api/model-providers-oauth/pair/redeem") {
     const auth = headers.get("authorization") ?? headers.get("Authorization");
     if (parseBearer(auth)?.startsWith("appp_")) return true;
   }
@@ -394,7 +471,7 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
 }
 
 const REMOTE_RUN_EVENT_PATH_PATTERN =
-  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|documents(\/[^/]+)?)$/;
+  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|files(\/[^/]+)?)$/;
 
 /**
  * Device-flow + CLI-token content-type shim.
@@ -456,7 +533,7 @@ export async function maybeTransformDeviceFlowFormBody(req: Request): Promise<Re
 }
 
 /** Paths that need auth but not org-context (user-scoped or self-resolving). */
-export function skipOrgContext(path: string): boolean {
+function skipOrgContext(path: string): boolean {
   if (path === "/api/orgs" || path === "/api/orgs/") return true; // list/create orgs
   if (path.startsWith("/api/orgs/")) return true; // /api/orgs/:id/* handle their own auth
   if (path === "/api/profile" || path === "/api/profile/") return true;
@@ -470,12 +547,12 @@ export function skipOrgContext(path: string): boolean {
   // require org context and are intentionally not listed here.
   if (path === "/api/me/orgs" || path === "/api/me/orgs/") return true;
   // `/api/me/connections` is the unified user-scope connection view: it
-  // crosses orgs/applications by design, so requiring `X-Org-Id` would be
+  // crosses orgs/spaces by design, so requiring `X-Org-Id` would be
   // both wrong (no single org represents the caller's full inventory) and
   // user-hostile (would force the SPA to pick one before showing the list).
   if (path === "/api/me/connections" || path === "/api/me/connections/") return true;
   // `DELETE /api/me/connections/:id` — destructive global delete, derives
-  // applicationId from the row itself. Same rationale as the list above.
+  // spaceId from the row itself. Same rationale as the list above.
   if (/^\/api\/me\/connections\/[^/]+\/?$/.test(path)) return true;
   return false;
 }

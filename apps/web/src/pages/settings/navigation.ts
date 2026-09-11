@@ -52,7 +52,7 @@ export function buildSettingsNavigation({
         { to: "/org-settings/general", icon: Building, labelKey: "orgSettings.tabGeneral" },
         { to: "/org-settings/members", icon: Users, labelKey: "orgSettings.tabMembers" },
         {
-          to: "/org-settings/applications",
+          to: "/org-settings/spaces",
           icon: LayoutGrid,
           labelKey: "applications.pageTitle",
         },

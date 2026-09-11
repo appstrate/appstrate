@@ -13,61 +13,76 @@ import {
   uniqueIndex,
   primaryKey,
   check,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
-import { applications } from "./applications.ts";
+import { spaces } from "./spaces.ts";
+import type { SpaceAssignment } from "@appstrate/core/permissions";
 
-export const organizations = pgTable("organizations", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: text("name").notNull(),
-  slug: text("slug").unique().notNull(),
-  // Small presentation asset for the shell and organization switcher. The web
-  // client stores either `emoji:<grapheme>` or a square WebP data URL that it
-  // has already resized and compressed. Keeping this nullable preserves the
-  // initial-based fallback for every existing organization.
-  logo: text("logo"),
-  orgSettings: jsonb("org_settings").notNull().default({}),
-  // The org's default model — a flat model id that may name a system model
-  // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
-  // an `is_default` boolean on `org_models` so the default can point at a
-  // system model too (mirrors the integration `client_ref` pattern): picking
-  // any row — system or custom — makes exactly that row the default. NULL ⇒ no
-  // explicit default; the resolution cascade falls to the system-flagged model.
-  // No FK: a system id is not a DB row. Stale custom ids are cleared on delete
-  // and ignored by the resolver (it falls through to the cascade).
-  defaultModelId: text("default_model_id"),
-  // The org's default proxy — same pointer pattern as `default_model_id`: a flat
-  // proxy id naming a system proxy (SYSTEM_PROXIES) OR an `org_proxies.id` (UUID).
-  // A pointer rather than an `is_default` boolean on `org_proxies` so the default
-  // can point at a system proxy too; picking any row — system or custom — makes
-  // exactly that one the default. NULL ⇒ no explicit default; the resolver falls
-  // to the system-flagged proxy then `PROXY_URL`. No FK (a system id is not a DB
-  // row); stale custom ids are cleared on delete and ignored by the resolver.
-  defaultProxyId: text("default_proxy_id"),
-  // Running total of durable document bytes stored by this org. Maintained
-  // transactionally alongside `documents` insert/delete so the synchronous
-  // org-storage quota check (`ORG_STORAGE_QUOTA_BYTES`) needs no aggregate
-  // scan. bigint (mode: number) — total storage far exceeds the int4 ceiling.
-  // FK cascade deletes (run/chat-session/end-user/application removed) drop
-  // `documents` rows WITHOUT the app-level decrement, so the counter can drift
-  // high; `reconcileOrgDocumentBytes()` (documents.ts GC loop, ~daily) recomputes
-  // it from `SUM(documents.size)` and corrects the drift.
-  documentsBytesUsed: bigint("documents_bytes_used", { mode: "number" }).notNull().default(0),
-  // Per-org durable-document storage limit, in bytes. NULL = no per-org override
-  // (the org falls back to the global env quota). Resolution order the write path
-  // enforces (see `effectiveOrgStorageLimit` in documents.ts):
-  //   organizations.documents_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
-  // Pilotable per-org by the out-of-repo cloud module via the narrow
-  // `PlatformServices.setDocumentStorageLimit` capability. The core stays
-  // billing-neutral: this is a technical byte ceiling, never a plan or price.
-  // bigint (mode: number) — mirrors `documents_bytes_used` above.
-  documentsBytesLimit: bigint("documents_bytes_limit", { mode: "number" }),
-  createdBy: text("created_by").references(() => user.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").unique().notNull(),
+    // Small presentation asset for the shell and organization switcher. The web
+    // client stores either `emoji:<grapheme>` or a square WebP data URL that it
+    // has already resized and compressed. Keeping this nullable preserves the
+    // initial-based fallback for every existing organization.
+    logo: text("logo"),
+    orgSettings: jsonb("org_settings").notNull().default({}),
+    // The org's default model — a flat model id that may name a system model
+    // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
+    // an `is_default` boolean on `org_models` so the default can point at a
+    // system model too (mirrors the integration `client_ref` pattern): picking
+    // any row — system or custom — makes exactly that row the default. NULL ⇒ no
+    // explicit default; the resolution cascade falls to the system-flagged model.
+    // No FK: a system id is not a DB row. Stale custom ids are cleared on delete
+    // and ignored by the resolver (it falls through to the cascade).
+    defaultModelId: text("default_model_id"),
+    // The org's default proxy — same pointer pattern as `default_model_id`: a flat
+    // proxy id naming a system proxy (SYSTEM_PROXIES) OR an `org_proxies.id` (UUID).
+    // A pointer rather than an `is_default` boolean on `org_proxies` so the default
+    // can point at a system proxy too; picking any row — system or custom — makes
+    // exactly that one the default. NULL ⇒ no explicit default; the resolver falls
+    // to the system-flagged proxy then `PROXY_URL`. No FK (a system id is not a DB
+    // row); stale custom ids are cleared on delete and ignored by the resolver.
+    defaultProxyId: text("default_proxy_id"),
+    // Running total of durable file bytes stored by this org. Maintained
+    // transactionally alongside `files` insert/delete so the synchronous
+    // org-storage quota check (`ORG_STORAGE_QUOTA_BYTES`) needs no aggregate
+    // scan. bigint (mode: number) — total storage far exceeds the int4 ceiling.
+    // FK cascade deletes (run/chat-session/end-user/space removed) drop
+    // `files` rows WITHOUT the space-level decrement, so the counter can drift
+    // high; `reconcileOrgFileBytes()` (files.ts GC loop, ~daily) recomputes
+    // it from `SUM(files.size)` and corrects the drift.
+    filesBytesUsed: bigint("files_bytes_used", { mode: "number" }).notNull().default(0),
+    // Per-org durable-file storage limit, in bytes. NULL = no per-org override
+    // (the org falls back to the global env quota). Resolution order the write path
+    // enforces (see `effectiveOrgStorageLimit` in files.ts):
+    //   organizations.files_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
+    // Pilotable per-org by a billing module — the ee module
+    // (`@appstrate/module-ee`) — via the narrow
+    // `PlatformServices.setFileStorageLimit` capability. The core stays
+    // billing-neutral: this is a technical byte ceiling, never a plan or price.
+    // bigint (mode: number) — mirrors `files_bytes_used` above.
+    filesBytesLimit: bigint("files_bytes_limit", { mode: "number" }),
+    // When a deletion was reserved, NULL otherwise. Set before `onOrgDelete`, so a DELETE that
+    // failed in a hook finds the reservation standing and resumes.
+    deletingAt: timestamp("deleting_at", { withTimezone: true }),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_organizations_created_by").on(table.createdBy),
+  ],
+);
 
 export const organizationMembers = pgTable(
   "org_members",
@@ -87,6 +102,34 @@ export const organizationMembers = pgTable(
   ],
 );
 
+/**
+ * Pending invitations to join an org.
+ *
+ * NOTE — there are deliberately no `accepted_by` / `accepted_at` columns, and
+ * no `idx_org_invitations_accepted_by`. There were, written by
+ * `markInvitationAccepted` (`services/invitations.ts`) beside the
+ * `status = 'accepted'` flip, and read by nothing: `getOrgInvitations` — the
+ * only list — filters `status = 'pending'`, so an accepted row never reaches
+ * the route at all, and neither column appears in any DTO, OpenAPI schema or
+ * SPA read. The two assertions in `invitations.test.ts` were the entire
+ * readership, i.e. a test that only proved the write happened.
+ *
+ * The `status` enum already records THAT an invitation was accepted; who
+ * accepted it and when is in the audit log, which outlives the row (the org
+ * delete drops every invitation with it). Dropped by `0055`.
+ *
+ * That audit substitute is NOT something the drop inherited — it did not exist
+ * when the columns went. `POST /invite/:token/accept` wrote no audit record at
+ * all, so for the length of one review the attribution was simply gone, backed
+ * by a claim nobody had implemented. The route now writes
+ * `org.invitation_accepted` (`routes/invitations.ts`) AFTER the claim is won,
+ * so the loser of a concurrent accept logs nothing, and
+ * `invitations.test.ts` asserts the actor, the timestamp and the payload.
+ * Delete that write and this paragraph becomes false again.
+ *
+ * If acceptance attribution is ever wanted on this TABLE, it needs a reader
+ * designed with it — not these columns revived.
+ */
 export const orgInvitations = pgTable(
   "org_invitations",
   {
@@ -99,17 +142,37 @@ export const orgInvitations = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     role: orgRoleEnum("role").notNull(),
+    /**
+     * Space memberships applied when the invitation is accepted (RBAC spec
+     * §5). Wire-shaped (snake_case keys) because it is written straight from
+     * the validated invite body and read straight back onto it:
+     * `[{ space_id, preset_role } | { space_id, custom_role_id }]`.
+     */
+    spaceAssignments: jsonb("space_assignments")
+      .$type<ReadonlyArray<SpaceAssignment>>()
+      .notNull()
+      .default([]),
     status: invitationStatusEnum("status").notNull().default("pending"),
-    invitedBy: text("invited_by").references(() => user.id),
-    acceptedBy: text("accepted_by").references(() => user.id),
+    invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    index("idx_org_invitations_token").on(table.token),
     index("idx_org_invitations_org_id").on(table.orgId),
     index("idx_org_invitations_email").on(table.email),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_org_invitations_invited_by").on(table.invitedBy),
+    // One pending invitation per (org, email): a second invite for the same
+    // address must extend or edit the existing one, never silently replace it
+    // and invalidate a link already shared (0056). `email` is stored
+    // lower-cased and trimmed by `createInvitation`, so the index needs no
+    // expression. Concurrent creates race on this index; the service maps
+    // the unique violation to `invitation_already_pending`.
+    uniqueIndex("uq_org_invitations_pending")
+      .on(table.orgId, table.email)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 
@@ -122,9 +185,9 @@ export const apiKeys = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     keyHash: text("key_hash").notNull(),
     keyPrefix: text("key_prefix").notNull(),
@@ -132,7 +195,7 @@ export const apiKeys = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -140,9 +203,12 @@ export const apiKeys = pgTable(
   },
   (table) => [
     index("idx_api_keys_org_id").on(table.orgId),
-    index("idx_api_keys_application_id").on(table.applicationId),
+    index("idx_api_keys_space_id").on(table.spaceId),
     uniqueIndex("idx_api_keys_key_hash").on(table.keyHash),
-    index("idx_api_keys_key_prefix").on(table.keyPrefix),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_api_keys_created_by").on(table.createdBy),
   ],
 );
 
@@ -160,12 +226,16 @@ export const orgProxies = pgTable(
     // not a per-row boolean — so it can point at a system proxy too. See the
     // column comment on `organizations`.
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_proxies_org_id").on(table.orgId),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_org_proxies_created_by").on(table.createdBy),
     check("org_proxies_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );
@@ -226,7 +296,15 @@ export const modelProviderCredentials = pgTable(
     // (`updateOAuthCredentialTokens`). Mirrors
     // `integration_connections.refresh_failure_count`.
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
-    lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
+    // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
+    // one, written beside `refresh_failure_count` on every transient refresh
+    // failure and read by nothing: no route, no DTO, no OpenAPI field, no
+    // module consumer, no predicate. Its only readers were the integration
+    // tests asserting the write happened. `refresh_failure_count` is the
+    // column that drives the reconnect escalation; the timestamp was never
+    // part of that predicate. Dropped by `0044_finish_file_rename`. If "when
+    // did refresh last fail" is ever needed, build the reader first — a column
+    // with no reader is not telemetry, it is write amplification.
     /**
      * Model ids empirically verified against this credential — filled by
      * the model-discovery probe (post-OAuth-import + manual refresh). The
@@ -245,18 +323,21 @@ export const modelProviderCredentials = pgTable(
      * rows. Read the column through that accessor, never directly.
      */
     availableModelIds: jsonb("available_model_ids").$type<string[]>(),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    index("idx_model_provider_credentials_org_id").on(t.orgId),
     index("idx_model_provider_credentials_org_provider").on(t.orgId, t.providerId),
     // Partial index — only OAuth rows have a non-null expiry. Keeps the
     // index small even on installations with millions of api-key rows.
     index("idx_model_provider_credentials_expires_at_oauth")
       .on(t.expiresAt)
       .where(sql`${t.expiresAt} IS NOT NULL`),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_model_provider_credentials_created_by").on(t.createdBy),
   ],
 );
 
@@ -312,26 +393,61 @@ export const modelProviderPairings = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** When the helper successfully POSTed credentials. NULL means still pending. */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
-    /** IP address that consumed the pairing — kept alongside `consumedAt` for audit. */
-    consumedFromIp: text("consumed_from_ip"),
+    // NOTE — there is deliberately no `consumed_from_ip` here. There was one,
+    // written by `consumePairing` (`services/model-providers/pairings.ts`) and
+    // read by nothing: no route, no DTO, no OpenAPI field, no module consumer.
+    // Its "for audit" justification did not survive two facts:
+    // `cleanupExpiredPairings` DELETEs the row an hour after expiry, and the
+    // audit entry `handlePairRedeem` writes at redeem time omits the IP — so
+    // the forensic trail it was meant to leave was erased, and the record that
+    // survives never carried it. Dropped by `0044_finish_file_rename`. If the
+    // consuming IP is wanted, put it in the audit `after` payload, which
+    // outlives the row — do not re-add a column nothing reads.
     /**
      * Final `model_provider_credentials.id` created or reconnected by the
      * helper. NULL while pending; surfaced via `GET /pairing/:id` after redeem
      * so the UI can act on the result without polling the credential list.
+     *
+     * The FK is declared in the table-config block below with an EXPLICIT
+     * name: drizzle's generated one,
+     * `model_provider_pairings_credential_id_model_provider_credentials_id_fk`,
+     * is 70 bytes and Postgres truncates silently at 63. See the block.
      */
-    credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
-      onDelete: "set null",
-    }),
+    credentialId: uuid("credential_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_model_provider_pairings_org_id").on(table.orgId),
-    // Partial index — only unconsumed rows matter for the cleanup scan.
-    // Keeps the index footprint proportional to the (small) pending-pairing
-    // population, not the long-tail of consumed rows kept for the audit window.
-    index("idx_model_provider_pairings_expires_at")
-      .on(table.expiresAt)
-      .where(sql`consumed_at IS NULL`),
+    // NOTE — there is deliberately no `expires_at` index.
+    //
+    // There was one, partial on `consumed_at IS NULL`, justified as "only
+    // unconsumed rows matter for the cleanup scan". The cleanup scan
+    // (`services/model-providers/pairings.cleanupExpiredPairings`) is
+    // `DELETE ... WHERE expires_at < cutoff` with no `consumed_at` predicate —
+    // it deletes consumed rows too, on purpose, since the grace window is what
+    // bounds the table. The planner can therefore never prove the partial
+    // index's predicate and never used it, so it was maintained on every
+    // pending-pairing write and read by nothing. The only other `expires_at`
+    // reader, `consumePairing`, is anchored on the unique `token_hash`.
+    // If the cleanup scan ever becomes hot, add a NON-partial index on
+    // `expires_at` — the partial shape cannot serve that query.
+    //
+    // EXPLICITLY NAMED (migration 0055). Drizzle's generated name,
+    // `model_provider_pairings_credential_id_model_provider_credentials_id_fk`,
+    // is 70 bytes; Postgres truncates identifiers past 63 at creation, without
+    // a warning, so the catalog has only ever held
+    // `model_provider_pairings_credential_id_model_provider_credential`. The
+    // schema, the snapshot and `0000_init.sql` all carried the 70-byte form,
+    // and the first statement to address it by name — the
+    // `DROP CONSTRAINT "<declared name>"` drizzle-kit emits when an FK's
+    // `onDelete` or target changes — would have errored 42704 and aborted the
+    // whole pending batch. Same reasoning in full on
+    // `integration_org_defaults.connectionId`, the other one of the two.
+    foreignKey({
+      columns: [table.credentialId],
+      foreignColumns: [modelProviderCredentials.id],
+      name: "model_provider_pairings_credential_id_fk",
+    }).onDelete("set null"),
   ],
 );
 
@@ -373,12 +489,16 @@ export const orgModels = pgTable(
     // not a per-row boolean — so it can point at a system model too. See the
     // column comment on `organizations`.
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_models_org_id").on(table.orgId),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_org_models_created_by").on(table.createdBy),
     check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );

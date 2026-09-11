@@ -163,3 +163,139 @@ describe("startSinkHeartbeat", () => {
     expect(timestamps.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+/**
+ * A `fetch` that never resolves on its own — it settles only when the
+ * caller's signal aborts, rejecting with the abort reason exactly as a real
+ * `fetch` does. Records every signal it was handed so a test can tell WHICH
+ * of the composed legs fired (`TimeoutError` = the per-attempt deadline,
+ * `AbortError` = `stop()`).
+ */
+function hangingFetch(): { fetchImpl: typeof fetch; signals: AbortSignal[] } {
+  const signals: AbortSignal[] = [];
+  const fetchImpl = (async (
+    _input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const signal = init?.signal;
+    if (!signal) throw new Error("heartbeat POST carried no AbortSignal — it can hang forever");
+    signals.push(signal);
+    return await new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, signals };
+}
+
+/** Poll until `predicate` holds or `timeoutMs` elapses. Returns whether it held. */
+async function until(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await wait(5);
+  }
+  return predicate();
+}
+
+/**
+ * The heartbeat's own hang, which is the failure it exists to prevent: ticks
+ * are serialised through `sendOnce().finally(scheduleNext)`, so ONE fetch that
+ * never settles stops the loop for good and the platform's stall watchdog
+ * reaps a container that is perfectly alive.
+ */
+describe("startSinkHeartbeat — per-attempt deadline", () => {
+  it("gives up on a hung POST and keeps ticking", async () => {
+    const { fetchImpl, signals } = hangingFetch();
+    const errors: unknown[] = [];
+    // 40 ms interval → a 20 ms per-attempt deadline (half the interval).
+    const handle = startSinkHeartbeat({
+      url: "https://api/runs/r_hang/events/heartbeat",
+      runSecret: "a".repeat(43),
+      intervalMs: 40,
+      jitter: 0,
+      fetch: fetchImpl,
+      onError: (err) => errors.push(err),
+    });
+
+    const ticked = await until(() => signals.length >= 3, 1_000);
+    handle.stop();
+
+    // Without the deadline this is stuck at 1 forever.
+    expect(ticked).toBe(true);
+    // Every attempt that ran to completion died on the DEADLINE, not on some
+    // other fault. The last one is excluded: `stop()` above aborts whatever is
+    // in flight, which is the subject of the third test, not this one.
+    const completed = signals.slice(0, -1);
+    expect(completed.length).toBeGreaterThanOrEqual(2);
+    for (const signal of completed) {
+      expect(signal.aborted).toBe(true);
+      expect((signal.reason as Error).name).toBe("TimeoutError");
+    }
+    // Each hang is surfaced, not swallowed.
+    expect(errors.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // Control: the same loop, same tight interval, against an upstream that
+  // answers. If the deadline were firing indiscriminately — or the loop were
+  // simply broken — this fails, so the test above cannot pass by accident.
+  it("does not fire on a responsive upstream", async () => {
+    const { fetchImpl, calls } = collectingFetch();
+    // Sampled at the instant the POST completes — the composed signal's
+    // timeout leg stays armed afterwards and fires harmlessly on the finished
+    // request (nothing reads the heartbeat's body), so a later read would say
+    // nothing about whether the deadline cut this attempt short.
+    const abortedAtCompletion: boolean[] = [];
+    const recordingFetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const res = await fetchImpl(input as string, init);
+      abortedAtCompletion.push(init?.signal?.aborted ?? true);
+      return res;
+    }) as unknown as typeof fetch;
+    const errors: unknown[] = [];
+    const handle = startSinkHeartbeat({
+      url: "https://api/runs/r_live/events/heartbeat",
+      runSecret: "a".repeat(43),
+      intervalMs: 40,
+      jitter: 0,
+      fetch: recordingFetch,
+      onError: (err) => errors.push(err),
+    });
+
+    await wait(200);
+    handle.stop();
+
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    expect(errors).toHaveLength(0);
+    // Deadlines armed but never reached: no attempt was aborted on its way out.
+    expect(abortedAtCompletion.length).toBeGreaterThanOrEqual(3);
+    for (const aborted of abortedAtCompletion) expect(aborted).toBe(false);
+  });
+
+  // The half a naive fix misses: `stop()` clears the timer, which says nothing
+  // about a POST already in flight.
+  it("stop() aborts the request in flight", async () => {
+    const { fetchImpl, signals } = hangingFetch();
+    const errors: unknown[] = [];
+    // 200 ms interval → 100 ms deadline: wide enough that `stop()` lands while
+    // the first attempt is still hanging, so the abort observed below is
+    // `stop()`'s and not the deadline's.
+    const handle = startSinkHeartbeat({
+      url: "https://api/runs/r_stop/events/heartbeat",
+      runSecret: "a".repeat(43),
+      intervalMs: 200,
+      jitter: 0,
+      fetch: fetchImpl,
+      onError: (err) => errors.push(err),
+    });
+
+    expect(await until(() => signals.length === 1, 1_000)).toBe(true);
+    handle.stop();
+
+    expect(signals[0]!.aborted).toBe(true);
+    expect((signals[0]!.reason as Error).name).toBe("AbortError");
+    // A requested stop is not a fault to report.
+    expect(errors).toHaveLength(0);
+  });
+});

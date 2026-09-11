@@ -1,12 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile, readdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { ProcessOrchestrator } from "../../src/services/orchestrator/process-orchestrator.ts";
+import { mkdtemp, mkdir, rm, writeFile, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  ProcessOrchestrator,
+  _setDataDirForTesting,
+} from "../../src/services/orchestrator/process-orchestrator.ts";
 
-const DATA_DIR = resolve("./data/runs");
+/**
+ * A scratch run-data directory, NOT the live `./data/runs`.
+ *
+ * This file used to `resolve("./data/runs")` — the same expression the source
+ * uses — and `rm -rf` it in `beforeEach`. API tests must run from the repo root,
+ * so that is the real directory a `bun run dev` session writes run pidfiles
+ * into: running the unit suite beside a dev server destroyed its pidfiles, and
+ * two concurrent test sessions wiped each other. The source now takes a
+ * test-only override for exactly this.
+ */
+const DATA_DIR = await mkdtemp(join(tmpdir(), "appstrate-test-runs-"));
+_setDataDirForTesting(DATA_DIR);
 
 let orchestrator: ProcessOrchestrator;
 
@@ -14,10 +29,30 @@ afterEach(async () => {
   await orchestrator?.shutdown();
 });
 
-/** Wipe DATA_DIR so each test starts from a known empty state. */
+afterAll(async () => {
+  _setDataDirForTesting();
+  await rm(DATA_DIR, { recursive: true, force: true });
+});
+
+/** Wipe the scratch data dir so each test starts from a known empty state. */
 async function resetDataDir() {
   await rm(DATA_DIR, { recursive: true, force: true });
   await mkdir(DATA_DIR, { recursive: true });
+}
+
+/** Where the orchestrator keeps a run's workspace — mirrors workspaceDirFor(). */
+function workspaceDirFor(runId: string): string {
+  return join(tmpdir(), `appstrate-ws-${runId}`);
+}
+
+/**
+ * Write the ownership marker that tells a boot sweep which platform process
+ * created a run. Mirrors what createIsolationBoundary writes.
+ */
+async function writeOwnerMarker(runId: string, ownerPid: number): Promise<void> {
+  const dir = workspaceDirFor(runId);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await writeFile(join(dir, ".appstrate-owner"), String(ownerPid));
 }
 
 /** Spawn a long-lived child process and return its pid. Caller must kill it. */
@@ -100,13 +135,6 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
-  describe("ensureImages", () => {
-    it("is a no-op", async () => {
-      orchestrator = new ProcessOrchestrator();
-      await orchestrator.ensureImages(["some-image:latest"]); // should not throw
-    });
-  });
-
   describe("cleanupOrphans", () => {
     beforeEach(async () => {
       await resetDataDir();
@@ -117,10 +145,13 @@ describe("ProcessOrchestrator", () => {
       const report = await orchestrator.cleanupOrphans();
       expect(report.workloads).toBe(0);
       expect(report.isolationBoundaries).toBe(0);
-      // Workspaces reap sweeps os.tmpdir() globally — concurrent tests
-      // creating workspace dirs (or leftovers from prior runs) can
-      // contribute, so we don't pin the count.
-      expect(report.workspaces).toBeGreaterThanOrEqual(0);
+      // `report.workspaces` is deliberately NOT asserted. The workspace reap
+      // sweeps `os.tmpdir()` globally — unlike the run-data directory above,
+      // which this file now scopes to a scratch path — so concurrent tests and
+      // leftovers from prior runs both contribute. A `toBeGreaterThanOrEqual(0)`
+      // stood here, which reads as an assertion and is one no count can fail.
+      // Pinning it needs the workspace root injectable too; until then, silence
+      // is more honest than a green that proves nothing.
     });
 
     it("removes a boundary directory whose pidfile points at a dead pid", async () => {
@@ -175,6 +206,82 @@ describe("ProcessOrchestrator", () => {
       expect(existsSync(dir)).toBe(false);
     });
 
+    it("preserves a boundary owned by a live sibling instance (#1130)", async () => {
+      // The regression: DATA_DIR is cwd-relative, so two `bun run dev`
+      // sessions from the same checkout share it. Booting the second one
+      // SIGKILLed the first one's live agent and deleted its boundary —
+      // the sweep probed `kill(pid, 0)`, saw the workload was ALIVE, and
+      // killed it for exactly that reason.
+      const workloadPid = spawnSleeper();
+      const ownerPid = spawnSleeper();
+      const runId = "sibling-live";
+      const dir = join(DATA_DIR, runId);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "sidecar.pid"), String(workloadPid));
+      await writeOwnerMarker(runId, ownerPid);
+
+      try {
+        orchestrator = new ProcessOrchestrator();
+        const report = await orchestrator.cleanupOrphans();
+
+        expect(report.workloads).toBe(0);
+        expect(report.isolationBoundaries).toBe(0);
+        expect(existsSync(dir)).toBe(true);
+        // The sibling's workload is still running.
+        expect(() => process.kill(workloadPid, 0)).not.toThrow();
+      } finally {
+        await rm(workspaceDirFor(runId), { recursive: true, force: true });
+        for (const pid of [workloadPid, ownerPid]) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Already dead
+          }
+        }
+      }
+    });
+
+    it("preserves the workspace of a live sibling started from another worktree (#1130)", async () => {
+      // Worktrees get their own DATA_DIR but share os.tmpdir(), so the
+      // workspace sweep is the one path that sees across them. It used to
+      // `rm -rf` a running agent's /workspace mid-run: the uid filter it
+      // relied on does not separate two instances run by the same user.
+      const ownerPid = spawnSleeper();
+      const runId = "sibling-worktree";
+      const workspace = workspaceDirFor(runId);
+      await mkdir(workspace, { recursive: true });
+      await writeOwnerMarker(runId, ownerPid);
+      await writeFile(join(workspace, "output.txt"), "work in progress");
+
+      try {
+        orchestrator = new ProcessOrchestrator();
+        await orchestrator.cleanupOrphans();
+
+        expect(existsSync(join(workspace, "output.txt"))).toBe(true);
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+        try {
+          process.kill(ownerPid, "SIGKILL");
+        } catch {
+          // Already dead
+        }
+      }
+    });
+
+    it("reclaims a workspace whose owning instance is gone (#1130)", async () => {
+      // The other half of the invariant: a dead owner is what makes residue
+      // reclaimable, so a crashed instance's leftovers must still be reaped.
+      const runId = "owner-dead";
+      const workspace = workspaceDirFor(runId);
+      await mkdir(workspace, { recursive: true });
+      await writeOwnerMarker(runId, 99999999);
+
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.cleanupOrphans();
+
+      expect(existsSync(workspace)).toBe(false);
+    });
+
     it("is idempotent — second call after a wipe returns zeros", async () => {
       const dir = join(DATA_DIR, "orphan-twice");
       await mkdir(dir, { recursive: true });
@@ -189,6 +296,36 @@ describe("ProcessOrchestrator", () => {
       // + workload zeros; leave workspaces unconstrained.
       expect(second.workloads).toBe(0);
       expect(second.isolationBoundaries).toBe(0);
+    });
+  });
+
+  describe("createIsolationBoundary ownership marker", () => {
+    beforeEach(async () => {
+      await resetDataDir();
+    });
+
+    it("stamps the creating platform's pid so sibling sweeps can spare the run (#1130)", async () => {
+      orchestrator = new ProcessOrchestrator();
+      const runId = "marker-write";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+
+      try {
+        const marker = join(workspaceDirFor(runId), ".appstrate-owner");
+        expect(existsSync(marker)).toBe(true);
+        expect((await Bun.file(marker).text()).trim()).toBe(String(process.pid));
+      } finally {
+        await orchestrator.removeIsolationBoundary(boundary);
+      }
+    });
+
+    it("takes the marker down with the workspace, so finished runs read as reclaimable", async () => {
+      orchestrator = new ProcessOrchestrator();
+      const runId = "marker-teardown";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+
+      await orchestrator.removeIsolationBoundary(boundary);
+
+      expect(existsSync(workspaceDirFor(runId))).toBe(false);
     });
   });
 
@@ -292,5 +429,142 @@ describe("ProcessOrchestrator", () => {
       expect(port).toBeGreaterThan(0);
       expect(port).toBeLessThan(65536);
     });
+  });
+
+  /**
+   * `pendingSpecs` retains the agent's FULL env — RUN_TOKEN, sink secret,
+   * model credentials — until something evicts it. Only `startWorkload`
+   * (happy path) and `shutdown` ever did; `removeWorkload` deleted the
+   * `processes` entry and left the spec behind. Every sidecar- or
+   * upload-failure teardown in `run-launcher/pi.ts` takes exactly that path,
+   * so a long-lived process-mode platform accumulated one credential-bearing
+   * spec per failed launch, forever.
+   *
+   * The knock-on was worse than the retention: a later `startWorkload` found
+   * the spec but no process entry and returned SILENTLY, leaving the caller
+   * to `waitForExit` a process that would never be spawned.
+   */
+  describe("createWorkload / startWorkload / removeWorkload", () => {
+    beforeEach(async () => {
+      await resetDataDir();
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+    });
+
+    /** The private map, read directly — the retention IS the defect. */
+    function pendingSpecCount(): number {
+      return (orchestrator as unknown as { pendingSpecs: Map<string, unknown> }).pendingSpecs.size;
+    }
+
+    async function stageAgent(runId: string) {
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      const handle = await orchestrator.createWorkload(
+        {
+          runId,
+          role: "agent",
+          image: "unused-in-process-mode",
+          env: { RUN_TOKEN: "run-token-that-must-not-be-retained" },
+          resources: { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000 },
+        },
+        boundary,
+      );
+      return { boundary, handle };
+    }
+
+    /** Swap the agent entrypoint for an idle script so no real run boots. */
+    async function withFakeEntrypoint<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+      const fake = join(dir, "fake-agent.ts");
+      await writeFile(fake, "setInterval(()=>{},60000);");
+      const originalSpawn = Bun.spawn;
+      const patched = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) =>
+        originalSpawn(
+          cmd[0] === "bun" && cmd[1] === "run" ? ["bun", "run", fake] : cmd,
+          opts,
+        )) as typeof Bun.spawn;
+      (Bun as { spawn: typeof Bun.spawn }).spawn = patched;
+      try {
+        return await fn();
+      } finally {
+        (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+    }
+
+    // CONTROL. Passes before and after: the happy path must still consume the
+    // spec and actually SPAWN. Without it, a `startWorkload` that threw (or
+    // returned) unconditionally would look identical to the fix below.
+    it("startWorkload spawns the staged process and consumes its pending spec", async () => {
+      const { boundary, handle } = await stageAgent("test-run-start-ok");
+      expect(pendingSpecCount()).toBe(1);
+
+      await withFakeEntrypoint(boundary.id, () => orchestrator.startWorkload(handle));
+
+      expect(await readdir(boundary.id)).toContain("agent.pid");
+      expect(pendingSpecCount()).toBe(0);
+    }, 10_000);
+
+    it("removeWorkload drops the pending spec, not just the process entry", async () => {
+      const { handle } = await stageAgent("test-run-remove-evicts");
+      expect(pendingSpecCount()).toBe(1);
+
+      await orchestrator.removeWorkload(handle);
+
+      expect(pendingSpecCount()).toBe(0);
+    });
+
+    it("startWorkload after removeWorkload throws, naming both missing halves", async () => {
+      const { handle } = await stageAgent("test-run-start-after-remove");
+      await orchestrator.removeWorkload(handle);
+
+      const err = await orchestrator.startWorkload(handle).then(
+        () => null,
+        (e: unknown) => e,
+      );
+
+      expect(err).toBeInstanceOf(Error);
+      // BOTH halves gone is what proves the spec was evicted with the process
+      // entry: a removeWorkload that dropped only the process entry would
+      // report the process entry alone.
+      expect((err as Error).message).toContain("pending spec");
+      expect((err as Error).message).toContain("process entry");
+    });
+
+    it("startWorkload throws for a handle this orchestrator never created", async () => {
+      const err = await orchestrator
+        .startWorkload({ id: "workload-ghost-agent", runId: "ghost", role: "agent" })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("workload-ghost-agent");
+    });
+
+    it("startWorkload is a no-op for a sidecar, which createSidecar already spawned", async () => {
+      // The carve-out that keeps connect-runs working in process mode:
+      // `createSidecar` spawns eagerly and stages no pending spec, but the
+      // Docker path defers its start, so callers issue the call regardless.
+      const runId = "test-run-sidecar-start";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      const fakeSidecar = join(boundary.id, "fake-sidecar.ts");
+      await writeFile(fakeSidecar, "setInterval(()=>{},60000);");
+
+      const originalSpawn = Bun.spawn;
+      const patched = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) =>
+        originalSpawn(
+          cmd[0] === "bun" && cmd[1] === "run" ? ["bun", "run", fakeSidecar] : cmd,
+          opts,
+        )) as typeof Bun.spawn;
+      (Bun as { spawn: typeof Bun.spawn }).spawn = patched;
+      let sidecar;
+      try {
+        sidecar = await orchestrator.createSidecar(runId, boundary, { runToken: "tok" });
+      } finally {
+        (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+
+      await orchestrator.startWorkload(sidecar); // must not throw
+      await orchestrator.stopByRunId(runId);
+    }, 10_000);
   });
 });

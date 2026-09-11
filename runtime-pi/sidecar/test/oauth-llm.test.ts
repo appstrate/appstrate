@@ -14,7 +14,8 @@
  */
 
 import { describe, it, expect, mock, spyOn } from "bun:test";
-import { createApp, type AppDeps } from "../app.ts";
+import { type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import { logger } from "../logger.ts";
 import { OAuthTokenCache } from "../oauth-token-cache.ts";
 import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
@@ -112,7 +113,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
       method: "POST",
@@ -156,7 +157,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     await app.request("/llm/v1/messages", {
       method: "POST",
@@ -171,7 +172,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     await app.request("/llm/v1/messages", {
       method: "POST",
@@ -187,7 +188,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     const body = JSON.stringify({ model: "claude-haiku-4-5", messages: [], metadata: { a: 1 } });
     await app.request("/llm/v1/messages", {
@@ -202,7 +203,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = { ...OAUTH_CFG, baseUrl: "https://chatgpt.com/backend-api" };
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const compressed = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0xff, 0x00, 0x81, 0x7f]);
 
     await app.request("/llm/codex/responses", {
@@ -241,7 +242,7 @@ describe("/llm/* oauth — no forging", () => {
     try {
       const deps = makeDeps(fetchFn);
       deps.config.llm = OAUTH_CFG;
-      const app = createApp(deps);
+      const app = createTestApp(deps);
 
       const res = await app.request("/llm/codex/responses", { method: "GET" });
 
@@ -271,6 +272,53 @@ describe("/llm/* oauth — no forging", () => {
     }
   });
 
+  // The body sample is sliced BEFORE it is scrubbed — a measured DoS bound
+  // (scrubbing an unbounded upstream body cost ~2.5 s per MB). Every scrub rule
+  // matches a credential from its START and so survives a cut, EXCEPT the two
+  // userinfo rules, which need the `@` that ENDS the userinfo. A DSN whose
+  // password pushes that `@` past the cut left the rule unable to fire at all,
+  // and ~130 characters of the password shipped into the operator log.
+  it("masks a DSN password whose `@` falls past the body-sample cut", async () => {
+    const password = "S3cr3tP4ssw0rd".repeat(16); // 224 chars → `@` at index 314
+    const body = `{"error":{"type":"upstream_connect_error","message":"dial failed for postgres://svc_admin:${password}@db.internal:5432/app"}}`;
+    const { fetchFn } = setupFetchMock((url) => {
+      if (url.startsWith(PLATFORM_API)) {
+        return new Response(JSON.stringify(buildOAuthTokenResponse()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(body, {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      const deps = makeDeps(fetchFn);
+      deps.config.llm = OAUTH_CFG;
+      const app = createTestApp(deps);
+
+      const res = await app.request("/llm/codex/responses", { method: "GET" });
+      expect(res.status).toBe(502);
+
+      const warning = warnSpy.mock.calls.find(
+        ([message]) => message === "oauth llm: upstream response non-2xx",
+      );
+      expect(warning).toBeDefined();
+      const payload = warning![1] as Record<string, unknown>;
+      const sample = String(payload.bodySample);
+      expect(sample).not.toContain("S3cr3tP4ssw0rd");
+      // The diagnosis survives: the operator still reads what failed and the
+      // scheme it failed on.
+      expect(sample).toContain("upstream_connect_error");
+      expect(sample).toContain("dial failed for postgres://");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("retries once on 401 with a force-refreshed token", async () => {
     let upstreamN = 0;
     const { fetchFn, calls } = setupFetchMock((url) => {
@@ -291,7 +339,7 @@ describe("/llm/* oauth — no forging", () => {
     });
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
       method: "POST",

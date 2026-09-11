@@ -2,18 +2,16 @@
 
 /**
  * Per-run throttled fan-out for `appstrate.metric` events. Sits between
- * the `PersistingEventSink` (which calls
- * {@link scheduleRunMetricBroadcast} on every metric persistence) and
- * Postgres `NOTIFY run_metric` (which the realtime SSE service relays
- * to UI subscribers).
+ * `persistRunEvent` (which calls {@link scheduleRunMetricBroadcast} on every
+ * metric persistence) and Postgres `NOTIFY run_metric` (which the realtime
+ * SSE service relays to UI subscribers).
  *
  * Why a separate module — the broadcaster reads
- * `runs (org_id, application_id, package_id)` and aggregates the run's
+ * `runs (org_id, space_id, package_id)` and aggregates the run's
  * ledger spend via {@link computeRunSpend}. Doing that inline in
- * {@link PersistingEventSink} would couple the metric write-through to
- * the broadcast read path (two extra queries inside the ingestion hot
- * path) and force the throttle state into the per-event sink instances
- * that are spun up + dropped per HTTP request. Lifting the throttle
+ * `persistRunEvent` would couple the metric write-through to the broadcast
+ * read path (two extra queries inside the ingestion hot path) and force the
+ * throttle state to be rebuilt per HTTP request. Lifting the throttle
  * map to module scope keeps it stable across requests.
  *
  * Throttle policy — leading + trailing per run:
@@ -242,7 +240,11 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
   const [runRow] = await db
     .select({
       orgId: runs.orgId,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
+      // The run's actor: the SSE fan-out gates each metric frame on
+      // `runs:read-all` OR ownership, exactly as it gates `run_update`.
+      userId: runs.userId,
+      endUserId: runs.endUserId,
       packageId: runs.packageId,
       tokenUsage: runs.tokenUsage,
     })
@@ -272,7 +274,9 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
   return {
     run_id: runId,
     org_id: runRow.orgId,
-    application_id: runRow.applicationId,
+    space_id: runRow.spaceId,
+    user_id: runRow.userId,
+    end_user_id: runRow.endUserId,
     package_id: runRow.packageId,
     token_usage: (runRow.tokenUsage as RunMetricNotifyPayload["token_usage"]) ?? null,
     cost_so_far: costUsd,

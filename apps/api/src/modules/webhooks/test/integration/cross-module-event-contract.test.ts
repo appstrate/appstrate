@@ -51,7 +51,7 @@ async function waitForDelivery(
 
 describe("cross-module contract — onRunStatusChange → webhook delivery", () => {
   let orgId: string;
-  let applicationId: string;
+  let spaceId: string;
 
   // The preload applies module migrations but does not run `module.init()`,
   // so the delivery worker never starts. Start it explicitly here.
@@ -66,13 +66,9 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
   beforeEach(async () => {
     await truncateAll();
     const { id: userId } = await createTestUser();
-    const { org, defaultAppId } = await createTestOrg(userId, { slug: "cross-mod-test" });
+    const { org, defaultSpaceId } = await createTestOrg(userId, { slug: "cross-mod-test" });
     orgId = org.id;
-    applicationId = defaultAppId;
-  });
-
-  it("webhooks module exposes an onRunStatusChange handler", () => {
-    expect(webhooksModule.events?.onRunStatusChange).toBeDefined();
+    spaceId = defaultSpaceId;
   });
 
   it("the handler persists a webhook_deliveries row for a matching event", async () => {
@@ -81,8 +77,8 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     // is recorded regardless. That row is what we assert on to prove the
     // cross-module path fired.
     const webhook = await createWebhook({
-      level: "application",
-      scope: { orgId, applicationId },
+      level: "space",
+      scope: { orgId, spaceId },
       url: "https://no-such-domain-xyz123.test/hook",
       events: ["run.success"],
     });
@@ -93,7 +89,7 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
       orgId,
       runId: "run_test_1",
       packageId: "@scope/agent",
-      applicationId,
+      spaceId,
       status: "success",
       duration: 1234,
       extra: { result: { ok: true } },
@@ -106,8 +102,8 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
 
   it("does not deliver when the registered event does not match", async () => {
     const webhook = await createWebhook({
-      level: "application",
-      scope: { orgId, applicationId },
+      level: "space",
+      scope: { orgId, spaceId },
       url: "https://no-such-domain-xyz123.test/hook",
       events: ["run.failed"],
     });
@@ -116,7 +112,7 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
       orgId,
       runId: "run_test_2",
       packageId: "@scope/agent",
-      applicationId,
+      spaceId,
       status: "success",
       extra: {},
     });
@@ -130,21 +126,17 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     expect(rows).toHaveLength(0);
   });
 
-  it("webhooks module exposes an onRunConnectionMissing handler", () => {
-    expect(webhooksModule.events?.onRunConnectionMissing).toBeDefined();
-  });
-
   it("the onRunConnectionMissing handler persists a run.connection_missing delivery", async () => {
     const webhook = await createWebhook({
-      level: "application",
-      scope: { orgId, applicationId },
+      level: "space",
+      scope: { orgId, spaceId },
       url: "https://no-such-domain-xyz123.test/hook",
       events: ["run.connection_missing"],
     });
 
     await webhooksModule.events!.onRunConnectionMissing!({
       orgId,
-      applicationId,
+      spaceId,
       packageId: "@scope/agent",
       actor: { type: "user", id: "u_test" },
       errors: [

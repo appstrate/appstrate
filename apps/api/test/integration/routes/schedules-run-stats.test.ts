@@ -26,8 +26,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
-  createTestUser,
-  addOrgMember,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
@@ -57,7 +56,7 @@ describe("Schedule run counters", () => {
     return seedSchedule({
       packageId: agent.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       name,
     });
@@ -73,7 +72,7 @@ describe("Schedule run counters", () => {
       packageId,
       scheduleId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status,
       runNumber,
@@ -84,7 +83,7 @@ describe("Schedule run counters", () => {
   async function seedUnread(runId: string, recipientId: string) {
     await db.insert(notifications).values({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       recipientType: "user",
       recipientId,
       runId,
@@ -123,7 +122,7 @@ describe("Schedule run counters", () => {
     await seedUnread(r2.id, ctx.user.id);
     await db.insert(notifications).values({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       recipientType: "user",
       recipientId: ctx.user.id,
       runId: r3.id,
@@ -159,9 +158,7 @@ describe("Schedule run counters", () => {
     // the same org does not.
     await seedUnread(run.id, ctx.user.id);
 
-    const other = await createTestUser();
-    await addOrgMember(ctx.orgId, other.id, "admin");
-    const otherCtx: TestContext = { ...ctx, user: other, cookie: other.cookie };
+    const otherCtx = await memberContext(ctx, "admin");
 
     const [asOwner] = await listSchedules(ctx);
     const [asOther] = await listSchedules(otherCtx);

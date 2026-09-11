@@ -14,7 +14,9 @@
  * event ingestion lives in a separate router (`runs-events.ts`) because
  * its auth model is fundamentally different.
  *
- * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.5.1.
+ * Contract: this router plus `openapi/paths/runs.ts`; the sink-credential
+ * shape is owned by `services/run-creation.ts`. There is no `docs/specs/`
+ * directory in this repo.
  */
 
 import { Hono } from "hono";
@@ -23,24 +25,30 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { getEnv } from "@appstrate/env";
+import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
+import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
-import { isValidDependencyOverride, collectFileRefs } from "../services/input-parser.ts";
+import type { IntegrationManifestCache } from "../services/integration-service.ts";
+import { collectFileRefs } from "../services/input-parser.ts";
+import { dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
-import { validateConfig, validateInput } from "../services/schema.ts";
+import { validateInput } from "../services/schema.ts";
+import { getInstalledPackageSettings } from "../services/space-packages.ts";
+import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
-import { assertApplicationInScope } from "../services/applications.ts";
+import { assertSpaceInScope } from "../services/spaces.ts";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -56,7 +64,7 @@ import type { AppEnv } from "../types/index.ts";
  */
 const CONTEXT_SNAPSHOT_MAX_BYTES = 16 * 1024;
 
-const CreateRemoteRunBodySchema = z
+export const CreateRemoteRunBodySchema = z
   .object({
     // Two source shapes:
     //   - `inline`   — ad-hoc manifest + prompt shipped in the request
@@ -81,7 +89,6 @@ const CreateRemoteRunBodySchema = z
           kind: z.literal("inline"),
           manifest: z.record(z.string(), z.unknown()),
           prompt: z.string().min(1),
-          config: z.record(z.string(), z.unknown()).optional(),
         })
         .strict(),
       z
@@ -103,24 +110,17 @@ const CreateRemoteRunBodySchema = z
            * for no security gain (no untrusted bytes are loaded server-side).
            */
           integrity: z.string().optional(),
-          config: z.record(z.string(), z.unknown()).optional(),
         })
         .strict(),
     ]),
-    applicationId: z.string().min(1),
+    spaceId: z.string().min(1),
     input: z.record(z.string(), z.unknown()).optional().default({}),
     // Per-run dependency version overrides (#666/#686) — run-level, applies to
     // both source shapes. `"draft"` opts a declared skill/integration into its
     // working copy; any other value replaces the manifest pin. Mirrors the
     // platform run route's value gate (`isValidDependencyOverride`); the KEY
     // gate + pin resolution happen in `freezeRunSpawnDependencies`.
-    dependency_overrides: z
-      .record(z.string(), z.string())
-      .optional()
-      .refine(
-        (m) => !m || Object.values(m).every(isValidDependencyOverride),
-        '`dependency_overrides` values must be "draft" or a valid version spec (semver range or dist-tag)',
-      ),
+    dependency_overrides: dependencyOverridesSchema.optional(),
     contextSnapshot: z
       .record(z.string(), z.unknown())
       .optional()
@@ -136,7 +136,7 @@ const CreateRemoteRunBodySchema = z
   })
   .strict();
 
-const ExtendSinkBodySchema = z
+export const ExtendSinkBodySchema = z
   .object({
     ttl_seconds: z.number().int().positive().max(86400),
   })
@@ -144,7 +144,7 @@ const ExtendSinkBodySchema = z
 
 /**
  * Reject platform-stored file inputs on remote runs. `upload://` and
- * `document://` file-field values reference bytes the platform holds; a remote
+ * `appfile://` file-field values reference bytes the platform holds; a remote
  * run executes on the caller's host, whose workspace the platform never
  * provisions — those bytes can never be delivered there, so the remote agent
  * would silently find no file. Fail loud and early instead. `data:` URIs are
@@ -157,9 +157,15 @@ function assertNoPlatformFileRefs(
   input: Record<string, unknown>,
 ): void {
   for (const ref of collectFileRefs(inputSchema, input)) {
-    if (ref.kind === "upload" || ref.kind === "document") {
+    if (ref.kind === "upload" || ref.kind === "file") {
+      // The ref's `kind` is a DISCRIMINANT, not a URI scheme: the `file` kind is
+      // carried by `appfile://`, never `file://` — which names the caller's
+      // local filesystem and is precisely the scheme this project refused. Map
+      // kind → scheme off the shared constants so the wire-visible message can
+      // never advertise a scheme the platform does not accept.
+      const scheme = ref.kind === "upload" ? UPLOAD_URI_PREFIX : FILE_URI_PREFIX;
       throw invalidRequest(
-        `Field '${ref.fieldName}' references a platform-stored file (${ref.kind}://) which is ` +
+        `Field '${ref.fieldName}' references a platform-stored file (${scheme}) which is ` +
           "not supported on remote runs — the run executes on the caller's host, whose workspace " +
           "the platform does not provision. Inline the content as a " +
           "'data:<mime>;name=<file>;base64,<payload>' URI instead.",
@@ -182,39 +188,47 @@ export function createRunsRemoteRouter() {
 
       const orgId = c.get("orgId");
       const actor = getActor(c);
-      // The caller binds the run to one of their applications. The body value
+      // The caller binds the run to one of their spaces. The body value
       // is authoritative for this write surface, but it MUST be proven to
       // belong to the caller's org BEFORE any credential-bearing resolution
       // runs against it — otherwise a principal in org A could name an
-      // application owned by org B and receive org B's decrypted connection
+      // space owned by org B and receive org B's decrypted connection
       // credentials. Assert org membership up front (404 on mismatch); every
-      // downstream resolver keys on this applicationId.
-      const applicationId = body.applicationId;
-      // The caller's authenticated application context (`c.get("applicationId")`,
-      // resolved by `requireAppContext` from a credential pin — API key, OIDC
-      // bearer, any module auth strategy — or the X-Application-Id header) is
-      // the app-scope boundary for this write. The org-scope assertion below
-      // only proves app∈org, so without this check a credential pinned to app
-      // A could name a sibling app B in the body and escape its app scope (the
-      // path-param `apiKeyAppScopeGuard` doesn't cover the body). Enforced for
+      // downstream resolver keys on this spaceId.
+      const spaceId = body.spaceId;
+      // The caller's authenticated space context (`c.get("spaceId")`,
+      // resolved by `requireSpaceContext` from a credential pin — API key, OIDC
+      // bearer, any module auth strategy — or the X-Space-Id header) is
+      // the space-scope boundary for this write. The org-scope assertion below
+      // only proves space∈org, so without this check a credential pinned to space
+      // A could name a sibling space B in the body and escape its space scope (the
+      // path-param `apiKeySpaceScopeGuard` doesn't cover the body). Enforced for
       // EVERY auth method — gating on `authMethod === "api_key"` would leave
-      // the same escape open to any module strategy that pins an application
+      // the same escape open to any module strategy that pins a space
       // (e.g. oauth2-end-user bearers).
-      const pinnedAppId = c.get("applicationId");
-      if (pinnedAppId && applicationId !== pinnedAppId) {
-        throw forbidden("Caller's application scope does not include this application");
+      const pinnedSpaceId = c.get("spaceId");
+      if (pinnedSpaceId && spaceId !== pinnedSpaceId) {
+        throw forbidden("Caller's space scope does not include this space");
       }
-      await assertApplicationInScope({ orgId, applicationId });
+      await assertSpaceInScope({ orgId, spaceId });
 
       const src = body.source;
 
       let agentForRun: LoadedPackage;
       let overrideVersionLabel: string | undefined;
       let effectiveInput: Record<string, unknown> | null;
-      let effectiveConfig: Record<string, unknown>;
       // Attribution path counter — emitted once per request so we can
       // track the inline-vs-registry split over time.
       let attributionPath: "registry" | "inline_shadow";
+      // Seeded by the inline preflight only — the registry branch resolves no
+      // pins of its own, so `createRun` creates its own Map there.
+      let manifestCache: IntegrationManifestCache | undefined;
+      // Normalize an empty map to null (mirrors the platform run route): a
+      // non-null map on the row means the run carried explicit overrides.
+      const dependencyOverrides =
+        body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
+          ? body.dependency_overrides
+          : null;
 
       if (src.kind === "registry") {
         // Server-resolved attribution. The runner names the package; we
@@ -222,7 +236,7 @@ export function createRunsRemoteRouter() {
         // reconciliation, no shadow row, no "Inline" badge.
         const resolved = await resolveRegistryAgent({
           orgId,
-          applicationId,
+          spaceId,
           packageId: src.packageId,
           stage: src.stage,
           spec: src.spec,
@@ -232,34 +246,33 @@ export function createRunsRemoteRouter() {
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
 
-        effectiveConfig =
-          src.config && typeof src.config === "object" && !Array.isArray(src.config)
-            ? (src.config as Record<string, unknown>)
-            : {};
-        effectiveInput =
-          body.input && typeof body.input === "object" && !Array.isArray(body.input)
-            ? (body.input as Record<string, unknown>)
-            : null;
-
-        // Validate config + input against the resolved manifest's schemas.
-        // The manifest is server-authored (came from our own catalog), so
-        // structural validation is unnecessary — only AJV schema checks.
-        const configSchema = agentForRun.manifest.config?.schema;
-        if (configSchema) {
-          const cv = validateConfig(effectiveConfig, asJSONSchemaObject(configSchema));
-          if (!cv.valid) {
-            const first = cv.errors[0]!;
-            throw new ApiError({
-              status: 400,
-              code: "invalid_config",
-              title: "Invalid Config",
-              detail: first.field ? `${first.field}: ${first.message}` : first.message,
-            });
-          }
-        }
+        // A cataloged agent has per-space settings, so the run's input
+        // resolves through the same four layers as a platform run: author
+        // defaults < editor defaults < caller input, with locked fields
+        // refused (400 `locked_input_field`). There is no schedule layer here.
+        const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
+          spaceId,
+          agentForRun.id,
+        );
         const inputSchema = agentForRun.manifest.input?.schema;
+        effectiveInput = resolveEffectiveInput({
+          ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
+          editorDefaults: storedValues,
+          lockedFields,
+          overlay: {
+            origin: "input",
+            values:
+              body.input && typeof body.input === "object" && !Array.isArray(body.input)
+                ? (body.input as Record<string, unknown>)
+                : undefined,
+          },
+        });
+
+        // Validate the resolved input against the manifest schema. The
+        // manifest is server-authored (came from our own catalog), so
+        // structural validation is unnecessary — only the AJV schema check.
         if (inputSchema) {
-          const iv = validateInput(effectiveInput ?? undefined, asJSONSchemaObject(inputSchema));
+          const iv = validateInput(effectiveInput, asJSONSchemaObject(inputSchema));
           if (!iv.valid) {
             const first = iv.errors[0]!;
             throw new ApiError({
@@ -275,8 +288,7 @@ export function createRunsRemoteRouter() {
         await validateAgentReadiness({
           agent: agentForRun,
           orgId,
-          config: effectiveConfig,
-          applicationId,
+          spaceId,
           actor,
         });
       } else {
@@ -285,14 +297,17 @@ export function createRunsRemoteRouter() {
         // runs land on a shadow ephemeral package ("Inline" badge in UI);
         // callers who want deterministic attribution use kind=registry.
         const preflight = await runInlinePreflight({
+          authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
           orgId,
-          applicationId,
+          spaceId,
           actor,
+          // Same overrides `createRun` freezes with below, so the preflight
+          // memo holds the versions the run will spawn.
+          dependencyOverrides,
           body: {
             manifest: src.manifest,
             prompt: src.prompt,
             input: body.input,
-            config: src.config,
           },
         });
 
@@ -300,7 +315,9 @@ export function createRunsRemoteRouter() {
         attributionPath = "inline_shadow";
 
         effectiveInput = preflight.effectiveInput;
-        effectiveConfig = preflight.effectiveConfig;
+        // Already seeded with the PINNED integration manifests — `createRun`
+        // reuses it instead of resolving every pin a second time.
+        manifestCache = preflight.manifestCache;
       }
 
       async function createShadowAgent(
@@ -316,7 +333,7 @@ export function createRunsRemoteRouter() {
         return buildShadowLoadedPackage(shadowId, preflight.manifest, preflight.prompt);
       }
 
-      // Reject platform-stored file inputs (upload:// / document://) that can
+      // Reject platform-stored file inputs (upload:// / appfile://) that can
       // never reach a remote host's workspace. Applies to both source shapes:
       // `agentForRun.manifest` is the resolved manifest in either branch.
       const fileInputSchema = agentForRun.manifest.input?.schema;
@@ -329,23 +346,20 @@ export function createRunsRemoteRouter() {
       const result = await createRun({
         runId,
         orgId,
-        applicationId,
+        spaceId,
         actor,
         agent: agentForRun,
         ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
         input: effectiveInput,
-        config: effectiveConfig,
         // Normalize an empty map to null (mirrors the platform run route): a
         // non-null map on the row means the run carried explicit overrides.
-        dependencyOverrides:
-          body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
-            ? body.dependency_overrides
-            : null,
+        dependencyOverrides,
         apiKeyId: c.get("apiKeyId") ?? undefined,
         sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
         contextSnapshot: body.contextSnapshot,
         runnerName: runner.name,
         runnerKind: runner.kind,
+        ...(manifestCache ? { manifestCache } : {}),
       });
 
       if (!result.ok) {
@@ -357,21 +371,10 @@ export function createRunsRemoteRouter() {
           detail: result.error.message,
         });
       }
-      if (!result.sinkCredentials) {
-        // Remote origin always returns credentials; the absence is a service bug.
-        logger.error("createRun remote returned no sinkCredentials", { runId });
-        throw new ApiError({
-          status: 500,
-          code: "sink_credentials_missing",
-          title: "Internal Error",
-          detail: "Remote run created without sink credentials — please retry",
-        });
-      }
-
       logger.info("runs.remote.attribution", {
         runId: result.runId,
         orgId,
-        applicationId,
+        spaceId,
         path: attributionPath,
         packageId: agentForRun.id,
         versionLabel: overrideVersionLabel ?? null,
@@ -402,7 +405,7 @@ export function createRunsRemoteRouter() {
 
   // PATCH /api/runs/:runId/sink/extend — push out sink_expires_at for a
   // long-running remote run. Same auth as creation: agents:run. Runs are
-  // app-scoped but this route resolves the run by id (not app path) so the
+  // space-scoped but this route resolves the run by id (not space path) so the
   // handler checks ownership explicitly.
   router.patch(
     "/runs/:runId/sink/extend",
@@ -419,8 +422,8 @@ export function createRunsRemoteRouter() {
       const newExpiresAt = new Date(Date.now() + ttl * 1000);
 
       // Update only open sinks (not closed, not already expired) owned by
-      // the caller's org AND application. Filtering on `applicationId` too
-      // stops an app-A principal from extending an app-B run's sink within
+      // the caller's org AND space. Filtering on `spaceId` too
+      // stops a space-A principal from extending a space-B run's sink within
       // the same org. Mismatched ownership or closed sink → 404, which
       // avoids leaking whether a run exists across tenancies.
       const orgId = c.get("orgId");
@@ -437,7 +440,7 @@ export function createRunsRemoteRouter() {
           and(
             eq(runs.id, runId),
             eq(runs.orgId, orgId),
-            eq(runs.applicationId, c.get("applicationId")),
+            eq(runs.spaceId, c.get("spaceId")),
             sql`sink_closed_at IS NULL`,
             sql`sink_expires_at IS NOT NULL`,
           ),

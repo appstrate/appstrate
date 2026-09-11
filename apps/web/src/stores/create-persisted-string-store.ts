@@ -2,7 +2,7 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-export interface PersistedStringState {
+interface PersistedStringState {
   id: string | null;
   setId: (id: string | null) => void;
 }

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 /**
  * Shared tail of the four per-type list descriptions (skills / agents /
  * integrations / mcp-servers) — only the leading noun differs.
  */
 const listPackagesSharedDescription =
-  "system packages, plus organization packages installed in this application. " +
+  "system packages, plus organization packages installed in this space. " +
   "Organization packages that exist but are not installed here are NOT returned — for " +
-  "the organization-wide catalogue with per-application install state, use " +
+  "the organization-wide catalogue with per-space install state, use " +
   "`GET /api/library`.";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,10 +70,10 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a multi-package .afps-bundle",
       description:
-        "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current application. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
+        "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current space. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -85,7 +87,7 @@ export const packagesPaths = {
                   type: "string",
                   format: "binary",
                   description:
-                    "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias.",
+                    "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker.",
                 },
               },
             },
@@ -95,10 +97,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Bundle imported",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // CASING: this import-result envelope is snake_case throughout
@@ -148,7 +147,7 @@ export const packagesPaths = {
                   root_installed: {
                     type: "boolean",
                     description:
-                      "Whether the root was installed in the calling application (false if it was already installed).",
+                      "Whether the root was installed in the calling space (false if it was already installed).",
                   },
                   root_package_id: { type: "string" },
                   root_version: { type: "string" },
@@ -165,7 +164,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`.",
+            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -196,7 +195,7 @@ export const packagesPaths = {
         "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "force",
           in: "query",
@@ -227,10 +226,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package imported",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -261,7 +257,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`).",
+            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -292,7 +288,7 @@ export const packagesPaths = {
         "Import a package (agent, skill, or integration) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -308,6 +304,7 @@ export const packagesPaths = {
                     "GitHub URL pointing to a repository or subdirectory (e.g. https://github.com/owner/repo/tree/main/path)",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -315,10 +312,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package imported",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -348,7 +342,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`).",
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -383,7 +377,7 @@ export const packagesPaths = {
         "Read-only. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -406,8 +400,7 @@ export const packagesPaths = {
         "200": {
           description: "File index",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             ETag: {
               description:
                 'Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact\'s integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag.',
@@ -415,12 +408,12 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
               schema: { type: "string" },
             },
             Vary: {
               description:
-                "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications.",
+                "Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse this body across organizations or spaces.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -446,7 +439,7 @@ export const packagesPaths = {
               schema: { type: "string" },
             },
             Vary: {
-              description: "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+              description: "Always `X-Org-Id, X-Space-Id`, as on the `200`.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -486,7 +479,7 @@ export const packagesPaths = {
         "anything else is a `404`. Read-only. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -516,8 +509,7 @@ export const packagesPaths = {
         "200": {
           description: "Raw file bytes",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             ETag: {
               description:
                 'Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match.',
@@ -525,12 +517,12 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application.",
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space.",
               schema: { type: "string" },
             },
             Vary: {
               description:
-                "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications.",
+                "Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse these bytes across organizations or spaces.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -573,7 +565,7 @@ export const packagesPaths = {
               schema: { type: "string" },
             },
             Vary: {
-              description: "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+              description: "Always `X-Org-Id, X-Space-Id`, as on the `200`.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -609,7 +601,7 @@ export const packagesPaths = {
         "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -664,20 +656,17 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List skills",
       description:
-        "List the skills available to the current application (`X-Application-Id`): " +
+        "List the skills available to the current space (`X-Space-Id`): " +
         listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
           description: "Skill list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -725,7 +714,7 @@ export const packagesPaths = {
       description: "Create a new skill in the organization packages.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -733,7 +722,9 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest"],
+              // `content` is mandatory on create for every type whose content
+              // file is (`agent`, `skill`) — the handler refuses a blank one.
+              required: ["manifest", "content"],
               properties: {
                 manifest: {
                   type: "object",
@@ -743,9 +734,16 @@ export const packagesPaths = {
                 },
                 content: {
                   type: "string",
-                  description: "SKILL.md content (markdown with YAML frontmatter).",
+                  description:
+                    "SKILL.md content (markdown with YAML frontmatter). Must not be blank.",
                 },
               },
+              // An unknown field is a 400, never a silent drop: the create /
+              // update bodies are `.strict()` in `routes/packages.ts`, so a
+              // client still sending the retired `source_code` learns it is
+              // gone instead of getting a 201 without it. Same rule the four
+              // launch surfaces took in #1187.
+              additionalProperties: false,
             },
           },
         },
@@ -753,17 +751,18 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Skill created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -778,17 +777,14 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -816,17 +812,14 @@ export const packagesPaths = {
       description: "List all published versions for a skill.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -855,7 +848,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -868,9 +861,11 @@ export const packagesPaths = {
               properties: {
                 version: {
                   type: "string",
+                  minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -878,17 +873,18 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionCreateResponseSchema(),
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
@@ -912,7 +908,7 @@ export const packagesPaths = {
         "Restore a previously published version into the skill draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -926,15 +922,17 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -959,7 +957,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned skill data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -973,10 +971,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned skill detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/PackageVersionDetail" },
@@ -996,7 +991,7 @@ export const packagesPaths = {
         "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -1004,9 +999,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1022,17 +1015,14 @@ export const packagesPaths = {
       description: "Get a skill's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Skill detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -1052,7 +1042,7 @@ export const packagesPaths = {
         "Update a skill in the organization packages. Built-in skills cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1062,7 +1052,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -1072,6 +1062,7 @@ export const packagesPaths = {
                 content: { type: "string" },
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1079,17 +1070,18 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -1103,16 +1095,14 @@ export const packagesPaths = {
         "Delete a skill from the organization packages. Built-in skills cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
           description: "Skill deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1135,20 +1125,17 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List agent packages",
       description:
-        "List the agent packages available to the current application (`X-Application-Id`): " +
+        "List the agent packages available to the current space (`X-Space-Id`): " +
         listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
           description: "Agent list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1178,7 +1165,7 @@ export const packagesPaths = {
         "Create a new user agent from manifest and content. Creates an initial version automatically.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -1186,11 +1173,17 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              // `content` is mandatory on create for every type whose content
+              // file is (`agent`, `skill`) — the handler refuses a blank one.
               required: ["manifest", "content"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
-                content: { type: "string", description: "Agent prompt (markdown)" },
+                content: {
+                  type: "string",
+                  description: "Agent prompt (markdown). Must not be blank.",
+                },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1198,10 +1191,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Agent created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/AgentDetail"),
@@ -1219,10 +1209,11 @@ export const packagesPaths = {
       operationId: "getAgentPackage",
       tags: ["Packages"],
       summary: "Get agent detail",
-      description: "Returns agent detail including integrations, config, state, and skills.",
+      description:
+        "Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -1231,16 +1222,13 @@ export const packagesPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns config / input / integrations / skills from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
+            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
         },
       ],
       responses: {
         "200": {
           description: "Agent detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/AgentDetail" },
@@ -1259,7 +1247,7 @@ export const packagesPaths = {
       description: "Update manifest and content of a user agent with optimistic locking.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1269,12 +1257,13 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["lock_version"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1282,10 +1271,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Agent updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/AgentDetail"),
@@ -1314,16 +1300,14 @@ export const packagesPaths = {
       description: "Delete a user agent. Built-in agents cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
           description: "Agent deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1347,17 +1331,14 @@ export const packagesPaths = {
       description: "Returns the latest published version and current draft version for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1384,17 +1365,14 @@ export const packagesPaths = {
       description: "Returns all published versions for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1423,7 +1401,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1436,9 +1414,11 @@ export const packagesPaths = {
               properties: {
                 version: {
                   type: "string",
+                  minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1446,10 +1426,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionCreateResponseSchema(),
@@ -1479,7 +1456,7 @@ export const packagesPaths = {
       description: "Restore a published version into the draft. Requires no runs in progress.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -1487,10 +1464,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/AgentDetail"),
@@ -1520,7 +1494,7 @@ export const packagesPaths = {
       description: "Returns the detail of a specific agent version including manifest and content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -1528,10 +1502,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/PackageVersionDetail" },
@@ -1551,7 +1522,7 @@ export const packagesPaths = {
         "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -1559,9 +1530,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1584,10 +1553,10 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Fork a package to your organization",
       description:
-        "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
+        "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. Reading a source in another organization requires a session caller with live membership and package read access in that source organization; space-pinned credentials cannot cross organizations. Published versions alone do not grant visibility. The caller also needs the source package type's write permission in the destination space. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1605,6 +1574,7 @@ export const packagesPaths = {
                     "Custom name for the forked package (slug format). Defaults to the source package name.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1612,10 +1582,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package forked successfully",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1654,9 +1621,7 @@ export const packagesPaths = {
         "422": {
           description:
             "The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1668,268 +1633,6 @@ export const packagesPaths = {
   },
   // --- By-ID routes (unscoped package identifiers) ---
 
-  "/api/packages/skills/{id}": {
-    get: {
-      operationId: "getSkillById",
-      tags: ["Packages"],
-      summary: "Get skill detail by ID",
-      description: "Get a skill's full details by unscoped package ID.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Skill detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "updateSkillById",
-      tags: ["Packages"],
-      summary: "Update a skill by ID",
-      description: "Update a skill by unscoped package ID. Built-in skills cannot be modified.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["manifest", "content", "lock_version"],
-              properties: {
-                manifest: {
-                  type: "object",
-                  additionalProperties: true,
-                  description: "Package manifest",
-                },
-                content: { type: "string" },
-                lock_version: { type: "integer", description: "Optimistic lock version" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Skill updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteSkillById",
-      tags: ["Packages"],
-      summary: "Delete a skill by ID",
-      description: "Delete a skill by unscoped package ID. Built-in skills cannot be deleted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "204": {
-          description: "Skill deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/packages/agents/{id}": {
-    get: {
-      operationId: "getAgentPackageById",
-      tags: ["Packages"],
-      summary: "Get agent detail by ID",
-      description:
-        "Returns agent detail including integrations, config, state, and skills by unscoped package ID.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Agent detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/AgentDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "updateAgentById",
-      tags: ["Packages"],
-      summary: "Update a user agent by ID",
-      description:
-        "Update manifest and content of a user agent with optimistic locking by unscoped package ID.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["manifest", "content", "lock_version"],
-              properties: {
-                manifest: { $ref: "#/components/schemas/AgentManifest" },
-                content: { type: "string" },
-                lock_version: { type: "integer", description: "Optimistic lock version" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Agent updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: packageUpdateResponseSchema("#/components/schemas/AgentDetail"),
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-    delete: {
-      operationId: "deleteAgentById",
-      tags: ["Packages"],
-      summary: "Delete a user agent by ID",
-      description: "Delete a user agent by unscoped package ID. Built-in agents cannot be deleted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "204": {
-          description: "Agent deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-  },
   // --- Integration package CRUD routes (registry packages, distinct from the
   //     /api/integrations connection domain) ---
 
@@ -1939,21 +1642,18 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List integration packages",
       description:
-        "List the integration packages available to the current application " +
-        "(`X-Application-Id`): " +
+        "List the integration packages available to the current space " +
+        "(`X-Space-Id`): " +
         listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
           description: "Integration package list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1983,7 +1683,7 @@ export const packagesPaths = {
         'Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; use an MCP-server package only for a local executable referenced by `source.kind: "local"`.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -2001,9 +1701,10 @@ export const packagesPaths = {
                 },
                 content: {
                   type: "string",
-                  description: "Primary package file content (manifest document).",
+                  description: "Primary package file content (manifest file).",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -2011,10 +1712,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Integration package created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2036,17 +1734,14 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2074,17 +1769,14 @@ export const packagesPaths = {
       description: "List all published versions for an integration package.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2113,7 +1805,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2126,9 +1818,11 @@ export const packagesPaths = {
               properties: {
                 version: {
                   type: "string",
+                  minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -2136,10 +1830,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionCreateResponseSchema(),
@@ -2170,7 +1861,7 @@ export const packagesPaths = {
         "Restore a previously published version into the integration package draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -2184,10 +1875,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2217,7 +1905,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned integration package data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -2231,10 +1919,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned integration package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/PackageVersionDetail" },
@@ -2254,7 +1939,7 @@ export const packagesPaths = {
         "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -2262,9 +1947,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -2280,17 +1963,14 @@ export const packagesPaths = {
       description: "Get an integration package's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Integration package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -2310,7 +1990,7 @@ export const packagesPaths = {
         "Update an integration package in the organization packages. Built-in integration packages cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2320,7 +2000,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "lock_version"],
+              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2330,6 +2010,7 @@ export const packagesPaths = {
                 content: { type: "string" },
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -2337,10 +2018,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Integration package updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2361,146 +2039,14 @@ export const packagesPaths = {
         "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
           description: "Integration package deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "Integration package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/packages/integrations/{id}": {
-    get: {
-      operationId: "getIntegrationPackageById",
-      tags: ["Packages"],
-      summary: "Get integration package detail by ID",
-      description: "Get an integration package's full details by unscoped package ID.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Integration package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "updateIntegrationPackageById",
-      tags: ["Packages"],
-      summary: "Update an integration package by ID",
-      description:
-        "Update an integration package by unscoped package ID. Built-in integration packages cannot be modified.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["manifest", "lock_version"],
-              properties: {
-                manifest: {
-                  type: "object",
-                  additionalProperties: true,
-                  description: "Package manifest",
-                },
-                content: { type: "string" },
-                lock_version: { type: "integer", description: "Optimistic lock version" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "Integration package updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteIntegrationPackageById",
-      tags: ["Packages"],
-      summary: "Delete an integration package by ID",
-      description:
-        "Delete an integration package by unscoped package ID. Built-in integration packages cannot be deleted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "204": {
-          description: "Integration package deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -2525,21 +2071,18 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List MCP-server packages",
       description:
-        "List the MCP-server packages available to the current application " +
-        "(`X-Application-Id`): " +
+        "List the MCP-server packages available to the current space " +
+        "(`X-Space-Id`): " +
         listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
           description: "MCP-server package list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2569,7 +2112,7 @@ export const packagesPaths = {
         'Create a local executable MCP-server package referenced by an integration with `source.kind: "local"`. For an upstream-hosted MCP endpoint, create an integration package with `source.kind: "remote"` instead.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -2595,10 +2138,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "MCP-server package created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2621,17 +2161,14 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2659,17 +2196,14 @@ export const packagesPaths = {
       description: "List all published versions for an MCP-server package.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2698,7 +2232,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2711,9 +2245,11 @@ export const packagesPaths = {
               properties: {
                 version: {
                   type: "string",
+                  minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -2721,10 +2257,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionCreateResponseSchema(),
@@ -2755,7 +2288,7 @@ export const packagesPaths = {
         "Restore a previously published version into the MCP-server package draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -2769,10 +2302,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2802,7 +2332,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned MCP-server package data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -2816,10 +2346,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned MCP-server package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/PackageVersionDetail" },
@@ -2839,7 +2366,7 @@ export const packagesPaths = {
         "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -2847,9 +2374,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -2865,17 +2390,14 @@ export const packagesPaths = {
       description: "Get an MCP-server package's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "MCP-server package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -2895,7 +2417,7 @@ export const packagesPaths = {
         "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2905,7 +2427,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2915,6 +2437,7 @@ export const packagesPaths = {
                 content: { type: "string" },
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -2922,10 +2445,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "MCP-server package updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2946,146 +2466,14 @@ export const packagesPaths = {
         "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "204": {
           description: "MCP-server package deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/packages/mcp-servers/{id}": {
-    get: {
-      operationId: "getMcpServerPackageById",
-      tags: ["Packages"],
-      summary: "Get MCP-server package detail by ID",
-      description: "Get an MCP-server package's full details by unscoped package ID.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "200": {
-          description: "MCP-server package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    put: {
-      operationId: "updateMcpServerPackageById",
-      tags: ["Packages"],
-      summary: "Update an MCP-server package by ID",
-      description:
-        "Update an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be modified.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["manifest", "content", "lock_version"],
-              properties: {
-                manifest: {
-                  type: "object",
-                  additionalProperties: true,
-                  description: "Package manifest",
-                },
-                content: { type: "string" },
-                lock_version: { type: "integer", description: "Optimistic lock version" },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        "200": {
-          description: "MCP-server package updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
-          content: {
-            "application/json": {
-              schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-    delete: {
-      operationId: "deleteMcpServerPackageById",
-      tags: ["Packages"],
-      summary: "Delete an MCP-server package by ID",
-      description:
-        "Delete an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be deleted.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
-        {
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-          description: "Package ID (unscoped)",
-        },
-      ],
-      responses: {
-        "204": {
-          description: "MCP-server package deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

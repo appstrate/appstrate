@@ -11,16 +11,19 @@
  *  3. the notification queries polling every 30s, which is only safe to slow
  *     down while the realtime stream reconciles them on (re)connect — the SSE
  *     protocol has no replay, so dropping the reconnect-side invalidation would
- *     leave a badge stale for a full poll interval.
+ *     leave a badge stale for a full poll interval;
+ *  4. the run caches, reconciled on the same reconnect for the same reason, and
+ *     on RE-connects only (the first one races the mount's own queries).
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
- * runner (the same reason `document-preview.test.ts` scans its component).
+ * runner (the same reason `file-preview.test.ts` scans its component).
  */
 
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { broadRunKeys } from "../../hooks/use-global-run-sync.ts";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf-8");
 
@@ -38,15 +41,20 @@ const code = (source: string) =>
 const DASHBOARD = read("../../pages/dashboard.tsx");
 const SCHEDULE_CARD = read("../schedule-card.tsx");
 const RUN_LIST = read("../run-list.tsx");
+const DASHBOARD_CONTENT = read("../../pages/dashboard-content.tsx");
 const RUNS_TABLE = read("../runs-table.tsx");
 const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 
 describe("dashboard reuses its own runs", () => {
   it("renders the rows it already holds, not a second fetching list", () => {
-    expect(DASHBOARD).toContain("runs={runs.slice(0, RECENT_RUNS_COUNT)}");
-    // `<RunList …>` here is what issues the duplicate query.
+    // The page hands its own rows down and the presentation layer trims them;
+    // what must never appear on either side is the FETCHING list, which would
+    // issue a second query for rows the page is already holding.
+    expect(DASHBOARD).toContain("runs,");
     expect(code(DASHBOARD)).not.toMatch(/<RunList[\s/>]/);
+    expect(code(DASHBOARD_CONTENT)).not.toMatch(/<RunList[\s/>]/);
+    expect(DASHBOARD_CONTENT).toContain("runs.slice(0, limit)");
   });
 
   it("keeps exactly one run query on the page", () => {
@@ -103,5 +111,41 @@ describe("notification freshness", () => {
   it("still invalidates them on a terminal run seen live", () => {
     expect(GLOBAL_SYNC).toContain("TERMINAL_RUN_STATUSES.has(status)");
     expect([...GLOBAL_SYNC.matchAll(/invalidateNotificationQueries\(/g)].length).toBeGreaterThan(1);
+  });
+});
+
+describe("run cache reconciliation on reconnect", () => {
+  // Same protocol gap as the badges, run side: `run_update` frames missed while
+  // the stream was down left the page reading "running" under a bell that said
+  // "finished".
+  it("reconciles on RE-connect only, before reading frames", () => {
+    const connectStart = GLOBAL_SYNC.indexOf("const connectOnce = async () => {");
+    const readerStart = GLOBAL_SYNC.indexOf("const reader = res.body.getReader();");
+    expect(connectStart).toBeGreaterThan(-1);
+    expect(readerStart).toBeGreaterThan(connectStart);
+
+    // The guard: the FIRST connect races the mount's own queries, so
+    // reconciling there would double every one of them. Matched on the
+    // identifiers, not a formatted line — prettier reflows the latter.
+    const onConnect = GLOBAL_SYNC.slice(connectStart, readerStart);
+    expect(onConnect).toContain("hasConnectedOnce");
+    expect(onConnect).toContain("reconcileRunQueries(qcRef.current, orgId)");
+    expect(onConnect).toContain("handleConnectionUpdate(qcRef.current)");
+    expect(GLOBAL_SYNC).toContain("let hasConnectedOnce = false;");
+  });
+
+  it("covers every run family except the logs, identically on both paths", () => {
+    // One list feeds the per-event throttle AND the reconnect reconciliation,
+    // so the latter cannot drift into a silent subset of the former.
+    const keys = broadRunKeys("org_1").map((key) => JSON.stringify(key));
+    expect(keys).toEqual([
+      '["paginated-runs"]',
+      '["agents","org_1"]',
+      '["packages","agents","org_1"]',
+      '["get","/api/runs"]',
+    ]);
+    // The run-detail page appends live frames into the log cache; refetching
+    // it would drop the per-turn breadcrumbs it holds.
+    expect(keys.some((key) => key.startsWith('["run-logs"'))).toBe(false);
   });
 });

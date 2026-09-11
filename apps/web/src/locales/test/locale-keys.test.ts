@@ -36,9 +36,16 @@ const REPO_ROOT = dirname(dirname(dirname(WEB_SRC)));
  * in the list because it renders inside the SPA and reads `chat.json` through
  * the host-injected `t` (see its `runtime-context.ts`) — its keys live here,
  * so both guards must see its call sites or they mis-report in both
- * directions (unresolvable keys missed, live keys reported dead).
+ * directions (unresolvable keys missed, live keys reported dead). `packages/ui`
+ * joined for the same reason: `buildGenerationLabels()` names the whole
+ * `models.generation.*` family in `model-generation-labels.ts`, on behalf of
+ * both surfaces that render `ModelGenerationControls`.
  */
-const SOURCE_ROOTS = [WEB_SRC, join(REPO_ROOT, "packages/module-chat/src/ui")];
+const SOURCE_ROOTS = [
+  WEB_SRC,
+  join(REPO_ROOT, "packages/module-chat/src/ui"),
+  join(REPO_ROOT, "packages/ui/src"),
+];
 
 function loadNamespaces(lang: string): Map<string, Record<string, string>> {
   const dir = join(LOCALES_DIR, lang);
@@ -156,32 +163,38 @@ describe("t() keys", () => {
  * site, so the reverse guard cannot see them. Each entry below is a prefix
  * under which a REAL interpolation site exists — the comment names it. This
  * is the one list that must be justified per line: widening it to silence a
- * failure is how a dead-key guard becomes decorative.
+ * failure is how a dead-key guard becomes decorative. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
   "concept.", // modules/agent-map/map-nodes.tsx — t(`agent-map:concept.${concept}.{title,body}`)
-  "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
-  "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
-  "type.", // components/document-columns.tsx — t(`type.${mimeKind(doc.mime)}`)
-  "generation.level.", // packages/module-chat/src/ui/model-select.tsx
-  "generation.levelShort.", // packages/module-chat/src/ui/model-select.tsx
+  "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
+  "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
+  "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
+  "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
+  "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
+  "type.", // components/document-columns.tsx — t(`type.${mimeKind(doc.mime)}`)
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
+  "orgSettings.roleHint.", // components/org-invitation-form.tsx + OAuth signup form
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
-  "models.generation.levels.", // components/model-generation-fields.tsx
-  "models.generation.levelsShort.", // components/model-generation-fields.tsx
+  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/space/general.tsx
+  "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
-  "run.connSource.", // components/run-info-tab.tsx — t(`run.connSource.${c.source}`)
+  "run.connSource.", // components/run-configuration-tab.tsx — t(`run.connSource.${c.source}`)
   "run.triggerType.", // components/run-detail/{run-header-summary,run-snapshot-inspector}.tsx
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
+  "spaceMembers.source.", // pages/org-settings/space/members.tsx — t(`spaceMembers.source.${member.source}`)
+  "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
+  "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "status.", // components/status-badge.tsx — t(`status.${status}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
   "systemTool.", // modules/agent-map/map-nodes.tsx — t(`agent-map:systemTool.${item.id}`)
+  "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];
 
 /**
@@ -207,6 +220,8 @@ function isShielded(key: string): boolean {
 }
 
 describe("declared keys", () => {
+  // Scans every key against the whole source blob, so it grows with the app;
+  // past ~1000 keys it no longer fits the 5s default on a cold run.
   it("are all still referenced by the source", () => {
     // The guard the other direction lacks: deleting the last call site of a
     // key leaves the translation behind in both bundles, and nothing notices.
@@ -216,7 +231,7 @@ describe("declared keys", () => {
       .sort();
 
     expect(orphans).toEqual([]);
-  });
+  }, 20_000);
 
   it("keep every dynamic-prefix exemption backed by a real interpolation site", () => {
     // An exemption is only legitimate while the code it excuses exists. This

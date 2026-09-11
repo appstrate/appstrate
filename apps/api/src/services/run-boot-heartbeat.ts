@@ -48,7 +48,7 @@ import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { recordBootHeartbeat, type BootHeartbeatOutcome } from "./state/runs.ts";
 
-export interface BootHeartbeatOptions {
+interface BootHeartbeatOptions {
   readonly runId: string;
   /** Beat cadence. Should be well under `RUN_STALL_THRESHOLD_SECONDS`. */
   readonly intervalMs: number;

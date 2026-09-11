@@ -22,7 +22,7 @@
 
 import { html, raw, type RawHtml } from "./html.ts";
 
-export interface SocialButtonsOptions {
+interface SocialButtonsOptions {
   google?: boolean;
   github?: boolean;
   /** When set, renders a "magic link" link next to the social buttons. */

@@ -72,6 +72,7 @@ import type {
 } from "@appstrate/core/platform-types";
 import { logger } from "./runner/logger.ts";
 import { buildBaseSidecarEnv } from "../../services/orchestrator/sidecar-env.ts";
+import { SIGTERM_GRACE_SECONDS } from "../../services/orchestrator/constants.ts";
 import {
   drainStream,
   spawnCollect,
@@ -141,6 +142,7 @@ const CONSOLE_ARCHIVE_MAX_FILES = 100;
 
 /** How often the exit reaper sweeps {@link FirecrackerOrchestrator.vms} (ms). */
 const EXIT_REAPER_INTERVAL_MS = 60_000;
+
 /**
  * Attempts for transiently-failing teardown host ops (TAP delete, cgroup
  * rmdir). Kept small: the only legitimate transient is the kernel still
@@ -191,7 +193,7 @@ const EXIT_REAP_AFTER_MS = 5 * 60_000;
  *                       partition where the platform's own timeout can no
  *                       longer reach the workload
  */
-export type TeardownReason =
+type TeardownReason =
   "finalize" | "watchdog-kill" | "orphan-sweep" | "shutdown" | "crash" | "reaper" | "max-lifetime";
 /**
  * Minimum firecracker binary version. 1.16 is what the docs require, and
@@ -339,17 +341,24 @@ export interface FirecrackerOrchestratorDeps {
    */
   platformApiUrl?: string;
   /**
-   * Chroot-prep filesystem ops (hardlink/chown/…). Injectable for unit
-   * tests only — chown to an unallocated jail uid requires root.
-   */
-  jailFs?: JailFs;
-  /**
    * Single MMDS PUT (credential broker) — writes the payload to the VMM's
    * in-memory data store over its unix API socket. Injectable so unit
    * tests can pin the broker contract (payload PUT'd, failure fail-closes
    * the run) without a live VMM. Production is {@link defaultMmdsPut}.
    */
   mmdsPut?: (apiSocketPath: string, payload: MmdsPayload) => Promise<void>;
+  /**
+   * SIGTERM→SIGKILL grace on stop, in seconds. Injectable for unit tests
+   * ONLY — the D-state guard tests must drive it to 0 so they assert the
+   * bounded-reap path in milliseconds instead of waiting out the real grace.
+   * Production always takes {@link SIGTERM_GRACE_SECONDS}.
+   *
+   * This replaces a `timeoutSeconds` parameter that used to sit on the public
+   * `stopWorkload`/`stopByRunId` signatures. No production caller ever passed
+   * it — only these tests did — so it was a test seam wearing the costume of
+   * an orchestrator-contract option. It now looks like what it is.
+   */
+  sigtermGraceSeconds?: number;
 }
 
 export class FirecrackerOrchestrator implements RunOrchestrator {
@@ -398,8 +407,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   /** Host-lock pidfile path once acquired (see acquireHostLock). */
   private hostLockPath: string | null = null;
 
-  /** Chroot-prep fs ops — node:fs/promises in production (see deps.jailFs). */
-  private readonly jailFs: JailFs;
+  /** Chroot-prep fs ops — node:fs/promises ({@link defaultJailFs}). */
+  private readonly jailFs: JailFs = defaultJailFs;
 
   /** Single MMDS PUT (credential broker) — see deps.mmdsPut / defaultMmdsPut. */
   private readonly mmdsPut: (apiSocketPath: string, payload: MmdsPayload) => Promise<void>;
@@ -432,15 +441,18 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
    */
   private exitReaper?: ReturnType<typeof setInterval>;
 
+  /** See {@link FirecrackerOrchestratorDeps.sigtermGraceSeconds}. */
+  private readonly sigtermGraceSeconds: number;
+
   constructor(deps: FirecrackerOrchestratorDeps = {}) {
     this.hostExec = deps.hostExec ?? createHostExec();
-    this.jailFs = deps.jailFs ?? defaultJailFs;
     this.mmdsPut = deps.mmdsPut ?? this.defaultMmdsPut.bind(this);
     this.agentArgvOverride = deps.agentArgvOverride;
     this.platformApiUrlOverride = deps.platformApiUrl;
     const parsedForward =
       deps.platformApiUrl === undefined ? undefined : parsePlatformApiUrl(deps.platformApiUrl);
     this.platformForward = parsedForward && { ip: parsedForward.ip, port: parsedForward.port };
+    this.sigtermGraceSeconds = deps.sigtermGraceSeconds ?? SIGTERM_GRACE_SECONDS;
     this.allocator = new SubnetAllocator(getFirecrackerEnv().FIRECRACKER_SUBNET_CIDR);
   }
 
@@ -610,6 +622,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         throw new Error(
           `Firecracker jailer: could not make "${artifact}" root:root 0644 (jailed VMMs ` +
             `hardlink and read it as unprivileged uids): ${getErrorMessage(err)}`,
+          { cause: err },
         );
       }
     }
@@ -1482,6 +1495,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       throw new Error(
         `Firecracker orchestrator: failed to persist the VMM pid for run ${handle.runId} — ` +
           `killed the VMM rather than leave it unsweepable: ${getErrorMessage(err)}`,
+        { cause: err },
       );
     }
 
@@ -1500,6 +1514,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         throw new Error(
           `Firecracker orchestrator: MMDS credential injection failed for run ${handle.runId} — ` +
             `destroyed the VM rather than boot it without credentials: ${getErrorMessage(err)}`,
+          { cause: err },
         );
       } finally {
         // Scrub the payload from the API heap regardless of outcome.
@@ -1525,7 +1540,10 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         void this.killVm(vm, 0).catch(() => {});
       }, maxLifetimeSeconds * 1000);
     }
-    proc.exited.then((code) => {
+    // Fire-and-forget: `Bun.Subprocess.exited` never rejects and the observer
+    // only stamps the record and logs, so there is nothing to await here —
+    // `waitForExit` is the path that actually consumes the exit code.
+    void proc.exited.then((code) => {
       if (vm.consoleWatch) clearInterval(vm.consoleWatch);
       // Reaper anchor (ROB-1): the exit reaper destroys records whose
       // stamp lingers past EXIT_REAP_AFTER_MS — i.e. exits no platform
@@ -1549,7 +1567,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     });
   }
 
-  async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
+  async stopWorkload(handle: WorkloadHandle): Promise<void> {
     const vm = this.vms.get(handle.runId);
     if (!vm) return;
     // Latch BEFORE the proc check (B4): a cancel landing in the boot
@@ -1558,7 +1576,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // kills the just-spawned VMM.
     vm.stopping = true;
     if (!vm.proc) return;
-    await this.killVm(vm, timeoutSeconds);
+    await this.killVm(vm, this.sigtermGraceSeconds);
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
@@ -1615,13 +1633,15 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     if (!vm) return;
 
     let exited = vm.proc === null;
-    vm.proc?.exited.then(() => {
+    // Fire-and-forget flag flip read by the tail loop below; `exited` never
+    // rejects and the handler cannot throw.
+    void vm.proc?.exited.then(() => {
       exited = true;
     });
     yield* tailFileLines(vm.consolePath, () => exited, signal);
   }
 
-  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
+  async stopByRunId(runId: string): Promise<StopResult> {
     const vm = this.vms.get(runId);
     if (!vm) return "not_found";
     // Latch BEFORE the proc check (B4): a cancel in the boot window must
@@ -1633,7 +1653,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     // log attributes the kill instead of mislabelling it a clean finalize.
     vm.teardownReason = "watchdog-kill";
     if (!vm.proc) return "already_stopped";
-    await this.killVm(vm, timeoutSeconds ?? 5);
+    await this.killVm(vm, this.sigtermGraceSeconds);
     return "stopped";
   }
 
@@ -1813,7 +1833,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         backoff: 1,
       });
     } catch (err) {
-      throw new Error(`MMDS PUT failed after ${attempts} attempts: ${getErrorMessage(err)}`);
+      throw new Error(`MMDS PUT failed after ${attempts} attempts: ${getErrorMessage(err)}`, {
+        cause: err,
+      });
     }
   }
 
@@ -2367,6 +2389,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           throw new Error(
             `another Firecracker orchestrator (pid ${existingPid}) owns this host — ` +
               `two instances would sweep each other's TAP devices and collide on subnets`,
+            // The EEXIST that brought us into this catch. The message above is
+            // the diagnosis; the cause carries the path and errno behind it.
+            { cause: err },
           );
         }
       }

@@ -6,7 +6,10 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
+import { flushRedis } from "../../helpers/redis.ts";
 import { user as userTable, account as accountTable } from "@appstrate/db/schema";
+import { getAuth } from "@appstrate/db/auth";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 
 const app = getTestApp();
 
@@ -15,6 +18,10 @@ describe("Profile API", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // Better Auth caps `/sign-in*` at 3 per 10s per IP and every request
+    // here arrives from the same (absent) address — reset the budget so a
+    // test is never throttled by the one before it.
+    await flushRedis();
     ctx = await createTestContext();
   });
 
@@ -46,7 +53,7 @@ describe("Profile API", () => {
 
     // Scope-independence invariant: `/api/profile` must be reachable by
     // any authenticated caller — including CLI-scope JWTs that carry
-    // only `user` + `applicationId` in context (no OIDC scope claim, no
+    // only `user` + `spaceId` in context (no OIDC scope claim, no
     // X-Org-Id). The CLI's `whoami` relies on this to verify its
     // session is valid without needing an org pin. This test uses the
     // session cookie (which also has no OIDC scope) to pin the
@@ -226,13 +233,16 @@ describe("Profile API", () => {
       expect(body.code).toBe("password_already_set");
     });
 
-    it("returns 400 for a password shorter than 8 characters", async () => {
+    // Titled off the constant, not off a literal `8`: the bound is
+    // `MIN_PASSWORD_LENGTH` and this title said "8" while the schema read the
+    // constant, so a bump would have left the suite describing the wrong rule.
+    it("returns 400 for a password below the minimum length", async () => {
       await removeCredentialAccount(ctx.user.id);
 
       const res = await app.request("/api/profile/password", {
         method: "POST",
         headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
-        body: JSON.stringify({ newPassword: "short" }),
+        body: JSON.stringify({ newPassword: "a".repeat(MIN_PASSWORD_LENGTH - 1) }),
       });
 
       expect(res.status).toBe(400);
@@ -240,10 +250,57 @@ describe("Profile API", () => {
       expect(await getCredentialAccount(ctx.user.id)).toBeUndefined();
     });
 
+    // The maximum shipped with no test at all while its whole justification was
+    // a 200-character password. One over the bound is the case that separates
+    // "capped" from "capped somewhere else".
+    it("returns 400 for a password above the maximum length", async () => {
+      await removeCredentialAccount(ctx.user.id);
+
+      const res = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: "a".repeat(MAX_PASSWORD_LENGTH + 1) }),
+      });
+
+      expect(res.status).toBe(400);
+      // The credential must be untouched — a refused write that still created
+      // the account would leave the user with a password nothing told them.
+      expect(await getCredentialAccount(ctx.user.id)).toBeUndefined();
+    });
+
+    // Positive control for the bound above: exactly at the maximum is accepted,
+    // so the 400 comes from crossing the ceiling and not from length in general.
+    it("accepts a password exactly at the maximum length", async () => {
+      await removeCredentialAccount(ctx.user.id);
+
+      const res = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword: "a".repeat(MAX_PASSWORD_LENGTH) }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await getCredentialAccount(ctx.user.id)).toBeDefined();
+    });
+
+    // `MAX_PASSWORD_LENGTH` documents itself as "equal to Better Auth's own
+    // default ceiling", and every Zod `.max()` that reports it is only true
+    // while the framework agrees. Better Auth resolves the effective ceiling
+    // once, as `emailAndPassword?.maxPasswordLength || 128`, and exposes it on
+    // `$context.password.config` — so this reads the number the framework will
+    // actually enforce rather than the option we handed it. A bump that renames
+    // or relocates the option (making our explicit setting inert and the
+    // framework default govern) shows up here instead of as an unexplained 400.
+    it("matches the ceiling Better Auth will actually enforce", async () => {
+      const authContext = await getAuth().$context;
+      expect(authContext.password.config.maxPasswordLength).toBe(MAX_PASSWORD_LENGTH);
+      expect(authContext.password.config.minPasswordLength).toBe(MIN_PASSWORD_LENGTH);
+    });
+
     it("returns 403 for API key auth", async () => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
       const res = await app.request("/api/profile/password", {
@@ -274,7 +331,7 @@ describe("Profile API", () => {
     it("GET /api/profile returns 403 for API key auth", async () => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
       const res = await app.request("/api/profile", {
@@ -286,7 +343,7 @@ describe("Profile API", () => {
     it("PATCH /api/profile returns 403 and does not rename the user", async () => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
       const originalName = ctx.user.name;

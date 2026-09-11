@@ -31,7 +31,7 @@ if (!process.env["DATABASE_URL"]) {
 // drizzle-kit's Node-based config loader cannot handle.
 export default defineConfig({
   dialect: "postgresql",
-  schema: "./src/schema.ts",
+  schema: "./src/schema/index.ts",
   out: "./drizzle",
   dbCredentials: {
     url: process.env["DATABASE_URL"]!,

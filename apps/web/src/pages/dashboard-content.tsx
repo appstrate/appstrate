@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/shared-types";
@@ -26,7 +27,7 @@ import { RunAgentButton } from "../components/run-agent-button";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useAppConfig } from "../hooks/use-app-config";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import { packageDetailPath } from "../lib/package-paths";
 import { toast } from "sonner";
 
@@ -508,6 +509,9 @@ function dashboardMetrics(data: DashboardData) {
 }
 
 export function DashboardContent(data: DashboardData) {
+  const { t } = useTranslation("agents");
+  const { can } = usePermissions();
+  const canReadSchedules = can("schedules:read");
   const metrics = dashboardMetrics(data);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));
 
@@ -522,23 +526,42 @@ export function DashboardContent(data: DashboardData) {
       </div>
 
       <section>
-        <SectionHeading title="Agents récents" href="/agents" action="Tous les agents" />
+        <SectionHeading
+          title={t("dashboard.recentAgents")}
+          href="/agents"
+          action={t("dashboard.allAgents")}
+        />
         <RecentAgents agents={data.agents} />
       </section>
 
-      <div className="grid grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)] gap-6">
-        <section className="min-w-0">
-          <SectionHeading title="Exécutions récentes" href="/runs" action="Tout voir" />
-          <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
-        </section>
+      {/* The schedules column follows the same permission as its nav entry: a
+          caller who cannot reach `/schedules` was still being shown what is
+          scheduled, with a link that 403s. When it is absent the runs column
+          takes the full width rather than leaving a hole. */}
+      <div
+        className={cn(
+          "grid gap-6",
+          canReadSchedules ? "grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]" : "grid-cols-1",
+        )}
+      >
         <section className="min-w-0">
           <SectionHeading
-            title="Planifications à venir"
-            href="/schedules"
-            action="Planifications"
+            title={t("dashboard.recentRuns")}
+            href="/runs"
+            action={t("dashboard.seeAll")}
           />
-          <UpcomingSchedules schedules={metrics.activeSchedules} agentById={agentById} />
+          <RecentRuns runs={data.runs} agentName={data.agentName} agentById={agentById} />
         </section>
+        {canReadSchedules && (
+          <section className="min-w-0">
+            <SectionHeading
+              title={t("dashboard.upcomingSchedules")}
+              href="/schedules"
+              action={t("dashboard.schedules")}
+            />
+            <UpcomingSchedules schedules={metrics.activeSchedules} agentById={agentById} />
+          </section>
+        )}
       </div>
     </div>
   );

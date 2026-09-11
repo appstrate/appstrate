@@ -1,6 +1,8 @@
 # Built-in Modules
 
-Built-in modules extend the Appstrate platform with optional features (currently: oidc, webhooks). They follow the same `AppstrateModule` contract as external modules published on npm, but live inside the API package so they can share test infrastructure and be discovered automatically.
+Built-in modules extend the Appstrate platform with optional features. They follow the same `AppstrateModule` contract as external modules published on npm, but live inside the API package so they can share test infrastructure and be discovered automatically.
+
+**This file is the owner of two facts other docs point at**: which directories are built-in modules, and the database-ownership rule below. The directories at the time of writing are `core-providers`, `firecracker`, `mcp`, `oidc` and `webhooks` — `ls apps/api/src/modules/` is the authority, because the loader reads the directory and not a list (see Auto-discovery). Of those, `firecracker` is opt-in and absent from the `MODULES` default.
 
 ## Auto-discovery
 
@@ -74,7 +76,7 @@ The loader checks that range against the platform's `CORE_VERSION` at boot. It e
 
 A mismatch refuses to boot by default, naming the module and both versions. `MODULE_CONTRACT_ENFORCE=warn` downgrades it to a log line — the escape hatch for an operator running a module that has not been republished against the core major the platform ships.
 
-Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `manifest.dependencies`) is optional. Use `publicPaths` for routes that bypass auth (e.g. inbound webhook callbacks). Modules that need `X-Application-Id` context for their routes gate it themselves (e.g. an explicit `applicationId` body/query field validated against the caller's org).
+Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `manifest.dependencies`) is optional. Use `publicPaths` for routes that bypass auth (e.g. inbound webhook callbacks). Modules that need `X-Space-Id` context for their routes gate it themselves (e.g. an explicit `spaceId` body/query field validated against the caller's org).
 
 ## Database ownership rules
 
@@ -82,9 +84,9 @@ Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`,
 (e.g. OIDC's `oauth_clients`/`jwks`, webhooks' `webhooks`) — live in the **core
 schema** (`packages/db/src/schema/`) and are created by the system migration
 pipeline at boot. A module is pure behavior: routes, hooks, events, RBAC, Better
-Auth plugins, model providers, OpenAPI. There is no module `schema.ts`, no
-per-module migration tree, no `__drizzle_migrations_<id>`, and no `drizzleSchemas()`
-or `ctx.applyMigrations` — those were removed in core 2.23.0.
+Auth plugins, model providers, OpenAPI. The module contract carries no schema
+or migration surface at all: no module `schema.ts`, no per-module migration
+tree, no `__drizzle_migrations_<id>` table.
 
 1. A module's tables are defined in `packages/db/src/schema/<domain>.ts` and
    exported from the core barrel. The module imports them from `@appstrate/db/schema`.
@@ -94,17 +96,26 @@ or `ctx.applyMigrations` — those were removed in core 2.23.0.
    module, use a hook (`beforeUsage`) or an event — never a direct import. A
    module reads another module's data via the platform API/events, never a
    cross-module SQL join.
-4. **Need a separate tenant?** A module that must own a physically isolated
-   database (e.g. the proprietary `@appstrate/cloud` module) runs its own
-   database and migrations, and reads platform data through `ctx.services`
-   (e.g. `services.usage.list`), never a cross-DB join.
+4. **Need tables the Apache-2.0 core schema must not carry?** A module in that
+   position (the `@appstrate/module-ee` module, in-tree under `packages/module-ee`
+   and source-available) keeps a Drizzle tree of its own and self-migrates it
+   into the platform database at `init()`, under a migration journal of its own
+   (`drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`).
+   It still reads platform data through `ctx.services`
+   (e.g. `services.usage.list`), never a SQL join across the licence boundary.
+   `bun run verify:module-sql-boundary` (in `bun run check`) enforces that last
+   sentence: because those tables sit in the platform database, a `SELECT …
+FROM organizations` written in the module compiles, runs and returns rows, so
+   the gate refuses any import of the platform's drizzle schema from such a
+   module and any table named in its raw SQL that its own drizzle snapshot does
+   not declare.
 
 ## Permissions
 
 The platform ships RBAC as a typed contract that **both** core and modules contribute to. The role-to-permission matrix lives in `apps/api/src/lib/permissions.ts` — it composes:
 
-1. **Core resources** (`CoreResources` interface from `@appstrate/core/permissions`): the static platform catalog (`agents`, `runs`, `org`, `api-keys`, …). This set is fixed at core-release time and mapped to roles in `apps/api/src/lib/permissions.ts`.
-2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface ModuleResources { … } }`): **every** module — built-in (`webhooks`, `oidc`) and external — declares new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `resolvePermissions(role)`, and exposes them through the same RBAC machinery.
+1. **Core resources** (`CoreResources` interface from `@appstrate/core/permissions`): the static platform catalog (`agents`, `runs`, `org`, `api-keys`, …). Each one declares its LEVEL in `CORE_RESOURCE_LEVELS` next to its actions; org-level resources are mapped to org roles and space-level ones to the four space-role presets, both in `apps/api/src/lib/permissions.ts`.
+2. **Module-contributed resources** (`AppstrateModule.permissionsContribution()` + `declare module "@appstrate/core/permissions" { interface ModuleResources { … } }`): **every** module — built-in (`webhooks`, `oidc`) and external — declares new resources through TypeScript declaration merging plus a runtime contribution. The platform aggregates them at boot, merges the grants into `orgPermissions(role)` / `presetPermissions(preset)`, and exposes them through the same RBAC machinery.
 
 Built-in and external modules use the **exact same contribution pattern**. Built-ins do not extend `CoreResources` — that interface is reserved for the platform's own resource catalog. The only difference is where the module source lives (this directory vs. an npm package).
 
@@ -125,9 +136,18 @@ const tasksModule: AppstrateModule = {
     {
       resource: "tasks",
       actions: ["read", "write"],
-      grantTo: ["owner", "admin", "member"],
+      // Space-level: the rows carry a `space_id`, so space roles grant it.
+      level: "space",
+      presets: ["admin", "builder", "operator"],
       apiKeyGrantable: true, // can be carried by API keys
       endUserGrantable: true, // can be carried by end-user OIDC tokens
+    },
+    {
+      resource: "task-settings",
+      actions: ["write"],
+      // Org-level: one row per org, so org roles grant it.
+      level: "org",
+      grantTo: ["owner", "admin"],
     },
   ],
   // ...
@@ -148,15 +168,137 @@ router.post(
 );
 ```
 
-Both built-in modules in this repo (`webhooks`, `oidc`) use this pattern — read their `index.ts` + `routes.ts` for reference.
+The built-in modules that contribute permissions (`webhooks`, `oidc`, `mcp`) use this pattern — read their `index.ts` + `routes.ts` for reference.
 
-**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, role validity) and aggregates them into:
+`level` is the discriminant (RBAC spec §3.4). Every permission string belongs
+to exactly one level: `level: "org"` takes `grantTo` (org roles) and
+`level: "space"` takes `presets` (space-role presets — `admin`, `builder`,
+`operator`, `viewer`). There is no default and no fallback; pick the level from
+where the resource's rows live. Listing the same resource twice with different
+`actions` is how per-action granularity is expressed, and both entries must
+declare the same level.
 
-- `resolvePermissions(role)` — module entries for the listed roles are written into the per-role permission Set returned to the auth pipeline.
+**At boot, the platform validates each contribution** (resource name format, no collision with a core resource or another module, action format, one level per resource, role/preset validity) and aggregates them into:
+
+- `orgPermissions(role)` / `presetPermissions(preset)` — module entries reach the org role or the space preset they listed.
 - `getApiKeyAllowedScopes()` — entries with `apiKeyGrantable: true` become grantable through API keys (filtered against the creator's role at issuance).
 - `getModuleEndUserAllowedScopes()` — entries with `endUserGrantable: true` are accepted on end-user OIDC JWTs (in addition to the built-in `OIDC_ALLOWED_SCOPES`). Defaults to `false` — admin / destructive surfaces stay closed to embedding apps.
 
 Disabling a module leaves **zero footprint**: the `declare module` augmentation widens types but contributes nothing at runtime (interface keys aren't iterated), and the runtime contribution is gone the moment `permissionsContribution()` stops being called. No dead scope strings in role sets, no dead entries in the API-key allowlist.
+
+### `permissionsContribution` vs `principalPermissions`
+
+Two contribution members, one question: **is the population that holds this
+permission a ROLE, or a LIST the module maintains?**
+
+|               | `permissionsContribution()`                           | `principalPermissions`            |
+| ------------- | ----------------------------------------------------- | --------------------------------- |
+| Grants to     | an org role (`grantTo`) or a space preset (`presets`) | one `(orgId, userId)`             |
+| Level         | org or space                                          | **org only**                      |
+| Vocabulary    | declares NEW resources                                | reuses strings that already exist |
+| Evaluated for | every caller                                          | session-shaped callers only       |
+| Cost          | a boot-time table                                     | one cached lookup per principal   |
+
+`permissionsContribution` is the common case and the two compose: a module
+declares its resource and its role grants there, then hands **extra copies of
+those same strings** to named principals here. There is no third case — a
+per-principal grant never invents vocabulary.
+
+```ts
+const billingModule: AppstrateModule = {
+  manifest: { id: "billing", name: "Billing", version: "1.0.0" },
+  permissionsContribution: () => [
+    { resource: "billing", actions: ["read"], level: "org", grantTo: ["owner", "admin", "member"] },
+    { resource: "billing", actions: ["manage"], level: "org", grantTo: ["owner", "admin"] },
+  ],
+  // …and these people hold both without being admins.
+  principalPermissions: {
+    mayGrant: ["billing:read", "billing:manage"],
+    resolve: async ({ orgId, userId }) =>
+      (await isBillingManager(orgId, userId)) ? ["billing:read", "billing:manage"] : [],
+  },
+  // ...
+};
+```
+
+Reach for `principalPermissions` when the answer is a row in the module's own
+table — billing managers, an SSO group mapping — and the alternative would be
+inventing an org role for them. That alternative is what the surface exists to
+avoid: an org role is platform vocabulary, and `billing` is not.
+
+**Two boot rules, both fail-fast and both naming the module and the string.**
+Every `mayGrant` entry must be a known ORG-level permission (the core catalog,
+or a `level: "org"` contribution of some loaded module) — a space-level string
+is granted per space and this surface has no space. And no entry may be
+`apiKeyGrantable` / `endUserGrantable`: the surface is evaluated for
+session-shaped callers only, so a delegated credential's ceiling can never
+carry the grant and declaring one would advertise access no key can obtain.
+
+**At runtime**: the resolver is called once per principal per cache miss, its
+answer is filtered to `mayGrant` (an undeclared string is dropped and logged,
+never granted), and a throwing resolver contributes nothing rather than failing
+the request — a module's outage must not lock a caller out of the permissions
+their own role gives them.
+
+**Invalidation is yours.** Results are cached per `(orgId, userId)` with a 10s
+TTL. The platform cannot know when your table changed, so call
+`invalidatePrincipalPermissions(orgId, userId)` from
+`@appstrate/core/principal-permissions` after every write the resolver reads.
+Both arguments are required and it drops exactly that one principal on every
+replica: a write that changes N principals calls it N times, naming each. There
+is no org-wide form — the cache is keyed by the pair, not prefixed by org, so a
+blanket clear would drop every organization's principals to save the caller a
+loop. The TTL is only the backstop for a lost bus broadcast, not the
+invalidation mechanism.
+
+### A space-level resource on a route the platform does not space-scope
+
+`SPACE_SCOPED_PREFIXES` (`apps/api/src/middleware/space-context.ts`) is
+**core-only by design** — a module never adds a row to it. So a module that
+gates a `level: "space"` resource on its own route family must enter a space
+itself, before its guard runs:
+
+```ts
+import { enterSpaceContext, requireModulePermission } from "@appstrate/core/permissions";
+
+router.use("/api/tasks/*", async (c, next) => {
+  await enterSpaceContext(c); // pinned space → X-Space-Id (400 when neither)
+  return next();
+});
+router.get("/api/tasks", requireModulePermission("tasks", "read"), handler);
+```
+
+Pass an explicit id (`enterSpaceContext(c, spaceId)`) when the route addresses a
+space of its own — the `webhooks` module does, from its `spaceId` body/query
+field, and again from the row's own space on its by-id routes.
+
+A caller that names no space at all is a **400**, exactly as it is on a core
+space-scoped route. The org's default space answers only the trusted in-process
+MCP re-entry (the internal-dispatch marker), which is the one caller that
+physically cannot carry a header. A module route is not a weaker door than a
+core one: falling back to the default space for a session or CLI caller would
+put them in a space they never asked for.
+
+That makes the entry a decision, not a reflex. A router whose family mixes
+space-level and ORG-level resources must enter only when the caller identifies
+a space (`c.get("spaceId") ?? c.req.header("X-Space-Id")`) and skip otherwise —
+`webhooks` does, because a `level: "org"` webhook is space-less and its
+permission is org-level, so an unconditional entry would 400 a caller who needs
+no space. Skipping leaves `permissions` at the org half, which is the correct
+authority for those rows; a route that then wants either half gates on both
+strings rather than on one (`requireAnyPermission` from
+`middleware/require-permission.ts`, which an in-tree module imports like
+`webhooks` does; an out-of-tree module composes `makePermissionGuard` from
+`@appstrate/core/permissions` the same way).
+
+This is not optional: a caller outside a space holds **org-level strings only**,
+so a space-level guard on a route that never entered a space can never pass. It
+fails closed, which is the right default and the wrong behaviour. `chat` and
+`webhooks` are the two examples of the seam; the in-tree `mcp` module imports
+`applySpacePermissions` from the middleware directly, which is the same code
+path without the indirection an out-of-tree module needs. A caller with no role in the
+resolved space is refused there (403 `not_a_space_member`, or 404 for a
+`private` space) — the same answer the core middleware gives.
 
 ### Middleware symmetry: one guard path
 
@@ -164,7 +306,7 @@ Core routes use `requirePermission` (apps/api-internal, union-typed against core
 
 ### Adding a new core resource
 
-Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `CoreResources` in `@appstrate/core/permissions` → edit `CORE_RESOURCE_NAMES` in the same file (drift caught by a unit test) → wire the role grants + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
+Core resources are reserved for the platform itself. If the platform (not a module) needs a new resource, edit `CoreResources` in `@appstrate/core/permissions` → add its actions to `CORE_RESOURCE_ACTIONS` and its level to `CORE_RESOURCE_LEVELS` in the same file (drift caught by the `satisfies` clauses plus a unit test) → wire the org-role grants or space-role presets + API-key allowlist in `apps/api/src/lib/permissions.ts` → call `requirePermission(...)` or `requireCorePermission(...)` at the route.
 
 ## Model providers
 
@@ -234,6 +376,13 @@ to accept only their own half, so the wrong-mode call does not compile.
   effects only; errors in one handler are **isolated** and do not block others —
   that isolation is the difference from a broadcast hook.
 
+`onOrgDelete` must be **idempotent**. The platform reserves the deletion
+(`organizations.deleting_at`) before it emits, so the organization cannot be
+saved by a concurrent run and the operator can simply repeat the DELETE when a
+later step fails — which emits the event again for the same org id. Tear down
+what is still there, and treat what is already gone as success; never make the
+second call throw, and never make it charge, refund or cancel anything twice.
+
 Names are defined in `packages/core/src/module.ts` (`FirstMatchHooks` /
 `BroadcastHooks` / `ModuleHooks`, `ModuleEvents`). To add a new hook or event,
 update that file first — including its `scripts/verify-module-contract.ts`
@@ -284,14 +433,14 @@ const jwtStrategy: AuthStrategy = {
       orgId: payload.org_id,
       orgRole: "admin",
       authMethod: "my-jwt",
-      applicationId: payload.app_id,
+      spaceId: payload.space_id,
       permissions: ["runs:read", "runs:write"],
       // Optional end-user impersonation. `EndUserContext` is exactly
-      // `{ id, applicationId, name?, email? }` — core has no end-user role
+      // `{ id, spaceId, name?, email? }` — core has no end-user role
       // vocabulary, so there is no `role` field to set here.
       endUser: {
         id: payload.enduser_id,
-        applicationId: payload.app_id,
+        spaceId: payload.space_id,
         email: payload.email,
       },
     };
@@ -311,7 +460,7 @@ const myModule: AppstrateModule = {
 
 **Ordering.** Strategies are tried in module load order (topological sort by `manifest.dependencies`). First non-null resolution wins. Core auth (API key + cookie) runs only when every strategy has returned `null`.
 
-**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `applicationId`, `permissions` (as a string set), optional `endUser`. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
+**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `spaceId`, `permissions` (as a string set), optional `endUser`. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
 
 **`permissions` type.** `readonly string[]` at the contract layer (not the typed `Permission[]` union) to keep the core RBAC catalog out of `@appstrate/core`. Use permission strings that match core's `resource:action` vocabulary — `requirePermission()` guards will 403 on unknown strings at request time.
 
@@ -343,7 +492,7 @@ Core enforces a single hard rule: when an end-user is in the request context (vi
 
 A module that needs a different visibility model (team-wide, org-admin end-users, etc.) expresses it out-of-band — typically by exposing its own routes under its own prefix (e.g. `/api/<mod>/runs`) that call the `listPackageRuns` service directly with whatever filters the module decides. Core stays strict and predictable; modules compose alternative UX on top.
 
-Applications embedding Appstrate headlessly that want an "admin dashboard" view simply don't send `Appstrate-User` on admin calls — a raw API key request has no `endUser` context, so the self-filter doesn't apply and the caller sees every run in the application (which `applicationId` still scopes).
+Applications embedding Appstrate headlessly that want an "admin dashboard" view simply don't send `Appstrate-User` on admin calls — a raw API key request has no `endUser` context, so the self-filter doesn't apply and the caller sees every run in the space (which `spaceId` still scopes).
 
 ## OpenAPI contributions
 
@@ -353,21 +502,21 @@ Because discovery is filesystem-based, adding a new endpoint only requires touch
 
 `verify-openapi` step 7b is fail-closed: every component schema in the spec must either pair with a shared-type in the core response-type registry, or be explicitly exempt with a reason. A module-owned schema with no shared-type twin declares its own exemption via `openApiExemptSchemas()` — `{ SchemaName: "why there is no shared-type" }` — so contributing a wire schema never means editing `apps/api/src/openapi/response-type-registry.ts`. The rules are the same as for a core entry: a name the module does not also contribute via `openApiComponentSchemas()` is reported stale, and a core registry entry wins a name collision. Reference: `oidc` (2 entries) and `agent-map` (3).
 
-## Idempotency — in-tree modules can opt in, out-of-tree modules cannot
+## Idempotency — built-in dir modules can opt in, package modules cannot
 
 The platform mounts `idempotencyGuard` (`apps/api/src/middleware/idempotency-guard.ts`) globally, **before** `registerModuleRoutes(app)`. Every mutating route a module registers is therefore subject to it: a request carrying `Idempotency-Key` on an unsafe method (`POST`/`PUT`/`PATCH`/`DELETE`) is refused with `400 idempotency_not_supported` unless the matched route mounts `idempotency()`.
 
 **Built-in dir modules opt in by relative import**, and two already do — `webhooks/routes.ts` (`POST /api/webhooks`) and `oidc/routes.ts` (`POST /api/oauth/clients`) both mount `idempotency()` from `../../middleware/idempotency.ts` and declare `$ref: "#/components/parameters/IdempotencyKey"` on that operation in their own `openapi/paths.ts`. Copy that pair — mount **and** declare — if a built-in route needs de-duplication.
 
-**Out-of-tree modules cannot.** `idempotency()` lives in `apps/api/src/middleware/` and is exported from no package — not `@appstrate/core`, not anywhere an npm module can import (unlike `services.http.rateLimit()`, which the same routes get through `PlatformServices`). So `@appstrate/module-chat`, `@appstrate/module-claude-code`, `@appstrate/module-codex`, `@appstrate/cloud` and any operator-installed module are permanently in "refuse" mode on every mutating route they expose. Nothing breaks today — none of them advertises the header — but the asymmetry is real: they are held to a policy they have no way to satisfy.
+**Package modules cannot** — the line is the package boundary, not the repo boundary. `idempotency()` lives in `apps/api/src/middleware/` and is exported from no package — not `@appstrate/core`, not anywhere an importer outside `apps/api` can reach (unlike `services.http.rateLimit()`, which the same routes get through `PlatformServices`). So `@appstrate/module-chat`, `@appstrate/module-claude-code`, `@appstrate/module-codex`, `@appstrate/module-ee` — in-tree workspace packages, all four — and any operator-installed module are permanently in "refuse" mode on every mutating route they expose. Nothing breaks today: none of them advertises the header, and `@appstrate/module-ee` de-duplicates Stripe deliveries in its own `ee_stripe_events` table rather than through the platform's. But the asymmetry is real: they are held to a policy they have no way to satisfy.
 
-Until that changes, for an out-of-tree module:
+Until that changes, for a package module:
 
 - **Do not declare an `Idempotency-Key` parameter in your `openApiPaths()`.** It would be a promise the runtime refuses; the drift test (`apps/api/test/integration/middleware/idempotency-contract.test.ts`) matches the parameter by name — inline or `$ref` — and fails on a declaration with no mount. (`openapi/paths/llm-proxy.ts` carried exactly that false promise for three operations.)
 - **Do not tell clients to stamp the header on your routes.** They will get a `400`.
-- If you genuinely need request de-duplication, implement it in your own handler under your own header/body field, or open an issue: exposing `idempotency()` on `PlatformServices.http` next to `rateLimit()` is the obvious shape, and it is a deliberate core API-surface decision (a `@appstrate/core` minor + module lockstep), not something to work around locally.
+- If you genuinely need request de-duplication, implement it in your own handler under your own header/body field (`@appstrate/module-ee` does exactly that for Stripe), or open an issue: exposing `idempotency()` on `PlatformServices.http` next to `rateLimit()` is the obvious shape, and it is a deliberate core API-surface decision (a `@appstrate/core` minor, plus lockstep for the out-of-tree modules), not something to work around locally.
 
-Note also that the drift test discovers modules through the test preload (built-ins under `apps/api/src/modules/*` plus workspace `packages/module-*`). An operator-installed out-of-tree module is not in that process and is not checked by it — sound only for as long as such a module has no way to mount `idempotency()`. Exposing the middleware to modules means giving that check a second, module-side home.
+Note also that the drift test discovers modules through the test preload (built-ins under `apps/api/src/modules/*` plus workspace `packages/module-*`, which now includes `module-ee`). An operator-installed out-of-tree module is not in that process and is not checked by it — sound only for as long as such a module has no way to mount `idempotency()`. Exposing the middleware to modules means giving that check a second, module-side home.
 
 ## Disabling a module
 

@@ -13,7 +13,8 @@
  */
 
 import { describe, it, expect, mock, spyOn } from "bun:test";
-import { createApp, SIDECAR_IDLE_TIMEOUT_SECONDS, type AppDeps } from "../app.ts";
+import { SIDECAR_IDLE_TIMEOUT_SECONDS, type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import type { LlmProxyConfig } from "../helpers.ts";
 import { logger } from "../logger.ts";
 
@@ -61,14 +62,14 @@ describe("SIDECAR_IDLE_TIMEOUT_SECONDS", () => {
 
 describe("GET /health", () => {
   it("returns 200 when ready", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await app.request("/health");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: "ok" });
   });
 
   it("returns 503 when not ready", async () => {
-    const app = createApp(makeDeps({ isReady: () => false }));
+    const app = createTestApp(makeDeps({ isReady: () => false }));
     const res = await app.request("/health");
     expect(res.status).toBe(503);
     const body = (await res.json()) as { status: string; proxy: string };
@@ -76,7 +77,7 @@ describe("GET /health", () => {
   });
 
   it("response has correct content-type", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await app.request("/health");
     expect(res.headers.get("content-type")).toContain("application/json");
   });
@@ -86,9 +87,9 @@ describe("GET /health", () => {
 //
 // The agent's bootloader polls this after the MCP handshake to relay the
 // per-phase boot breadcrumbs into the run log and to abort the run when any
-// declared integration failed. No inbound auth (same as `/mcp`): the agent
-// container holds no run token by design, so the per-run network is the only
-// boundary.
+// declared integration failed. Agent-authenticated (same as `/mcp`) — the
+// per-run network is shared with the integration runners, so it is not a
+// boundary; see `app-auth.test.ts`. The agent still holds no RUN token.
 
 describe("GET /integrations/boot-report", () => {
   const sampleReport = {
@@ -108,7 +109,7 @@ describe("GET /integrations/boot-report", () => {
     const integrationBootPromise = new Promise<void>((r) => {
       resolveBoot = r;
     });
-    const app = createApp(
+    const app = createTestApp(
       makeDeps({
         integrationBootPromise,
         integrationBootReportProvider: () => sampleReport,
@@ -121,20 +122,13 @@ describe("GET /integrations/boot-report", () => {
     expect(await res.json()).toEqual(sampleReport);
   });
 
-  it("needs no auth — the agent container has no run token (network-isolation boundary)", async () => {
-    const app = createApp(
-      makeDeps({
-        integrationBootPromise: Promise.resolve(),
-        integrationBootReportProvider: () => sampleReport,
-      }),
-    );
-    const res = await app.request("/integrations/boot-report");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(sampleReport);
-  });
+  // The inbound-auth posture of this route (and of the rest of the control
+  // surface) lives in `app-auth.test.ts`, against the UNWRAPPED `createApp` —
+  // an assertion made through `createTestApp`, which stamps the token, could
+  // only ever say that the stamping works.
 
   it("returns a synthetic ok report when no integrations were wired", async () => {
-    const app = createApp(makeDeps()); // no provider
+    const app = createTestApp(makeDeps()); // no provider
     const res = await app.request("/integrations/boot-report");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
@@ -173,7 +167,7 @@ describe("ALL /llm/* — SSRF protection", () => {
       baseUrl: "http://169.254.169.254/metadata",
       credentialId: "cred_blocked",
     };
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
@@ -188,7 +182,7 @@ describe("ALL /llm/* — SSRF protection", () => {
       apiKey: "real-sk",
       placeholder: "sk-placeholder",
     };
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
@@ -198,7 +192,7 @@ describe("ALL /llm/* — SSRF protection", () => {
 
 describe("ALL /llm/* — basic routing", () => {
   it("returns 503 when llm config not set", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
@@ -215,7 +209,7 @@ describe("ALL /llm/* — basic routing", () => {
     );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages?stream=true", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -232,7 +226,7 @@ describe("ALL /llm/* — basic routing", () => {
     });
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: string };
@@ -249,7 +243,7 @@ describe("ALL /llm/* — basic routing", () => {
     );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(429);
   });
@@ -262,7 +256,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
     );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     await app.request("/llm/v1/messages", {
       method: "POST",
       headers: { "x-api-key": "sk-placeholder" },
@@ -283,7 +277,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
       apiKey: "sk-ant-oat01-real-token",
       placeholder: "sk-ant-oat01-placeholder",
     };
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     await app.request("/llm/v1/messages", {
       method: "POST",
       headers: { Authorization: "Bearer sk-ant-oat01-placeholder" },
@@ -299,7 +293,7 @@ describe("ALL /llm/* — placeholder replacement", () => {
     );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     await app.request("/llm/v1/messages", {
       method: "POST",
       headers: {
@@ -336,7 +330,7 @@ describe("ALL /llm/* — streaming", () => {
     );
     const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
     deps.config.llm = LLM_CONFIG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const res = await app.request("/llm/v1/messages", { method: "POST" });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/event-stream");
@@ -377,7 +371,7 @@ describe("ALL /llm/* — telemetry", () => {
       );
       const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
       deps.config.llm = LLM_CONFIG;
-      const app = createApp(deps);
+      const app = createTestApp(deps);
       const res = await app.request("/llm/v1/messages", { method: "POST" });
       // Drain the stream so `pull` runs to completion and the
       // observation closes — without this `llm.stream.observed` is
@@ -429,7 +423,7 @@ describe("ALL /llm/* — telemetry", () => {
       );
       const deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch });
       deps.config.llm = LLM_CONFIG;
-      const app = createApp(deps);
+      const app = createTestApp(deps);
       const res = await app.request("/llm/v1/messages", { method: "POST" });
       const reader = res.body!.getReader();
       await reader.read(); // pull the first chunk
@@ -442,6 +436,133 @@ describe("ALL /llm/* — telemetry", () => {
       expect(String(payload?.reason)).toContain("test-abort");
     } finally {
       warnSpy.mockRestore();
+    }
+  });
+
+  // --- inter-chunk idle bound ---
+  //
+  // `passUpstream` bounds how long the UPSTREAM may stay silent between two
+  // chunks (`LLM_STREAM_IDLE_TIMEOUT_MS`, 120 s in production; injected here as
+  // a few ms via `deps.llmStreamIdleTimeoutMs`). Four of the ten api shapes
+  // this platform maps ignore pi-ai's own `timeoutMs`, so a stalled
+  // Gemini/Vertex/Bedrock stream had no bound below the 30 min absolute cap and
+  // runs died on their wall-clock watchdog with nothing to show the user.
+  //
+  // The subtlety these tests pin: the wrapper is `pull`-based, so a timeout
+  // must be armed against the PENDING `reader.read()` and cleared when it
+  // settles — never on `maxIdleMs` (which measures CONSUMER pull gaps) and
+  // never on a timer that keeps running between pulls. The slow-consumer case
+  // below is the regression control for exactly that mistake.
+
+  it("errors the stream and logs llm.stream.idle_timeout when the upstream goes silent mid-pull", async () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      // Upstream that hands over one chunk and then never speaks again — the
+      // consumer IS pulling, so the read stays pending and the idle bound is
+      // the only thing that can end it.
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("first-chunk"));
+        },
+      });
+      const fetchFn = mock(
+        async () =>
+          new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+      );
+      const deps = makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        llmStreamIdleTimeoutMs: 25,
+      });
+      deps.config.llm = LLM_CONFIG;
+      const app = createTestApp(deps);
+      const res = await app.request("/llm/v1/messages", { method: "POST" });
+
+      // IN-PROCESS ONLY. Hono's `app.request` hands the same stream object
+      // back, so `controller.error` surfaces here. Over a real socket it does
+      // not: the agent observes a TRUNCATED stream and never sees this text —
+      // which is what pi-ai classifies as retryable. See the branch in
+      // `app.ts`. What this pins is that the stall ENDS the stream.
+      await expect(res.text()).rejects.toThrow(/timed out/i);
+
+      const idle = warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.idle_timeout");
+      expect(idle).toBeDefined();
+      const payload = idle?.[1] as Record<string, unknown> | undefined;
+      expect(payload).toMatchObject({ status: 200, authMode: "api_key", idleTimeoutMs: 25 });
+      // Telemetry still describes what DID arrive before the stall.
+      expect(payload?.chunks).toBe(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does NOT trip on a slow consumer reading a healthy upstream", async () => {
+    // REGRESSION CONTROL. This is the failure an idle timeout naively hung off
+    // `maxIdleMs` — or off a timer that survives between pulls — would ship:
+    // the upstream answers every pull immediately, but the CONSUMER dawdles far
+    // longer than the idle bound between reads. That must never be a timeout.
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const enc = new TextEncoder();
+      const payloads = ["a", "b", "c", "d"];
+      let next = 0;
+      // Demand-driven upstream: produces only when pulled, and instantly.
+      const stream = new ReadableStream({
+        pull(controller) {
+          if (next >= payloads.length) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(enc.encode(payloads[next]!));
+          next += 1;
+        },
+      });
+      const fetchFn = mock(
+        async () =>
+          new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+      );
+      const idleTimeoutMs = 15;
+      const deps = makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        llmStreamIdleTimeoutMs: idleTimeoutMs,
+      });
+      deps.config.llm = LLM_CONFIG;
+      const app = createTestApp(deps);
+      const res = await app.request("/llm/v1/messages", { method: "POST" });
+
+      // Consumer gaps an order of magnitude past the idle bound.
+      const consumerGapMs = idleTimeoutMs * 5;
+      const reader = res.body!.getReader();
+      const seen: string[] = [];
+      const dec = new TextDecoder();
+      for (;;) {
+        await new Promise((r) => setTimeout(r, consumerGapMs));
+        const { value, done } = await reader.read();
+        if (done) break;
+        seen.push(dec.decode(value));
+      }
+
+      expect(seen.join("")).toBe(payloads.join(""));
+      expect(warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.idle_timeout")).toBeUndefined();
+      expect(warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.error")).toBeUndefined();
+
+      // Proof the control tests the right thing: `maxIdleMs` is the
+      // CONSUMER-pull-gap metric, and it really did exceed the idle bound. Any
+      // implementation that timed out on that counter would have failed above.
+      const observed = infoSpy.mock.calls.find(([msg]) => msg === "llm.stream.observed");
+      expect(observed).toBeDefined();
+      const payload = observed?.[1] as Record<string, unknown> | undefined;
+      expect(payload?.chunks).toBe(payloads.length);
+      expect(payload?.maxIdleMs as number).toBeGreaterThan(idleTimeoutMs);
+    } finally {
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 });

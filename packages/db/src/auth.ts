@@ -13,8 +13,8 @@ import { createLogger } from "@appstrate/core/logger";
 const logger = createLogger("info");
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
-import * as schema from "./schema.ts";
-import { profiles, orgInvitations, user } from "./schema.ts";
+import * as schema from "./schema/index.ts";
+import { profiles, orgInvitations, user } from "./schema/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
   evaluateSignupPolicy,
@@ -23,6 +23,7 @@ import {
   normalizeEmail,
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password-policy.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -49,13 +50,13 @@ async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
 /**
  * Post-bootstrap side-effect hook (issue #228). Fires once `createBootstrapOrg`
  * has actually inserted the org row — never on the idempotent no-op path.
- * apps/api wires this at boot to (a) emit `onOrgCreate` so cloud free-tier
- * and other module listeners observe the bootstrap org, and (b) provision
- * the default application + hello-world agent so the post-signup onboarding
- * path lands on a usable workspace, mirroring `POST /api/orgs`.
+ * apps/api wires this at boot to (a) emit `onOrgCreate` so the ee module's
+ * free-tier gate and other module listeners observe the bootstrap org, and (b) provision
+ * the default space + hello-world agent so the post-signup onboarding
+ * path lands on a usable space, mirroring `POST /api/orgs`.
  *
  * Lives as an injection slot rather than a direct call because the
- * platform service layer (applications, default-agent, module event bus)
+ * platform service layer (spaces, default-agent, module event bus)
  * lives in `apps/api`, which `packages/db` cannot import without inverting
  * the dependency graph.
  */
@@ -83,7 +84,7 @@ export function setPostBootstrapOrgHook(hook: (info: PostBootstrapOrgInfo) => Pr
  *
  * Realm-guarded: only fires for `platform` realm signups. Without this guard,
  * an OIDC end-user flow that happens to target `AUTH_BOOTSTRAP_OWNER_EMAIL`
- * (`realm = end_user:<applicationId>`) would provision a platform org for an
+ * (`realm = end_user:<spaceId>`) would provision a platform org for an
  * end-user, mixing audiences that the realm separation exists to keep apart.
  */
 async function maybeBootstrapOrgForOwner(
@@ -104,7 +105,7 @@ async function maybeBootstrapOrgForOwner(
       slug: result.slug,
     });
     if (_postBootstrapOrgHook) {
-      // Side effects (event emit, default app, default agent) run in
+      // Side effects (event emit, default space, default agent) run in
       // apps/api. Failures here are logged but never break signup — the
       // org itself is already committed.
       try {
@@ -166,13 +167,13 @@ export function setBeforeSignupHook(
 // row at creation time. The default ("platform") covers every signup flow
 // driven by the platform itself (dashboard signup, org invitation, direct
 // BA sign-up). The OIDC module overrides this via `setRealmResolver()`
-// during its `init()` to return `"end_user:<applicationId>"` whenever the
-// in-flight signup is bound to an application-level OAuth client — the
+// during its `init()` to return `"end_user:<spaceId>"` whenever the
+// in-flight signup is bound to a space-level OAuth client — the
 // single-user-pool isolation fix that prevents end-user sessions from
 // being replayed against platform routes.
 //
 // Async signature so the resolver can look up the OAuth client's policy
-// (which includes `applicationId`) in the short-TTL cache — same plumbing
+// (which includes `spaceId`) in the short-TTL cache — same plumbing
 // as `oidcBeforeSignupGuard`.
 //
 // The resolver receives the full request-scoped view Better Auth exposes to
@@ -198,6 +199,11 @@ export interface RealmResolutionContext {
   query: Record<string, unknown> | null;
 }
 
+/**
+ * Parameter type of the exported `setRealmResolver` injection slot; the OIDC
+ * module passes a function literal and never names the type, so this is part
+ * of that function's contract rather than an independent export.
+ */
 export type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
 
 let _realmResolver: RealmResolver | null = null;
@@ -237,7 +243,7 @@ export function setMagicLinkIssuedHook(hook: (info: MagicLinkIssuedInfo) => Prom
 
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
 //
-// Flows driven by a `level=application` OIDC client must send verification
+// Flows driven by a `level=space` OIDC client must send verification
 // emails, magic-links, and password-reset mails through the TENANT's SMTP
 // transport, not the instance env transport. The Better Auth singleton is
 // built once at boot with callbacks that capture `smtpTransport` by closure
@@ -274,7 +280,7 @@ export function withBootstrapTokenRedemption<T>(fn: () => Promise<T>): Promise<T
 }
 
 /** True when the current async context is inside `withBootstrapTokenRedemption`. */
-export function isBootstrapTokenRedemptionActive(): boolean {
+function isBootstrapTokenRedemptionActive(): boolean {
   return bootstrapTokenRedemptionStore.getStore() === true;
 }
 
@@ -288,7 +294,7 @@ export function withSmtpOverride<T>(
 }
 
 /** Return the active SMTP override, if any. Called from BA mail callbacks. */
-export function getSmtpOverride(): SmtpOverride | undefined {
+function getSmtpOverride(): SmtpOverride | undefined {
   return smtpOverrideStore.getStore();
 }
 
@@ -300,7 +306,7 @@ function formatFrom(override: SmtpOverride): string {
 
 // ─── Social provider override (per-request) ──────────────────────────────────
 //
-// Flows driven by a `level=application` OIDC client must redirect through the
+// Flows driven by a `level=space` OIDC client must redirect through the
 // TENANT's Google/GitHub OAuth App, not the platform's — so the consent
 // screen shows the tenant's branding, scopes are tenant-controlled, and
 // audit/revocation happen on the tenant's OAuth App. Like SMTP, we can't
@@ -308,7 +314,7 @@ function formatFrom(override: SmtpOverride): string {
 // below expose `clientId` / `clientSecret` as **getters** that look up an
 // AsyncLocalStorage override before falling back to env. The OIDC module's
 // BA `before` hook calls `enterSocialOverride()` after reading the pending-
-// client cookie and resolving per-app creds — all subsequent BA property
+// client cookie and resolving per-space creds — all subsequent BA property
 // accesses (in Google/GitHub provider factories, validate-authorization-code,
 // create-authorization-url) see the tenant's creds.
 //
@@ -342,7 +348,7 @@ const socialOverrideStore = new AsyncLocalStorage<SocialOverride>();
  *     long as we only call this from the OIDC module's social `before`
  *     hook (see `apps/api/src/modules/oidc/services/ba-social-override-plugin.ts`).
  *   - Tested by `apps/api/src/modules/oidc/test/unit/social-override-isolation.test.ts`
- *     which exercises two concurrent requests with distinct per-app creds
+ *     which exercises two concurrent requests with distinct per-space creds
  *     and asserts no cross-contamination.
  */
 export function enterSocialOverride(override: SocialOverride): void {
@@ -366,6 +372,54 @@ export function setAfterSignupHook(
  * erasure at the `@appstrate/core` contract layer.
  */
 export type BetterAuthPluginList = NonNullable<Parameters<typeof betterAuth>[0]["plugins"]>;
+
+/**
+ * How module plugin contributions reach {@link createAuth}: as a THUNK, never
+ * as an already-built array.
+ *
+ * A Better Auth plugin object is single-use. Building an auth instance runs
+ * every plugin's `init(ctx)`, and an init may MUTATE a sibling plugin's
+ * options — `@better-auth/cimd` calls `extendOAuthProvider()`, which appends
+ * to `oauth-provider`'s `options.extensions`. Feeding the same objects to a
+ * second `betterAuth()` call appends a second time, and the provider's
+ * disjointness check then rejects the duplicate client-discovery id.
+ *
+ * A thunk makes each build produce fresh instances, so every build starts from
+ * a clean plugin state. It also means a rebuild re-reads the env at plugin
+ * construction time, which is the whole point of {@link _rebuildAuthForTesting}.
+ */
+export type BetterAuthPluginFactory = () => BetterAuthPluginList;
+
+/**
+ * Atomic check-and-increment backing Better Auth's built-in rate limiter.
+ * The implementation lives in `apps/api` (it needs the platform's limiter
+ * factory, which this package must not depend on) and reaches the auth
+ * builder through {@link CreateAuthOptions}.
+ */
+export type BetterAuthRateLimitStorage = NonNullable<
+  NonNullable<Parameters<typeof betterAuth>[0]["rateLimit"]>["customStorage"]
+>;
+
+/** Everything the platform supplies to {@link createAuth}. */
+export interface CreateAuthOptions {
+  /**
+   * Module-contributed plugins, as a THUNK — plugin objects are single-use
+   * (see {@link BetterAuthPluginFactory}), and the thunk is what lets
+   * {@link _rebuildAuthForTesting} mint a fresh set.
+   */
+  plugins: BetterAuthPluginFactory;
+  /** Shared storage for the built-in rate limiter. */
+  rateLimitStorage: BetterAuthRateLimitStorage;
+  /**
+   * Whether the built-in limiter is armed. Better Auth arms it in production
+   * only; the platform keeps that split so development and e2e are not held
+   * to rules such as three sign-ups per ten seconds per IP, and the test
+   * harness arms it to exercise the rules.
+   */
+  rateLimitEnabled: boolean;
+  /** Header the platform stamps with the resolved client IP. */
+  clientIpHeader: string;
+}
 
 /**
  * BA's OAuth callback endpoint path. Exposed as a constant so the create
@@ -420,7 +474,7 @@ function buildBasePlugins(
             // chain still enforces per-context policy: the OIDC module's
             // `oidcBeforeSignupGuard` blocks creation for org-level clients with
             // `allowSignup: false` (via the signed `oidc_pending_client` cookie),
-            // and cloud's free-tier hook applies its own gate. Outside an OIDC
+            // and the ee module's free-tier hook applies its own gate. Outside an OIDC
             // flow, magic-link signup is as open as email/password signup.
             disableSignUp: false,
             // Short-lived login link. A magic-link is a bearer credential: a
@@ -522,10 +576,11 @@ function buildBasePlugins(
 // needed. All consumers must call `getAuth()` at request time / post-boot
 // — never at module-evaluation time.
 //
-// Test harness: `test/setup/preload.ts` calls `createAuth([])` during
+// Test harness: `test/setup/preload.ts` calls `createAuth()` during
 // preload so module test runs boot cleanly.
 
-function buildAuth(extraPlugins: BetterAuthPluginList = []) {
+function buildAuth(options: CreateAuthOptions) {
+  const extraPlugins = options.plugins();
   const env = getEnv();
   const smtpEnabled = !!(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SMTP_FROM);
   // Tests set `SMTP_HOST=__test_json__` to exercise the SMTP-enabled BA flow
@@ -545,7 +600,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     : null;
   const googleEnvEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
   const githubEnvEnabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
-  // Both providers are ALWAYS registered on BA so per-app credentials
+  // Both providers are ALWAYS registered on BA so per-space credentials
   // injected via `enterSocialOverride()` (OIDC module plugin, see
   // `apps/api/src/modules/oidc/services/ba-social-override-plugin.ts`) have a
   // live provider factory to flow through — even when the env vars are
@@ -555,8 +610,8 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
   // error surfaced to the UI when a tenant hasn't configured creds).
   //
   // `anySocialEnabled` still gates account-linking + trusted providers on
-  // env-configured providers only: per-app social applies exclusively to
-  // `level=application` OIDC clients, which have their own auth surface —
+  // env-configured providers only: per-space social applies exclusively to
+  // `level=space` OIDC clients, which have their own auth surface —
   // the instance-wide account linking flag is an env concern.
   const anySocialEnabled = googleEnvEnabled || githubEnvEnabled;
   const socialProviders: Record<
@@ -626,7 +681,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     //
     // Suppress one construction-time false positive: the google/github social
     // providers below are registered with empty placeholder creds ON PURPOSE
-    // so the per-app OIDC social override (`enterSocialOverride`) has a live
+    // so the per-space OIDC social override (`enterSocialOverride`) has a live
     // provider factory to flow tenant creds through at request time. BA's
     // `!clientId` guard runs once at construction and can't see that
     // request-time override, so "Social provider … is missing clientId or
@@ -653,9 +708,26 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
 
     plugins: [...basePlugins, ...extraPlugins],
 
+    rateLimit: {
+      // Better Auth counts in per-process memory, so a fleet of replicas
+      // grants each caller one budget per replica. The shared platform
+      // limiter makes it one budget per caller.
+      enabled: options.rateLimitEnabled,
+      customStorage: options.rateLimitStorage,
+    },
+
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: 8,
+      // The one place these two numbers are ENFORCED; every other declaration
+      // of them reports this one (`src/password-policy.ts` states the rule).
+      // `maxPasswordLength` is set explicitly even though it equals Better
+      // Auth's own default: left unset, the ceiling the routes' Zod bounds
+      // report was a framework default they could not see, and `auth-bootstrap`
+      // had already drifted to 256 above it — a 200-character password cleared
+      // its Zod and was refused here, surfacing to the caller as that route's
+      // generic `bootstrap_signup_rejected` 400, which names no length.
+      minPasswordLength: MIN_PASSWORD_LENGTH,
+      maxPasswordLength: MAX_PASSWORD_LENGTH,
       requireEmailVerification: smtpEnabled,
       // Test-only fast password hasher. Better Auth's default is scrypt
       // (deliberately slow — ~35ms/hash), which dominates the test suite since
@@ -796,6 +868,19 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     trustedOrigins: env.TRUSTED_ORIGINS,
 
     advanced: {
+      ipAddress: {
+        // The platform resolves the client IP under its own `TRUST_PROXY`
+        // model (a hop COUNT, which `trustedProxies` — a list of proxy
+        // addresses — cannot express) and states the answer on this header.
+        // Naming it alone keeps Better Auth from parsing `x-forwarded-for`
+        // on its own, so its rate limiter and its session records key on the
+        // same address every other platform limiter does.
+        // One writer: the edge middleware `apps/api/src/middleware/client-ip.ts`
+        // overwrites the header on the inbound request, so the handler mount
+        // and every `auth.api.*` call passed `c.req.raw.headers` read the
+        // platform's answer and never a caller-supplied one.
+        ipAddressHeaders: [options.clientIpHeader],
+      },
       // Explicit per-cookie defaults — Better Auth applies these to the
       // session cookie + every plugin-issued cookie (CSRF, etc.). Pinning
       // them here removes "what does BA's default do?" from every
@@ -981,7 +1066,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
             const realm = (user as { realm?: string }).realm ?? "platform";
             // Self-hosting bootstrap path (issue #228) — auto-create the
             // root org for AUTH_BOOTSTRAP_OWNER_EMAIL. Idempotent. Runs
-            // BEFORE the module after-hook so cloud's free-tier hook etc.
+            // BEFORE the module after-hook so the ee module's free-tier hook etc.
             // see a coherent state.
             try {
               await maybeBootstrapOrgForOwner(user.id, user.email, realm);
@@ -1046,7 +1131,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
 type AuthInstance = ReturnType<typeof buildAuth>;
 
 let _auth: AuthInstance | null = null;
-let _lastExtraPlugins: BetterAuthPluginList = [];
+let _options: CreateAuthOptions | null = null;
 
 /**
  * Construct the Better Auth singleton. Idempotent — subsequent calls are
@@ -1055,18 +1140,20 @@ let _lastExtraPlugins: BetterAuthPluginList = [];
  * are merged with `basePlugins`. Module tables already live in the core
  * schema, so the Drizzle adapter resolves them from the barrel directly.
  */
-export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
+export function createAuth(options: CreateAuthOptions): void {
   if (_auth) return;
-  _lastExtraPlugins = extraPlugins;
-  _auth = buildAuth(extraPlugins);
+  _options = options;
+  _auth = buildAuth(options);
 }
 
 /**
  * Test-only: rebuild the Better Auth singleton with the CURRENT env. Lets
  * tests flip SMTP / social / cookie-domain flags at runtime and verify the
  * resulting behavior (email-verification flow, social auto-verify hook,
- * …). The extra plugins + drizzle schemas passed to the most recent
- * `createAuth()` call are re-used so modules don't need to re-register.
+ * …). The plugin factory passed to `createAuth()` is re-invoked so modules
+ * don't need to re-register — and so the rebuild gets plugin instances of
+ * its own rather than re-initializing the ones the previous build already
+ * mutated.
  *
  * DO NOT call this from production code — it defeats the whole point of
  * the idempotent singleton. It exists solely so the module test preload
@@ -1074,7 +1161,10 @@ export function createAuth(extraPlugins: BetterAuthPluginList = []): void {
  * having to reload the entire process.
  */
 export function _rebuildAuthForTesting(): void {
-  _auth = buildAuth(_lastExtraPlugins);
+  if (!_options) {
+    throw new Error("auth not initialized — createAuth() must run before a rebuild");
+  }
+  _auth = buildAuth(_options);
 }
 
 /** Get the Better Auth instance. Throws if `createAuth()` has not yet run. */

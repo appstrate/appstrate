@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ConversationSidebarTab = "preview" | "runs" | "documents" | "info";
+export type ConversationSidebarTab = "preview" | "runs" | "files" | "info";
 
-export interface SidebarDocument {
+export interface SidebarFile {
   id: string;
   name: string;
 }
@@ -10,14 +10,14 @@ export interface SidebarDocument {
 export interface ConversationSidebarState {
   expanded: boolean;
   activeTab: ConversationSidebarTab;
-  selectedDocument: SidebarDocument | null;
-  modalDocument: SidebarDocument | null;
+  selectedFile: SidebarFile | null;
+  modalFile: SidebarFile | null;
 }
 
 export type ConversationSidebarAction =
   | { type: "toggle" }
   | { type: "select-tab"; tab: ConversationSidebarTab }
-  | { type: "show-document"; document: SidebarDocument }
+  | { type: "show-file"; file: SidebarFile }
   | { type: "open-modal" }
   | { type: "close-modal" }
   | { type: "conversation-change" };
@@ -25,13 +25,13 @@ export type ConversationSidebarAction =
 export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
   expanded: false,
   activeTab: "preview",
-  selectedDocument: null,
-  modalDocument: null,
+  selectedFile: null,
+  modalFile: null,
 };
 
 /**
- * State behind the chat's one context surface. `show-document` deliberately
- * carries no source: a click and a newly published primary document are the
+ * State behind the chat's one context surface. `show-file` deliberately
+ * carries no source: a click and the single file a run just produced are the
  * exact same event once they cross the module boundary.
  */
 export function conversationSidebarReducer(
@@ -43,18 +43,18 @@ export function conversationSidebarReducer(
       return { ...state, expanded: !state.expanded };
     case "select-tab":
       return { ...state, expanded: true, activeTab: action.tab };
-    case "show-document":
+    case "show-file":
       return {
         ...state,
         expanded: true,
         activeTab: "preview",
-        selectedDocument: action.document,
+        selectedFile: action.file,
       };
     case "open-modal":
-      return state.selectedDocument ? { ...state, modalDocument: state.selectedDocument } : state;
+      return state.selectedFile ? { ...state, modalFile: state.selectedFile } : state;
     case "close-modal":
-      return state.modalDocument ? { ...state, modalDocument: null } : state;
+      return state.modalFile ? { ...state, modalFile: null } : state;
     case "conversation-change":
-      return { ...state, selectedDocument: null, modalDocument: null };
+      return { ...state, selectedFile: null, modalFile: null };
   }
 }

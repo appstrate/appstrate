@@ -211,10 +211,10 @@ export function PackageList() {
   const { t } = useTranslation(["agents", "common"]);
   const { data: agents, isLoading, error } = useAgents();
   const { data: unreadCounts } = useUnreadCountsByAgent();
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
-  const creation = useCreationHandoff("agent", isAdmin);
+  const creation = useCreationHandoff("agent", can("agents:write"));
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
@@ -241,7 +241,7 @@ export function PackageList() {
         emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
         emptyIcon={Layers}
         extraActions={
-          isAdmin ? (
+          can("agents:write") ? (
             <PageActionsMenu>
               <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
                 <Upload />

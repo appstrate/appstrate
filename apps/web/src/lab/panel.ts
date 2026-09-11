@@ -8,12 +8,39 @@
  * a tool sitting next to the app, not part of it.
  */
 import { SCENARIOS, getScenario, setScenario, type Scenario } from "./scenario";
+import {
+  LAB_PRESETS,
+  LAB_ROLES,
+  getPreset,
+  getRole,
+  setPreset,
+  setRole,
+  type LabPreset,
+  type LabRole,
+} from "./role";
 
 const LABELS: Record<Scenario, string> = {
   nominal: "Nominal",
   empty: "Vide",
   heavy: "Charge",
   error: "Erreur",
+};
+
+/** The role's own label: what the caller IS, not what the data looks like. */
+const ROLE_LABELS: Record<LabRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+  guest: "Guest",
+};
+
+/** The space preset — the axis most screens actually read. */
+const PRESET_LABELS: Record<LabPreset, string> = {
+  admin: "Admin",
+  builder: "Builder",
+  operator: "Operator",
+  runner: "Runner",
+  viewer: "Viewer",
 };
 
 export function mountLabPanel(): void {
@@ -25,8 +52,9 @@ export function mountLabPanel(): void {
     "right:12px",
     "z-index:2147483647",
     "display:flex",
-    "gap:4px",
-    "align-items:center",
+    "flex-direction:column",
+    "gap:3px",
+    "align-items:stretch",
     "padding:5px 7px",
     "border-radius:9px",
     "background:rgba(20,20,23,.92)",
@@ -36,20 +64,50 @@ export function mountLabPanel(): void {
     "backdrop-filter:blur(6px)",
   ].join(";");
 
-  host.append(label("LAB"));
-
   const scenario = getScenario();
-  for (const value of SCENARIOS) {
-    host.append(pill(LABELS[value], value === scenario, () => setScenario(value)));
-  }
+  host.append(
+    row(
+      "LAB",
+      SCENARIOS.map((value) => pill(LABELS[value], value === scenario, () => setScenario(value))),
+    ),
+  );
+
+  // Second row: WHO is looking. Flipping it reloads with a weaker permission
+  // set, so a gate that never hides anything shows up here immediately.
+  const role = getRole();
+  host.append(
+    row(
+      "ORG",
+      LAB_ROLES.map((value) => pill(ROLE_LABELS[value], value === role, () => setRole(value))),
+    ),
+  );
+
+  const preset = getPreset();
+  host.append(
+    row(
+      "ESPACE",
+      LAB_PRESETS.map((value) =>
+        pill(PRESET_LABELS[value], value === preset, () => setPreset(value)),
+      ),
+    ),
+  );
 
   document.body.append(host);
+}
+
+function row(name: string, pills: HTMLElement[]): HTMLDivElement {
+  const line = document.createElement("div");
+  line.style.cssText = "display:flex;gap:4px;align-items:center";
+  line.append(label(name));
+  for (const p of pills) line.append(p);
+  return line;
 }
 
 function label(text: string): HTMLSpanElement {
   const span = document.createElement("span");
   span.textContent = text;
-  span.style.cssText = "opacity:.5;letter-spacing:.08em;font-weight:600;margin:0 3px";
+  span.style.cssText =
+    "opacity:.5;letter-spacing:.08em;font-weight:600;margin:0 3px;min-width:30px";
   return span;
 }
 

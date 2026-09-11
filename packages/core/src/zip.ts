@@ -21,7 +21,9 @@ import {
   DecompressionLimitError,
   type BoundedUnzipLimits,
 } from "@appstrate/afps-shared/unzip-bounded";
+import { stripWrapperPrefix } from "@appstrate/afps-shared/archive-prefix";
 import { PACKAGE_CONTENT_FILE } from "./package-files.ts";
+import { getErrorMessage } from "./errors.ts";
 
 export type { Zippable };
 export { unzipBounded, DecompressionLimitError };
@@ -117,7 +119,12 @@ export function unzipArtifact(
     });
   } catch (err) {
     if (err instanceof DecompressionLimitError) throw err; // surface bomb/limit verbatim
-    throw new Error("Failed to decompress ZIP artifact");
+    // Both halves matter: the message names the operation, and fflate's own
+    // message names what was wrong with the bytes (truncated central
+    // directory, unsupported compression method, …). Inline it AND attach the
+    // error — nothing here reads a `cause` chain today (see the API error
+    // handler), so the message is what actually reaches a human.
+    throw new Error(`Failed to decompress ZIP artifact: ${getErrorMessage(err)}`, { cause: err });
   }
 
   // Sanitize: filter out path traversal, absolute paths, null bytes, backslashes, __MACOSX, and directory entries
@@ -142,64 +149,23 @@ export function unzipArtifact(
 // ─────────────────────────────────────────────
 
 /**
- * Detect and strip a single common wrapper folder from ZIP entries.
- * ZIPs created by macOS Finder or `zip -r folder/` wrap all files under
- * a top-level directory. This function strips that prefix so lookups
- * like `files["manifest.json"]` work regardless of how the ZIP was created.
+ * Detect and strip a single common wrapper folder from ZIP entries — re-exported
+ * verbatim from the zero-dependency `@appstrate/afps-shared` package, so the
+ * `@appstrate/core/zip` public surface is unchanged (both overloads, `Record`
+ * and `Map`, and the identity return when there is nothing to strip).
  *
- * Only strips when ALL entries share a single first-level prefix and none
- * are at the root level. Returns the original collection unchanged otherwise.
+ * The implementation lives in `@appstrate/afps-shared/archive-prefix` because
+ * `@appstrate/afps-runtime` strips the same prefix on its `.afps` ingestion
+ * path and must NOT take a runtime dependency on `@appstrate/core`. Before this
+ * move it kept a hand-copy of the `Map` branch under a comment asking a human
+ * to keep the two in sync, with no parity test policing it — the same
+ * arrangement that let the media-type set drift three times before it moved to
+ * `@appstrate/afps-shared/mime`.
  *
- * Accepts either a `Record<string, Uint8Array>` (default ZIP shape) or a
- * `Map<string, Uint8Array>` (sanitized bundle shape) and returns the same
- * type as the input.
- *
- * NOTE: `@appstrate/afps-runtime` keeps a local Map-only copy of this
- * algorithm to remain a zero-`@appstrate/core`-dependency package. Keep the
- * two implementations in sync. See
- * `packages/afps-runtime/src/bundle/archive-utils.ts`.
+ * See that module for the full rule, including why an entry at the root level
+ * or a second top-level folder means "strip nothing".
  */
-export function stripWrapperPrefix(files: Record<string, Uint8Array>): Record<string, Uint8Array>;
-export function stripWrapperPrefix(files: Map<string, Uint8Array>): Map<string, Uint8Array>;
-export function stripWrapperPrefix(
-  files: Record<string, Uint8Array> | Map<string, Uint8Array>,
-): Record<string, Uint8Array> | Map<string, Uint8Array> {
-  if (files instanceof Map) {
-    if (files.size === 0) return files;
-    const prefixes = new Set<string>();
-    for (const key of files.keys()) {
-      const slashIdx = key.indexOf("/");
-      if (slashIdx === -1) return files; // root-level file → no stripping
-      prefixes.add(key.slice(0, slashIdx));
-    }
-    if (prefixes.size !== 1) return files; // multiple top-level folders → ambiguous
-    const prefix = `${[...prefixes][0]}/`;
-    const stripped = new Map<string, Uint8Array>();
-    for (const [key, value] of files) {
-      stripped.set(key.slice(prefix.length), value);
-    }
-    return stripped;
-  }
-
-  const keys = Object.keys(files);
-  if (keys.length === 0) return files;
-
-  const prefixes = new Set<string>();
-  for (const key of keys) {
-    const slashIdx = key.indexOf("/");
-    if (slashIdx === -1) return files; // root-level file → no stripping
-    prefixes.add(key.slice(0, slashIdx));
-  }
-
-  if (prefixes.size !== 1) return files; // multiple top-level folders → ambiguous
-
-  const prefix = `${[...prefixes][0]}/`;
-  const stripped: Record<string, Uint8Array> = {};
-  for (const [key, value] of Object.entries(files)) {
-    stripped[key.slice(prefix.length)] = value;
-  }
-  return stripped;
-}
+export { stripWrapperPrefix };
 
 // ─────────────────────────────────────────────
 // Unified package ZIP parser — handles agent, skill, tool
@@ -238,13 +204,17 @@ export class PackageZipError extends Error {
    * @param code - Error code (e.g. "FILE_TOO_LARGE", "ZIP_INVALID", "MISSING_MANIFEST")
    * @param message - Human-readable error description
    * @param details - Optional structured error details (e.g. validation error list)
+   * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising this
+   *   from a `catch` so the underlying decoder/IO error is not discarded.
+   *   `preserve-caught-error` cannot see custom classes, so this is on us.
    */
   constructor(
     public code: string,
     message: string,
     public details?: unknown,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "PackageZipError";
   }
 }
@@ -287,10 +257,7 @@ export interface ParsePackageZipOptions {
  * based on package type (prompt.md for agents, SKILL.md for skills, entrypoint for tools).
  * Includes zip bomb protection and wrapper folder stripping.
  * @param zipBuffer - The raw ZIP file as a Uint8Array
- * @param options - {@link ParsePackageZipOptions}, or a bare `number` read as
- *   `maxSize`. The bare-number form is the original signature and stays
- *   supported for published consumers of `@appstrate/core`; new call sites
- *   should use the object form.
+ * @param options - {@link ParsePackageZipOptions}
  * @returns Parsed package with manifest, content, files, type, and any dropped runtime-tool ids
  * @throws PackageZipError for size limits, invalid ZIP, missing/invalid manifest, or missing content
  * @example
@@ -299,14 +266,9 @@ export interface ParsePackageZipOptions {
  */
 export function parsePackageZip(
   zipBuffer: Uint8Array,
-  options?: number | ParsePackageZipOptions,
+  options?: ParsePackageZipOptions,
 ): ParsedPackageZip {
-  // `maxSize` is a TypeScript function option, not an AFPS manifest key — it
-  // is the original published positional parameter, kept for npm consumers.
-  const opts: ParsePackageZipOptions =
-    typeof options === "number"
-      ? { maxSize: options } // canonical-casing-exempt
-      : (options ?? {});
+  const opts: ParsePackageZipOptions = options ?? {};
   const limit = opts.maxSize ?? PACKAGE_ZIP_MAX_COMPRESSED_BYTES;
   if (zipBuffer.length > limit) {
     throw new PackageZipError(
@@ -326,11 +288,36 @@ export function parsePackageZip(
     if (err instanceof DecompressionLimitError) {
       // A resource-exhaustion verdict → ZIP_BOMB; a structural one → ZIP_INVALID.
       if (err.reason === "corrupt-archive") {
-        throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact");
+        // Same rule as the generic branch below, and for the same reason: this
+        // is the verdict that means "the archive is structurally broken", the
+        // one an uploader can actually act on, and `DecompressionLimitError`'s
+        // detail is the only text that says HOW ("not a ZIP archive",
+        // "invalid distance", "unexpected EOF"). A fixed string collapsed all
+        // of them into one shrug.
+        //
+        // Safe to surface: for `corrupt-archive` the detail is either a
+        // literal of ours or the fflate decoder's own static sentence. It
+        // carries no request context and nothing credential-adjacent — the
+        // only uploader-controlled string `DecompressionLimitError` ever
+        // interpolates is an archive entry name, and that belongs to
+        // `file-too-large`, which lands on the ZIP_BOMB branch below.
+        throw new PackageZipError("ZIP_INVALID", getErrorMessage(err), undefined, { cause: err });
       }
-      throw new PackageZipError("ZIP_BOMB", "Decompressed size exceeds limit");
+      // Deliberately fixed. The budget verdicts already name themselves
+      // completely — there is no decoder sentence to add — and their detail
+      // CAN be an archive entry name (`file-too-large` passes `file.name`),
+      // i.e. attacker-chosen text that would be echoed into a 400.
+      throw new PackageZipError("ZIP_BOMB", "Decompressed size exceeds limit", undefined, {
+        cause: err,
+      });
     }
-    throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact");
+    // `unzipArtifact` above already names the operation AND inlines the
+    // decoder's own message; re-wrapping with a fixed string would discard
+    // that on the one path where it reaches a human — `routes/packages.ts`
+    // renders `PackageZipError.message` into the 400 the uploader sees, so
+    // "invalid zip data" vs "unexpected EOF" is the difference between a
+    // fixable report and a shrug.
+    throw new PackageZipError("ZIP_INVALID", getErrorMessage(err), undefined, { cause: err });
   }
 
   // Strip single wrapper folder if present (e.g. ZIPs from macOS Finder)
@@ -346,8 +333,13 @@ export function parsePackageZip(
   let manifestRaw: unknown;
   try {
     manifestRaw = JSON.parse(manifestText);
-  } catch {
-    throw new PackageZipError("INVALID_MANIFEST", "manifest.json is not valid JSON");
+  } catch (err) {
+    // `PackageZipError` gained its `ErrorOptions` parameter for exactly this:
+    // "is not valid JSON" is the same sentence for a truncated file, a BOM and
+    // a trailing comma. The SyntaxError's offset is what tells them apart.
+    throw new PackageZipError("INVALID_MANIFEST", "manifest.json is not valid JSON", undefined, {
+      cause: err,
+    });
   }
 
   const validation = validateManifest(manifestRaw, {

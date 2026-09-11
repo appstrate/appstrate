@@ -4,20 +4,33 @@
  * Verify OpenAPI spec: completeness, structural validity, best practices,
  * and Zod ↔ OpenAPI request-body schema consistency.
  *
- * 1. Endpoint coverage — compares spec vs maintained endpoint list
+ * 1. Endpoint index — enumerates the spec's "VERB /path" set for sections 5 and 5b
  * 2. Structural validation — @readme/openapi-parser (OpenAPI 3.1 schema conformance)
  * 3. Best practices lint — @redocly/openapi-core (recommended ruleset)
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
- *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
+ *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas.
+ *    Covers both the DECLARED fields (required, property names, types, nullability, scalar
+ *    constraints, items, minItems) and the body's STRICTNESS — the Zod schema's `.strict()`
+ *    and the spec's top-level `additionalProperties` must agree in BOTH directions, per
+ *    `oneOf` branch for a discriminated union.
+ * 4b. Step 4 coverage — every endpoint whose spec declares an application/json request body
+ *    must be registered (core registry or a module's openApiSchemas()) or listed in
+ *    EXEMPT_REQUEST_BODIES with a stated reason; a stale exemption fails too
  * 5. Code subset Spec — statically enumerates router.METHOD() and app.METHOD() calls across
  *    apps/api/src/routes (per-domain route files) plus apps/api/src/modules (built-in modules)
  *    plus apps/api/src/index.ts, composes the mount prefix from app.route(prefix, factory) calls,
  *    normalises Hono path syntax, and asserts every code-registered endpoint is documented in
  *    the OpenAPI spec or in the explicit allowlist.
+ * 5b. Spec subset Code — the mirror of 5: every documented endpoint must be registered by
+ *    some router, or listed in SPEC_ONLY_ALLOWLIST. Replaces the hand-typed 242-entry
+ *    `expectedEndpoints` array, whose only unique signal this was.
  * 6. Response schema presence — every 2xx JSON response (except 204) must declare a schema
  * 7. Shared-type ↔ OpenAPI response required-field comparison — for each registered
- *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts every type-required field
- *    is also required in the spec response schema (catches spec-optional / type-required drift)
+ *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts the two agree on which
+ *    fields are guaranteed, in BOTH directions: every type-required field is required in the
+ *    spec (spec-optional / type-required drift), and every spec-required field the type
+ *    declares with `?` is reported too (spec-required / type-optional drift). Accepted
+ *    divergences live in KNOWN_DRIFT and KNOWN_REVERSE_DRIFT respectively.
  *
  * Module-owned paths and schemas are loaded dynamically from built-in modules.
  * The set of modules validated matches `MODULES` (default: all built-in).
@@ -30,12 +43,24 @@ import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
-import { buildZodSchemaRegistry } from "../apps/api/src/openapi/zod-schema-registry.ts";
+import {
+  buildZodSchemaRegistry,
+  EXEMPT_REQUEST_BODIES,
+} from "../apps/api/src/openapi/zod-schema-registry.ts";
 import {
   responseTypeRegistry,
   KNOWN_DRIFT,
+  KNOWN_REVERSE_DRIFT,
   EXEMPT_SCHEMAS,
 } from "../apps/api/src/openapi/response-type-registry.ts";
+// Relative, like every other cross-workspace import in this file: the root
+// manifest declares no `@appstrate/runner-pi` dependency, and this gate only
+// needs the one path table.
+import {
+  LLM_PROXY_ROUTES,
+  llmProxyUrlPath,
+  type ProxiedApiShape,
+} from "../packages/runner-pi/src/llm-proxy-routes.ts";
 import { collectModuleOpenApi, discoverWorkspaceModuleDirs } from "./lib/module-openapi.ts";
 import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
@@ -62,340 +87,26 @@ const zodSchemaRegistry = buildZodSchemaRegistry(moduleSchemas);
 let exitCode = 0;
 
 // ═══════════════════════════════════════════════════
-// 1. Endpoint coverage
+// 1. Endpoint index
 // ═══════════════════════════════════════════════════
-
-const expectedEndpoints = [
-  // Health
-  "GET /health",
-
-  // Auth (Better Auth)
-  "POST /api/auth/sign-up/email",
-  "POST /api/auth/sign-in/email",
-  "POST /api/auth/sign-out",
-  "GET /api/auth/get-session",
-  // Bootstrap-token redemption (#344 Layer 2b) — platform-owned, not BA
-  "POST /api/auth/bootstrap/redeem",
-
-  // Agents (runtime — agents.ts + user-agents.ts junction endpoints)
-  "GET /api/agents",
-  "PUT /api/agents/{scope}/{name}/config",
-  // Unified persistence — pinned slots + memories
-  "GET /api/agents/{scope}/{name}/persistence",
-  "DELETE /api/agents/{scope}/{name}/persistence",
-  "DELETE /api/agents/{scope}/{name}/persistence/memories/{id}",
-  "DELETE /api/agents/{scope}/{name}/persistence/pinned/{id}",
-  "PUT /api/agents/{scope}/{name}/skills",
-  "GET /api/agents/{scope}/{name}/model",
-  "PUT /api/agents/{scope}/{name}/model",
-  "GET /api/agents/{scope}/{name}/bundle",
-  "GET /api/agents/{scope}/{name}/diagnostics",
-
-  // Runs
-  "POST /api/agents/{scope}/{name}/run",
-  "GET /api/agents/{scope}/{name}/runs",
-  "GET /api/agents/{scope}/{name}/run-activity",
-  "DELETE /api/agents/{scope}/{name}/runs",
-  "GET /api/runs/{id}",
-  "GET /api/runs/{id}/logs",
-  "POST /api/runs/{id}/cancel",
-
-  // Realtime (SSE)
-  "GET /api/realtime/runs",
-  "GET /api/realtime/runs/{id}",
-  "GET /api/realtime/agents/{packageId}/runs",
-
-  // Schedules
-  "GET /api/schedules",
-  "GET /api/schedules/{id}",
-  "GET /api/schedules/{id}/runs",
-  "GET /api/agents/{scope}/{name}/schedules",
-  "POST /api/agents/{scope}/{name}/schedules",
-  "PUT /api/schedules/{id}",
-  "DELETE /api/schedules/{id}",
-
-  // Integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI)
-  "GET /api/integrations",
-  "GET /api/integrations/callback",
-  "GET /api/integrations/{packageId}",
-  "POST /api/integrations/{packageId}/activate",
-  "DELETE /api/integrations/{packageId}/deactivate",
-  "POST /api/integrations/{packageId}/auths/{authKey}/oauth-clients",
-  "PUT /api/integrations/{packageId}/oauth-clients/{clientId}",
-  "DELETE /api/integrations/{packageId}/oauth-clients/{clientId}",
-  "GET /api/integrations/{packageId}/auths/{authKey}/clients",
-  "PUT /api/integrations/{packageId}/auths/{authKey}/default-client",
-  "POST /api/integrations/{packageId}/auths/{authKey}/connect/fields",
-  "POST /api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
-  "POST /api/integrations/{packageId}/auths/{authKey}/connect/session",
-  "GET /api/integrations/connect/start",
-  "GET /api/integrations/connect/context",
-  "POST /api/integrations/connect/submit",
-  "GET /api/integrations/{packageId}/connections",
-  "GET /api/integrations/{packageId}/consuming-agents",
-  "PATCH /api/integrations/{packageId}/connections/{connectionId}",
-  "PATCH /api/integrations/{packageId}/settings",
-  "GET /api/integrations/{packageId}/pins",
-  "PUT /api/integrations/{packageId}/pins/{agentPackageId}",
-  "DELETE /api/integrations/{packageId}/pins/{agentPackageId}",
-  "GET /api/integrations/{packageId}/default",
-  "PUT /api/integrations/{packageId}/default",
-  "DELETE /api/integrations/{packageId}/default",
-
-  // Agent Proxy
-  "GET /api/agents/{scope}/{name}/proxy",
-  "GET /api/agents/{scope}/{name}/connection-readiness",
-  "PUT /api/agents/{scope}/{name}/proxy",
-
-  // Model Provider Credentials
-  "GET /api/model-provider-credentials/registry",
-  "GET /api/model-provider-credentials",
-  "POST /api/model-provider-credentials",
-  "POST /api/model-provider-credentials/test",
-  "PUT /api/model-provider-credentials/{id}",
-  "DELETE /api/model-provider-credentials/{id}",
-  "POST /api/model-provider-credentials/{id}/test",
-  "POST /api/model-provider-credentials/{id}/refresh-models",
-  // OAuth Model Providers (subscription billing)
-  "POST /api/model-providers-oauth/pair/redeem",
-  "POST /api/model-providers-oauth/pairing",
-  "GET /api/model-providers-oauth/pairing/{id}",
-  "DELETE /api/model-providers-oauth/pairing/{id}",
-
-  // Models
-  "GET /api/models",
-  "POST /api/models",
-  "PUT /api/models/default",
-  "GET /api/models/openrouter",
-  "POST /api/models/test",
-  "POST /api/models/seed",
-  "PUT /api/models/{id}",
-  "DELETE /api/models/{id}",
-  "POST /api/models/{id}/test",
-
-  // Proxies
-  "GET /api/proxies",
-  "POST /api/proxies",
-  "PUT /api/proxies/default",
-  "PUT /api/proxies/{id}",
-  "DELETE /api/proxies/{id}",
-  "POST /api/proxies/{id}/test",
-
-  // API Keys
-  "GET /api/api-keys/available-scopes",
-  "GET /api/api-keys",
-  "POST /api/api-keys",
-  "DELETE /api/api-keys/{id}",
-
-  // Packages — Skills
-  "GET /api/packages/skills",
-  "POST /api/packages/skills",
-  "GET /api/packages/skills/{scope}/{name}",
-  "PUT /api/packages/skills/{scope}/{name}",
-  "DELETE /api/packages/skills/{scope}/{name}",
-  "GET /api/packages/skills/{id}",
-  "PUT /api/packages/skills/{id}",
-  "DELETE /api/packages/skills/{id}",
-  "GET /api/packages/skills/{scope}/{name}/versions",
-  "GET /api/packages/skills/{scope}/{name}/versions/info",
-  "POST /api/packages/skills/{scope}/{name}/versions",
-  "POST /api/packages/skills/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/skills/{scope}/{name}/versions/{version}",
-  "GET /api/packages/skills/{scope}/{name}/versions/{version}",
-
-  // Packages — Agents
-  "GET /api/packages/agents",
-  "POST /api/packages/agents",
-  "GET /api/packages/agents/{scope}/{name}",
-  "PUT /api/packages/agents/{scope}/{name}",
-  "DELETE /api/packages/agents/{scope}/{name}",
-  "GET /api/packages/agents/{id}",
-  "PUT /api/packages/agents/{id}",
-  "DELETE /api/packages/agents/{id}",
-  "GET /api/packages/agents/{scope}/{name}/versions",
-  "GET /api/packages/agents/{scope}/{name}/versions/info",
-  "POST /api/packages/agents/{scope}/{name}/versions",
-  "POST /api/packages/agents/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/agents/{scope}/{name}/versions/{version}",
-  "GET /api/packages/agents/{scope}/{name}/versions/{version}",
-
-  // Packages — Integrations
-  "GET /api/packages/integrations",
-  "POST /api/packages/integrations",
-  "GET /api/packages/integrations/{scope}/{name}",
-  "PUT /api/packages/integrations/{scope}/{name}",
-  "DELETE /api/packages/integrations/{scope}/{name}",
-  "GET /api/packages/integrations/{id}",
-  "PUT /api/packages/integrations/{id}",
-  "DELETE /api/packages/integrations/{id}",
-  "GET /api/packages/integrations/{scope}/{name}/versions",
-  "GET /api/packages/integrations/{scope}/{name}/versions/info",
-  "POST /api/packages/integrations/{scope}/{name}/versions",
-  "POST /api/packages/integrations/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/integrations/{scope}/{name}/versions/{version}",
-  "GET /api/packages/integrations/{scope}/{name}/versions/{version}",
-
-  // Packages — MCP Servers
-  "GET /api/packages/mcp-servers",
-  "POST /api/packages/mcp-servers",
-  "GET /api/packages/mcp-servers/{scope}/{name}",
-  "PUT /api/packages/mcp-servers/{scope}/{name}",
-  "DELETE /api/packages/mcp-servers/{scope}/{name}",
-  "GET /api/packages/mcp-servers/{id}",
-  "PUT /api/packages/mcp-servers/{id}",
-  "DELETE /api/packages/mcp-servers/{id}",
-  "GET /api/packages/mcp-servers/{scope}/{name}/versions",
-  "GET /api/packages/mcp-servers/{scope}/{name}/versions/info",
-  "POST /api/packages/mcp-servers/{scope}/{name}/versions",
-  "POST /api/packages/mcp-servers/{scope}/{name}/versions/{version}/restore",
-  "DELETE /api/packages/mcp-servers/{scope}/{name}/versions/{version}",
-  "GET /api/packages/mcp-servers/{scope}/{name}/versions/{version}",
-
-  // Organizations
-  "GET /api/orgs",
-  "POST /api/orgs",
-  "GET /api/orgs/{orgId}",
-  "PUT /api/orgs/{orgId}",
-  "DELETE /api/orgs/{orgId}",
-  "POST /api/orgs/{orgId}/members",
-  "PUT /api/orgs/{orgId}/members/{userId}",
-  "DELETE /api/orgs/{orgId}/members/{userId}",
-  "PUT /api/orgs/{orgId}/invitations/{invitationId}",
-  "DELETE /api/orgs/{orgId}/invitations/{invitationId}",
-
-  // Profile
-  "GET /api/profile",
-  "PATCH /api/profile",
-  "POST /api/profile/password",
-  "POST /api/profiles/batch",
-  "GET /api/me/orgs",
-  "GET /api/me/context",
-  "GET /api/me/connections",
-  "DELETE /api/me/connections/{connectionId}",
-  "GET /api/me/integration-pins",
-  "PUT /api/me/integration-pins",
-  "DELETE /api/me/integration-pins",
-
-  // Invitations
-  "GET /invite/{token}/info",
-  "POST /invite/{token}/accept",
-
-  // Welcome
-  "POST /api/welcome/setup",
-
-  // Internal
-  "GET /internal/run-history",
-  "GET /internal/memories",
-  "GET /internal/oauth-token/{credentialId}",
-  "POST /internal/oauth-token/{credentialId}/refresh",
-  "GET /internal/mcp-server-bundle/{scope}/{name}",
-  "GET /internal/integration-credentials/{scope}/{name}",
-  "POST /internal/integration-credentials/{scope}/{name}/refresh",
-
-  // Meta
-  "GET /api/openapi.json",
-  "GET /api/docs",
-
-  // Notifications
-  "GET /api/notifications",
-  "GET /api/notifications/unread-count",
-  "GET /api/notifications/unread-counts-by-agent",
-  "PUT /api/notifications/{id}/read",
-  "PUT /api/notifications/read/{runId}",
-  "PUT /api/notifications/read-all",
-  "GET /api/runs",
-  "POST /api/runs/inline",
-  "POST /api/runs/inline/validate",
-  "POST /api/runs/remote",
-  "POST /api/runs/{runId}/events",
-  "POST /api/runs/{runId}/events/finalize",
-  "POST /api/runs/{runId}/events/heartbeat",
-  "GET /api/runs/{runId}/workspace",
-  "GET /api/runs/{runId}/documents",
-  "POST /api/runs/{runId}/documents",
-  "GET /api/runs/{runId}/documents/{name}",
-  "PATCH /api/runs/{runId}/sink/extend",
-
-  // Packages
-  "POST /api/packages/import",
-  "POST /api/packages/import-github",
-  "POST /api/packages/import-bundle",
-  "GET /api/packages/{scope}/{name}/{version}/download",
-  "GET /api/packages/{scope}/{name}/files",
-  "GET /api/packages/{scope}/{name}/files/content",
-  "POST /api/packages/{scope}/{name}/fork",
-
-  // Organization settings
-  "GET /api/orgs/{orgId}/settings",
-  "PUT /api/orgs/{orgId}/settings",
-
-  // Applications
-  "POST /api/applications",
-  "GET /api/applications",
-  "GET /api/applications/{id}",
-  "PATCH /api/applications/{id}",
-  "DELETE /api/applications/{id}",
-
-  // Application Packages
-  "GET /api/applications/{applicationId}/packages",
-  "POST /api/applications/{applicationId}/packages",
-  "GET /api/applications/{applicationId}/packages/{scope}/{name}",
-  "PUT /api/applications/{applicationId}/packages/{scope}/{name}",
-  "DELETE /api/applications/{applicationId}/packages/{scope}/{name}",
-  "GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config",
-
-  // End-Users
-  "POST /api/end-users",
-  "GET /api/end-users",
-  "GET /api/end-users/{id}",
-  "PATCH /api/end-users/{id}",
-  "DELETE /api/end-users/{id}",
-
-  // Uploads
-  "POST /api/uploads",
-  "PUT /api/uploads/_content",
-
-  // Documents (durable document store — inputs + agent outputs)
-  "GET /api/documents",
-  "GET /api/documents/{id}",
-  "DELETE /api/documents/{id}",
-  "POST /api/documents/{id}/keep",
-  "GET /api/documents/{id}/content",
-
-  // Credential proxy (AFPS BYOI) — registered as router.all() in code,
-  // every verb is documented because upstream provider semantics are method-defined.
-  "GET /api/credential-proxy/proxy",
-  "POST /api/credential-proxy/proxy",
-  "PUT /api/credential-proxy/proxy",
-  "PATCH /api/credential-proxy/proxy",
-  "DELETE /api/credential-proxy/proxy",
-
-  // LLM proxy (Remote CLI execution — Phase 3)
-  "POST /api/llm-proxy/openai-completions/v1/chat/completions",
-  "POST /api/llm-proxy/anthropic-messages/v1/messages",
-  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions",
-
-  // Library (consolidated package catalog across an org's applications)
-  "GET /api/library",
-
-  // Storage-deletion outbox operator surface (platform-admin gated)
-  "GET /api/admin/storage-deletion-jobs",
-  "POST /api/admin/storage-deletion-jobs/{id}/retry",
-];
-
-// Module-contributed endpoints are sourced directly from each module's
-// `openApiPaths()` output — no hardcoded list. This keeps verify-openapi
-// in sync with whatever the module declares, so adding or removing a
-// module endpoint requires no update here.
-for (const [path, methods] of Object.entries(modulePaths)) {
-  if (!methods || typeof methods !== "object") continue;
-  for (const method of Object.keys(methods as Record<string, unknown>)) {
-    // Skip OpenAPI path-level fields that aren't HTTP methods (parameters, summary, etc.)
-    const lower = method.toLowerCase();
-    if (!["get", "post", "put", "patch", "delete", "head", "options"].includes(lower)) continue;
-    expectedEndpoints.push(`${lower.toUpperCase()} ${path}`);
-  }
-}
+//
+// Builds the "VERB /path" set the later sections compare against.
+//
+// This section used to also assert that set, bidirectionally, against a
+// hand-typed `expectedEndpoints` array of 242 string literals. That array is
+// gone: every signal it carried is now produced by something that derives the
+// answer instead of restating it.
+//   - "registered in code but undocumented" → §5 (Code ⊆ Spec).
+//   - "documented but registered by no router" → §5b (Spec ⊆ Code), which is
+//     the one signal the list held alone and the reason it survived this long.
+//   - "endpoint dropped from the published contract" → `Endpoint removed` in
+//     scripts/detect-breaking-changes.ts, against the committed baseline.
+// Module-contributed endpoints were already exempt — they were pushed into
+// `expectedEndpoints` straight from each module's `openApiPaths()` output, on
+// the stated grounds that "adding or removing a module endpoint requires no
+// update here". Core was the half that never got that treatment, so every new
+// core route cost a second edit in this file whose only failure mode was
+// forgetting to make it.
 
 const specEndpoints = new Set<string>();
 const paths = openApiSpec.paths as Record<string, Record<string, unknown>>;
@@ -405,33 +116,9 @@ for (const [path, methods] of Object.entries(paths)) {
   }
 }
 
-const missing: string[] = [];
-const obsolete: string[] = [];
-
-for (const ep of expectedEndpoints) {
-  if (!specEndpoints.has(ep)) missing.push(ep);
-}
-for (const ep of specEndpoints) {
-  if (!expectedEndpoints.includes(ep)) obsolete.push(ep);
-}
-
-console.log(`\n  1. Endpoint Coverage`);
-console.log(`  --------------------`);
-console.log(`  Spec: ${specEndpoints.size}  Expected: ${expectedEndpoints.length}`);
-
-if (missing.length === 0 && obsolete.length === 0) {
-  console.log(`  OK — all endpoints accounted for.`);
-} else {
-  exitCode = 1;
-  if (missing.length > 0) {
-    console.log(`\n  MISSING from spec (${missing.length}):`);
-    for (const ep of missing) console.log(`    - ${ep}`);
-  }
-  if (obsolete.length > 0) {
-    console.log(`\n  IN SPEC but not expected (${obsolete.length}):`);
-    for (const ep of obsolete) console.log(`    - ${ep}`);
-  }
-}
+console.log(`\n  1. Endpoint Index`);
+console.log(`  -------------------`);
+console.log(`  Spec endpoints: ${specEndpoints.size} (coverage asserted in §5 / §5b)`);
 
 // ═══════════════════════════════════════════════════
 // 2. Structural validation (@readme/openapi-parser)
@@ -468,6 +155,31 @@ try {
       // Public endpoints (health, OAuth callback, OpenAPI spec, docs) intentionally
       // have no 4xx responses — they are unauthenticated and always succeed or 5xx
       "operation-4xx-response": "off",
+      // Everything else `recommended` ships is promoted from `warn` to `error`.
+      // This section fails on `error` only, so a `warn` rule here is not a
+      // lenient rule — it is an OFF rule that prints a line, and the
+      // LINT_ALLOWLIST below (whose whole premise is "keep rules globally ON so
+      // any NEW violation still surfaces") was decorative for exactly as long as
+      // that held. Two of these were being violated at the time of the promotion
+      // and the gate reported ALL CHECKS PASSED. Every rule listed here was
+      // verified clean before being promoted; a genuine deviation earns a
+      // narrow, justified pointer entry in LINT_ALLOWLIST, never a downgrade
+      // back to `warn`. The two rules turned `off` above are the only blanket
+      // exemptions, and both state their reason.
+      "info-license": "error",
+      "info-license-strict": "error",
+      "no-duplicated-tag-names": "error",
+      "no-invalid-media-type-examples": "error",
+      "no-invalid-parameter-examples": "error",
+      "no-invalid-schema-examples": "error",
+      "no-mixed-number-range-constraints": "error",
+      "no-required-schema-properties-undefined": "error",
+      "no-server-example.com": "error",
+      "no-unused-components": "error",
+      "operation-2xx-response": "error",
+      "operation-operationId": "error",
+      "security-scopes-defined": "error",
+      "tag-description": "error",
     },
   });
 
@@ -509,6 +221,13 @@ try {
     // would be a lie. Documenting the 405 behaviour is still useful for
     // clients. Scoped to GET /api/mcp/o/{org} only.
     "operation-2xx-response@#/paths/~1api~1mcp~1o~1{org}/get/responses",
+    // GET /api/integrations/connect/start is the public entry the hosted
+    // connect URL points at. It is a dispatcher, not a resource: a valid token
+    // 302s to the provider OAuth screen or the hosted form, and every failure
+    // renders an HTML error page under its own 4xx/5xx. It never returns
+    // content, so a 2xx would be a lie — the same shape as POST /activate
+    // above. Scoped to GET /api/integrations/connect/start only.
+    "operation-2xx-response@#/paths/~1api~1integrations~1connect~1start/get/responses",
   ]);
   const problems = rawProblems.filter((p) => {
     const pointer = p.location?.[0]?.pointer ?? "";
@@ -537,6 +256,12 @@ try {
     }
   }
 } catch (err: unknown) {
+  // A section that throws IS a failed section. Without this the word "FAIL" is
+  // printed and the run still ends "ALL CHECKS PASSED" — any throw out of
+  // `createConfig` / `lintFromString` (a Redocly bump, a bad rule id, OOM on a
+  // 287-path spec) silently disabled the whole best-practice gate. Every other
+  // catch in this file sets it; this one was the outlier.
+  exitCode = 1;
   const msg = err instanceof Error ? err.message : String(err);
   console.log(`  FAIL — could not lint: ${msg}`);
 }
@@ -609,19 +334,63 @@ function normalizeSpecSchema(
   return { properties, required, open, items };
 }
 
+/** The two accepted-divergence registers, resolved for one registry entry. */
+interface DriftExemptions {
+  /** `KNOWN_DRIFT` — spec-optional while the type is required. */
+  forward: Set<string>;
+  /** `KNOWN_REVERSE_DRIFT` — spec-required while the type is optional. */
+  reverse: Set<string>;
+  /**
+   * Which of those labels actually suppressed a finding on this run — the
+   * liveness evidence collected below and asserted after the comparison.
+   *
+   * An exemption that suppresses nothing names nothing: the field was renamed,
+   * dropped from the type, or the divergence was fixed — and the entry then
+   * silently pre-approves whatever lands at that name tomorrow. Recorded per
+   * direction because the two registers are keyed alike and a field can appear
+   * in both.
+   *
+   * "Still needed", not merely "still exists", and that is the opposite call
+   * from `GRANDFATHERED` in `scripts/verify-no-migration-dml.ts` — for a
+   * reason. That list records a historical fact about an immutable file, so
+   * re-deriving it from today's rules would be wrong. These two record a LIVE
+   * divergence between a spec and a type that are both edited every week; when
+   * the divergence goes, the justification goes with it, and the entry is
+   * exactly the stale claim its own doc-comment demands it not become.
+   */
+  used: { forward: Set<string>; reverse: Set<string> };
+}
+
+/**
+ * The register label that exempts `field` at `label`, or `null` if none does.
+ *
+ * An entry may be written as the dotted path or, at the top level only, as the
+ * bare field name — both spellings are in use, and the liveness check has to
+ * report back the one the author actually wrote.
+ */
+function exemptionFor(
+  register: Set<string>,
+  label: string,
+  field: string,
+  prefix: string,
+): string | null {
+  if (register.has(label)) return label;
+  return !prefix && register.has(field) ? field : null;
+}
+
 /**
  * Recursively compare a shared-type {@link TypeShape} against a spec schema,
- * collecting required-field drift at every nesting level (nested objects and
- * array element types — not just the top level). Recursion descends only where
- * the shared-type exposes a closed nested shape AND the spec side is a closed
- * object; open objects (`additionalProperties:true` / JSONB / Record) short-
- * circuit so dynamic payloads never false-positive.
+ * collecting required-field drift in BOTH directions at every nesting level
+ * (nested objects and array element types — not just the top level). Recursion
+ * descends only where the shared-type exposes a closed nested shape AND the
+ * spec side is a closed object; open objects (`additionalProperties:true` /
+ * JSONB / Record) short-circuit so dynamic payloads never false-positive.
  */
 function compareShapeToSchema(
   shape: TypeShape,
   specSchema: any,
   prefix: string,
-  known: Set<string>,
+  exempt: DriftExemptions,
   issues: string[],
   depth = 0,
 ): void {
@@ -629,9 +398,42 @@ function compareShapeToSchema(
   const norm = normalizeSpecSchema(specSchema);
   if (!norm) return;
   const specProps = new Set(Object.keys(norm.properties));
+
+  // Reverse direction: the spec guarantees the field, the type says it may be
+  // absent. Harmless on the wire — but the type is the record a consumer reads,
+  // and an optional member is a standing invitation to write a `?? fallback`
+  // for a case the server cannot produce. That is exactly how
+  // `ResolvedRunConfig.generation` / `.input` acquired their "compatibility
+  // with older servers" tolerance while the spec required both.
+  //
+  // Only a field the type declares as absent-able counts — `x?: T` or
+  // `x: T | undefined`, which `getTypeShape` reads as one fact. A field the
+  // type omits entirely is a different fact (the type models a subset of the
+  // wire, which is legal and common), and `required` ∪ `optional` is the
+  // declared set — which is why `optional` is carried through rather than
+  // inferred as the complement of `required`.
+  for (const field of norm.required) {
+    const label = prefix ? `${prefix}.${field}` : field;
+    const exempted = exemptionFor(exempt.reverse, label, field, prefix);
+    if (exempted !== null) {
+      if (shape.optional.has(field)) exempt.used.reverse.add(exempted);
+      continue;
+    }
+    if (shape.optional.has(field)) {
+      issues.push(`Field "${label}": OpenAPI=required, shared-type=optional`);
+    }
+  }
+
   for (const field of shape.required) {
     const label = prefix ? `${prefix}.${field}` : field;
-    if (known.has(label) || (!prefix && known.has(field))) continue;
+    const exempted = exemptionFor(exempt.forward, label, field, prefix);
+    if (exempted !== null) {
+      // Same drift test as the two branches below, read for liveness only.
+      if (specProps.has(field) ? !norm.required.has(field) : !norm.open) {
+        exempt.used.forward.add(exempted);
+      }
+      continue;
+    }
     if (!specProps.has(field)) {
       // An open object (additionalProperties / Record) legitimately omits the key.
       if (!norm.open) {
@@ -648,9 +450,9 @@ function compareShapeToSchema(
     if (childShape) {
       const childNorm = normalizeSpecSchema(norm.properties[field]);
       if (childNorm?.items) {
-        compareShapeToSchema(childShape, childNorm.items, `${label}[]`, known, issues, depth + 1);
+        compareShapeToSchema(childShape, childNorm.items, `${label}[]`, exempt, issues, depth + 1);
       } else {
-        compareShapeToSchema(childShape, norm.properties[field], label, known, issues, depth + 1);
+        compareShapeToSchema(childShape, norm.properties[field], label, exempt, issues, depth + 1);
       }
     }
   }
@@ -662,6 +464,207 @@ function compareShapeToSchema(
  * Returns undefined if the endpoint has no requestBody or no application/json content.
  * Resolves top-level `$ref` pointers so the comparison gets the actual schema.
  */
+/**
+ * A schema position that may hold a nested schema — `items`, or
+ * `additionalProperties` when it is a schema rather than the boolean form.
+ */
+/**
+ * The JSON media types a request body can be declared under.
+ *
+ * `application/json` plus the RFC 6839 `+json` structured suffix. The gate used
+ * to match the first exactly and dismiss the rest as having "no JSON schema to
+ * compare a Zod object against" — true for the multipart, form-encoded and
+ * octet-stream bodies, and false for exactly one endpoint:
+ * `POST /api/runs/{runId}/events` declares `application/cloudevents+json` with
+ * a hand-written 8-key schema, validated by a `.strict()` Zod object with the
+ * same 8 keys. It is the most skew-exposed body on the surface — the envelope
+ * is strict, so a spec/Zod divergence 400s the whole event, and it is the
+ * runtime→platform boundary the image-tag lockstep admits it cannot cover in
+ * three cases.
+ */
+function jsonBodySchemaOf(
+  content: Record<string, { schema?: unknown }> | undefined,
+): unknown | undefined {
+  if (!content) return undefined;
+  for (const [mediaType, entry] of Object.entries(content)) {
+    if (/^application\/([\w.+-]+\+)?json$/.test(mediaType)) return entry?.schema;
+  }
+  return undefined;
+}
+
+function asSchemaObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Compare the scalar JSON-Schema keywords of one value position.
+ *
+ * UNIDIRECTIONAL by design: a constraint present in Zod but missing or
+ * differing in OpenAPI is flagged; an OpenAPI-only constraint is not. Zod is
+ * the runtime source of truth, so a Zod constraint absent from the spec is the
+ * drift that misleads consumers, while the spec legitimately carries
+ * descriptive constraints Zod does not enforce. KNOWN LIMITATION: tightening to
+ * bidirectional would require reconciling that pre-existing hand-authored drift
+ * first.
+ *
+ * `label` is the reported position — `field`, `field[]` for array items, or
+ * `field[*]` for a record's values.
+ */
+function compareValueConstraints(
+  label: string,
+  zodProp: Record<string, unknown>,
+  oaProp: Record<string, unknown>,
+  issues: string[],
+): void {
+  // maxLength (check anyOf variants for Zod nullable types)
+  const zodMaxLen =
+    zodProp.maxLength ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.maxLength)?.maxLength;
+  const oaMaxLen = oaProp.maxLength;
+  if (zodMaxLen !== undefined && oaMaxLen !== undefined && zodMaxLen !== oaMaxLen) {
+    issues.push(`Property "${label}" maxLength: Zod=${zodMaxLen}, OpenAPI=${oaMaxLen}`);
+  }
+  if (zodMaxLen !== undefined && oaMaxLen === undefined) {
+    issues.push(`Property "${label}" maxLength: Zod=${zodMaxLen}, OpenAPI=unset`);
+  }
+
+  // minLength
+  const zodMinLen =
+    zodProp.minLength ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.minLength)?.minLength;
+  const oaMinLen = oaProp.minLength;
+  if (zodMinLen !== undefined && oaMinLen !== undefined && zodMinLen !== oaMinLen) {
+    issues.push(`Property "${label}" minLength: Zod=${zodMinLen}, OpenAPI=${oaMinLen}`);
+  }
+  if (zodMinLen !== undefined && oaMinLen === undefined) {
+    issues.push(`Property "${label}" minLength: Zod=${zodMinLen}, OpenAPI=unset`);
+  }
+
+  // Pattern
+  if (zodProp.pattern && oaProp.pattern && zodProp.pattern !== oaProp.pattern) {
+    issues.push(
+      `Property "${label}" pattern: Zod="${zodProp.pattern}", OpenAPI="${oaProp.pattern}"`,
+    );
+  }
+
+  // Format (check anyOf variants for Zod nullable types)
+  const zodFormat =
+    zodProp.format ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.format)?.format;
+  if (zodFormat && oaProp.format && zodFormat !== oaProp.format) {
+    issues.push(`Property "${label}" format: Zod="${zodFormat}", OpenAPI="${oaProp.format}"`);
+  }
+
+  // Enum values
+  if (zodProp.enum && oaProp.enum) {
+    const zodEnumStr = JSON.stringify([...(zodProp.enum as unknown[])].sort());
+    const oaEnumStr = JSON.stringify([...(oaProp.enum as unknown[])].sort());
+    if (zodEnumStr !== oaEnumStr) {
+      issues.push(`Property "${label}" enum: Zod=${zodEnumStr}, OpenAPI=${oaEnumStr}`);
+    }
+  }
+}
+
+/**
+ * Does this schema REFUSE members it does not declare?
+ *
+ * Zod emits `additionalProperties: false` for `.strict()` and nothing at all
+ * for a plain `z.object()`; the hand-written spec declares the same keyword.
+ * Everything else — absent, `true`, or a value schema (`z.record()`) — is open.
+ */
+function refusesUnknownFields(schema: Record<string, unknown> | undefined): boolean {
+  return schema?.additionalProperties === false;
+}
+
+/**
+ * The `oneOf` / `anyOf` branches of a schema, deref'd, or `undefined` when the
+ * schema is not a union. A discriminated union (`z.discriminatedUnion`) carries
+ * its closure per branch — the top level of such a schema has no
+ * `additionalProperties` on EITHER side, so comparing only the top level would
+ * read every union body as "agreed and open" and see nothing.
+ */
+function unionBranches(
+  schema: Record<string, unknown> | undefined,
+): Record<string, unknown>[] | undefined {
+  const branches = schema?.oneOf ?? schema?.anyOf;
+  if (!Array.isArray(branches)) return undefined;
+  return branches.map((branch) => {
+    const obj = asSchemaObject(branch);
+    if (obj && typeof obj.$ref === "string") return resolveRef(obj.$ref) ?? obj;
+    return obj ?? {};
+  });
+}
+
+/**
+ * Compare STRICTNESS: the Zod schema's `.strict()` and the spec's
+ * `additionalProperties: false` must agree, in BOTH directions.
+ *
+ * This is the one top-level fact the rest of Step 4 never read. Everything else
+ * it compares — `required`, the property-name sets, types, nullability, scalar
+ * constraints, `items`, `minItems`, nested `additionalProperties` VALUE schemas
+ * — describes fields the body DECLARES. None of them can see the answer to
+ * "what happens to a field the body does not declare", so ~65 request bodies
+ * were closed in code (`.strict()`, an unknown field is a 400) while the
+ * published spec still said extra keys were accepted, and this gate reported
+ * `all Zod schemas match their OpenAPI counterparts`.
+ *
+ * Both directions are errors:
+ *   - strict Zod + open spec — the spec invites a body the API answers 400 to;
+ *   - open Zod + closed spec — the spec forbids a body the API accepts, so a
+ *     generated client or a spec-driven validator rejects a legal request.
+ */
+function compareStrictness(
+  zodSchema: Record<string, unknown>,
+  oaSchema: Record<string, unknown>,
+  issues: string[],
+): void {
+  const zodBranches = unionBranches(zodSchema);
+  const oaBranches = unionBranches(oaSchema);
+
+  if (zodBranches && oaBranches) {
+    if (zodBranches.length !== oaBranches.length) {
+      // The branch-count mismatch is itself the finding: without a stable
+      // pairing there is nothing to compare, and the union has drifted anyway.
+      issues.push(
+        `Union branches: Zod=${zodBranches.length}, OpenAPI=${oaBranches.length} — cannot compare strictness`,
+      );
+      return;
+    }
+    for (let i = 0; i < zodBranches.length; i++) {
+      compareStrictnessOfObject(`oneOf[${i}] `, zodBranches[i]!, oaBranches[i]!, issues);
+    }
+    return;
+  }
+
+  if (zodBranches || oaBranches) {
+    issues.push(
+      `Union shape: Zod=${zodBranches ? "union" : "object"}, OpenAPI=${oaBranches ? "union" : "object"} — cannot compare strictness`,
+    );
+    return;
+  }
+
+  compareStrictnessOfObject("", zodSchema, oaSchema, issues);
+}
+
+function compareStrictnessOfObject(
+  prefix: string,
+  zodSchema: Record<string, unknown>,
+  oaSchema: Record<string, unknown>,
+  issues: string[],
+): void {
+  const zodClosed = refusesUnknownFields(zodSchema);
+  const oaClosed = refusesUnknownFields(oaSchema);
+  if (zodClosed === oaClosed) return;
+
+  issues.push(
+    zodClosed
+      ? `${prefix}Unknown fields: Zod=rejected (\`.strict()\`), OpenAPI=accepted — add \`additionalProperties: false\` to the requestBody schema`
+      : `${prefix}Unknown fields: Zod=accepted, OpenAPI=rejected (\`additionalProperties: false\`) — drop it from the requestBody schema, or make the Zod schema \`.strict()\``,
+  );
+}
+
 function getOpenApiRequestBodySchema(
   specPath: string,
   method: string,
@@ -673,7 +676,7 @@ function getOpenApiRequestBodySchema(
   const operation = pathObj[method.toLowerCase()] as any;
   if (!operation?.requestBody) return undefined;
 
-  let schema = operation.requestBody?.content?.["application/json"]?.schema as
+  let schema = jsonBodySchemaOf(operation.requestBody?.content) as
     Record<string, unknown> | undefined;
 
   // Resolve top-level $ref
@@ -697,6 +700,23 @@ function normalizeType(schema: Record<string, unknown>): {
     return resolved ? normalizeType(resolved) : { baseTypes: [], nullable: false };
   }
 
+  // `allOf` is a conjunction, not a union: merge the branches' base types with
+  // any sibling `type`. Without this a component built as
+  // `{ allOf: [ {$ref: <external>}, {type:"object", …} ] }` — the AFPS manifest
+  // schemas — normalizes to no type at all and reads as drift against a Zod
+  // `z.record(...)`.
+  if (Array.isArray(schema.allOf)) {
+    const normalized = (schema.allOf as Record<string, unknown>[]).map(normalizeType);
+    const merged = new Set(normalized.flatMap((branch) => branch.baseTypes));
+    if (typeof schema.type === "string") merged.add(schema.type);
+    if (merged.size > 0) {
+      return {
+        baseTypes: [...merged].sort(),
+        nullable: normalized.some((branch) => branch.nullable),
+      };
+    }
+  }
+
   const variants = Array.isArray(schema.anyOf)
     ? schema.anyOf
     : Array.isArray(schema.oneOf)
@@ -705,10 +725,17 @@ function normalizeType(schema: Record<string, unknown>): {
   if (variants) {
     // Zod and hand-authored OpenAPI use unions for nullable refs and scalars.
     const normalized = (variants as Record<string, unknown>[]).map(normalizeType);
-    return {
-      baseTypes: [...new Set(normalized.flatMap((variant) => variant.baseTypes))].sort(),
-      nullable: normalized.some((variant) => variant.nullable),
-    };
+    const baseTypes = [...new Set(normalized.flatMap((variant) => variant.baseTypes))].sort();
+    // A `oneOf` whose branches carry no `type` is not a type union — it is a
+    // constraint list on a node that declares its own type alongside it (the
+    // "exactly one of these keys is required" idiom). Fall through to the
+    // sibling `type` rather than reporting "no type".
+    if (baseTypes.length > 0 || schema.type === undefined) {
+      return {
+        baseTypes,
+        nullable: normalized.some((variant) => variant.nullable),
+      };
+    }
   }
 
   if (Array.isArray(schema.type)) {
@@ -751,6 +778,9 @@ for (const entry of zodSchemaRegistry) {
 
   comparedCount++;
   const issues: string[] = [];
+
+  // --- Compare strictness (top-level `additionalProperties`) ---
+  compareStrictness(zodJsonSchema, openApiSchema, issues);
 
   // --- Compare required fields ---
   const zodRequired = new Set<string>(
@@ -815,73 +845,35 @@ for (const entry of zodSchemaRegistry) {
       );
     }
 
-    // String/length/format/enum constraint checks below are UNIDIRECTIONAL by
-    // design: they flag a constraint present in Zod but missing (or differing)
-    // in OpenAPI, not the reverse (OpenAPI-only constraint). Zod is the runtime
-    // source of truth, so a Zod constraint absent from the spec is the drift
-    // that misleads consumers; the spec legitimately carries descriptive
-    // constraints Zod does not enforce. KNOWN LIMITATION: OpenAPI-only
-    // constraints therefore go unreported here — tightening to bidirectional
-    // would require reconciling that pre-existing hand-authored drift first.
-    // String constraints — maxLength (check anyOf variants for Zod nullable types)
-    const zodMaxLen =
-      zodProp.maxLength ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.maxLength)?.maxLength;
-    const oaMaxLen = oaProp.maxLength;
-    if (zodMaxLen !== undefined && oaMaxLen !== undefined && zodMaxLen !== oaMaxLen) {
-      issues.push(`Property "${field}" maxLength: Zod=${zodMaxLen}, OpenAPI=${oaMaxLen}`);
-    }
-    if (zodMaxLen !== undefined && oaMaxLen === undefined) {
-      issues.push(`Property "${field}" maxLength: Zod=${zodMaxLen}, OpenAPI=unset`);
-    }
+    // The scalar keyword comparison, applied to the property AND to the two
+    // places a constraint can hide one level down.
+    //
+    // This used to be inline, and only the property's own keywords were read.
+    // `connection_overrides` is `z.record(z.string(), z.string().min(1))`: the
+    // `minLength` lives on the record's VALUES, i.e. on `additionalProperties`,
+    // so `zodProp.minLength` was `undefined` on both sides and every branch was
+    // skipped — the gate reported nothing. That is not hypothetical: 875df353f
+    // documents finding and fixing exactly that drift BY HAND, on three run
+    // surfaces, in the same range this gate was written.
+    compareValueConstraints(field, zodProp, oaProp, issues);
 
-    // String constraints — minLength
-    const zodMinLen =
-      zodProp.minLength ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.minLength)?.minLength;
-    const oaMinLen = oaProp.minLength;
-    if (zodMinLen !== undefined && oaMinLen !== undefined && zodMinLen !== oaMinLen) {
-      issues.push(`Property "${field}" minLength: Zod=${zodMinLen}, OpenAPI=${oaMinLen}`);
-    }
-    if (zodMinLen !== undefined && oaMinLen === undefined) {
-      issues.push(`Property "${field}" minLength: Zod=${zodMinLen}, OpenAPI=unset`);
-    }
-
-    // Pattern
-    const zodPattern = zodProp.pattern;
-    const oaPattern = oaProp.pattern;
-    if (zodPattern && oaPattern && zodPattern !== oaPattern) {
-      issues.push(`Property "${field}" pattern: Zod="${zodPattern}", OpenAPI="${oaPattern}"`);
-    }
-
-    // Format (check anyOf variants for Zod nullable types)
-    const zodFormat =
-      zodProp.format ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.format)?.format;
-    const oaFormat = oaProp.format;
-    if (zodFormat && oaFormat && zodFormat !== oaFormat) {
-      issues.push(`Property "${field}" format: Zod="${zodFormat}", OpenAPI="${oaFormat}"`);
-    }
-
-    // Enum values (also check inside array items)
-    const zodEnum = zodProp.enum ?? (zodProp.items as Record<string, unknown> | undefined)?.enum;
-    const oaEnum = oaProp.enum ?? (oaProp.items as Record<string, unknown> | undefined)?.enum;
-    if (zodEnum && oaEnum) {
-      const zodEnumStr = JSON.stringify([...(zodEnum as unknown[])].sort());
-      const oaEnumStr = JSON.stringify([...(oaEnum as unknown[])].sort());
-      if (zodEnumStr !== oaEnumStr) {
-        issues.push(`Property "${field}" enum: Zod=${zodEnumStr}, OpenAPI=${oaEnumStr}`);
-      }
+    const zodAdditional = asSchemaObject(zodProp.additionalProperties);
+    const oaAdditional = asSchemaObject(oaProp.additionalProperties);
+    if (zodAdditional && oaAdditional) {
+      compareValueConstraints(`${field}[*]`, zodAdditional, oaAdditional, issues);
     }
 
     // Array item type
     if (zodProp.type === "array" && oaProp.type === "array") {
-      const zodItems = zodProp.items as Record<string, unknown> | undefined;
-      const oaItems = oaProp.items as Record<string, unknown> | undefined;
+      const zodItems = asSchemaObject(zodProp.items);
+      const oaItems = asSchemaObject(oaProp.items);
       if (zodItems?.type && oaItems?.type && zodItems.type !== oaItems.type) {
         issues.push(
           `Property "${field}" array items type: Zod=${zodItems.type}, OpenAPI=${oaItems.type}`,
         );
+      }
+      if (zodItems && oaItems) {
+        compareValueConstraints(`${field}[]`, zodItems, oaItems, issues);
       }
     }
 
@@ -913,6 +905,71 @@ if (discrepancies.length === 0) {
       console.log(`          - ${issue}`);
     }
     console.log();
+  }
+}
+
+// Coverage enforcement — every endpoint whose spec declares an
+// `application/json` request body must be either registered (compared above)
+// or explicitly exempt with a stated reason. Without this the registry is
+// opt-in: a launch surface can accept fields its documented body never
+// mentions, and nothing notices. Same shape as §7b for response schemas.
+//
+// The universe is the SPEC, not the `readJsonBody()` call sites: the spec is
+// the published contract, and §5/§5b already assert that code and spec carry
+// the same endpoint set. Non-JSON bodies (multipart uploads, form-encoded
+// OAuth2, octet-stream) are out of scope — there is genuinely no JSON schema to
+// compare a Zod object against. `application/cloudevents+json` IS in scope: it
+// carries a hand-written JSON schema and a `.strict()` Zod object, and listing
+// it as exempt was the gate's one blind spot. See `jsonBodySchemaOf`.
+{
+  const registeredEndpoints = new Set(
+    zodSchemaRegistry.map((e) => `${e.method.toUpperCase()} ${e.path}`),
+  );
+  const jsonBodyEndpoints: string[] = [];
+  for (const [path, methods] of Object.entries(paths)) {
+    for (const [method, op] of Object.entries(methods)) {
+      const body = (op as { requestBody?: { content?: Record<string, { schema?: unknown }> } })
+        ?.requestBody;
+      if (jsonBodySchemaOf(body?.content) === undefined) continue;
+      jsonBodyEndpoints.push(`${method.toUpperCase()} ${path}`);
+    }
+  }
+  const uncoveredBodies = jsonBodyEndpoints
+    .filter((k) => !registeredEndpoints.has(k) && !(k in EXEMPT_REQUEST_BODIES))
+    .sort();
+  // A stale exemption (endpoint removed, or its body registered after all) is
+  // also a failure — keep the list honest.
+  const jsonBodySet = new Set(jsonBodyEndpoints);
+  const staleExemptBodies = Object.keys(EXEMPT_REQUEST_BODIES)
+    .filter((k) => !jsonBodySet.has(k) || registeredEndpoints.has(k))
+    .sort();
+
+  console.log(`\n  4b. Step 4 coverage (every JSON request body registered or exempt)`);
+  console.log(`  ------------------------------------------------------------------`);
+  if (uncoveredBodies.length === 0 && staleExemptBodies.length === 0) {
+    console.log(
+      `  OK — all ${jsonBodyEndpoints.length} JSON request bodies are registered ` +
+        `(${jsonBodyEndpoints.length - Object.keys(EXEMPT_REQUEST_BODIES).length}) or exempt ` +
+        `(${Object.keys(EXEMPT_REQUEST_BODIES).length}).`,
+    );
+  } else {
+    exitCode = 1;
+    if (uncoveredBodies.length > 0) {
+      console.log(
+        `  Endpoint(s) with a JSON request body that is neither registered nor exempt ` +
+          `(${uncoveredBodies.length}):`,
+      );
+      for (const k of uncoveredBodies) console.log(`    - ${k}`);
+      console.log(
+        `\n  Register the route's Zod schema in apps/api/src/openapi/zod-schema-registry.ts ` +
+          `(or the owning module's openApiSchemas()), or add the endpoint to ` +
+          `EXEMPT_REQUEST_BODIES with the reason it has no comparable schema.`,
+      );
+    }
+    if (staleExemptBodies.length > 0) {
+      console.log(`\n  Stale EXEMPT_REQUEST_BODIES entries (endpoint gone, or now registered):`);
+      for (const k of staleExemptBodies) console.log(`    - ${k}`);
+    }
   }
 }
 
@@ -1112,6 +1169,13 @@ function resolveLocalImportFile(currentFile: string, source: string): string | n
   const importedFull = normalize(join(dirname(currentFull), sourceWithExt));
   const rel = relative(apiSrcRoot, importedFull);
   if (rel.startsWith("..") || rel.startsWith("/") || !rel.endsWith(".ts")) return null;
+  // The specifier has to name a file that EXISTS. Without this, a `./foo`
+  // resolving to a directory index, a `.tsx`, or a moved module produced a
+  // plausible-looking relative path that `readRouteFile` then read as "" — the
+  // silent-empty-source path this pass closed. Returning null here is the
+  // honest answer ("not a local .ts module"), and it is what lets
+  // `readRouteFile` throw on a genuinely missing file instead of shrugging.
+  if (!existsSync(importedFull)) return null;
   return rel.slice(0, -3).replace(/\\/g, "/");
 }
 
@@ -1336,11 +1400,20 @@ const indexPath = join(REPO_ROOT, "apps/api/src/index.ts");
 const indexSrc = readFileSync(indexPath, "utf8");
 
 // 1. Build the import map for `./routes/<file>` imports in index.ts
-//    - Named: `import { createXRouter } from "./routes/x.ts"`
+//    - Named:   `import { createXRouter } from "./routes/x.ts"`
 //    - Default: `import xRouter from "./routes/x.ts"`
+//    - Mixed:   `import xRouter, { helper } from "./routes/x.ts"`
+//
+// The mixed form is in both patterns because omitting it cost real coverage:
+// `import healthRouter, { bootGate, markServerReady } from "./routes/health.ts"`
+// matched NEITHER pattern (the named one needs `import {` immediately, the
+// default one needed `<ident> from`), so `healthRouter` resolved to no file and
+// `app.route("/", healthRouter)` was dropped — every route health.ts declares
+// was invisible to §5. It dropped in SILENCE; the mount resolver below now
+// fails closed on an unresolved mount instead, which is how that was found.
 const importToFile = new Map<string, string>(); // identifier → relative file path
 for (const m of indexSrc.matchAll(
-  /import\s+\{([^}]+)\}\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
+  /import\s+(?:\w+\s*,\s*)?\{([^}]+)\}\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
 )) {
   const file = m[2]!;
   for (const raw of m[1]!.split(",")) {
@@ -1352,7 +1425,7 @@ for (const m of indexSrc.matchAll(
   }
 }
 for (const m of indexSrc.matchAll(
-  /import\s+(\w+)\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
+  /import\s+(\w+)\s*(?:,\s*\{[^}]*\})?\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
 )) {
   importToFile.set(m[1]!, m[2]!);
 }
@@ -1369,6 +1442,16 @@ for (const m of indexSrc.matchAll(/(?:const|let)\s+(\w+)\s*=\s*(\w+)\s*\(\s*\)/g
 //    - `fooRouter`                   → variable bound to either `createFooRouter()` or default import
 type Mount = { prefix: string; file: string; factory: string | "__default__" };
 const mounts: Mount[] = [];
+// Mounts whose expression resolves to no route file. COLLECTED, not thrown:
+// this used to `throw`, which left the process with a raw uncaught stack trace
+// — no section header, no `SOME CHECKS FAILED` summary, and none of the other
+// sections' findings, because the throw happened at import time before §5 had
+// printed anything. A legitimate mount the resolver has not been taught (an
+// inline `const sub = new Hono(); app.route("/x", sub)` — none exists in
+// index.ts today, `new Hono` appears once, for `app` itself) would have looked
+// like a crashed tool rather than a gate saying no. It still fails closed; it
+// now fails closed the way every other section does, in §5 below.
+const unresolvedMounts: { prefix: string; expr: string; ident: string }[] = [];
 // Matches both `app.route("/p", fooRouter)` and `app.route("/p", createFooRouter())`.
 // The expression group accepts an identifier optionally followed by `()` — this is
 // narrow enough to capture the trailing `)` of the factory call as part of the
@@ -1382,7 +1465,7 @@ for (const m of indexSrc.matchAll(
   const ident = exprRaw.replace(/\(\s*\)$/, "").trim();
 
   // Resolve identifier
-  let factory: string | "__default__" = ident;
+  let factory: string;
   let file: string | undefined;
 
   if (isCall) {
@@ -1401,14 +1484,23 @@ for (const m of indexSrc.matchAll(
     }
   }
 
-  if (file) mounts.push({ prefix, file, factory });
+  if (!file) {
+    // An `app.route("/api/x", somethingUnresolvable)` used to be dropped here in
+    // silence, taking every endpoint that router declares with it — the same
+    // whole-mount hole `readRouteFile` had, one step earlier. There is no honest
+    // fallback: without the file this gate cannot know what `/api/x` serves, so
+    // it must not report on it.
+    unresolvedMounts.push({ prefix, expr: exprRaw, ident });
+    continue;
+  }
+  mounts.push({ prefix, file, factory });
 }
 
 // 4. Discovered code endpoints
 const codeEndpoints = new Set<string>();
 // "VERB PATH" → error statuses the handler is statically certain to return
 // (union across every registration that maps to the same endpoint). Feeds the
-// 5b documented-error-status check.
+// 5c documented-error-status check.
 const codeRouteStatuses = new Map<string, Set<string>>();
 function recordRouteStatuses(ep: string, statuses: Set<string>): void {
   if (statuses.size === 0) return;
@@ -1428,11 +1520,29 @@ for (const m of indexSrc.matchAll(
 
 // 4b. Route files referenced by mounts — parse each factory body or default body
 //     and combine with the mount prefix.
+//
+// A whole-file skip removes every route in that file from `codeEndpoints`, so
+// §5 (Code ⊆ Spec) cannot see them. §5b (Spec ⊆ Code) only half-covers that: it
+// reports a skipped file's endpoints as "registered by no router" if the spec
+// ALREADY documents them, which is the case for a file being newly skipped. It
+// reports NOTHING for a file whose endpoints were never documented — the spec
+// side has nothing to iterate. The already-skipped
+// `modules/firecracker/runner/server` demonstrates the shape: 13 routes, none
+// in the spec, and this gate is silent about all of them (there, deliberately —
+// see below).
+//
+// So widening this set IS a silent coverage hole for a new file, and the size
+// assertion under it is the barrier. It is one literal rather than the
+// `ALLOWED_SKIP_FILES` twin-set it replaces — that duplicate went stale under a
+// rename without failing, whereas a count cannot disagree with itself.
 const SKIP_FILES = new Set<string>([
-  // Routes registered via runtime config with a VARIABLE path
-  // (`router.post(entry.urlPath, …)` — a bare identifier, not a string/template
-  // literal). The path can't be captured at all, so the emitted endpoints are
-  // covered by check #1. (packages.ts is NOT skipped: its template-literal
+  // Routes registered with a COMPUTED path (`router.post(llmProxyUrlPath(shape),
+  // …)` — a call, not a string/template literal). The path can't be captured
+  // statically, so the emitted endpoints are covered by SPEC_ONLY_ALLOWLIST in
+  // §5b. (This used to describe `router.post(entry.urlPath, …)`, a bare
+  // identifier read off a local config array; that array is gone. Before that
+  // it read "covered by check #1", the hand-typed endpoint list §5b replaced.)
+  // (packages.ts is NOT skipped: its template-literal
   // `${path}` routes are now expanded by resolveTemplatedPath against the
   // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
   // any literal route; an unresolvable `${…}` fails the run.)
@@ -1446,51 +1556,76 @@ const SKIP_FILES = new Set<string>([
   "modules/firecracker/runner/server",
 ]);
 
-// Meta-guard: a whole-file skip lets every endpoint in that file escape the
-// Code ⊆ Spec check (above), so adding one must be a deliberate, reviewed act.
-// Sanctioned skips: `routes/llm-proxy` (variable-path config loop) and the
-// firecracker runner daemon server (standalone process, not platform API).
-// If anyone widens this set, fail loudly here and force per-route handling or
-// an explicit, justified decision instead of a silent coverage hole.
-const ALLOWED_SKIP_FILES = new Set<string>([
-  "routes/llm-proxy",
-  "modules/firecracker/runner/server",
-]);
-const unexpectedSkips = [...SKIP_FILES].filter((f) => !ALLOWED_SKIP_FILES.has(f));
-if (SKIP_FILES.size > ALLOWED_SKIP_FILES.size || unexpectedSkips.length > 0) {
+// The barrier. Both entries above are load-bearing and neither can be derived,
+// so the only honest assertion is that the set still holds exactly what was
+// reviewed. Checked with `!==`, not `>`: a narrowing is a SAFER state, but it
+// leaves this constant claiming a file is skipped when it is not, and a gate
+// whose own bookkeeping has drifted is the thing this branch exists to stop.
+// The message below therefore names the right repair for each direction.
+const SANCTIONED_SKIP_COUNT = 2;
+if (SKIP_FILES.size !== SANCTIONED_SKIP_COUNT) {
   exitCode = 1;
+  const widened = SKIP_FILES.size > SANCTIONED_SKIP_COUNT;
   console.log(`\n  5. Code ⊆ Spec — SKIP_FILES guard`);
   console.log(`  ---------------------------------`);
   console.log(
-    `  ERROR  SKIP_FILES must contain only the sanctioned whole-file skip ` +
-      `(${[...ALLOWED_SKIP_FILES].join(", ")}).`,
+    `  ERROR  SKIP_FILES holds ${SKIP_FILES.size} entr${SKIP_FILES.size === 1 ? "y" : "ies"}, ` +
+      `expected ${SANCTIONED_SKIP_COUNT}: ` +
+      `${[...SKIP_FILES].join(", ")}`,
   );
-  if (unexpectedSkips.length > 0) {
-    console.log(`  Unexpected skip(s) that would hide endpoints from the Code ⊆ Spec check:`);
-    for (const f of unexpectedSkips) console.log(`    - ${f}`);
-  }
   console.log(
-    `\n  A whole-file skip silently excludes every route in that file. Don't widen ` +
-      `SKIP_FILES — verify the file's literal-path routes against the spec individually, ` +
-      `or, if a skip is genuinely unavoidable, add the file to ALLOWED_SKIP_FILES in this ` +
-      `file with a justifying comment so the decision is reviewed.`,
+    widened
+      ? `\n  A whole-file skip hides every route in that file from the Code ⊆ Spec check, ` +
+          `and §5b cannot report what the spec never documented. Verify the file's ` +
+          `literal-path routes individually, or — if a skip is genuinely unavoidable — ` +
+          `raise SANCTIONED_SKIP_COUNT with a justifying comment so the decision is reviewed.`
+      : `\n  A skip was REMOVED, which is a widening of coverage and almost certainly ` +
+          `correct. Lower SANCTIONED_SKIP_COUNT to ${SKIP_FILES.size} so this constant ` +
+          `stops asserting a skip that no longer exists.`,
   );
 }
 
 const routeFileCache = new Map<string, string>();
+
+/**
+ * Read a route file, or fail.
+ *
+ * This used to be `existsSync(full) ? readFileSync(full, "utf8") : ""`, and the
+ * empty string travelled: a mount whose route file had moved contributed ZERO
+ * endpoints to `codeEndpoints` and said nothing, so §5's "every code route is
+ * in the spec" passed over a file it had never opened. That is precisely the
+ * defect `SKIP_FILES` thirty lines above exists to bound — a whole-file skip
+ * removes every route in that file from the check — except this one needed no
+ * entry and no `SANCTIONED_SKIP_COUNT` review to happen.
+ *
+ * Every caller reaches here with a path that something already claimed is a
+ * real module: `mounts` from a resolved `app.route(...)` import, and
+ * `lookupIdentLiterals` from a specifier `resolveLocalImportFile` has confirmed
+ * exists. A miss is therefore a broken assumption, not a normal case.
+ */
 function readRouteFile(relPath: string): string {
   const cached = routeFileCache.get(relPath);
   if (cached !== undefined) return cached;
   const full = join(REPO_ROOT, "apps/api/src", relPath + ".ts");
-  const src = existsSync(full) ? readFileSync(full, "utf8") : "";
+  if (!existsSync(full)) {
+    throw new Error(
+      `verify-openapi: route file apps/api/src/${relPath}.ts does not exist, but something ` +
+        `mounts or imports it. Skipping it would drop every route it declares from the ` +
+        `Code ⊆ Spec check with no message — fix the path, or if the file is genuinely gone, ` +
+        `remove the mount.`,
+    );
+  }
+  const src = readFileSync(full, "utf8");
   routeFileCache.set(relPath, src);
   return src;
 }
 
 for (const mount of mounts) {
   if (SKIP_FILES.has(mount.file)) continue;
+  // No `if (!src) continue` here any more: `readRouteFile` throws rather than
+  // handing back an empty string, so an unreadable mount can no longer pass for
+  // a mount with no routes.
   const src = readRouteFile(mount.file);
-  if (!src) continue;
 
   let scope: string;
   if (mount.factory === "__default__") {
@@ -1535,7 +1670,8 @@ if (existsSync(modulesDir)) {
       const src = readFileSync(filePath, "utf8");
       if (!src.includes("new Hono")) continue; // only files that define a router
       const rel = "modules/" + filePath.slice(modulesDir.length + 1);
-      // Same sanctioned whole-file skip as 4b (guarded by ALLOWED_SKIP_FILES).
+      // Same sanctioned whole-file skip as 4b (see SKIP_FILES' own comment for
+      // why a widened skip still fails, at §5b).
       if (SKIP_FILES.has(rel.replace(/\.ts$/, ""))) continue;
       for (const reg of extractRouterRegistrations(src, src, rel)) {
         const fullPath = normaliseHonoPath(reg.path);
@@ -1606,11 +1742,11 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "GET /*",
   // Dev-time docs page served as plain text, not part of the JSON API.
   "GET /llms.txt",
-  // Cookie-less HTML document preview — serves untrusted agent HTML (text/html)
+  // Cookie-less HTML file preview — serves untrusted agent HTML (text/html)
   // from a hardened, session-less route OUTSIDE /api, authorized by a signed
   // token in the URL. Not a JSON API endpoint; intentionally undocumented in the
   // OpenAPI surface (no typed client, no SDK consumer).
-  "GET /preview/documents/{id}",
+  "GET /preview/files/{id}",
   // MCP per-org endpoint method-not-allowed catch-all: `app.all(MCP_PATH, …)`
   // throws 405 for every verb other than the documented POST + GET channels.
   // These three are the catch-all, not real endpoints.
@@ -1634,8 +1770,28 @@ if (orphans.length === 0) {
   console.log(`\n  Endpoints registered in code but missing from the spec (${orphans.length}):`);
   for (const ep of orphans) console.log(`    - ${ep}`);
   console.log(
-    `\n  Either document the endpoint in apps/api/src/openapi/paths/ + add it to ` +
-      `expectedEndpoints, or add a justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
+    `\n  Either document the endpoint in apps/api/src/openapi/paths/, or add a ` +
+      `justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
+  );
+}
+
+// Fail closed on any MOUNT the resolver couldn't resolve to a route file —
+// every endpoint that router declares vanishes from `codeEndpoints` with it.
+// Same policy as the templated-route block below, reported the same way.
+if (unresolvedMounts.length > 0) {
+  exitCode = 1;
+  console.log(
+    `\n  Mounts the resolver could not resolve to a route file (${unresolvedMounts.length}):`,
+  );
+  for (const m of unresolvedMounts) {
+    console.log(`    - app.route("${m.prefix}", ${m.expr})  — unknown identifier "${m.ident}"`);
+  }
+  console.log(
+    `\n  Every route mounted at those prefixes is invisible to the Code ⊆ Spec check. ` +
+      `Import the router from a \`./routes/<file>\` module in apps/api/src/index.ts (named, ` +
+      `default or mixed import, optionally through a \`const x = createXRouter()\` alias — the ` +
+      `three forms documented above), or teach the resolver the new shape. Do not leave a ` +
+      `mount unresolved.`,
   );
 }
 
@@ -1658,7 +1814,137 @@ if (unresolvedTemplatedRoutes.length > 0) {
 }
 
 // ═══════════════════════════════════════════════════
-// 5b. Documented error statuses
+// 5b. Spec ⊆ Code
+// ═══════════════════════════════════════════════════
+//
+// The mirror of §5, and the one signal the deleted hand-typed
+// `expectedEndpoints` list carried on its own: a path documented in the spec
+// that no router actually registers. §5 catches code with no doc;
+// detect-breaking-changes catches a doc that disappeared from the baseline;
+// neither catches a doc that was never wired up, or whose route was deleted
+// while the `paths/` entry stayed behind.
+//
+// Reuses `codeEndpoints` exactly as computed for §5 — same extractor, same
+// mount-prefix composition, same Hono-syntax normalisation — so this check
+// costs one set difference and stays correct by construction as routes move.
+
+// Endpoints documented on purpose that `codeEndpoints` structurally cannot see,
+// because the extractor only walks explicit `router.METHOD()` / `app.METHOD()`
+// calls under apps/api/src/routes, apps/api/src/modules and index.ts. Same
+// contract as CODE_TO_SPEC_ALLOWLIST: every entry needs a justifying comment.
+const SPEC_ONLY_ALLOWLIST = new Set<string>([
+  // Better Auth surface. `lib/auth-pipeline.ts` mounts the whole thing behind a
+  // single wildcard — `app.on(["POST", "GET"], "/api/auth/*", …)` — so there is
+  // no per-endpoint registration to find, and that file is a lib helper rather
+  // than a routes/ or modules/ file the extractor walks. The spec documents the
+  // individual operations because clients call them individually.
+  // (`POST /api/auth/bootstrap/redeem` is deliberately absent: it is a real
+  // platform router mounted ahead of the wildcard, so §5 already sees it.)
+  "POST /api/auth/sign-up/email",
+  "POST /api/auth/sign-in/email",
+  "POST /api/auth/sign-out",
+  "GET /api/auth/get-session",
+  "GET /api/auth/jwks",
+  "GET /api/auth/oauth2/authorize",
+  "POST /api/auth/oauth2/token",
+  "GET /api/auth/oauth2/userinfo",
+  "POST /api/auth/oauth2/introspect",
+  "POST /api/auth/oauth2/revoke",
+  "POST /api/auth/device/code",
+  "POST /api/auth/cli/token",
+  "GET /api/auth/cli/sessions",
+  "POST /api/auth/cli/sessions/revoke",
+  "POST /api/auth/cli/sessions/revoke-all",
+  "POST /api/auth/cli/revoke",
+
+  // Registered, but through a mount shape the `app.route()` parser above does
+  // not resolve — an extractor blind spot, not an undocumented design decision:
+  //   - `GET /health`: `import healthRouter, { bootGate, … } from …` is a mixed
+  //     default+named import, which the `import (\w+) from` pattern skips, so
+  //     the default-export router never enters `importToFile`.
+  //   - `GET /api/openapi.json`: mounted as
+  //     `app.route("/", createOpenApiSpecRouter(getOpenApiSpec))`; the mount
+  //     regex accepts `ident` or `ident()`, not a factory call with arguments.
+  // Widening either pattern would let these two drop out of the allowlist.
+  "GET /health",
+  "GET /api/openapi.json",
+
+  // LLM proxy shapes. `routes/llm-proxy.ts` mounts them from `LLM_PROXY_ROUTES`
+  // via `llmProxyUrlPath(shape)`, a call this parser cannot evaluate, which is
+  // why the whole file sits in SKIP_FILES; this exemption exists only because
+  // §5b then compares against code endpoints the skip removed.
+  //
+  // DERIVED from that same table, not spelled out. Both the mount and the
+  // document already read it — `openapi/paths/llm-proxy.ts` states in its own
+  // header that hand-spelling the paths "is what would let the published
+  // contract drift from a live endpoint with every check still green", and the
+  // check it was talking about kept the last hand-written copy three files
+  // away. Reading the table means a `baseSuffix` edit, or a fourth shape, moves
+  // the mounted route, the document and this exemption in one step; the
+  // symmetry between a client's base URL and the server's mount is asserted
+  // directly in `packages/runner-pi/test/llm-proxy-routes.test.ts`.
+  ...(Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).map(
+    (shape) => `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
+  ),
+]);
+
+const undocumentedInCode = [...specEndpoints]
+  .filter((ep) => !codeEndpoints.has(ep) && !SPEC_ONLY_ALLOWLIST.has(ep))
+  .sort();
+
+console.log(`\n  5b. Spec ⊆ Code`);
+console.log(`  -----------------`);
+console.log(
+  `  Documented endpoints: ${specEndpoints.size}  (allowlist: ${SPEC_ONLY_ALLOWLIST.size})`,
+);
+
+if (undocumentedInCode.length === 0) {
+  console.log(`  OK — every documented endpoint is registered in code.`);
+} else {
+  exitCode = 1;
+  console.log(
+    `\n  Endpoints documented in the spec but registered by no router (${undocumentedInCode.length}):`,
+  );
+  for (const ep of undocumentedInCode) console.log(`    - ${ep}`);
+  console.log(
+    `\n  Either delete the path entry from apps/api/src/openapi/paths/ (or the ` +
+      `module's openApiPaths()), or add a justified entry to SPEC_ONLY_ALLOWLIST ` +
+      `in this file.`,
+  );
+}
+
+// Both allowlists are hand-maintained sets of exemptions, and an exemption that
+// no longer applies is the failure mode the deleted `expectedEndpoints` array
+// used to cover from the other direction: SPEC_ONLY_ALLOWLIST names endpoints
+// §5b must not flag, so a documented endpoint that gets deleted from the spec
+// stops being enumerated by ANY check here — the only remaining signal is
+// `detect:breaking` against the committed baseline, which a legitimate
+// `openapi:baseline` regeneration wipes. Assert both sets stay live. This is
+// the same contract §4b's staleExemptBodies, §6's staleResponseSchema and §7's
+// staleExempt already enforce for their own exemption lists.
+const staleSpecOnly = [...SPEC_ONLY_ALLOWLIST].filter((ep) => !specEndpoints.has(ep)).sort();
+const staleCodeToSpec = [...CODE_TO_SPEC_ALLOWLIST].filter((ep) => !codeEndpoints.has(ep)).sort();
+
+if (staleSpecOnly.length === 0 && staleCodeToSpec.length === 0) {
+  console.log(`  OK — both endpoint allowlists are free of stale entries.`);
+} else {
+  exitCode = 1;
+  for (const [label, stale, source] of [
+    ["SPEC_ONLY_ALLOWLIST", staleSpecOnly, "the spec"],
+    ["CODE_TO_SPEC_ALLOWLIST", staleCodeToSpec, "code"],
+  ] as const) {
+    if (stale.length === 0) continue;
+    console.log(`\n  Stale ${label} entries — no longer present in ${source} (${stale.length}):`);
+    for (const ep of stale) console.log(`    - ${ep}`);
+  }
+  console.log(
+    `\n  Delete the stale entries. An exemption that outlives its endpoint hides ` +
+      `the endpoint's later removal from every check in this script.`,
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// 5c. Documented error statuses
 // ═══════════════════════════════════════════════════
 //
 // For every code-registered endpoint that IS documented, assert the spec
@@ -1671,7 +1957,7 @@ if (unresolvedTemplatedRoutes.length > 0) {
 // route returns 403/400 but the spec omits it" drift that the runtime response
 // validator only catches when a test happens to exercise that exact error path.
 
-console.log(`\n  5b. Documented Error Statuses`);
+console.log(`\n  5c. Documented Error Statuses`);
 console.log(`  -------------------------------`);
 
 // "VERB /path STATUS" pairs where the handler can return the status but the
@@ -1749,16 +2035,22 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   "POST /activate/approve 200",
   "POST /activate/deny 200",
   "GET /api/integrations/callback 200",
-  // LLM proxy passthrough — the body is the upstream provider's response,
-  // verbatim; there is no stable schema to declare.
-  "POST /api/llm-proxy/anthropic-messages/v1/messages 200",
-  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions 200",
-  "POST /api/llm-proxy/openai-completions/v1/chat/completions 200",
+  // The three `/api/llm-proxy/*` 200s used to sit here, on the reasoning that a
+  // verbatim upstream passthrough "has no stable schema to declare". It does:
+  // `openapi/paths/llm-proxy.ts` declares a permissive `{ type: "object",
+  // additionalProperties: true }` passthrough schema explicitly to satisfy this
+  // very check, and says so in a comment. Two files asserted opposite things
+  // about the same three endpoints, and the exemption won by short-circuiting.
 ]);
 
 const JSON_MEDIA_TYPE = /^application\/([a-z0-9.+-]+\+)?json$/;
 
 const schemaGaps: string[] = [];
+// Every 2xx-non-204 response key this step considered, allowlisted or not —
+// the domain RESPONSE_SCHEMA_ALLOWLIST is allowed to name. Collected here
+// rather than re-walked afterwards so the "which responses does this step
+// judge" predicate exists once.
+const consideredResponses = new Set<string>();
 for (const [specPath, pathItem] of Object.entries(
   openApiSpec.paths as Record<string, Record<string, unknown>>,
 )) {
@@ -1769,6 +2061,7 @@ for (const [specPath, pathItem] of Object.entries(
     for (const [status, rawResp] of Object.entries(responses)) {
       if (!/^2\d\d$/.test(status) || status === "204") continue;
       const key = `${verb.toUpperCase()} ${specPath} ${status}`;
+      consideredResponses.add(key);
       if (RESPONSE_SCHEMA_ALLOWLIST.has(key)) continue;
 
       let resp = rawResp as Record<string, unknown>;
@@ -1790,30 +2083,64 @@ for (const [specPath, pathItem] of Object.entries(
   }
 }
 
-if (schemaGaps.length === 0) {
+// RESPONSE_SCHEMA_ALLOWLIST was the last hand-maintained exemption list in this
+// file without a staleness assertion — §4b's EXEMPT_REQUEST_BODIES, §5b's two
+// endpoint allowlists and §7's EXEMPT_SCHEMAS all carry one, for the reason §5b
+// states outright: an exemption that no longer applies is the failure mode. An
+// entry naming a response the spec no longer serves is not inert, it is a
+// pre-authorised hole waiting for the path to come back schema-less. (The only
+// list still exempt from this is ERROR_STATUS_ALLOWLIST, deliberately empty.)
+const staleResponseSchema = [...RESPONSE_SCHEMA_ALLOWLIST]
+  .filter((key) => !consideredResponses.has(key))
+  .sort();
+
+if (schemaGaps.length === 0 && staleResponseSchema.length === 0) {
   console.log(
-    `  OK — every 2xx JSON response declares a schema (allowlist: ${RESPONSE_SCHEMA_ALLOWLIST.size}).`,
+    `  OK — every 2xx JSON response declares a schema (allowlist: ${RESPONSE_SCHEMA_ALLOWLIST.size}, all live).`,
   );
 } else {
   exitCode = 1;
-  console.log(`\n  2xx responses without a schema (${schemaGaps.length}):`);
-  for (const gap of schemaGaps.sort()) console.log(`    - ${gap}`);
-  console.log(
-    `\n  Declare a response schema in apps/api/src/openapi/paths/, switch the ` +
-      `response to 204, or add a justified entry to RESPONSE_SCHEMA_ALLOWLIST in this file.`,
-  );
+  if (schemaGaps.length > 0) {
+    console.log(`\n  2xx responses without a schema (${schemaGaps.length}):`);
+    for (const gap of schemaGaps.sort()) console.log(`    - ${gap}`);
+    console.log(
+      `\n  Declare a response schema in apps/api/src/openapi/paths/, switch the ` +
+        `response to 204, or add a justified entry to RESPONSE_SCHEMA_ALLOWLIST in this file.`,
+    );
+  }
+  if (staleResponseSchema.length > 0) {
+    console.log(
+      `\n  Stale RESPONSE_SCHEMA_ALLOWLIST entries — the spec declares no such ` +
+        `2xx response any more (${staleResponseSchema.length}):`,
+    );
+    for (const key of staleResponseSchema) console.log(`    - ${key}`);
+    console.log(
+      `\n  Delete the stale entries. An exemption that outlives its response pre-approves ` +
+        `a schema-less body the day that path returns.`,
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════
 // 7. Shared-Type ↔ OpenAPI Response Required-Field Comparison
 // ═══════════════════════════════════════════════════
 //
-// Catches the "spec marks a response field optional that the shared-type marks
-// required" class of drift: the SPA trusts the generated type and reads the
-// field unconditionally, but the spec permits the server to omit it. For each
-// registered (spec-schema ↔ shared-type) pair, assert that every type-required
-// field is also required in the spec — restricted to fields the spec declares
-// as properties, and skipping accepted exceptions in KNOWN_DRIFT.
+// Asserts the spec and the shared-type agree on which response fields are
+// guaranteed. Both directions are drift, for different reasons:
+//
+//   spec-optional + type-required — the SPA trusts the generated type and reads
+//     the field unconditionally, but the spec permits the server to omit it.
+//     Exceptions: KNOWN_DRIFT.
+//   spec-required + type-optional — the server always sends the field, so this
+//     is invisible on the wire, but the type is the record consumers read and a
+//     `?` invites a `?? fallback` branch for a case that cannot happen. This is
+//     how ResolvedRunConfig came to carry a "compatibility with older servers"
+//     tolerance against a CLI with no version negotiation.
+//     Exceptions: KNOWN_REVERSE_DRIFT.
+//
+// Both are restricted to fields the spec declares as properties; the reverse
+// direction is further restricted to fields the TYPE declares (with `?`), so a
+// type that models a subset of the wire is never reported.
 
 console.log(`\n  7. Shared-Type <> OpenAPI Response Required-Field Comparison`);
 console.log(`  ------------------------------------------------------------`);
@@ -1824,6 +2151,8 @@ interface ResponseDrift {
 }
 
 const responseDrifts: ResponseDrift[] = [];
+/** Accepted-divergence entries that suppressed nothing — see `DriftExemptions.used`. */
+const deadExemptions: string[] = [];
 let responseCompared = 0;
 
 for (const entry of responseTypeRegistry) {
@@ -1878,11 +2207,25 @@ for (const entry of responseTypeRegistry) {
     continue;
   }
 
-  const known = new Set<string>(KNOWN_DRIFT[driftKey] ?? []);
+  const exempt: DriftExemptions = {
+    forward: new Set<string>(KNOWN_DRIFT[driftKey] ?? []),
+    reverse: new Set<string>(KNOWN_REVERSE_DRIFT[driftKey] ?? []),
+    used: { forward: new Set<string>(), reverse: new Set<string>() },
+  };
 
   responseCompared++;
   const issues: string[] = [];
-  compareShapeToSchema(shape, specSchema, "", known, issues);
+  compareShapeToSchema(shape, specSchema, "", exempt, issues);
+
+  for (const [register, listed, used] of [
+    ["KNOWN_DRIFT", exempt.forward, exempt.used.forward],
+    ["KNOWN_REVERSE_DRIFT", exempt.reverse, exempt.used.reverse],
+  ] as const) {
+    for (const field of listed) {
+      if (used.has(field)) continue;
+      deadExemptions.push(`${register}["${driftKey}"] → "${field}"`);
+    }
+  }
 
   if (issues.length > 0) {
     responseDrifts.push({ description: entry.description, issues });
@@ -1892,7 +2235,10 @@ for (const entry of responseTypeRegistry) {
 console.log(`  Compared: ${responseCompared}/${responseTypeRegistry.length} registry entries\n`);
 
 if (responseDrifts.length === 0) {
-  console.log(`  OK — every registered response schema requires what its shared-type requires.`);
+  console.log(
+    `  OK — every registered response schema and its shared-type agree on which ` +
+      `fields are guaranteed (compared both directions).`,
+  );
 } else {
   exitCode = 1;
   console.log(`  ${responseDrifts.length} entry(ies) with required-field drift:\n`);
@@ -1904,17 +2250,97 @@ if (responseDrifts.length === 0) {
     console.log();
   }
   console.log(
-    `  Tighten the spec response schema's required array to match the shared-type, ` +
-      `or record the divergence in KNOWN_DRIFT in ` +
-      `apps/api/src/openapi/response-type-registry.ts with a justification.`,
+    `  "OpenAPI=optional": tighten the spec response schema's required array, or ` +
+      `record the divergence in KNOWN_DRIFT.\n` +
+      `  "shared-type=optional": drop the \`?\` in @appstrate/shared-types (and the ` +
+      `now-dead null-guards it invited), or record it in KNOWN_REVERSE_DRIFT.\n` +
+      `  Both registers live in apps/api/src/openapi/response-type-registry.ts and ` +
+      `each entry must carry its justification.`,
   );
 }
 
-// Coverage enforcement — every named component schema must be either registered
+// Liveness of the two accepted-divergence registers — the same discipline the
+// checks around it already apply to their own exemptions (`EXEMPT_SCHEMAS`
+// below, `GRANDFATHERED` in scripts/verify-no-migration-dml.ts): an exemption
+// that names nothing silently excuses whatever lands at that name tomorrow.
+// Two ways to name nothing, and neither is visible without this:
+//
+//   - a KEY no registry entry resolves to — the schema was renamed, or the
+//     entry it belonged to was removed. Nothing ever reads the list under it;
+//   - a FIELD that suppressed no finding — it left the type, or the divergence
+//     was fixed. The justification beside it now describes nothing.
+//
+// The pair is deliberately stricter than `GRANDFATHERED`, which checks
+// existence only; `DriftExemptions.used` states why the two calls differ.
+{
+  const registryKeys = new Set(
+    responseTypeRegistry
+      .map((e) => e.specSchemaName ?? e.path)
+      .filter((k): k is string => k !== undefined),
+  );
+  const orphanKeys = [
+    ...Object.keys(KNOWN_DRIFT).map((k) => [`KNOWN_DRIFT`, k] as const),
+    ...Object.keys(KNOWN_REVERSE_DRIFT).map((k) => [`KNOWN_REVERSE_DRIFT`, k] as const),
+  ]
+    .filter(([, key]) => !registryKeys.has(key))
+    .map(([register, key]) => `${register}["${key}"] — no responseTypeRegistry entry`);
+
+  const dead = [...orphanKeys, ...deadExemptions].sort();
+  if (dead.length > 0) {
+    exitCode = 1;
+    console.log(`\n  ${dead.length} accepted-divergence entr(y|ies) that excuse nothing:\n`);
+    for (const d of dead) console.log(`  ERROR  ${d}`);
+    console.log(
+      `\n  Delete each one. The drift it recorded is gone (or the field/schema is), ` +
+        `so the entry now\n  pre-approves whatever lands at that name next. ` +
+        `apps/api/src/openapi/response-type-registry.ts.`,
+    );
+  }
+}
+
+/**
+ * How many 2xx JSON responses name their schema, and how many inline it.
+ *
+ * Printed by §7b so the size of its blind spot is a measurement on every run,
+ * not a sentence someone has to keep true by hand.
+ */
+function countJsonResponseSchemaShapes(): { inline: number; named: number } {
+  let inline = 0;
+  let named = 0;
+  const paths = (openApiSpec.paths ?? {}) as Record<string, Record<string, unknown>>;
+  for (const methods of Object.values(paths)) {
+    for (const op of Object.values(methods)) {
+      const responses = (op as { responses?: Record<string, unknown> })?.responses;
+      if (!responses) continue;
+      for (const [status, resp] of Object.entries(responses)) {
+        if (!status.startsWith("2")) continue;
+        const schema = (resp as { content?: Record<string, { schema?: Record<string, unknown> }> })
+          ?.content?.["application/json"]?.schema;
+        if (!schema || typeof schema !== "object") continue;
+        if (typeof schema.$ref === "string") named++;
+        else inline++;
+      }
+    }
+  }
+  return { inline, named };
+}
+
+// Coverage enforcement — every NAMED component schema must be either registered
 // (a shared-type pair, checked above) or explicitly EXEMPT (no shared-type
-// consumer). This makes step 7 fail-closed: a new response schema can't slip
-// in unchecked. The opt-in gap (a schema nobody registers is never compared)
-// is closed by requiring an explicit, justified decision for every schema.
+// consumer). Requiring an explicit, justified decision for every named schema
+// closes the opt-in gap: one nobody registers is no longer silently uncompared.
+//
+// WHAT THIS DOES NOT COVER, and it is the majority. The universe is
+// `components.schemas` — schemas with a NAME. A 2xx response whose schema is
+// written INLINE at the operation has no name, so it is not in that universe
+// and no amount of registry discipline reaches it. The count is printed below
+// on every run rather than asserted here in prose, because prose is what went
+// stale: this block used to claim "step 7 is fail-closed: a new response schema
+// can't slip in unchecked", which is true only of the named third.
+//
+// Closing it needs a different shape — a registry keyed on
+// `(verb, path, status)` like §4b's request-body one, not on schema name. That
+// is a project, not a tightening, and it is deliberately not attempted here.
 {
   const registeredSpecNames = new Set(
     responseTypeRegistry.map((e) => e.specSchemaName).filter((n): n is string => !!n),
@@ -1949,6 +2375,11 @@ if (responseDrifts.length === 0) {
         `(${registeredSpecNames.size}) or exempt (${Object.keys(effectiveExemptSchemas).length}, ` +
         `of which ${Object.keys(moduleExemptSchemas).length} module-declared).`,
     );
+    const { inline, named } = countJsonResponseSchemaShapes();
+    console.log(
+      `  Out of scope: ${inline} of ${inline + named} 2xx JSON responses declare their ` +
+        `schema INLINE (no name), so this step cannot see them. See the note above.`,
+    );
   } else {
     exitCode = 1;
     if (uncovered.length > 0) {
@@ -1975,5 +2406,4 @@ console.log(`  ${"=".repeat(50)}`);
 console.log(`  ${exitCode === 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED"}`);
 console.log(`  ${"=".repeat(50)}\n`);
 
-// @ts-ignore Bun's type definitions for process.exit are incorrect (they say it returns never, but it actually returns void), so we ignore the type error here.
 process.exit(exitCode);

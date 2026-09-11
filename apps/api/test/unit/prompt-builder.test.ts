@@ -14,7 +14,6 @@ import { defaultTestAgentResources } from "../helpers/run-resources.ts";
 
 interface TestSchemas {
   input?: import("@appstrate/core/form").JSONSchemaObject;
-  config?: import("@appstrate/core/form").JSONSchemaObject;
   output?: import("@appstrate/core/form").JSONSchemaObject;
 }
 
@@ -43,7 +42,6 @@ function makeTestBundle(opts: {
     ...(opts.schemaVersion ? { schema_version: opts.schemaVersion } : {}),
     ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     ...(opts.schemas?.input ? { input: { schema: opts.schemas.input } } : {}),
-    ...(opts.schemas?.config ? { config: { schema: opts.schemas.config } } : {}),
     ...(opts.schemas?.output ? { output: { schema: opts.schemas.output } } : {}),
   };
   const rootFiles = new Map<string, Uint8Array>();
@@ -92,7 +90,6 @@ interface PromptContext {
   rawPrompt: string;
   schemaVersion?: string;
   runId?: string;
-  config: Record<string, unknown>;
   previousCheckpoint: Record<string, unknown> | null;
   runToken?: string;
   input: Record<string, unknown>;
@@ -130,7 +127,6 @@ function splitLegacy(ctx: PromptContext): {
       createdAt: m.createdAt ? new Date(m.createdAt).getTime() : 0,
     })),
     ...(ctx.previousCheckpoint !== null ? { checkpoint: ctx.previousCheckpoint } : {}),
-    config: ctx.config,
   };
   const bundle = makeTestBundle({
     rawPrompt: ctx.rawPrompt,
@@ -148,7 +144,7 @@ function splitLegacy(ctx: PromptContext): {
     rawPrompt: ctx.rawPrompt,
     ...(ctx.schemas.output ? { outputSchema: ctx.schemas.output } : {}),
     llmConfig: ctx.llmConfig,
-    ...(ctx.runToken !== undefined ? { runToken: ctx.runToken } : {}),
+    runToken: ctx.runToken ?? "test-run-token",
     proxyUrl: ctx.proxyUrl,
     timeout: ctx.timeout ?? 0,
     resources: ctx.resources ?? defaultTestAgentResources(),
@@ -165,7 +161,6 @@ function buildEnrichedPrompt(ctx: PromptContext): Promise<string> {
 function baseContext(overrides?: Partial<PromptContext>): PromptContext {
   return {
     rawPrompt: "Do the task.",
-    config: {},
     previousCheckpoint: null,
     input: {},
     schemas: {},
@@ -455,13 +450,13 @@ describe("buildEnrichedPrompt — user input", () => {
 
   it("excludes file-type input fields from user input section", async () => {
     const ctx = baseContext({
-      input: { text: "hello", document: "file-ref" },
+      input: { text: "hello", file: "file-ref" },
       schemas: {
         input: {
           type: "object",
           properties: {
             text: { type: "string" },
-            document: {
+            file: {
               type: "string",
               format: "uri",
               contentMediaType: "application/octet-stream",
@@ -479,37 +474,8 @@ describe("buildEnrichedPrompt — user input", () => {
 // ─── Configuration ──────────────────────────────────────────
 
 describe("buildEnrichedPrompt — configuration", () => {
-  it("includes config values", async () => {
-    const ctx = baseContext({
-      config: { language: "fr", maxResults: 10 },
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Configuration");
-    expect(prompt).toContain("language");
-    expect(prompt).toContain("fr");
-    expect(prompt).toContain("maxResults");
-  });
-
-  it("includes schema descriptions for config fields", async () => {
-    const ctx = baseContext({
-      config: { language: "fr" },
-      schemas: {
-        config: {
-          type: "object",
-          properties: {
-            language: { type: "string", description: "Output language" },
-          },
-          required: ["language"],
-        },
-      },
-    });
-    const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("Output language");
-    expect(prompt).toContain("required");
-  });
-
-  it("omits configuration section when no config", async () => {
-    const ctx = baseContext({ config: {} });
+  it("never renders a Configuration section (config folded into input)", async () => {
+    const ctx = baseContext({ input: { language: "fr", maxResults: 10 } });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Configuration");
   });
@@ -596,7 +562,7 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
   // whether a signed `runToken` is present.
 
   it("does not render a Run History section when runToken is present", async () => {
-    const ctx = baseContext({ runToken: "exec_token_123" });
+    const ctx = baseContext({ runToken: "run_token_123" });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
     expect(prompt).not.toContain("$SIDECAR_URL");
@@ -624,10 +590,10 @@ describe("buildEnrichedPrompt — provider dimension fully removed", () => {
   });
 });
 
-// ─── Documents/files ────────────────────────────────────────
+// ─── Files ──────────────────────────────────────────────────
 
-describe("buildEnrichedPrompt — documents", () => {
-  it("includes documents section when files provided", async () => {
+describe("buildEnrichedPrompt — files", () => {
+  it("includes files section when files provided", async () => {
     const ctx = baseContext({
       files: [
         {
@@ -650,25 +616,25 @@ describe("buildEnrichedPrompt — documents", () => {
     });
 
     const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Documents");
-    // Neutral wording: an input document can be a sibling run's deliverable
+    expect(prompt).toContain("## Files");
+    // Neutral wording: an input file can be a sibling run's deliverable
     // mounted by reference, not only a human upload.
-    expect(prompt).toContain("The following documents are available on the local filesystem:");
+    expect(prompt).toContain("The following files are available on the local filesystem:");
     expect(prompt).not.toContain("have been uploaded");
     expect(prompt).toContain("report.pdf");
     // The colliding display names resolve to distinct on-disk paths.
-    expect(prompt).toContain("./documents/report.pdf");
-    expect(prompt).toContain("./documents/report-2.pdf");
+    expect(prompt).toContain("./files/report.pdf");
+    expect(prompt).toContain("./files/report-2.pdf");
   });
 
-  // Fan-in by reference: a document mounted through the reserved
-  // `_context_documents` field is announced exactly like any other input
-  // document. A file mounted but not announced is a file never read.
-  it("announces context documents mounted through the reserved field", async () => {
+  // Fan-in by reference: a file mounted through the reserved
+  // `_context_files` field is announced exactly like any other input
+  // file. A file mounted but not announced is a file never read.
+  it("announces context files mounted through the reserved field", async () => {
     const ctx = baseContext({
       files: [
         {
-          fieldName: "_context_documents",
+          fieldName: "_context_files",
           name: "research.json",
           workspaceName: "research.json",
           type: "application/json",
@@ -678,14 +644,14 @@ describe("buildEnrichedPrompt — documents", () => {
     });
 
     const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Documents");
-    expect(prompt).toContain("./documents/research.json");
+    expect(prompt).toContain("## Files");
+    expect(prompt).toContain("./files/research.json");
   });
 
-  it("omits documents section when no files", async () => {
+  it("omits files section when no files", async () => {
     const ctx = baseContext({ files: [] });
     const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Documents");
+    expect(prompt).not.toContain("## Files");
   });
 });
 

@@ -36,7 +36,7 @@ function payload(...auths: ResolvedAuthCredentials[]): IntegrationCredentialsPay
 
 const PLAIN_BEARER: HttpDeliveryPlan = {
   headerName: "Authorization",
-  headerPrefix: "Bearer",
+  headerPrefix: "Bearer ",
   value: "github-tok",
   allowServerOverride: false,
 };
@@ -243,7 +243,7 @@ describe("planMitmAction — dedup", () => {
   it("dedupes strip list case-insensitively when manifest header collides with universal pair", () => {
     const plan: HttpDeliveryPlan = {
       headerName: "AUTHORIZATION", // Same header, different casing.
-      headerPrefix: "Bearer",
+      headerPrefix: "Bearer ",
       value: "tok",
       allowServerOverride: false,
     };

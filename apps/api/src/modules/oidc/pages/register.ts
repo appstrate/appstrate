@@ -8,18 +8,19 @@
  * to continue the OAuth flow.
  */
 
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import { renderSocialButtons, renderSocialSignInScript } from "./social-sign-in-script.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
-export interface RegisterPageProps {
+interface RegisterPageProps {
   queryString: string;
   error?: string;
   email?: string;
   name?: string;
   csrfToken: string;
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   socialProviders?: { google?: boolean; github?: boolean };
   /**
    * Kept for type-parity with `LoginPageProps.allowSignup` so route
@@ -76,9 +77,10 @@ export function renderRegisterPage(props: RegisterPageProps): RawHtml {
       <input
         type="password"
         name="password"
-        placeholder="Mot de passe (8 caractères min.)"
+        placeholder="Mot de passe (${MIN_PASSWORD_LENGTH} caractères min.)"
         required
-        minlength="8"
+        minlength="${MIN_PASSWORD_LENGTH}"
+        maxlength="${MAX_PASSWORD_LENGTH}"
       />
       <button type="submit">Créer mon compte</button>
     </form>

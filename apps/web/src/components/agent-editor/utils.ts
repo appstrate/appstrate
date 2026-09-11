@@ -75,6 +75,7 @@ export function defaultSkillManifest(
   };
 }
 
+/** Deliberately not yet valid: a new skill has no package id to prefill `name` from. */
 export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
 // ─── Default manifest for integration ───────────────────────
@@ -329,7 +330,7 @@ export function toResourceEntry(r: {
 
 // ─── Manifest → SchemaFields (used by AgentEditorInner) ─────
 
-/** Convert manifest input/output/config wrappers into SchemaField arrays for the form. */
+/** Convert the manifest input/output wrappers into SchemaField arrays for the form. */
 export function manifestToSchemaFields(
   manifest: Record<string, unknown>,
 ): Record<string, SchemaField[]> {
@@ -352,7 +353,6 @@ export function manifestToSchemaFields(
   return {
     input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
     output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
-    config: schemaToFields(wrapperFor("config")?.schema, "config", wrapperFor("config")),
   };
 }
 
@@ -371,7 +371,7 @@ function convertDefaultValue(value: string, type: string): unknown {
 
 export function schemaToFields(
   schema: JSONSchemaObject | undefined,
-  mode: "input" | "output" | "config" | "credentials",
+  mode: "input" | "output",
   wrapper?: {
     file_constraints?: Record<string, FileConstraint>;
     ui_hints?: Record<string, UIHint>;
@@ -422,11 +422,6 @@ export function schemaToFields(
         ? {
             placeholder: hint?.placeholder || "",
             default: prop.default != null ? String(prop.default) : "",
-          }
-        : {}),
-      ...(mode === "config"
-        ? {
-            default: prop.default != null ? String(prop.default) : "",
             enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
           }
         : {}),
@@ -466,7 +461,7 @@ export function schemaToFields(
  */
 export function fieldsToSchema(
   fields: SchemaField[],
-  mode: "input" | "output" | "config" | "credentials",
+  mode: "input" | "output",
 ): SchemaWrapper | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;
@@ -507,11 +502,9 @@ export function fieldsToSchema(
     } else {
       const prop: JSONSchema7 = { type: f.type as JSONSchema7TypeName };
       if (f.description) prop.description = f.description;
-      if (mode === "input" || mode === "config") {
+      if (mode === "input") {
         const def = convertDefaultValue(f.default || "", f.type);
         if (def != null) prop.default = def as JSONSchema7Type;
-      }
-      if (mode === "config") {
         const enumVals = f.enumValues
           ?.split(",")
           .map((v) => v.trim())

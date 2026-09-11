@@ -72,10 +72,10 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
     openOrgClientId = open.clientId;
 
     const appClient = await createClient({
-      level: "application",
+      level: "space",
       name: "App Client",
       redirectUris: ["https://app.example.com/cb"],
-      referencedApplicationId: ctx.defaultAppId,
+      referencedSpaceId: ctx.defaultSpaceId,
     });
     appClientId = appClient.clientId;
   });
@@ -113,7 +113,7 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("blocks BA signup on an application-level client with allowSignup=false (unified semantic)", async () => {
+  it("blocks BA signup on a space-level client with allowSignup=false (unified semantic)", async () => {
     await expect(
       oidcBeforeSignupGuard({
         user: { email: "app@example.com" },
@@ -149,7 +149,7 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("no-op when the pending client is application-level", async () => {
+    it("no-op when the pending client is space-level", async () => {
       const signupUser = await createTestUser({ email: "appsignup@example.com" });
       await oidcAfterSignupHandler({
         user: { id: signupUser.id, email: "appsignup@example.com" },

@@ -14,7 +14,9 @@
  * `beforeUsage` hook), the connection-cascade resolver, the state-layer
  * `createRun` insert, and the `onRunStatusChange` event.
  *
- * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.2.
+ * The unified run-creation contract is this file plus its callers
+ * (`routes/runs.ts`, `routes/runs-remote.ts`); there is no `docs/specs/`
+ * directory in this repo.
  */
 
 import { encrypt } from "@appstrate/connect";
@@ -37,19 +39,18 @@ import { runPreflightGates } from "./run-preflight-gates.ts";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface SinkRequest {
+interface SinkRequest {
   /** Client-requested TTL in seconds. Clamped to REMOTE_RUN_SINK_MAX_TTL_SECONDS. */
   ttlSeconds?: number;
 }
 
-export interface CreateRunInput {
+interface CreateRunInput {
   runId: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor | null;
   agent: LoadedPackage;
   input?: Record<string, unknown> | null;
-  config: Record<string, unknown>;
   apiKeyId?: string;
   overrideVersionLabel?: string;
   /**
@@ -66,13 +67,24 @@ export interface CreateRunInput {
   /** Resolved by `lib/runner-context.ts` from request headers + auth context. */
   runnerName?: string | null;
   runnerKind?: string | null;
+  /**
+   * Per-call-graph memo for integration manifest fetches. The inline branch of
+   * `POST /api/runs/remote` passes the one its preflight already seeded, so
+   * this path shares it the way the platform kickoff does; the registry branch
+   * has none and gets the Map created below.
+   */
+  manifestCache?: IntegrationManifestCache;
 }
 
-export type CreateRunResult =
+type CreateRunResult =
   | {
       ok: true;
       runId: string;
-      sinkCredentials?: SinkCredentials;
+      /**
+       * Always present on the success arm — the remote origin cannot create a
+       * run without minting them, so the caller has no absent case to handle.
+       */
+      sinkCredentials: SinkCredentials;
     }
   | {
       ok: false;
@@ -92,10 +104,9 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   const {
     runId,
     orgId,
-    applicationId,
+    spaceId,
     actor,
     input: runInput,
-    config,
     apiKeyId,
     contextSnapshot,
     overrideVersionLabel,
@@ -103,7 +114,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
 
   // Readiness (`validateAgentReadiness`) is NOT re-run here. The single
   // caller — `POST /api/runs/remote` — already validates the
-  // (agent, config, applicationId, actor) tuple before it gets here: the
+  // (agent, input, spaceId, actor) tuple before it gets here: the
   // `registry` branch calls `validateAgentReadiness` directly, the `inline`
   // branch runs it inside `runInlinePreflight`. Neither passes
   // `runOverrides`, and neither can: `CreateRemoteRunBodySchema` is
@@ -155,7 +166,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   //     served the same to remote runs) reads it back. Without this a remote
   //     run silently served the mutable draft and never failed loud on an
   //     unsatisfiable pin. A shared `manifestCache` dedupes the cascade reads.
-  const manifestCache: IntegrationManifestCache = new Map();
+  const manifestCache: IntegrationManifestCache = input.manifestCache ?? new Map();
   let resolvedIntegrationVersions: ResolvedIntegrationVersionMap;
   try {
     resolvedIntegrationVersions = await freezeRunSpawnDependencies({
@@ -186,7 +197,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       agentManifest: agent.manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
-      scope: { orgId, applicationId },
+      scope: { orgId, spaceId },
       runOverrides: null,
       // Remote runs are never scheduled, so there is no frozen schedule
       // override on this path (mechanism #3 applies to platform runs only).
@@ -224,7 +235,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   });
 
   // --- Insert run row via the state-layer helper (single source of truth
-  //     for runs inserts — covers runNumber allocation, app-scoping, and
+  //     for runs inserts — covers runNumber allocation, space-scoping, and
   //     sink bookkeeping consistently across both origins).
   const agentDenorm = extractRunAgentDenorm(agent);
 
@@ -239,7 +250,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // runner row is the un-attributed mirror. (The platform path resolves a model
   // at creation and stamps `modelSource` — see `run-context-builder.ts`.)
   await createRunRow(
-    { orgId, applicationId },
+    { orgId, spaceId },
     {
       id: runId,
       packageId: agent.id,
@@ -248,7 +259,6 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       apiKeyId,
       agentScope: agentDenorm.scope,
       agentName: agentDenorm.name,
-      config,
       runOrigin: "remote",
       sinkSecretEncrypted: encrypt(credentials.secret),
       sinkExpiresAt: new Date(credentials.expiresAt),

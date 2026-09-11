@@ -3,7 +3,13 @@
 import { describe, it, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { validateManifest } from "@appstrate/core/validation";
-import { validateConfig, validateInput, validateOutput } from "../../src/services/schema.ts";
+import { MAX_CACHED_VALIDATORS } from "@appstrate/core/schema-validation";
+import {
+  validateAgainstSchema,
+  validateConnectionCredentials,
+  validateInput,
+  validateOutput,
+} from "../../src/services/schema.ts";
 
 // --- Fixtures ---
 
@@ -23,16 +29,6 @@ const VALID_MANIFEST = {
   // Declares an output schema below, so the `output` runtime tool must be
   // enabled (enforced by agentManifestSchema's superRefine).
   runtime_tools: ["output"],
-  config: {
-    schema: {
-      type: "object",
-      properties: {
-        max_emails: { type: "number", default: 20, description: "Max emails" },
-        language: { type: "string", default: "fr", enum: ["fr", "en"], description: "Language" },
-      },
-      required: [],
-    },
-  },
   input: {
     schema: {
       type: "object",
@@ -64,7 +60,7 @@ const VALID_MANIFEST = {
   timeout: 300,
 };
 
-const CONFIG_SCHEMA: JSONSchemaObject = {
+const VALUES_SCHEMA: JSONSchemaObject = {
   type: "object",
   properties: {
     max_emails: { type: "number", default: 20, description: "Max emails" },
@@ -121,10 +117,10 @@ describe("validateManifest", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("accepts manifest with empty config schema", () => {
+  it("accepts manifest with an empty input schema", () => {
     const manifest = {
       ...VALID_MANIFEST,
-      config: { schema: { type: "object", properties: {} } },
+      input: { schema: { type: "object", properties: {} } },
     };
     const result = validateManifest(manifest);
     expect(result.valid).toBe(true);
@@ -157,7 +153,7 @@ describe("validateManifest", () => {
   it("rejects old-format schema (flat record without type: object)", () => {
     const oldFormat = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           max_emails: { type: "number", default: 20, required: false },
           clickup_list_id: { type: "string", required: true },
@@ -172,7 +168,7 @@ describe("validateManifest", () => {
   it("rejects invalid field type in schema properties", () => {
     const bad = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           type: "object",
           properties: {
@@ -208,7 +204,7 @@ describe("validateManifest", () => {
   it("accepts required as an array of strings on schema level", () => {
     const manifest = {
       ...VALID_MANIFEST,
-      config: {
+      input: {
         schema: {
           type: "object",
           properties: {
@@ -225,20 +221,20 @@ describe("validateManifest", () => {
 });
 
 // =====================================================
-// validateConfig
+// validateAgainstSchema
 // =====================================================
 
-describe("validateConfig", () => {
-  it("valid config passes", () => {
+describe("validateAgainstSchema", () => {
+  it("valid values pass", () => {
     const data = { max_emails: 20, clickup_list_id: "abc123", language: "fr" };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
   it("missing required field fails", () => {
     const data = { max_emails: 20, language: "fr" }; // missing clickup_list_id
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors.some((e) => e.field === "clickup_list_id")).toBe(true);
@@ -246,39 +242,39 @@ describe("validateConfig", () => {
 
   it("type coercion: string to number", () => {
     const data = { max_emails: "50", clickup_list_id: "abc123", language: "fr" };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(true);
   });
 
   it("enum violation fails", () => {
     const data = { clickup_list_id: "abc", language: "de" }; // "de" not in enum
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.field === "language")).toBe(true);
   });
 
   it("empty schema always passes", () => {
     const emptySchema: JSONSchemaObject = { type: "object", properties: {} };
-    const result = validateConfig({ anything: "goes" }, emptySchema);
+    const result = validateAgainstSchema({ anything: "goes" }, emptySchema);
     expect(result.valid).toBe(true);
   });
 
   it("extra fields are accepted (no additionalProperties restriction by default)", () => {
     const data = { clickup_list_id: "abc123", extra_field: "hello" };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(true);
   });
 
   it("wrong type without coercion possibility fails", () => {
     const data = { clickup_list_id: "abc", max_emails: "not-a-number" };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.field === "max_emails")).toBe(true);
   });
 
   it("empty string on required field fails (aligned with frontend)", () => {
     const data = { clickup_list_id: "", max_emails: 20 };
-    const result = validateConfig(data, CONFIG_SCHEMA);
+    const result = validateAgainstSchema(data, VALUES_SCHEMA);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.field === "clickup_list_id")).toBe(true);
   });
@@ -293,7 +289,7 @@ describe("validateConfig", () => {
       required: ["name"],
     };
     const data = { name: "test", notes: "" };
-    const result = validateConfig(data, schema);
+    const result = validateAgainstSchema(data, schema);
     // notes is not in required, so "" is kept and valid
     expect(result.valid).toBe(true);
   });
@@ -306,7 +302,7 @@ describe("validateConfig", () => {
         age: { type: "number" },
       },
     };
-    const result = validateConfig({}, schema);
+    const result = validateAgainstSchema({}, schema);
     expect(result.valid).toBe(true);
   });
 });
@@ -367,13 +363,70 @@ describe("validateInput", () => {
     const result = validateInput({ topic: "AI" }, schema);
     expect(result.valid).toBe(true);
   });
+
+  /**
+   * The shared AJV is an Ajv2020 bound to one dialect, so a manifest declaring
+   * draft-07 — what most JSON Schema tooling emits — makes `ajv.compile` throw
+   * "no schema with key or ref …/draft-07/schema" rather than return a
+   * validator. That is a 500 on a path whose entire contract is a 400 with
+   * per-field errors. The effective schema must therefore drop `$schema`: it
+   * declares the document's dialect and asserts nothing about the value.
+   */
+  it("a schema declaring a foreign $schema dialect validates instead of throwing", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: { topic: { type: "string" } },
+      required: ["topic"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateInput({ topic: "AI" }, schema)).not.toThrow();
+    expect(validateInput({ topic: "AI" }, schema).valid).toBe(true);
+
+    // …and it still REJECTS, rather than waving the input through.
+    const missing = validateInput({}, schema);
+    expect(missing.valid).toBe(false);
+    expect(JSON.stringify(missing.errors)).toContain("topic");
+  });
+
+  it("a file field does not resurrect the $schema throw", () => {
+    // The file-field branch is the one that started spreading the author's
+    // schema, so it is the branch that started forwarding `$schema`.
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: {
+        doc: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+        note: { type: "string" },
+      },
+      required: ["doc"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateInput({ note: "hi" }, schema)).not.toThrow();
+    expect(validateInput({ note: "hi" }, schema).valid).toBe(true);
+  });
+});
+
+describe("validateOutput dialect handling", () => {
+  it("a schema declaring a foreign $schema dialect validates instead of throwing", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: { summary: { type: "string" } },
+      required: ["summary"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateOutput({ summary: "done" }, schema)).not.toThrow();
+    expect(validateOutput({ summary: "done" }, schema).valid).toBe(true);
+    expect(validateOutput({}, schema).valid).toBe(false);
+  });
 });
 
 // =====================================================
-// validateConfig (with custom keywords)
+// validateAgainstSchema (with custom keywords)
 // =====================================================
 
-describe("validateConfig with unknown keywords", () => {
+describe("validateAgainstSchema with unknown keywords", () => {
   it("schema with unknown keyword does not throw", () => {
     const schema = {
       type: "object",
@@ -382,8 +435,8 @@ describe("validateConfig with unknown keywords", () => {
       },
       required: ["api_key"],
     } as unknown as JSONSchemaObject;
-    expect(() => validateConfig({ api_key: "sk-123" }, schema)).not.toThrow();
-    const result = validateConfig({ api_key: "sk-123" }, schema);
+    expect(() => validateAgainstSchema({ api_key: "sk-123" }, schema)).not.toThrow();
+    const result = validateAgainstSchema({ api_key: "sk-123" }, schema);
     expect(result.valid).toBe(true);
   });
 });
@@ -443,5 +496,148 @@ describe("validateOutput", () => {
     const result = validateOutput({ summary: "Done", count: "5" }, OUTPUT_SCHEMA);
     // AJV with coerceTypes should accept "5" as a number
     expect(result.valid).toBe(true);
+  });
+});
+
+/**
+ * The server-only validators (`validateInput` / `validateOutput` /
+ * `validateConnectionCredentials`) compile through the SAME cache as
+ * `@appstrate/core/schema-validation`'s own `validateAgainstSchema` — there is
+ * exactly one Ajv instance in the process. These are the two properties that
+ * the second, uncapped instance this module used to own did not have.
+ */
+describe("compiled-validator cache — shared bound", () => {
+  it("compiles a schema carrying a $id twice without colliding in the registry", () => {
+    // Two structurally identical but DISTINCT objects under one `$id`. An Ajv
+    // instance that keeps compiled schemas registered throws
+    // "schema with key or id ... already exists" on the second one.
+    const withId = (): JSONSchemaObject =>
+      ({
+        $id: "https://example.test/creds.json",
+        type: "object",
+        properties: { token: { type: "string" } },
+        required: ["token"],
+      }) as unknown as JSONSchemaObject;
+
+    expect(validateConnectionCredentials(withId(), { token: "a" }).valid).toBe(true);
+    expect(() => validateConnectionCredentials(withId(), { token: "b" })).not.toThrow();
+    // …and across the two callers, which now share the instance.
+    expect(() => validateAgainstSchema({ token: "c" }, withId())).not.toThrow();
+  });
+
+  it("keeps validating correctly past the eviction bound, on both callers", () => {
+    // Well past MAX_CACHED_VALIDATORS distinct schemas: every one evicts an
+    // older entry rather than growing the map, and an evicted schema simply
+    // recompiles. A caller that fell off the end must still get the right
+    // verdict.
+    const distinct = (i: number): JSONSchemaObject => ({
+      type: "object",
+      properties: { [`field_${i}`]: { type: "string" } },
+      required: [`field_${i}`],
+    });
+
+    for (let i = 0; i < MAX_CACHED_VALIDATORS + 50; i++) {
+      expect(validateInput({ [`field_${i}`]: "x" }, distinct(i)).valid).toBe(true);
+      expect(validateAgainstSchema({ [`field_${i}`]: "x" }, distinct(i)).valid).toBe(true);
+    }
+
+    // The very first schema was evicted long ago; it recompiles and still
+    // reaches the same verdict.
+    expect(validateInput({}, distinct(0)).valid).toBe(false);
+    expect(validateAgainstSchema({}, distinct(0)).valid).toBe(false);
+  });
+});
+
+/**
+ * `runValidate` used to answer two questions with one test — "does this schema
+ * name a property?" standing in for "does this schema constrain anything?" —
+ * and then, past that gate, rebuild the input schema as a bare
+ * `{type, properties, required}`. Both discard rules the author wrote down.
+ *
+ * The verdicts below are the AUTHOR'S schema applied as written; every one of
+ * them was `valid: true` before.
+ */
+describe("the declared schema is applied as written", () => {
+  it("enforces a constraint that names no property (input)", () => {
+    const closed = {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    } as unknown as JSONSchemaObject;
+    expect(validateInput({ surprise: 1 }, closed).valid).toBe(false);
+
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["must_be_here"],
+    } as unknown as JSONSchemaObject;
+    expect(validateInput({}, requiresUnnamed).valid).toBe(false);
+  });
+
+  it("enforces a constraint that names no property (output)", () => {
+    // `additionalProperties` is deliberately relaxed on the output path, so the
+    // case that proves the short-circuit is `required`.
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["must_be_here"],
+    } as unknown as JSONSchemaObject;
+    expect(validateOutput({}, requiresUnnamed).valid).toBe(false);
+  });
+
+  it("enforces a constraint that names no property (connection credentials)", () => {
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["api_key"],
+    } as unknown as JSONSchemaObject;
+    expect(validateConnectionCredentials(requiresUnnamed, {}).valid).toBe(false);
+    // A genuinely loose `custom` auth is still waved through (control).
+    expect(
+      validateConnectionCredentials({ type: "object", properties: {} }, { whatever: 1 }).valid,
+    ).toBe(true);
+  });
+
+  it("keeps the keywords the three-key rebuild dropped from an input schema", () => {
+    const declared = {
+      type: "object",
+      properties: { topic: { type: "string" }, locale: { type: "string" } },
+      required: ["topic"],
+      additionalProperties: false,
+      $defs: { unused: { type: "string" } },
+      dependentRequired: { topic: ["locale"] },
+    } as unknown as JSONSchemaObject;
+
+    // `additionalProperties: false` — an undeclared key is refused.
+    expect(validateInput({ topic: "AI", locale: "fr", extra: 1 }, declared).valid).toBe(false);
+    // `dependentRequired` — `topic` present pulls `locale` in with it.
+    expect(validateInput({ topic: "AI" }, declared).valid).toBe(false);
+    // …and the body that satisfies all of it still passes (control).
+    expect(validateInput({ topic: "AI", locale: "fr" }, declared).valid).toBe(true);
+  });
+
+  it("still ignores a file field's own assertions, and still does not require it", () => {
+    // The file-field exclusion is why the rebuild existed. It must survive: the
+    // parser has already rewritten the value to an `appfile://…` URI that the
+    // declared `format: uri` + `contentMediaType` would reject, and whether a
+    // file was supplied is the upload pipeline's question, not AJV's.
+    const withFile = {
+      type: "object",
+      properties: {
+        topic: { type: "string" },
+        doc: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+      },
+      required: ["topic", "doc"],
+      additionalProperties: false,
+    } as unknown as JSONSchemaObject;
+
+    // Required file field absent → still valid.
+    expect(validateInput({ topic: "AI" }, withFile).valid).toBe(true);
+    // Present as the resolved URI → accepted, and NOT read as an unexpected
+    // extra even though the object is closed (the reason the exclusion relaxes
+    // the property instead of deleting the key).
+    expect(validateInput({ topic: "AI", doc: "appfile://file_abc" }, withFile).valid).toBe(true);
+    // The non-file half of the schema is still enforced.
+    expect(validateInput({ doc: "appfile://file_abc" }, withFile).valid).toBe(false);
   });
 });

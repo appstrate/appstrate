@@ -8,16 +8,17 @@
  * so discovery stays in one place and both scripts see the same view of module
  * contributions without booting the platform.
  *
- * We scan `apps/api/src/modules/*​/index.ts` directly rather than going through
- * the module loader because the loader requires a full init context (DB, Redis,
- * etc.) that build-time scripts don't have.
+ * We scan the `index.ts` of each directory under `apps/api/src/modules/`
+ * directly rather than going through the module loader, because the loader
+ * requires a full init context (DB, Redis, etc.) that build-time scripts
+ * don't have.
  */
 import { readdirSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module";
 
-export interface CollectedModuleOpenApi {
+interface CollectedModuleOpenApi {
   /** OpenAPI 3.1 path items, keyed by path string. */
   paths: Record<string, unknown>;
   /** OpenAPI 3.1 component schemas, keyed by schema name. */
@@ -41,7 +42,7 @@ export interface CollectedModuleOpenApi {
 }
 
 /** A discovered workspace-package module under `packages/module-*`. */
-export interface WorkspaceModuleDir {
+interface WorkspaceModuleDir {
   /** Package directory name, e.g. "module-chat". */
   name: string;
   /** Absolute path to the package's `src` directory. */
@@ -78,8 +79,8 @@ export function discoverWorkspaceModuleDirs(packagesDir: string): WorkspaceModul
 }
 
 /**
- * Scan `apps/api/src/modules/*​/index.ts` and return the merged OpenAPI
- * contributions of every discovered module.
+ * Scan the `index.ts` of each directory under `apps/api/src/modules/` and
+ * return the merged OpenAPI contributions of every discovered module.
  */
 export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
   const scriptDir = dirname(fileURLToPath(import.meta.url));

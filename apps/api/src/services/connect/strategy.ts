@@ -26,7 +26,7 @@ export type { CredentialBundle };
  * integration auth, and (for reconnect/upgrade) which existing row to target.
  */
 export interface ConnectContext {
-  scope: { orgId: string; applicationId: string };
+  scope: { orgId: string; spaceId: string };
   actor: Actor;
   integrationId: string;
   authKey: string;

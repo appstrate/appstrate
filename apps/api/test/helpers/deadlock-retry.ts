@@ -60,7 +60,7 @@ export function isTransientLockError(err: unknown): boolean {
   return false;
 }
 
-export interface DeadlockRetryOptions {
+interface DeadlockRetryOptions {
   /** Total attempts including the first one. Default 3. */
   maxAttempts?: number;
   /**

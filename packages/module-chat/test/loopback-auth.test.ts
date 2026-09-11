@@ -66,6 +66,50 @@ describe("mintMcpLoopbackToken (Pi-engine platform-MCP bearer)", () => {
     expect(res!.firstPartyLoopback).not.toBe(true);
   });
 
+  it("carries a role preview across the hop, verbatim and only when there is one", async () => {
+    // The persona is opaque to this module — it is copied out of the request
+    // context and back into `extra` for the platform to adopt — so the test
+    // asserts identity, not shape.
+    const viewAs = {
+      orgId: "org_1",
+      orgRole: "member",
+      space: { spaceId: "spc_1", role: { kind: "preset", preset: "viewer" } },
+    };
+    const withPersona = mintMcpLoopbackToken({
+      ...claims,
+      permissions: callerPermissions,
+      viewAs,
+    });
+    const carried = await chatLoopbackStrategy.authenticate({
+      headers: authHeaders(withPersona),
+    } as never);
+    expect(carried!.extra?.viewAs).toEqual(viewAs);
+
+    // Without one, nothing is carried: an absent key is what tells the platform
+    // this hop is the caller's own, so it must not become `undefined`-valued.
+    const plain = await chatLoopbackStrategy.authenticate({
+      headers: authHeaders(mintMcpLoopbackToken({ ...claims, permissions: callerPermissions })),
+    } as never);
+    expect(plain!.extra).toBeUndefined();
+  });
+
+  it("a preview grafted onto another token's signature is refused", async () => {
+    // The persona rides the SIGNED claims precisely so it cannot be added to a
+    // token after the fact.
+    const good = mintMcpLoopbackToken({ ...claims, permissions: callerPermissions });
+    const evil = mintMcpLoopbackToken({
+      ...claims,
+      permissions: callerPermissions,
+      viewAs: { orgId: "org_1", orgRole: "member", space: null },
+    });
+    const goodSig = good.slice("chatloop_".length).split(".")[1];
+    const evilPayload = evil.slice("chatloop_".length).split(".")[0];
+    const forged = `chatloop_${evilPayload}.${goodSig}`;
+    expect(
+      await chatLoopbackStrategy.authenticate({ headers: authHeaders(forged) } as never),
+    ).toBeNull();
+  });
+
   it("an expired MCP bearer is refused", async () => {
     const token = mintMcpLoopbackToken(
       { ...claims, permissions: callerPermissions },

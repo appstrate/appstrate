@@ -7,7 +7,7 @@ import { NextRunPreview } from "./next-run-preview";
 import { ActorLabel } from "./actor-label";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import { useTranslation } from "react-i18next";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 interface ScheduleCardProps {
   schedule: EnrichedSchedule;

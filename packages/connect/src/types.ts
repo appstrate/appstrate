@@ -18,7 +18,7 @@ export interface OAuthStateRecord {
   orgId: string;
   userId: string | null;
   endUserId?: string | null;
-  applicationId: string;
+  spaceId: string;
   /**
    * Honest name for the OAuth-state subject across both branches:
    * a real model-provider id OR an integration-auth sentinel

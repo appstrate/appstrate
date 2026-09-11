@@ -71,9 +71,8 @@ beforeAll(async () => {
   await startJwksServer();
   const { getTestApp } = await import("../../../../../../test/helpers/app.ts");
   const { default: oidcModule } = await import("../../../index.ts");
-  const { overrideJwksResolver } = await import("../../../services/enduser-token.ts");
-  const localSet = jose.createLocalJWKSet({ keys: [publicJwk] });
-  overrideJwksResolver(localSet as unknown as Parameters<typeof overrideJwksResolver>[0]);
+  const { overrideJwks } = await import("../../../services/enduser-token.ts");
+  overrideJwks(async () => ({ keys: [publicJwk] }));
   app = getTestApp({ modules: [oidcModule] });
 });
 
@@ -108,7 +107,7 @@ describe("ensureInstanceClient", () => {
     expect(row!.level).toBe("instance");
     expect(row!.skipConsent).toBe(true); // isFirstParty
     expect(row!.referencedOrgId).toBeNull();
-    expect(row!.referencedApplicationId).toBeNull();
+    expect(row!.referencedSpaceId).toBeNull();
     expect(row!.redirectUris).toEqual(["http://localhost:3000/auth/callback"]);
   });
 
@@ -212,14 +211,12 @@ describe("ensureInstanceClient", () => {
       scopes: ["openid", "profile", "email", "offline_access"],
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
-      metadata: JSON.stringify({ level: "instance", clientId }),
+      referencedSpaceId: null,
       skipConsent: true,
       allowSignup: true,
       signupRole: "member",
       disabled: false,
-      type: "web",
-      public: false,
+      applicationType: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -237,7 +234,6 @@ describe("ensureInstanceClient", () => {
       .where(eq(oauthClient.clientId, clientId))
       .limit(1);
     expect(row).toBeDefined();
-    expect(row!.public).toBe(true);
     expect(row!.tokenEndpointAuthMethod).toBe("none");
     expect(row!.clientSecret).toBeNull();
     // clientId unchanged → outstanding tokens still valid
@@ -255,7 +251,6 @@ describe("ensureInstanceClient", () => {
       .from(oauthClient)
       .where(eq(oauthClient.level, "instance"))
       .limit(1);
-    expect(before!.public).toBe(true);
     expect(before!.tokenEndpointAuthMethod).toBe("none");
     expect(before!.clientSecret).toBeNull();
     const originalUpdatedAt = before!.updatedAt!.getTime();
@@ -268,7 +263,6 @@ describe("ensureInstanceClient", () => {
       .where(eq(oauthClient.level, "instance"))
       .limit(1);
     expect(after!.updatedAt!.getTime()).toBe(originalUpdatedAt);
-    expect(after!.public).toBe(true);
     expect(after!.tokenEndpointAuthMethod).toBe("none");
     expect(after!.clientSecret).toBeNull();
   });
@@ -291,14 +285,12 @@ describe("ensureInstanceClient", () => {
       scopes: ["openid", "profile", "email", "offline_access"],
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
-      metadata: JSON.stringify({ level: "instance", clientId }),
+      referencedSpaceId: null,
       skipConsent: true,
       allowSignup: true,
       signupRole: "member",
       disabled: false,
-      type: "web",
-      public: false,
+      applicationType: "web",
       tokenEndpointAuthMethod: "client_secret_basic",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
@@ -317,7 +309,6 @@ describe("ensureInstanceClient", () => {
       .limit(1);
     expect(row).toBeDefined();
     // Auth shape converged
-    expect(row!.public).toBe(true);
     expect(row!.tokenEndpointAuthMethod).toBe("none");
     expect(row!.clientSecret).toBeNull();
     // Redirect URIs converged
@@ -448,8 +439,8 @@ describe("instance token strategy", () => {
       },
     });
     // Should work since the user is a member of the org
-    // (may need X-Application-Id too depending on route, but the auth + org resolution should pass)
-    expect([200, 400]).toContain(res.status); // 400 if missing X-Application-Id, but NOT 401/403
+    // (may need X-Space-Id too depending on route, but the auth + org resolution should pass)
+    expect([200, 400]).toContain(res.status); // 400 if missing X-Space-Id, but NOT 401/403
   });
 
   it("rejects instance token when user does not exist", async () => {

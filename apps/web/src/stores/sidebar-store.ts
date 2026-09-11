@@ -6,6 +6,7 @@ interface SidebarState {
   open: boolean;
   setOpen: (open: boolean) => void;
   toggle: () => void;
+  setOpenTransient: (open: boolean) => void;
 }
 
 /**
@@ -29,6 +30,9 @@ function createSidebarStore(storageKey: string) {
       localStorage.setItem(storageKey, String(next));
       set({ open: next });
     },
+    // Folds the rail WITHOUT writing the preference: a screen that needs the
+    // width back must not redecide what the user chose for every other screen.
+    setOpenTransient: (open) => set({ open }),
   }));
 }
 

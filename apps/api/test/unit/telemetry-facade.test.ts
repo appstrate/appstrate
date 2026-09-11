@@ -30,10 +30,10 @@ import {
   recordContainerSpawn,
   recordLlmLatency,
   recordProcessAnomaly,
-  recordDocumentCreated,
-  recordDocumentDeleted,
-  recordDocumentStorageLimitRejection,
-  recordDocumentPartialPublication,
+  recordFileCreated,
+  recordFileDeleted,
+  recordFileStorageLimitRejection,
+  recordFilePartialPublication,
   setQueueDepthSource,
   shutdownTelemetry,
   type QueueDepthSource,
@@ -72,12 +72,12 @@ function fakeProvider(opts: { trust?: boolean; withMiddleware?: boolean } = {}) 
       void calls.push({ method: "recordStorageDeletionSweep", args }),
     recordStorageDeletionResult: (...args) =>
       void calls.push({ method: "recordStorageDeletionResult", args }),
-    recordDocumentCreated: (...args) => void calls.push({ method: "recordDocumentCreated", args }),
-    recordDocumentDeleted: (...args) => void calls.push({ method: "recordDocumentDeleted", args }),
-    recordDocumentStorageLimitRejection: (...args) =>
-      void calls.push({ method: "recordDocumentStorageLimitRejection", args }),
-    recordDocumentPartialPublication: (...args) =>
-      void calls.push({ method: "recordDocumentPartialPublication", args }),
+    recordFileCreated: (...args) => void calls.push({ method: "recordFileCreated", args }),
+    recordFileDeleted: (...args) => void calls.push({ method: "recordFileDeleted", args }),
+    recordFileStorageLimitRejection: (...args) =>
+      void calls.push({ method: "recordFileStorageLimitRejection", args }),
+    recordFilePartialPublication: (...args) =>
+      void calls.push({ method: "recordFilePartialPublication", args }),
     setQueueDepthSource: (source) => {
       queueSource = source;
     },
@@ -115,10 +115,10 @@ describe("telemetry façade — no provider (module absent)", () => {
     expect(() => recordContainerSpawn(10, { sidecar: true })).not.toThrow();
     expect(() => recordLlmLatency(5, { api_shape: "openai", status: 200 })).not.toThrow();
     expect(() => recordProcessAnomaly({ kind: "uncaughtException" })).not.toThrow();
-    expect(() => recordDocumentCreated({ purpose: "agent_output" })).not.toThrow();
-    expect(() => recordDocumentDeleted(3)).not.toThrow();
-    expect(() => recordDocumentStorageLimitRejection()).not.toThrow();
-    expect(() => recordDocumentPartialPublication()).not.toThrow();
+    expect(() => recordFileCreated({ purpose: "agent_output" })).not.toThrow();
+    expect(() => recordFileDeleted(3)).not.toThrow();
+    expect(() => recordFileStorageLimitRejection()).not.toThrow();
+    expect(() => recordFilePartialPublication()).not.toThrow();
     await expect(shutdownTelemetry()).resolves.toBeUndefined();
   });
 
@@ -162,30 +162,30 @@ describe("telemetry façade — provider installed", () => {
     expect(currentTraceparent()).toBe("00-provider-traceparent-01");
   });
 
-  it("delegates the documents lifecycle counters with the exact arguments", () => {
+  it("delegates the files lifecycle counters with the exact arguments", () => {
     const { provider, calls } = fakeProvider();
     installTelemetryProvider(provider);
 
-    recordDocumentCreated({ purpose: "user_upload" });
-    recordDocumentDeleted(4);
-    recordDocumentStorageLimitRejection();
-    recordDocumentPartialPublication();
+    recordFileCreated({ purpose: "user_upload" });
+    recordFileDeleted(4);
+    recordFileStorageLimitRejection();
+    recordFilePartialPublication();
 
     expect(calls).toEqual([
-      { method: "recordDocumentCreated", args: [{ purpose: "user_upload" }] },
-      { method: "recordDocumentDeleted", args: [4] },
-      { method: "recordDocumentStorageLimitRejection", args: [] },
-      { method: "recordDocumentPartialPublication", args: [] },
+      { method: "recordFileCreated", args: [{ purpose: "user_upload" }] },
+      { method: "recordFileDeleted", args: [4] },
+      { method: "recordFileStorageLimitRejection", args: [] },
+      { method: "recordFilePartialPublication", args: [] },
     ]);
   });
 
-  it("recordDocumentDeleted is a no-op for a non-positive count (never reaches the provider)", () => {
+  it("recordFileDeleted is a no-op for a non-positive count (never reaches the provider)", () => {
     const { provider, calls } = fakeProvider();
     installTelemetryProvider(provider);
-    recordDocumentDeleted(0);
-    recordDocumentDeleted(-2);
-    recordDocumentDeleted(); // defaults to 1 → delegates
-    expect(calls).toEqual([{ method: "recordDocumentDeleted", args: [1] }]);
+    recordFileDeleted(0);
+    recordFileDeleted(-2);
+    recordFileDeleted(); // defaults to 1 → delegates
+    expect(calls).toEqual([{ method: "recordFileDeleted", args: [1] }]);
   });
 
   it("replays a queue-depth source registered BEFORE the provider install", () => {

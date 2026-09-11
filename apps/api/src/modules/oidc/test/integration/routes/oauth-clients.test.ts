@@ -28,12 +28,12 @@ import {
 
 const app = getTestApp({ modules: [oidcModule] });
 
-function applicationLevelBody(ctx: TestContext, overrides: Record<string, unknown> = {}) {
+function spaceLevelBody(ctx: TestContext, overrides: Record<string, unknown> = {}) {
   return {
-    level: "application" as const,
+    level: "space" as const,
     name: "Acme Portal",
     redirectUris: ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: ctx.defaultAppId,
+    referencedSpaceId: ctx.defaultSpaceId,
     ...overrides,
   };
 }
@@ -65,21 +65,21 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
       clientId: string;
       clientSecret: string;
       level: string;
-      referencedApplicationId: string | null;
+      referencedSpaceId: string | null;
       referencedOrgId: string | null;
       redirectUris: string[];
     };
     expect(body.clientId).toStartWith("oauth_");
     expect(body.clientSecret.length).toBeGreaterThan(20);
-    expect(body.level).toBe("application");
-    expect(body.referencedApplicationId).toBe(ctx.defaultAppId);
+    expect(body.level).toBe("space");
+    expect(body.referencedSpaceId).toBe(ctx.defaultSpaceId);
     expect(body.referencedOrgId).toBeNull();
     expect(body.redirectUris).toEqual(["https://acme.example.com/oauth/callback"]);
 
@@ -102,13 +102,13 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const body = (await res.json()) as {
       level: string;
       referencedOrgId: string | null;
-      referencedApplicationId: string | null;
+      referencedSpaceId: string | null;
       allowSignup: boolean;
       signupRole: string;
     };
     expect(body.level).toBe("org");
     expect(body.referencedOrgId).toBe(ctx.orgId);
-    expect(body.referencedApplicationId).toBeNull();
+    expect(body.referencedSpaceId).toBeNull();
     // Defaults when signup policy is not specified.
     expect(body.allowSignup).toBe(false);
     expect(body.signupRole).toBe("member");
@@ -135,11 +135,11 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST rejects signupRole on application-level clients (400)", async () => {
+  it("POST rejects signupRole on space-level clients (400)", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx, { signupRole: "admin" })),
+      body: JSON.stringify(spaceLevelBody(ctx, { signupRole: "admin" })),
     });
     expect(res.status).toBe(400);
   });
@@ -154,41 +154,52 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const patchRes = await app.request(`/api/oauth/clients/${created.clientId}`, {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ allowSignup: true, signupRole: "viewer" }),
+      body: JSON.stringify({
+        allowSignup: true,
+        signupRole: "guest",
+        signupSpaceAssignments: [{ space_id: ctx.defaultSpaceId, preset_role: "viewer" }],
+      }),
     });
     expect(patchRes.status).toBe(200);
-    const updated = (await patchRes.json()) as { allowSignup: boolean; signupRole: string };
+    const updated = (await patchRes.json()) as {
+      allowSignup: boolean;
+      signupRole: string;
+      signupSpaceAssignments: unknown[];
+    };
     expect(updated.allowSignup).toBe(true);
-    expect(updated.signupRole).toBe("viewer");
+    expect(updated.signupRole).toBe("guest");
+    expect(updated.signupSpaceAssignments).toEqual([
+      { space_id: ctx.defaultSpaceId, preset_role: "viewer" },
+    ]);
   });
 
-  it("POST defaults allowSignup=false on application-level create (secure-by-default)", async () => {
+  it("POST defaults allowSignup=false on space-level create (secure-by-default)", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { allowSignup: boolean };
     expect(body.allowSignup).toBe(false);
   });
 
-  it("POST accepts allowSignup=true on application-level create", async () => {
+  it("POST accepts allowSignup=true on space-level create", async () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx, { allowSignup: true })),
+      body: JSON.stringify(spaceLevelBody(ctx, { allowSignup: true })),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { allowSignup: boolean };
     expect(body.allowSignup).toBe(true);
   });
 
-  it("PATCH flips allowSignup on an application-level client", async () => {
+  it("PATCH flips allowSignup on a space-level client", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const created = (await createRes.json()) as {
       clientId: string;
@@ -205,11 +216,11 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(updated.allowSignup).toBe(true);
   });
 
-  it("PATCH rejects signupRole on an application-level client (400)", async () => {
+  it("PATCH rejects signupRole on a space-level client (400)", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const created = (await createRes.json()) as { clientId: string };
     const patchRes = await app.request(`/api/oauth/clients/${created.clientId}`, {
@@ -234,9 +245,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(
-        applicationLevelBody(ctx, { referencedApplicationId: other.defaultAppId }),
-      ),
+      body: JSON.stringify(spaceLevelBody(ctx, { referencedSpaceId: other.defaultSpaceId })),
     });
     expect(res.status).toBe(403);
   });
@@ -245,7 +254,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx, { redirectUris: ["not-a-url"] })),
+      body: JSON.stringify(spaceLevelBody(ctx, { redirectUris: ["not-a-url"] })),
     });
     expect(res.status).toBe(400);
   });
@@ -264,7 +273,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       const res = await app.request("/api/oauth/clients", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify(applicationLevelBody(ctx, { redirectUris: [uri] })),
+        body: JSON.stringify(spaceLevelBody(ctx, { redirectUris: [uri] })),
       });
       expect(res.status).toBe(400);
     });
@@ -275,7 +284,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(
-        applicationLevelBody(ctx, {
+        spaceLevelBody(ctx, {
           redirectUris: ["https://satellite.example.com/oauth/callback"],
         }),
       ),
@@ -298,7 +307,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       const res = await app.request("/api/oauth/clients", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify(applicationLevelBody(ctx, { redirectUris: [redirectUri] })),
+        body: JSON.stringify(spaceLevelBody(ctx, { redirectUris: [redirectUri] })),
       });
       expect(res.status).toBe(201);
     });
@@ -309,7 +318,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(
-        applicationLevelBody(ctx, { redirectUris: ["http://satellite.example.com/cb"] }),
+        spaceLevelBody(ctx, { redirectUris: ["http://satellite.example.com/cb"] }),
       ),
     });
     expect(res.status).toBe(400);
@@ -320,7 +329,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(
-        applicationLevelBody(ctx, { scopes: ["openid", "profile", "email", "superadmin:*"] }),
+        spaceLevelBody(ctx, { scopes: ["openid", "profile", "email", "superadmin:*"] }),
       ),
     });
     expect(res.status).toBe(400);
@@ -331,7 +340,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(
-        applicationLevelBody(ctx, {
+        spaceLevelBody(ctx, {
           scopes: ["openid", "profile", "email", "offline_access", "runs:read"],
         }),
       ),
@@ -343,7 +352,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const res = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx, { name: undefined })),
+      body: JSON.stringify(spaceLevelBody(ctx, { name: undefined })),
     });
     expect(res.status).toBe(400);
   });
@@ -352,7 +361,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx, { name: "EndUser One" })),
+      body: JSON.stringify(spaceLevelBody(ctx, { name: "EndUser One" })),
     });
     await app.request("/api/oauth/clients", {
       method: "POST",
@@ -374,7 +383,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const created = (await createRes.json()) as { clientId: string };
 
@@ -396,7 +405,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx, { scopes: ["openid", "profile", "email"] })),
+      body: JSON.stringify(spaceLevelBody(ctx, { scopes: ["openid", "profile", "email"] })),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
@@ -418,7 +427,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
@@ -436,7 +445,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
@@ -467,7 +476,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const first = (await createRes.json()) as { clientId: string; clientSecret: string };
 
@@ -497,7 +506,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
@@ -521,7 +530,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(
-        applicationLevelBody(ctx, {
+        spaceLevelBody(ctx, {
           name: "Used client",
           redirectUris: ["https://c.example.com/cb"],
         }),
@@ -583,12 +592,12 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx, { name: "Org A client" })),
+      body: JSON.stringify(spaceLevelBody(ctx, { name: "Org A client" })),
     });
     await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(otherCtx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(otherCtx, { name: "Org B client" })),
+      body: JSON.stringify(spaceLevelBody(otherCtx, { name: "Org B client" })),
     });
 
     const listA = await app.request("/api/oauth/clients", { headers: authHeaders(ctx) });
@@ -613,7 +622,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify(
-        applicationLevelBody(ctx, {
+        spaceLevelBody(ctx, {
           postLogoutRedirectUris: ["https://portal.example.com/"],
         }),
       ),
@@ -641,7 +650,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
@@ -670,7 +679,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify(applicationLevelBody(ctx)),
+      body: JSON.stringify(spaceLevelBody(ctx)),
     });
     const { clientId, redirectUris } = (await createRes.json()) as {
       clientId: string;

@@ -29,11 +29,9 @@ import { runStatusValues, type RunStatus } from "@appstrate/shared-types";
 export function AgentRunsTab({
   packageId,
   versionLabel,
-  configSchemaOverride,
 }: {
   packageId: string;
   versionLabel: string | undefined;
-  configSchemaOverride?: JSONSchemaObject;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const location = useLocation();
@@ -45,7 +43,7 @@ export function AgentRunsTab({
     ),
   );
   const { data: detail } = usePackageDetail("agent", packageId);
-  const readiness = useAgentReadiness(detail, undefined, undefined, configSchemaOverride);
+  const readiness = useAgentReadiness(detail);
   const filters: FilterSpec[] = [
     {
       id: "status",
@@ -61,8 +59,8 @@ export function AgentRunsTab({
 
   if (!detail) return null;
 
-  const { hasRequiredConfig, hasPrompt, hasRequiredSkills } = readiness;
-  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig;
+  const { hasPrompt, hasRequiredSkills } = readiness;
+  const runDisabled = !hasPrompt || !hasRequiredSkills;
 
   return (
     <RunList

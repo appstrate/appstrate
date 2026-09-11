@@ -9,11 +9,13 @@ duplicating the detail.
 - [**FIRECRACKER.md**](./FIRECRACKER.md) — Firecracker execution backend (`RUN_ADAPTER=firecracker`). One microVM per run behind a KVM hardware boundary; the platform → `appstrate-runner` host-daemon split. Opt-in built-in module.
 - [**SIDECAR.md**](./SIDECAR.md) — Sidecar protocol. Credential-isolating MCP server that injects secrets the agent never sees.
 - [**INTEGRATIONS_RUNTIME.md**](./INTEGRATIONS_RUNTIME.md) — AFPS integrations runtime: per-integration runner containers, MITM credential proxy, remote HTTP/SSE MCP transport.
-- [**RUN_COST.md**](./RUN_COST.md) — Run cost tracking. The `llm_usage` ledger and single `computeRunCost` read path.
+- [**RUN_COST.md**](./RUN_COST.md) — Run cost tracking. The `llm_usage` ledger and single `computeRunSpend` read path.
 
-## Data & documents
+## Tenancy & data
 
-- [**DOCUMENTS.md**](./DOCUMENTS.md) — Documents platform: staged uploads, agent outputs, `document://` refs, durable storage quotas, and the untrusted-HTML preview origin.
+- [**RBAC_PERMISSIONS_SPEC.md**](./RBAC_PERMISSIONS_SPEC.md) — Roles & permissions: fixed org roles, per-space membership with preset/custom role bundles, the effective-permission resolver, and the OSS/EE line for custom roles. Design spec.
+- [**SPACES.md**](./SPACES.md) — Spaces: the org-scoped container for agents, runs and connections. `X-Space-Id` resolution, the `spc_` id guard, and the delete cascade.
+- [**FILES.md**](./FILES.md) — Files platform: staged uploads, agent outputs, `appfile://` refs, durable storage quotas, and the untrusted-HTML preview origin.
 
 ## Models & providers
 

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const proxiesPaths = {
   "/api/proxies": {
     get: {
@@ -11,10 +13,7 @@ export const proxiesPaths = {
       responses: {
         "200": {
           description: "Proxy list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -74,6 +73,7 @@ export const proxiesPaths = {
                   description: "Proxy URL (http://user:pass@host:port)",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -81,10 +81,7 @@ export const proxiesPaths = {
       responses: {
         "201": {
           description: "Proxy created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -133,6 +130,7 @@ export const proxiesPaths = {
                   description: "Proxy ID to set as default, or null to unset",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -141,10 +139,7 @@ export const proxiesPaths = {
         "200": {
           description:
             "Default proxy updated — the bare *effective* default proxy resource (same shape as the `GET /api/proxies` list items). When no DB row is flagged, the system-default fallback (if any) is surfaced.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgProxy" },
@@ -165,9 +160,7 @@ export const proxiesPaths = {
         "204": {
           description:
             "Default unset and no proxy remains in effect (no system default configured) — no resource to return.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -200,6 +193,7 @@ export const proxiesPaths = {
                 url: { type: "string", format: "uri" },
                 enabled: { type: "boolean" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -207,10 +201,7 @@ export const proxiesPaths = {
       responses: {
         "200": {
           description: "Proxy updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -250,9 +241,7 @@ export const proxiesPaths = {
       responses: {
         "204": {
           description: "Proxy deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -273,10 +262,7 @@ export const proxiesPaths = {
       responses: {
         "200": {
           description: "Test result",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/TestResult" },

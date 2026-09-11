@@ -24,7 +24,7 @@ import {
   saveIntegrationConnection,
   selectAccessibleConnection,
 } from "../../../src/services/integration-connections.ts";
-import type { AppScope } from "../../../src/lib/scope.ts";
+import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 
 const INTEG_A = "@bindorg/gmail";
@@ -32,7 +32,7 @@ const INTEG_B = "@bindorg/slack";
 
 describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-10)", () => {
   let ctx: TestContext;
-  let scope: AppScope;
+  let scope: SpaceScope;
   let actor: Actor;
   let connAId: string;
   let connBId: string;
@@ -40,10 +40,10 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "bindorg" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     actor = { type: "user", id: ctx.user.id };
 
-    // Two DIFFERENT integrations in the SAME application, both connected by
+    // Two DIFFERENT integrations in the SAME space, both connected by
     // the SAME actor — the exact setup where an id-only lookup would leak.
     await seedPackage({ id: INTEG_A, orgId: ctx.orgId, type: "integration", source: "local" });
     await seedPackage({ id: INTEG_B, orgId: ctx.orgId, type: "integration", source: "local" });
@@ -72,14 +72,14 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
     // pre-fix code (id-only WHERE) returned B's row and injected B's
     // credentials under A's manifest. Post-fix this MUST NOT resolve.
     const leaked = await selectAccessibleConnection(INTEG_A, ["oauth"], connBId, {
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor,
     });
     expect(leaked).toBeNull();
 
     // Symmetric direction for completeness.
     const leakedReverse = await selectAccessibleConnection(INTEG_B, ["oauth"], connAId, {
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor,
     });
     expect(leakedReverse).toBeNull();
@@ -87,7 +87,7 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
 
   it("resolves the connection when the id belongs to the requested integration (happy path)", async () => {
     const resolved = await selectAccessibleConnection(INTEG_B, ["oauth"], connBId, {
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor,
     });
     expect(resolved).not.toBeNull();
@@ -100,7 +100,7 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
     // `auth_key: "api_key"` (AFPS §4.1). The pinned lookup must fail closed —
     // never hand back credentials acquired under a different auth method.
     const mismatch = await selectAccessibleConnection(INTEG_B, ["oauth"], connBId, {
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor,
       requiredAuthKey: "api_key",
     });
@@ -109,7 +109,7 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
 
   it("resolves when the pinned requiredAuthKey matches the row's authKey", async () => {
     const resolved = await selectAccessibleConnection(INTEG_B, ["oauth"], connBId, {
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor,
       requiredAuthKey: "oauth",
     });

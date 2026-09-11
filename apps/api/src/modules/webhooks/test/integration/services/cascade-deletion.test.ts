@@ -3,7 +3,7 @@
 /**
  * Cascade deletion test for webhook-owned tables.
  *
- * Asserts that the module's `application_id` FK to `applications` is declared
+ * Asserts that the module's `space_id` FK to `spaces` is declared
  * with ON DELETE CASCADE. Lives in the module (not core) because the FK is
  * declared in the webhooks module migration, not in core schema.
  */
@@ -11,45 +11,45 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
-import { seedApplication } from "../../../../../../test/helpers/seed.ts";
+import { seedSpace } from "../../../../../../test/helpers/seed.ts";
 import { assertDbHas, assertDbMissing } from "../../../../../../test/helpers/assertions.ts";
-import { deleteApplication } from "../../../../../services/applications.ts";
+import { deleteSpace } from "../../../../../services/spaces.ts";
 import { seedWebhook } from "../../helpers/seed.ts";
 import { webhooks } from "@appstrate/db/schema";
 
 describe("Webhooks cascade deletion", () => {
   let userId: string;
   let orgId: string;
-  let applicationId: string;
+  let spaceId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { id } = await createTestUser();
     userId = id;
-    const { org, defaultAppId } = await createTestOrg(userId);
+    const { org, defaultSpaceId } = await createTestOrg(userId);
     orgId = org.id;
-    applicationId = defaultAppId;
+    spaceId = defaultSpaceId;
   });
 
-  it("deleting an application cascades to its webhooks", async () => {
-    const customApp = await seedApplication({ orgId, name: "Cascade Target", createdBy: userId });
-    const wh = await seedWebhook({ orgId, applicationId: customApp.id });
+  it("deleting a space cascades to its webhooks", async () => {
+    const customSpace = await seedSpace({ orgId, name: "Cascade Target", createdBy: userId });
+    const wh = await seedWebhook({ orgId, spaceId: customSpace.id });
 
     await assertDbHas(webhooks, eq(webhooks.id, wh.id));
 
-    await deleteApplication(orgId, customApp.id);
+    await deleteSpace(orgId, customSpace.id);
 
     await assertDbMissing(webhooks, eq(webhooks.id, wh.id));
   });
 
   it("deleting a custom app does not affect webhooks in the default app", async () => {
-    const defaultWh = await seedWebhook({ orgId, applicationId: applicationId });
+    const defaultWh = await seedWebhook({ orgId, spaceId: spaceId });
 
-    const customApp = await seedApplication({ orgId, name: "Expendable", createdBy: userId });
-    await seedWebhook({ orgId, applicationId: customApp.id });
-    await deleteApplication(orgId, customApp.id);
+    const customSpace = await seedSpace({ orgId, name: "Expendable", createdBy: userId });
+    await seedWebhook({ orgId, spaceId: customSpace.id });
+    await deleteSpace(orgId, customSpace.id);
 
     await assertDbHas(webhooks, eq(webhooks.id, defaultWh.id));
-    expect(defaultWh.applicationId).toBe(applicationId);
+    expect(defaultWh.spaceId).toBe(spaceId);
   });
 });

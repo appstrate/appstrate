@@ -24,15 +24,6 @@ describe("unwrapResult — envelope peeling", () => {
     expect(unwrapResult(mcp)).toEqual(payload);
   });
 
-  it("peels the AI-SDK { type:'content', value } bridge", () => {
-    const bridge = { type: "content", value: [{ type: "text", text: JSON.stringify(payload) }] };
-    expect(unwrapResult(bridge)).toEqual(payload);
-  });
-
-  it("peels the { type:'json', value } bridge", () => {
-    expect(unwrapResult({ type: "json", value: payload })).toEqual(payload);
-  });
-
   it("peels a bare content array", () => {
     expect(unwrapResult([{ type: "text", text: JSON.stringify(payload) }])).toEqual(payload);
   });

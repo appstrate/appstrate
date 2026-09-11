@@ -20,13 +20,36 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
-import { persistUserMessage, persistAssistantMessage } from "../src/persistence.ts";
+import { persistUserMessage, persistAssistantMessage, ensureSession } from "../src/persistence.ts";
+import { db } from "@appstrate/db/client";
+import { sql } from "drizzle-orm";
 import type { UIMessage } from "ai";
 
 const app = getTestApp();
 
 function uiMessage(id: string, role: "user" | "assistant", text: string): UIMessage {
   return { id, role, parts: [{ type: "text", text }] } as UIMessage;
+}
+
+/**
+ * The writer's DB slice, counting how many times each statement builder is
+ * reached. A Proxy over the real `db`: every `client.select(…)` /
+ * `client.insert(…)` / `client.update(…)` is one property access, and the call
+ * itself still runs against the real database (with `this` forwarded), so what
+ * is counted is exactly the statements that went out.
+ */
+function countingClient(): {
+  client: typeof db;
+  counts: Record<"select" | "insert" | "update", number>;
+} {
+  const counts = { select: 0, insert: 0, update: 0 };
+  const client = new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop === "select" || prop === "insert" || prop === "update") counts[prop] += 1;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  return { client, counts };
 }
 
 describe("chat session read-state", () => {
@@ -146,5 +169,185 @@ describe("chat session read-state", () => {
     const id = await createSession();
     const other = await createTestContext({ orgSlug: "otherorg" });
     expect(await markRead(id, authHeaders(other))).toBe(404);
+  });
+
+  /**
+   * The title is derived by a query that filters on the role INSIDE the jsonb
+   * payload (`content->>'role'`) and bounds the scan. A wrong operator there
+   * returns no rows and the title silently stays null forever, so it needs an
+   * assertion rather than a green suite that never looked.
+   */
+  it("derives the title from the first user message, skipping assistant turns", async () => {
+    const id = await createSession();
+    await persistUserMessage(id, uiMessage("u1", "user", "Combien de runs ce mois-ci ?"));
+    await persistAssistantMessage(id, uiMessage("a1", "assistant", "Quarante-deux."), "u1");
+    await persistUserMessage(id, uiMessage("u2", "user", "Et le mois dernier ?"));
+
+    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { title: string | null }).toMatchObject({
+      title: "Combien de runs ce mois-ci ?",
+    });
+  });
+
+  it("skips a user message with no text and titles from the next one", async () => {
+    const id = await createSession();
+    // Only an attachment part: `uiMessageText` yields "" and the loop must go on.
+    await persistUserMessage(id, {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "file", url: "appfile://file_1", mediaType: "text/plain" }],
+    } as unknown as UIMessage);
+    await persistUserMessage(id, uiMessage("u2", "user", "Résume ce fichier"));
+
+    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    expect((await res.json()) as { title: string | null }).toMatchObject({
+      title: "Résume ce fichier",
+    });
+  });
+
+  async function titleOf(id: string): Promise<string | null> {
+    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { title: string | null }).title;
+  }
+
+  /**
+   * The title is written as `COALESCE(title, <candidate>)` in the same UPDATE
+   * that records the turn. What that must mean: the FIRST text-bearing user
+   * message titles the session, and nothing that comes after — a later user
+   * turn, and above all the owner's own rename — is ever overwritten. A write
+   * of the candidate that is not guarded by the existing value fails here on
+   * the third turn.
+   */
+  it("titles from the first user message with text and never overwrites an existing title", async () => {
+    const id = await createSession();
+    await persistUserMessage(id, {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "file", url: "appfile://file_1", mediaType: "text/plain" }],
+    } as unknown as UIMessage);
+    // No text anywhere yet → no candidate, no scan hit, still untitled.
+    expect(await titleOf(id)).toBeNull();
+
+    await persistUserMessage(id, uiMessage("u2", "user", "Résume ce fichier"));
+    expect(await titleOf(id)).toBe("Résume ce fichier");
+
+    await persistUserMessage(id, uiMessage("u3", "user", "Et maintenant traduis-le"));
+    expect(await titleOf(id)).toBe("Résume ce fichier");
+
+    const rename = await app.request(`/api/chat/sessions/${id}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "renommée" }),
+    });
+    expect(rename.status).toBe(204);
+    await persistUserMessage(id, uiMessage("u4", "user", "Encore une question"));
+    expect(await titleOf(id)).toBe("renommée");
+  });
+
+  /**
+   * The statement budget of a user turn on the chat route's path (the message
+   * always carries a client-minted id): one INSERT, one UPDATE, and NO read —
+   * neither the predecessor lookup (hash material only a derived id needs) nor
+   * the session SELECT / title scan the UPDATE used to be preceded by. Either
+   * read coming back makes `select` non-zero.
+   */
+  it("an id-bearing user message costs one insert and one update, with no read in front", async () => {
+    const id = await createSession();
+    const first = countingClient();
+    await persistUserMessage(id, uiMessage("u1", "user", "hello"), first.client);
+    expect(first.counts).toEqual({ select: 0, insert: 1, update: 1 });
+    // The title landed in that same UPDATE.
+    expect(await titleOf(id)).toBe("hello");
+
+    // Control: an id-less message DOES read its predecessor — it is the hash
+    // material of the derived id — which proves the counter sees the reads it
+    // is asserting the absence of above.
+    const second = countingClient();
+    const derived = await persistUserMessage(
+      id,
+      { role: "user", parts: [{ type: "text", text: "again" }] } as UIMessage,
+      second.client,
+    );
+    expect(derived).toMatch(/^gen_[0-9a-f]{32}$/);
+    expect(second.counts.select).toBe(1);
+  });
+
+  /**
+   * The scan survives as a fallback for the one case the in-hand candidate
+   * cannot cover: a turn with no candidate (an assistant reply) landing on a
+   * session that is still untitled while a text-bearing user message exists
+   * in storage. Reproduced by clearing the title underneath the session.
+   */
+  it("falls back to scanning stored user messages when a candidate-less turn finds no title", async () => {
+    const id = await createSession();
+    await persistUserMessage(id, uiMessage("u1", "user", "Question initiale"));
+    await db.execute(sql`UPDATE chat_sessions SET title = NULL WHERE id = ${id}`);
+    expect(await titleOf(id)).toBeNull();
+
+    await persistAssistantMessage(id, uiMessage("a1", "assistant", "Réponse."), "u1");
+    expect(await titleOf(id)).toBe("Question initiale");
+  });
+});
+
+describe("ensureSession refuses a foreign session without writing to it", () => {
+  let owner: TestContext;
+  let stranger: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    owner = await createTestContext({ orgSlug: "victimorg" });
+    stranger = await createTestContext({ orgSlug: "strangerorg" });
+  });
+
+  /**
+   * `xmin` is the transaction that produced the row's current version. Postgres
+   * bumps it on ANY update, including one that writes a column its own value —
+   * which is exactly the write we are asserting does not happen. Nothing
+   * user-visible would move today (`chat_sessions.updatedAt` is `.defaultNow()`
+   * with no `$onUpdateFn`), so a test written against observable columns would
+   * pass either way and go on passing right up until someone adds one.
+   */
+  async function xminOf(id: string): Promise<string> {
+    // `db.execute` returns a bare row array on postgres.js and a `{ rows }`
+    // envelope on PGlite; the suite runs on both depending on TEST_TIER.
+    const res = await db.execute(sql`select xmin::text as x from chat_sessions where id = ${id}`);
+    const rows = (Array.isArray(res) ? res : (res as { rows: unknown[] }).rows) as {
+      x: string;
+    }[];
+    const row = rows[0];
+    if (!row) throw new Error(`session ${id} not found`);
+    return row.x;
+  }
+
+  async function createSessionAs(ctx: TestContext): Promise<string> {
+    const res = await app.request("/api/chat/sessions", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it("control: the owner's own ensureSession DOES rewrite the row", async () => {
+    // Without this the assertion below would hold just as well against a table
+    // whose xmin never moves, and would be proving nothing.
+    const id = await createSessionAs(owner);
+    const before = await xminOf(id);
+    await ensureSession(id, owner.orgId, owner.user.id, owner.defaultSpaceId);
+    expect(await xminOf(id)).not.toBe(before);
+  });
+
+  it("a stranger naming the id gets 404 and leaves the row byte-identical", async () => {
+    const id = await createSessionAs(owner);
+    const before = await xminOf(id);
+
+    await expect(
+      ensureSession(id, stranger.orgId, stranger.user.id, stranger.defaultSpaceId),
+    ).rejects.toThrow(/not found/i);
+
+    expect(await xminOf(id)).toBe(before);
   });
 });

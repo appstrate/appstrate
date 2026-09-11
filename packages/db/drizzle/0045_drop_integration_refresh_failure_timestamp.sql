@@ -1,0 +1,22 @@
+-- Drop `integration_connections.last_refresh_failure_at` — the third column
+-- annotated WRITTEN, NEVER READ, and the last one left.
+--
+-- 0044 dropped `model_provider_credentials.last_refresh_failure_at` and
+-- `model_provider_pairings.consumed_from_ip` on the same reasoning. This column
+-- is the integration-side twin of the first of those, written by the same kind
+-- of code path, and it survived that pass for the same reason the other two
+-- did: the annotation said it held data already collected.
+--
+-- Written by `recordIntegrationRefreshFailure` beside `refresh_failure_count`
+-- on every transient refresh failure, and reset to NULL by
+-- `persistCredentialBundle` on every successful credential write. The COUNTER
+-- is what drives the `needs_reconnection` escalation; this timestamp was never
+-- a term in that predicate, is exposed in no DTO, appears in no query, and was
+-- read only by the integration tests asserting its own write. Both writers go
+-- with the column.
+--
+-- FORWARD-ONLY, and cheaply so: the value was an input to no decision, so
+-- nothing downstream needs the dropped rows. `IF EXISTS` so a partially
+-- migrated environment converges, matching 0044's own drops and the
+-- catalog-guarded style of 0041-0043.
+ALTER TABLE "integration_connections" DROP COLUMN IF EXISTS "last_refresh_failure_at";

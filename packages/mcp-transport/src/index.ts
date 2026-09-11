@@ -83,6 +83,21 @@ export interface AppstrateToolDefinition {
   handler: AppstrateToolHandler;
 }
 
+// There is no `hidden` flag on a tool definition.
+//
+// One existed, for exactly one use: a RETIRED tool name kept callable but
+// unlisted after a rename, because this server advertises
+// `tools: { listChanged: false }` and a client may cache the list for its whole
+// session. That use was then removed — `apps/api/src/modules/mcp/tools.ts`
+// registers no retired name, listed or hidden, on the grounds that the cost was
+// "a permanent second dispatch path whose only proof of life was its own test".
+// The flag outlived its only consumer by three commits, leaving a filter that
+// filtered nothing and a test asserting a capability nothing used.
+//
+// If a future rename wants it back it is three lines. Do not re-add it
+// speculatively: an unlisted-but-callable name is a second dispatch path, and
+// this codebase has now twice decided it does not want one.
+
 const DEFAULT_SERVER_INFO: Implementation = {
   name: "appstrate-mcp-server",
   version: "0.0.0",
@@ -267,7 +282,6 @@ export async function createInProcessPair(
 export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 export type {
   CallToolResult,
-  Implementation,
   ReadResourceResult,
   Resource,
   Tool,
@@ -276,25 +290,13 @@ export type {
 // MCP client factories. The agent connects to the sidecar's `/mcp`
 // over Streamable HTTP; the CLI uses the in-process pair already
 // exported above.
-export {
-  createMcpHttpClient,
-  wrapClient,
-  type AppstrateMcpClient,
-  type AppstrateMcpClientOptions,
-  type McpHttpClientOptions,
-  type McpConnectRetryOptions,
-  type McpRetryAttemptInfo,
-} from "./client.ts";
+export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./client.ts";
 
 // Subprocess transport — spawn a third-party MCP server as a child
 // process and speak newline-delimited JSON-RPC over stdio. Compatible
 // with the SDK's Transport interface so the same `Client` works against
 // http or subprocess servers without refactor.
-export {
-  SubprocessTransport,
-  SubprocessTransportError,
-  type SubprocessTransportOptions,
-} from "./transports/subprocess.ts";
+export { SubprocessTransport } from "./transports/subprocess.ts";
 
 // Tool descriptor sanitisation — strip hidden Unicode, cap field
 // lengths, defeat Full-Schema Poisoning before any third-party tool

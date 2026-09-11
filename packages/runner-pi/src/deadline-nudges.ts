@@ -59,7 +59,7 @@ export const DEADLINE_NUDGE_EVENT = "deadline_nudge";
  * `@appstrate/afps-runtime/bundle/platform-prompt`): which tools exist varies
  * per agent, so platform-authored prose never names one — "the appropriate
  * tool" is taught by each tool's MCP `description`, not from here. Naming
- * `output` / `publish_document` would produce instructions for tools half the
+ * `output` / `publish_file` would produce instructions for tools half the
  * agents do not have.
  *
  * Numbers are computed from the checkpoint, never hardcoded in the prose.
@@ -79,7 +79,7 @@ function nudgeText(remainingSeconds: number, timeoutSeconds: number, final: bool
   );
 }
 
-export interface DeadlineNudgeDeps {
+interface DeadlineNudgeDeps {
   /** The run's wall-clock budget. `<= 0` (or non-finite) disables nudging entirely. */
   timeoutSeconds: number;
   /** Queues a steering message on the live session (`AgentSession.steer`). */

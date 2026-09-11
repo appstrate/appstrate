@@ -8,7 +8,7 @@ import { Badge, type BadgeProps } from "@appstrate/ui/components/badge";
  * RECOVERABLE warning (the owner can renew) — it must read as amber, never
  * red/destructive, on every surface.
  */
-export type ConnectionStatusTone = "connected" | "needsReconnection" | "missingScopes";
+type ConnectionStatusTone = "connected" | "needsReconnection" | "missingScopes";
 
 const TONE_VARIANTS: Record<ConnectionStatusTone, BadgeProps["variant"]> = {
   connected: "success",

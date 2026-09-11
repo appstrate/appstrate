@@ -7,7 +7,7 @@
  * For each integration the agent declares the resolver:
  *
  *   1. Verifies the integration package exists + is installed in the
- *      run's application (`application_packages`).
+ *      run's space (`space_packages`).
  *   2. Loads the integration's bundle bytes — system packages from the
  *      in-memory registry (loaded at boot), local packages from object
  *      storage via `downloadVersionZip`.
@@ -34,11 +34,7 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import {
-  canonicalizeApiToolName,
-  getApiCallConfigs,
-  resolveEffectiveToolSelection,
-} from "@appstrate/core/integration";
+import { getApiCallConfigs, resolveEffectiveToolSelection } from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -47,7 +43,7 @@ import type {
 // ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import {
-  getMcpServerRuntime,
+  effectiveMcpServerType,
   getMcpServerMcpConfigEnv,
   getMcpServerWorkspaceMount,
   renderMcpConfigEnv,
@@ -77,14 +73,14 @@ import {
   type AfpsManifestAuth,
 } from "./integration-manifest-helpers.ts";
 
-export interface ResolveIntegrationsInput {
+interface ResolveIntegrationsInput {
   /**
    * The run's org — required tenant boundary for package resolution
    * (defense in depth against a cross-tenant reference): a spawn may only
    * resolve packages the org owns or system packages.
    */
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   /** The actor whose connections to lookup — `null` skips integration resolution entirely. */
   actor: Actor | null;
   /**
@@ -123,7 +119,7 @@ export type IntegrationDropReason =
   | "not_integration"
   | "invalid_manifest"
   | "not_installed"
-  | "remote_url_missing"
+  | "remote_source_invalid"
   | "local_server_ref_missing"
   | "mcp_server_unresolved"
   | "mcp_server_not_runnable"
@@ -148,7 +144,7 @@ export interface DroppedIntegration {
  * an integration it declared is otherwise indistinguishable from an agent
  * that simply never called that integration's tools.
  */
-export interface ResolveIntegrationSpawnsResult {
+interface ResolveIntegrationSpawnsResult {
   readonly specs: IntegrationSpawnSpec[];
   readonly dropped: DroppedIntegration[];
 }
@@ -165,7 +161,7 @@ function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult 
 
 /**
  * Return one `IntegrationSpawnSpec` per integration that's (a) declared
- * on the agent, (b) installed in the application, AND (c) connected by
+ * on the agent, (b) installed in the space, AND (c) connected by
  * the actor, ALONGSIDE one {@link DroppedIntegration} per integration that
  * failed any of those checks.
  *
@@ -180,7 +176,7 @@ function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult 
 export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
 ): Promise<ResolveIntegrationSpawnsResult> {
-  const { orgId, applicationId, actor, agentManifest, resolvedConnections } = input;
+  const { orgId, spaceId, actor, agentManifest, resolvedConnections } = input;
   // No actor → no actor-scoped connections to resolve. Scheduled runs are
   // fail-fasted upstream when actor-less + integrations are declared (#735,
   // scheduler.ts `isScheduleActorValid`, which disables the schedule and
@@ -202,7 +198,7 @@ export async function resolveIntegrationSpawns(
         return await resolveOne(
           entry.id,
           orgId,
-          applicationId,
+          spaceId,
           actor,
           entry.tools,
           resolvedConnections?.[entry.id] ?? null,
@@ -218,12 +214,13 @@ export async function resolveIntegrationSpawns(
         // missing referenced package) stays a per-integration skip — now a
         // MARKED one: the reason travels back to the caller in `dropped`.
         if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
-        // The server-side log stays: it carries `applicationId` and fires even
-        // for callers that ignore `dropped` (the credential proxy, tests). The
-        // run-visible marker is additive, not a replacement.
+        // The server-side log stays: it carries `spaceId`, which the
+        // run-visible marker does not, and it fires even for a caller that
+        // ignores `dropped` — today only tests, `run-context-builder.ts` being
+        // the sole production caller. The marker is additive, not a replacement.
         logger.warn("integration resolve failed; skipping", {
           integrationId: entry.id,
-          applicationId,
+          spaceId,
           error: err instanceof Error ? err.message : String(err),
         });
         return drop("resolve_error", err instanceof Error ? err.message : String(err));
@@ -251,7 +248,7 @@ export async function resolveIntegrationSpawns(
 async function resolveOne(
   integrationId: string,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | "*" | undefined,
   resolvedConnection: ResolvedConnection | null,
@@ -300,11 +297,11 @@ async function resolveOne(
   // default is honoured identically on both paths.
   const effectiveSelection = resolveEffectiveToolSelection(agentToolSelection, manifest);
 
-  // (b) Installed in the application
-  if (!(await isIntegrationActive(integrationId, applicationId))) {
-    logger.info("integration not installed in application; skipping", {
+  // (b) Installed in the space
+  if (!(await isIntegrationActive(integrationId, spaceId))) {
+    logger.info("integration not installed in space; skipping", {
       integrationId,
-      applicationId,
+      spaceId,
     });
     return drop("not_installed");
   }
@@ -338,9 +335,7 @@ async function resolveOne(
       (cfg) =>
         wildcardSelection ||
         selectedTools!.has(cfg.toolName) ||
-        (cfg.legacyToolName !== undefined && selectedTools!.has(cfg.legacyToolName)) ||
-        (cfg.uploadToolName !== undefined && selectedTools!.has(cfg.uploadToolName)) ||
-        (cfg.legacyUploadToolName !== undefined && selectedTools!.has(cfg.legacyUploadToolName)),
+        (cfg.uploadToolName !== undefined && selectedTools!.has(cfg.uploadToolName)),
     )
     .map((cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
@@ -383,8 +378,16 @@ async function resolveOne(
   if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
     if (!remote) {
-      logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
-      return drop("remote_url_missing");
+      // One reason covers both halves because `getRemoteSource` validates both
+      // and reports neither: `source.remote` is unusable when `url` is not a
+      // string OR `transport` is outside AFPS §7.1's enum. Naming only the url
+      // — as this did while the helper accepted any string transport — sends an
+      // author to inspect a url that is fine.
+      logger.warn("remote-source integration has an unusable source.remote; skipping", {
+        integrationId,
+        detail: 'requires a string `url` and `transport` of "streamable-http" | "sse"',
+      });
+      return drop("remote_source_invalid");
     }
     // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
     // opens a credential-bearing Streamable HTTP / SSE client against this URL,
@@ -414,20 +417,18 @@ async function resolveOne(
         `remote-source integration '${integrationId}' source.remote.url host '${egress.hostname}' is blocked by the SSRF guard (${egress.detail})`,
       );
     }
-    // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The
-    // manifest schema enforces the enum + `required`; we forward the
-    // declared value verbatim so the sidecar can pick the right MCP
-    // client transport. `getRemoteSource` already returned null (→ skip,
-    // above) for a non-string `transport`, so this is TYPE NARROWING from
-    // the helper's `string` to the union, not a fallback:
-    // `"streamable-http"` is the normal taken branch.
+    // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`, forwarded
+    // verbatim so the sidecar can pick the right MCP client transport.
+    // There is nothing to narrow and nothing to default: `getRemoteSource`
+    // returns the union or null, and null already skipped this integration
+    // above. Anything else here would be a rewrite of what the manifest
+    // said, which is how a malformed transport used to reach the sidecar
+    // wearing a valid one's name.
     //
     // `server.type` is intentionally omitted — the sidecar dispatches on
     // `spec.sourceKind === "remote"`. Carrying `"http"` here would collide
     // with the AFPS `mcpServerTypeEnum` (`node|python|binary|uv`).
-    const transport: "streamable-http" | "sse" =
-      remote.transport === "sse" ? "sse" : "streamable-http";
-    serverSpec = { url: remote.url, transport };
+    serverSpec = { url: remote.url, transport: remote.transport };
   } else if (sourceKind === "local") {
     const ref = getLocalServerRef(manifest);
     if (!ref) {
@@ -473,22 +474,23 @@ async function resolveOne(
     }
     const mcpServer = resolution.manifest;
     referencedMcpServer = mcpServer;
-    const run = (mcpServer as { server?: { type?: string; entry_point?: string } }).server;
+    const run = (mcpServer as { server?: { entry_point?: string } }).server;
+    // The runtime this server actually spawns under: the Appstrate `_meta`
+    // override, else the MCPB `server.type`. Decided by core so the
+    // connect-login path (`connect/connect-run-launcher.ts`) cannot decide it
+    // differently — it once did, and the same bun-native package spawned under
+    // two interpreters depending on which path reached it.
+    const effectiveType = effectiveMcpServerType(mcpServer);
     // Defensive: mcpServerManifestSchema makes `server.{type,entry_point}`
     // required, so a manifest that parsed (non-null above) always has them.
     // Kept as a fail-closed guard against a future schema relaxation.
-    if (!run?.type || !run.entry_point) {
+    if (!effectiveType || !run?.entry_point) {
       logger.warn("referenced mcp-server has no runnable server config; skipping", {
         integrationId,
         mcpServerId: ref.name,
       });
       return drop("mcp_server_not_runnable", `referenced mcp-server '${ref.name}'`);
     }
-    // The Appstrate runtime override (`_meta["dev.appstrate/mcp-server"].runtime`)
-    // wins over the MCPB `server.type`. MCPB has no `bun` type, so a bun-native
-    // server keeps an MCPB-vocabulary `server.type: "node"` and declares
-    // `bun` in _meta; the runner then picks the bun interpreter/image.
-    const effectiveType = getMcpServerRuntime(mcpServer) ?? run.type;
     // AFPS §7.1 — propagate `source.server.vendored` build-provenance signal
     // through the spawn spec → boot report so operators can audit "this run
     // used a vendored foreign package". Only meaningful for local sources.
@@ -512,7 +514,7 @@ async function resolveOne(
   // auth (no server-side injection) legitimately resolves no delivery.
   const deliveries = await resolveDeliveries(
     integrationId,
-    applicationId,
+    spaceId,
     actor,
     manifest,
     resolvedConnection,
@@ -561,11 +563,7 @@ async function resolveOne(
   //   - the connect-login `toolName` when the wildcard branch is in effect
   //     (only then does the allowlist no longer filter it out)
   // Connect tools never reach the agent's LLM regardless of agent selection.
-  const hiddenToolsUnion: string[] = [...(manifest.hidden_tools ?? [])];
-  for (const name of manifest.hidden_tools ?? []) {
-    const canonical = canonicalizeApiToolName(manifest, name);
-    if (!hiddenToolsUnion.includes(canonical)) hiddenToolsUnion.push(canonical);
-  }
+  const hiddenToolsUnion: string[] = [...new Set(manifest.hidden_tools ?? [])];
   if (wildcardSelection && deliveries.connectLogin) {
     const loginName = deliveries.connectLogin.toolName;
     if (!hiddenToolsUnion.includes(loginName)) hiddenToolsUnion.push(loginName);
@@ -608,8 +606,8 @@ async function resolveOne(
               // a Streamable HTTP client against it. Mutually exclusive with
               // `entry_point` (enforced by `integrationManifestSchema`).
               ...(serverSpec.url ? { url: serverSpec.url } : {}),
-              // AFPS §7.1 — `streamable-http` (default) | `sse`. Only
-              // emitted on remote sources.
+              // AFPS §7.1 — `streamable-http` | `sse`, required by the
+              // manifest schema. Only emitted on remote sources.
               ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
             },
           }
@@ -685,6 +683,7 @@ function resolveWorkspaceMount(
       `Integration '${integrationId}': mcp-server _meta.workspace is malformed — ${
         err instanceof Error ? err.message : String(err)
       }`,
+      { cause: err },
     );
   }
   if (!mount) return {};
@@ -736,7 +735,7 @@ interface ResolvedDeliveries {
  */
 async function resolveDeliveries(
   integrationId: string,
-  applicationId: string,
+  spaceId: string,
   actor: Actor,
   manifest: IntegrationManifest,
   resolvedConnection: ResolvedConnection | null,
@@ -759,7 +758,7 @@ async function resolveDeliveries(
     integrationId,
     Object.keys(auths),
     resolvedConnection?.connectionId ?? null,
-    { applicationId, actor, ...(requiredAuthKey ? { requiredAuthKey } : {}) },
+    { spaceId, actor, ...(requiredAuthKey ? { requiredAuthKey } : {}) },
   );
 
   if (!row) {

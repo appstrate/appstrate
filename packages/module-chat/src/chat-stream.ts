@@ -13,7 +13,8 @@
  *      connection, so leaving the conversation mid-inference no longer drops
  *      messages. The client history adapter is now load-only.
  *
- * Inference goes through the llm-proxy (no key here); tool calls dispatch
+ * Inference goes through the llm-proxy for API-key models and natively at
+ * the provider for OAuth subscriptions (no key here); tool calls dispatch
  * through `/api/mcp` (auth + RBAC re-applied in-process).
  */
 
@@ -21,9 +22,9 @@ import type { Context } from "hono";
 import type { UIMessage } from "ai";
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
-import { isAttachmentUri } from "@appstrate/core/document-uri";
+import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
-import { listModels, pickModel, resolveDefaultApplicationId } from "./llm.ts";
+import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
@@ -59,7 +60,6 @@ function subscriptionReconnectResponse(): Response {
       status: 401,
       detail: "The selected model's subscription credential expired or was revoked.",
       code: "needs_reconnection",
-      needsReconnection: true,
     }),
     { status: 401, headers: { "content-type": "application/problem+json" } },
   );
@@ -100,12 +100,25 @@ const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
  */
 export type ChatEngine = (input: PiChatInput) => Response;
 
+/**
+ * Roles the engine's history projection actually handles. `buildStructuredPiTurn`
+ * (`pi-chat/structured-session.ts`) keeps `user` and `assistant` and DROPS every
+ * other role silently, so anything else must be refused at the door rather than
+ * accepted and discarded.
+ */
+const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
+
 // The client (assistant-ui / useChat) posts the full thread plus optional
-// session/model/context extras. `messages` are UIMessages; we keep validation
-// loose here and let `convertToModelMessages` enforce the real shape — with one
-// tightening: any `file` part MUST reference an `upload://` or `document://`
-// URI. That rejects inline `data:` bytes and arbitrary URLs in the chat channel
-// (attachments flow only through the document store, never inline).
+// session/model/context extras. `messages` are UIMessages; the shape itself is
+// the AI SDK's and stays loose here, with two tightenings the engine cannot
+// make for us:
+//   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
+//     sends another: the composer only produces user turns, and a reload
+//     replays what the server persisted — user or assistant, a server-authored
+//     notice included (persistence.ts stores it as `assistant`).
+//   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
+//     rejects inline `data:` bytes and arbitrary URLs in the chat channel
+//     (attachments flow only through the file store, never inline).
 export const chatStreamSchema = z.object({
   id: z.string().optional(),
   messages: z
@@ -113,6 +126,14 @@ export const chatStreamSchema = z.object({
     .min(1, "messages must not be empty")
     .superRefine((messages, ctx) => {
       messages.forEach((message, i) => {
+        const role = (message as { role?: unknown }).role;
+        if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Message role must be 'user' or 'assistant'.",
+            path: [i, "role"],
+          });
+        }
         const parts = (message as { parts?: unknown }).parts;
         if (!Array.isArray(parts)) return;
         parts.forEach((part, j) => {
@@ -123,7 +144,7 @@ export const chatStreamSchema = z.object({
           if (!isAttachmentUri(url)) {
             ctx.addIssue({
               code: "custom",
-              message: "File attachment URI must be an 'upload://' or 'document://' URI.",
+              message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
               path: [i, "parts", j, "url"],
             });
           }
@@ -138,6 +159,55 @@ function clientErrorMessage(error: unknown): string {
   return clientTurnErrorMarker(classifyClientTurnError(error));
 }
 
+/**
+ * Claim the conversation for this turn, then write its user message. Returns the
+ * user message id, which the assistant turn derives its own id from.
+ *
+ * THE ORDER IS THE INVARIANT, not a preference. Chat persistence has a second
+ * writer — `persistNotice`, driving the orphaned-run reconciliation — and the
+ * rule it obeys is "a turn owns its conversation from start to finalize",
+ * evaluated as `chat_sessions.active_stream_id IS NULL` under the session row's
+ * lock. Writing the user message first left a window in which that predicate was
+ * TRUE while a turn was already under way: `onRunStatusChange` →
+ * `reconcileChatRun` → `persistNotice` took the lock, legitimately saw NULL, and
+ * committed a notice at the seq BETWEEN this turn's user message and its
+ * assistant message. The transcript then read user / notice / assistant, and the
+ * session was marked unread while its owner sat watching it generate.
+ *
+ * Claiming first closes the window instead of narrowing it, and costs nothing
+ * that anything reads back. The two things that consult the marker both already
+ * treat "set, but no live producer" as no stream: the resume GET answers 204
+ * when the store has no producer for the id (`routes.ts`), which is the same
+ * answer it already owes a stale id left by a crash, and `POST …/stop` looks the
+ * id up in the stop registry, where this turn's controller is registered a few
+ * statements later — the same gap it already had. What is briefly true is the
+ * DTO's `generating` flag, for the duration of one INSERT, and that is simply
+ * the truth: the turn has started.
+ *
+ * A locked transaction spanning both writes would close the window too. This is
+ * the cheaper half of that choice: no transaction on the pre-inference path of
+ * every turn, and no lock held across a `chat_messages` insert.
+ */
+export async function claimTurn(
+  sessionId: string,
+  streamId: string,
+  message: UIMessage,
+): Promise<string> {
+  await setActiveStream(sessionId, streamId);
+  try {
+    return await persistUserMessage(sessionId, message);
+  } catch (err) {
+    // A claim must not outlive the turn it was taken for. Without this, a failed
+    // user-message write would leave the session marked generating forever: the
+    // resume GET keeps answering 204, `persistNotice` keeps refusing, and the
+    // sidebar keeps a spinner on a turn that never started. `clearActiveStream`
+    // only clears a marker still pointing at THIS stream, so a newer turn that
+    // already claimed the session is left alone.
+    await clearActiveStream(sessionId, streamId).catch(() => {});
+    throw err;
+  }
+}
+
 export async function handleChatStream(
   c: Context<ChatEnv>,
   deps: ChatPlatformDeps,
@@ -145,7 +215,13 @@ export async function handleChatStream(
 ): Promise<Response> {
   const orgId = c.get("orgId");
   const user = c.get("user");
-  const orgRole = c.get("orgRole") ?? "member";
+  // The space the router entered — the session's space, and the scope of every
+  // space-scoped read this turn makes.
+  const spaceId = c.get("space").id;
+  // While a preview is on, the turn is answered as the persona; the real role
+  // stays on the context for identity and audit.
+  const persona = c.get("viewAs");
+  const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
   const body = parseBody(chatStreamSchema, await c.req.json().catch(() => null));
   const messages = body.messages as UIMessage[];
   logger.info("chat turn", { turns: messages.length });
@@ -159,6 +235,8 @@ export async function handleChatStream(
   // always satisfiable. Ephemeral turns record un-attributed usage (null).
   const meteringSessionId = sessionId && lastMessage?.id ? sessionId : null;
 
+  const turnStart = Date.now();
+
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
   // inference preamble (model resolve + MCP boot). The client mints the id and
   // creates conversations lazily, so the sidebar shows a new conversation
@@ -170,19 +248,31 @@ export async function handleChatStream(
   // marker are still written later, just before generation — keeping the
   // "generating" flag off until we're committed to a turn, so a preamble error
   // can't strand the session as perpetually generating.
-  if (sessionId && lastMessage?.id) {
-    await ensureSession(sessionId, orgId, user.id);
-  }
+  //
+  // Started here, NOT awaited here: it depends on nothing but ids, so it runs
+  // concurrently with the phase-A reads below and is joined in the same
+  // `Promise.all` — a foreign-tenant 404 still surfaces before anything is
+  // materialized into the session, and attaching the join in the same tick is
+  // what keeps a rejection from ever going unhandled.
+  const sessionReady: Promise<void> =
+    sessionId && lastMessage?.id
+      ? ensureSession(sessionId, orgId, user.id, spaceId)
+      : Promise.resolve();
 
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
   // Single platform-call seam: re-enter the platform app in-process (or loopback
-  // fetch when not wired) for every read the turn makes (/api/models,
-  // /api/applications, /api/me/context, the llm-proxy). Auth + RBAC run each hop.
+  // fetch when not wired) for every PLATFORM read the turn makes (/api/models,
+  // /api/spaces, and the MCP hops; `/api/me/context` dispatches directly).
+  // Auth + RBAC run each hop.
+  //
+  // Inference is the exception and does NOT ride this seam: the proxy binding
+  // hands pi-ai a `baseUrl` string built from `origin`, and pi-ai opens a real
+  // loopback socket to it. That is why `CHAT_SELF_ORIGIN` must actually resolve
+  // on this host, and why the binding needs a bearer *minter* (see below) rather
+  // than a header captured once.
   const platformFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     deps.dispatch(new Request(input, init))) as typeof fetch;
-
-  const turnStart = Date.now();
 
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
@@ -207,19 +297,61 @@ export async function handleChatStream(
     "X-Org-Id": orgId,
   };
 
-  // ── Preamble phase A (parallel) ──────────────────────────────────────────
-  // The model list and the default application id are independent reads, so
-  // fire them together rather than back-to-back. `listModels` resolves the row
-  // the turn binds to; the app id scopes the MCP + integration reads that follow. Pin from the header when the caller
-  // already supplied one (no lookup needed).
+  // ── Preamble phase A ─────────────────────────────────────────────────────
+  // `listModels` resolves the row the turn binds to. The space is NOT looked
+  // up: the router entered it before this handler ran (`enterSpaceContext`),
+  // so `c.get("space")` is the one the caller's `chat:write` was checked
+  // against — reading it again from `/api/spaces` would be a second, divergent
+  // answer (it also ignored an API key's pinned space).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
-  const pinnedAppId = c.req.header("x-application-id");
   const phaseAStart = Date.now();
-  const [models, applicationId] = await Promise.all([
+
+  // ── Preamble phase B (overlapped with A) ─────────────────────────────────
+  // Only the caller-context block. It depends on the space id and the caller's
+  // headers — never on the chosen model or the admission gate — so it is chained
+  // on the space id and starts the moment that resolves (immediately when
+  // pinned), overlapping the model list, the attachment materialization, the
+  // credential resolution and the gate rather than waiting behind them. It is a
+  // READ (`/api/me/context`); a turn the gate rejects has dispatched it for
+  // nothing, which is acceptable — what a rejected turn must not do is persist
+  // a user message, open an MCP session or record usage, none of which happen
+  // before the gate.
+  //
+  // There is NO platform-MCP probe here: the Pi engine opens its OWN MCP
+  // connection from `platformMcp.url`, and the MCP server's instructions reach
+  // the model through that handshake. Probing here would be a second handshake
+  // we'd immediately close — 2 round-trips wasted on the TTFT path. We pass
+  // `platformMcp` optimistically; if the `mcp` module is absent the engine just
+  // gets no tools.
+  //
+  // The promise settles to a RESULT and never rejects: every early return
+  // between here and the point the block is consumed (invalid generation
+  // settings, a gate rejection) would otherwise leave a rejection with no
+  // handler. The error is rethrown where the block is consumed.
+  const phaseBStart = Date.now();
+  let phaseBMs = 0;
+  const contextBlockPromise: Promise<{ ok: true; block: string } | { ok: false; error: unknown }> =
+    buildCallerContextBlock(c, {
+      origin,
+      headers,
+      spaceId,
+      user,
+      deps,
+      // UI language forwarded by the client; validated/defaulted in the builder.
+      locale: c.req.header("X-Chat-Locale"),
+    })
+      .finally(() => {
+        // Wall time of the block itself.
+        phaseBMs = Date.now() - phaseBStart;
+      })
+      .then(
+        (block) => ({ ok: true as const, block }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+  const [models] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
-    pinnedAppId
-      ? Promise.resolve(pinnedAppId)
-      : resolveDefaultApplicationId(origin, headers, orgId, platformFetch),
+    sessionReady,
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
@@ -240,22 +372,27 @@ export async function handleChatStream(
   });
 
   // Materialize the new turn's composer attachments into durable, session-scoped
-  // documents and rewrite each `upload://` (or already-`document://`) file part
-  // to its stable `document://` URI, BEFORE the turn is persisted (persistence
-  // stores only `document://`) and before it reaches the engine (the model is
+  // files and rewrite each `upload://` (or already-`appfile://`) file part
+  // to its stable `appfile://` URI, BEFORE the turn is persisted (persistence
+  // stores only `appfile://`) and before it reaches the engine (the model is
   // shown the attachment as a text line, never a raw file URL). Needs the session
-  // (the document container) and the resolved application id, both known here;
+  // (the file container) and the resolved space id, both known here;
   // nothing has been opened yet, so a quota/cap rejection surfaces as a clean
   // error with no MCP/stop-controller to leak. Only the last message can carry
-  // fresh uploads — earlier turns already hold rewritten `document://` URIs.
-  if (sessionId && lastMessage && applicationId) {
+  // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
+  if (sessionId && lastMessage) {
     lastMessage = await materializeUserAttachments(lastMessage, (uri) =>
       deps.resolveChatAttachment({
         orgId,
-        applicationId,
+        spaceId,
         userId: user.id,
         chatSessionId: sessionId,
         uri,
+        // The container ACL reads as wide as the caller does: an `appfile://`
+        // the user picked from the gallery — which `runs:read-all` widens to
+        // the whole space's run outputs — must still resolve when they attach
+        // it. Picker and attach answer the same set.
+        permissions: c.get("permissions"),
       }),
     );
     messages[messages.length - 1] = lastMessage;
@@ -267,7 +404,7 @@ export async function handleChatStream(
   // binding + a fresh access token, or a reconnect signal when its credential is
   // dead. Both ride the SAME engine — this fact drives admission and the Pi
   // binding, never a choice of loop.
-  const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
+  const subscription = await deps.resolveChatModel(orgId, chosen.id);
   const isSubscription = subscription.subscription;
 
   // Admission gate — EVERY turn. The platform
@@ -283,8 +420,10 @@ export async function handleChatStream(
   // subscription status must be able to refuse it. `subscription` reports the
   // credential mode, and the platform derives the credential source from it.
   //
-  // Gated BEFORE the phase-B preamble so a rejected turn opens no MCP session
-  // and persists no user message.
+  // Gated BEFORE the caller-context block is consumed, the model binding is
+  // resolved and capacity is reserved, so a rejected turn opens no MCP session
+  // and persists no user message. (The block's read may already be in flight —
+  // see phase B above — but nothing is written until the gate has answered.)
   const rejection = await deps.checkUsageAllowed({
     orgId,
     presetId: chosen.id,
@@ -293,24 +432,10 @@ export async function handleChatStream(
   });
   if (rejection) return usageRejectionResponse(rejection);
 
-  // ── Preamble phase B ─────────────────────────────────────────────────────
-  // Only the caller-context block. There is NO platform-MCP probe here: the Pi
-  // engine opens its OWN MCP connection from `platformMcp.url`, and the MCP
-  // server's instructions reach the model through that handshake. Probing here
-  // would be a second handshake we'd immediately close — 2 round-trips wasted on
-  // the TTFT path. We pass `platformMcp` optimistically; if the `mcp` module is
-  // absent the engine just gets no tools.
-  const phaseBStart = Date.now();
-  const contextBlock = await buildCallerContextBlock(c, {
-    origin,
-    headers,
-    applicationId,
-    user,
-    deps,
-    // UI language forwarded by the client; validated/defaulted in the builder.
-    locale: c.req.header("X-Chat-Locale"),
-  });
-  const phaseBMs = Date.now() - phaseBStart;
+  // Join phase B. This is the one place its failure is allowed to surface.
+  const contextResult = await contextBlockPromise;
+  if (!contextResult.ok) throw contextResult.error;
+  const contextBlock = contextResult.block;
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
@@ -324,14 +449,8 @@ export async function handleChatStream(
   let system = SYSTEM_PROMPT;
   if (contextBlock) system += `\n\n${contextBlock}`;
 
-  logger.info("chat preamble", {
-    // Which credential the turn spends. One engine drives them both.
-    credentialMode: isSubscription ? "oauth2" : "api-key",
-    providerId: chosen.providerId,
-    phaseAMs,
-    phaseBMs,
-    preambleMs: Date.now() - turnStart,
-  });
+  // Which credential the turn spends. One engine drives them both.
+  const credentialMode = isSubscription ? "oauth2" : "api-key";
 
   // Resolve the model binding and reserve capacity before the user message or
   // the active-stream marker is written, so a dead credential, an unsupported
@@ -366,23 +485,39 @@ export async function handleChatStream(
   // `active_stream_id` so a reloaded client's resume GET can find the live turn.
   const streamId = crypto.randomUUID();
 
-  // The session row was already ensured up front (before the preamble). Persist
-  // the user turn and mark the in-flight stream now, just before generation.
+  // The session row was already ensured up front (joined with phase A). Claim
+  // the conversation and persist the user turn now, just before generation.
   let userMessageId: string | undefined;
+  let claimTurnMs = 0;
   if (sessionId && lastMessage?.id) {
+    const claimStart = Date.now();
     try {
-      userMessageId = await persistUserMessage(sessionId, lastMessage);
-      // Mark the in-flight stream so a mid-inference reload can reconnect to it.
-      await setActiveStream(sessionId, streamId);
+      userMessageId = await claimTurn(sessionId, streamId, lastMessage);
+      claimTurnMs = Date.now() - claimStart;
     } catch (err) {
       // The concurrency slot is already reserved but generation has not started,
       // so neither `finalize` (teardown via onSettled) nor `failCleanup` (defined
       // below) owns it yet. Release it on this error path before rethrowing, or
-      // one slot leaks per failed turn.
+      // one slot leaks per failed turn. `claimTurn` has already undone its own
+      // half (the in-flight marker); the slot is this function's to undo.
       slot.release();
       throw err;
     }
   }
+
+  // Everything before generation, for an ADMITTED turn: the two overlapped
+  // phases (their wall times, not a sum — `phaseBMs` runs under `phaseAMs`),
+  // the claim/persist round trips, and the whole span since the request was
+  // parsed. A rejected turn (gate, dead credential, unsupported family,
+  // saturated capacity) returns above and is not measured here.
+  logger.info("chat preamble", {
+    credentialMode,
+    providerId: chosen.providerId,
+    phaseAMs,
+    phaseBMs,
+    claimTurnMs,
+    preambleMs: Date.now() - turnStart,
+  });
 
   // Generation abort is DECOUPLED from the request connection: a client
   // disconnect must NOT cancel generation (that was the data-loss bug). Only an
@@ -398,10 +533,10 @@ export async function handleChatStream(
     finalizeChatStream({
       engineResponse,
       streamId,
-      parentId: userMessageId ?? null,
+      precedingMessageId: userMessageId ?? null,
       onAssistant:
         sessionId && userMessageId
-          ? (assistant, parentId) => persistAssistantMessage(sessionId, assistant, parentId)
+          ? (assistant, preceding) => persistAssistantMessage(sessionId, assistant, preceding)
           : undefined,
       onSettled: () => {
         unregisterStopController(streamId);
@@ -440,7 +575,10 @@ export async function handleChatStream(
       name: user.name,
       orgId,
       orgRole,
-      permissions: [...(c.get("permissions") ?? [])],
+      permissions: [...c.get("permissions")],
+      // The re-entered request carries no header, so without this the hop would
+      // answer with the caller's real authority while a preview is on screen.
+      viewAs: persona,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
   );
@@ -448,9 +586,9 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  if (applicationId) mcpHeaders["x-application-id"] = applicationId;
+  mcpHeaders["x-space-id"] = spaceId;
   try {
-    return await finalize(
+    const response = await finalize(
       runEngine({
         slot,
         modelBinding,
@@ -461,7 +599,15 @@ export async function handleChatStream(
         messages,
         system,
         generation: generationSettings,
-        platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },
+        platformMcp: {
+          url: platformMcpUrl(origin, orgId),
+          headers: mcpHeaders,
+          // Same in-process seam the preamble reads through: the engine's three
+          // MCP hops re-enter the platform app directly instead of opening real
+          // loopback sockets back into this process. Auth and RBAC still run on
+          // every hop, so the scoped bearer above is exactly as load-bearing.
+          fetch: platformFetch,
+        },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,
         onError: clientErrorMessage,
@@ -473,6 +619,16 @@ export async function handleChatStream(
         },
       }),
     );
+    // Time to the Response object: from the parsed request to the resumable
+    // stream being wired up and handed back. `preambleMs` above stops before
+    // the engine is invoked; this includes the engine's synchronous setup and
+    // `finalizeChatStream`.
+    logger.info("chat turn response", {
+      credentialMode,
+      providerId: chosen.providerId,
+      toResponseMs: Date.now() - turnStart,
+    });
+    return response;
   } catch (err) {
     await failCleanup();
     throw err;

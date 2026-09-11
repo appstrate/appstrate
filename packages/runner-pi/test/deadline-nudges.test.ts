@@ -128,7 +128,7 @@ describe("scheduleDeadlineNudges — checkpoints", () => {
     h.timers[1]!.fire();
 
     for (const text of h.steers) {
-      expect(text).not.toMatch(/output|publish_document|bash|report|note\b/i);
+      expect(text).not.toMatch(/output|publish_file|bash|report|note\b/i);
     }
   });
 

@@ -41,7 +41,7 @@ const SECRET_BYTES = 32;
 /** Grace window after `expires_at` before the cleanup worker DELETEs the row. */
 const CLEANUP_GRACE_HOURS = 1;
 
-export interface CreatePairingArgs {
+interface CreatePairingArgs {
   userId: string;
   orgId: string;
   providerId: string;
@@ -53,7 +53,7 @@ export interface CreatePairingArgs {
   ttlSeconds: number;
 }
 
-export interface CreatePairingResult {
+interface CreatePairingResult {
   id: string;
   /**
    * The plaintext pairing token — `appp_<base64url(header)>.<base64url(secret)>`.
@@ -63,7 +63,7 @@ export interface CreatePairingResult {
   expiresAt: Date;
 }
 
-export interface ConsumedPairing {
+interface ConsumedPairing {
   id: string;
   userId: string;
   orgId: string;
@@ -73,15 +73,12 @@ export interface ConsumedPairing {
   consumedAt: Date;
 }
 
-export interface PairingRow {
+/** What {@link getPairing}'s single caller — the dashboard poll route — reads. */
+interface PairingRow {
   id: string;
-  userId: string;
-  orgId: string;
-  providerId: string;
   expiresAt: Date;
   consumedAt: Date | null;
   credentialId: string | null;
-  createdAt: Date;
 }
 
 function generateSecret(): string {
@@ -131,14 +128,13 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
  * not by re-issuing the result, because re-issuing credentials to a second
  * caller would defeat the one-shot guarantee.
  */
-export async function consumePairing(token: string, fromIp?: string): Promise<ConsumedPairing> {
+export async function consumePairing(token: string): Promise<ConsumedPairing> {
   const tokenHash = await hashPairingSecret(token);
 
   const rows = await db
     .update(modelProviderPairings)
     .set({
       consumedAt: sql`now()`,
-      consumedFromIp: fromIp ?? null,
     })
     .where(
       and(
@@ -178,13 +174,9 @@ export async function getPairing(id: string, orgId: string): Promise<PairingRow 
   const [row] = await db
     .select({
       id: modelProviderPairings.id,
-      userId: modelProviderPairings.userId,
-      orgId: modelProviderPairings.orgId,
-      providerId: modelProviderPairings.providerId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
       credentialId: modelProviderPairings.credentialId,
-      createdAt: modelProviderPairings.createdAt,
     })
     .from(modelProviderPairings)
     .where(and(eq(modelProviderPairings.id, id), eq(modelProviderPairings.orgId, orgId)))

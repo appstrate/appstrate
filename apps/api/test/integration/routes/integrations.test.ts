@@ -25,7 +25,7 @@ import { eq, and } from "drizzle-orm";
 import {
   integrationConnections,
   integrationOauthClients,
-  applicationPackages,
+  spacePackages,
 } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
@@ -57,7 +57,7 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
           http: {
             in: "header",
             name: "Authorization",
-            prefix: "Bearer",
+            prefix: "Bearer ",
             value: "{$credential.api_key}",
           },
         },
@@ -72,7 +72,7 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
           http: {
             in: "header",
             name: "Authorization",
-            prefix: "Bearer",
+            prefix: "Bearer ",
             value: "{$credential.access_token}",
           },
         },
@@ -168,12 +168,11 @@ describe("GET /api/integrations", () => {
     expect(gmail?.active).toBe(false);
   });
 
-  it("decorates `active: true` when the integration is activated in the app", async () => {
+  it("decorates `active: true` when the integration is activated in the space", async () => {
     const pkg = await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    await db.insert(applicationPackages).values({
-      applicationId: ctx.defaultAppId,
+    await db.insert(spacePackages).values({
+      spaceId: ctx.defaultSpaceId,
       packageId: pkg.id,
-      config: {},
     });
     const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
     const body = (await res.json()) as { data: Array<{ id: string; active: boolean }> };
@@ -183,7 +182,7 @@ describe("GET /api/integrations", () => {
 
   it("decorates `active: true` for a system integration with no install row", async () => {
     // A SYSTEM_INTEGRATIONS entry makes the integration auto-active out
-    // of the box — no application_packages row required.
+    // of the box — no space_packages row required.
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     initSystemIntegrations([
       {
@@ -221,10 +220,9 @@ describe("GET /api/integrations", () => {
         ],
       },
     ]);
-    await db.insert(applicationPackages).values({
-      applicationId: ctx.defaultAppId,
+    await db.insert(spacePackages).values({
+      spaceId: ctx.defaultSpaceId,
       packageId: pkg.id,
-      config: {},
       enabled: false,
     });
     const res = await app.request("/api/integrations", { headers: authHeaders(ctx) });
@@ -388,6 +386,29 @@ describe("GET /api/integrations/:packageId", () => {
     expect(res.status).toBe(404);
   });
 
+  it("refuses a stored manifest whose Authorization prefix is a bare auth scheme", async () => {
+    // Deliberately invalid: the shape every manifest stored BEFORE the §7.6
+    // prefix gate carries. `seedIntegration` is a raw insert, so this is
+    // byte-for-byte what such a row looks like in `packages.draft_manifest`.
+    // Every read path re-parses through `integrationManifestSchema`, so the
+    // row fails LOUDLY here instead of quietly rendering `BearerTOKEN`
+    // upstream. `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`
+    // moves those rows; this pins what happens until it is run.
+    const stale = gmailManifest("@myorg/stale-prefix") as unknown as Record<string, unknown>;
+    const auths = stale.auths as Record<string, { delivery: { http: { prefix: string } } }>;
+    auths.api!.delivery.http.prefix = "Bearer";
+    await seedIntegration(ctx.orgId, stale as unknown as IntegrationManifest);
+
+    const res = await app.request("/api/integrations/@myorg/stale-prefix", {
+      headers: authHeaders(ctx),
+    });
+    // 404, not 200: the route maps `invalid_manifest` onto "not found", so a
+    // stale row presents as a missing integration rather than a bad prefix.
+    // Loud, but not self-explaining — which is exactly why 0005 is worth
+    // running rather than waiting for the failure to be diagnosed.
+    expect(res.status).toBe(404);
+  });
+
   it("flags a remote MCP oauth2 auth as client_auto_provisioned", async () => {
     await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
     const res = await app.request("/api/integrations/@myorg/remote-mcp", {
@@ -468,7 +489,7 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
 
-  it("activates and deactivates the integration in the current app", async () => {
+  it("activates and deactivates the integration in the current space", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     const activate = await app.request("/api/integrations/@myorg/gmail/activate", {
       method: "POST",
@@ -497,11 +518,11 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
 
     const activeRow = await db
       .select()
-      .from(applicationPackages)
+      .from(spacePackages)
       .where(
         and(
-          eq(applicationPackages.applicationId, ctx.defaultAppId),
-          eq(applicationPackages.packageId, "@myorg/gmail"),
+          eq(spacePackages.spaceId, ctx.defaultSpaceId),
+          eq(spacePackages.packageId, "@myorg/gmail"),
         ),
       );
     expect(activeRow).toHaveLength(1);
@@ -535,12 +556,12 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
     // The row survives, flagged disabled — this is the sticky opt-out, not a
     // delete (deleting would let a system integration re-trigger auto-active).
     const after = await db
-      .select({ enabled: applicationPackages.enabled })
-      .from(applicationPackages)
+      .select({ enabled: spacePackages.enabled })
+      .from(spacePackages)
       .where(
         and(
-          eq(applicationPackages.applicationId, ctx.defaultAppId),
-          eq(applicationPackages.packageId, "@myorg/gmail"),
+          eq(spacePackages.spaceId, ctx.defaultSpaceId),
+          eq(spacePackages.packageId, "@myorg/gmail"),
         ),
       );
     expect(after).toHaveLength(1);
@@ -583,12 +604,12 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
 
     // Exactly one row, enabled.
     const rows = await db
-      .select({ enabled: applicationPackages.enabled })
-      .from(applicationPackages)
+      .select({ enabled: spacePackages.enabled })
+      .from(spacePackages)
       .where(
         and(
-          eq(applicationPackages.applicationId, ctx.defaultAppId),
-          eq(applicationPackages.packageId, "@myorg/gmail"),
+          eq(spacePackages.spaceId, ctx.defaultSpaceId),
+          eq(spacePackages.packageId, "@myorg/gmail"),
         ),
       );
     expect(rows).toHaveLength(1);
@@ -932,7 +953,7 @@ describe("OAuth client CRUD", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "a@x.test",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
         clientRef: target.id,
@@ -941,7 +962,7 @@ describe("OAuth client CRUD", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "b@x.test",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
         clientRef: target.id,
@@ -950,7 +971,7 @@ describe("OAuth client CRUD", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "c@x.test",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
         clientRef: other.id,
@@ -1013,15 +1034,15 @@ describe("OAuth client CRUD", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects pinning another application's custom client as default (cross-app escalation, 400)", async () => {
+  it("rejects pinning another space's custom client as default (cross-space escalation, 400)", async () => {
     const a = await createClient("client-a", "sa"); // ctx's own client (the default)
-    // A client owned by a DIFFERENT org/application for the same (global)
+    // A client owned by a DIFFERENT org/space for the same (global)
     // integration package. Inserted directly so it's genuinely foreign-scoped.
     const otherCtx = await createTestContext({ orgSlug: "other" });
     const [foreign] = await db
       .insert(integrationOauthClients)
       .values({
-        applicationId: otherCtx.defaultAppId,
+        spaceId: otherCtx.defaultSpaceId,
         integrationId: "@myorg/gmail",
         authKey: "google",
         clientId: "foreign",
@@ -1029,8 +1050,8 @@ describe("OAuth client CRUD", () => {
       })
       .returning({ id: integrationOauthClients.id });
 
-    // ctx's app must not be able to pin the foreign-app client as its default —
-    // the resolver scopes custom rows to (applicationId, integration, auth).
+    // ctx's space must not be able to pin the foreign-space client as its default —
+    // the resolver scopes custom rows to (spaceId, integration, auth).
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/default-client", {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -1038,7 +1059,7 @@ describe("OAuth client CRUD", () => {
     });
     expect(res.status).toBe(400);
 
-    // ctx's own default is untouched by the rejected cross-app attempt.
+    // ctx's own default is untouched by the rejected cross-space attempt.
     const clients = await listClients();
     expect(clients.find((c) => c.is_default)?.client_ref).toBe(a.id);
   });
@@ -1231,7 +1252,7 @@ describe("OAuth client CRUD", () => {
     const memberHeaders = {
       Cookie: member.cookie,
       "X-Org-Id": ctx.orgId,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
       "Content-Type": "application/json",
     };
     const res = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
@@ -1439,7 +1460,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
@@ -1534,7 +1555,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     const memberHeaders = {
       Cookie: member.cookie,
       "X-Org-Id": ctx.orgId,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
       "Content-Type": "application/json",
     };
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
@@ -1623,7 +1644,7 @@ describe("multi-client: list + system-client connect", () => {
     };
     expect(body.data).toHaveLength(2);
     const custom = body.data.find((c) => c.source === "custom")!;
-    // The custom client_ref is the per-application row id (a UUID), not a sentinel.
+    // The custom client_ref is the per-space row id (a UUID), not a sentinel.
     expect(custom.is_default).toBe(true);
     expect(custom.client_ref).not.toBe("gmail-system");
     expect(custom.client_ref.length).toBeGreaterThan(0);

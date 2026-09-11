@@ -16,7 +16,7 @@ import {
 } from "../../src/bundle/integrity.ts";
 import type { CliIO } from "../../src/cli/index.ts";
 
-export interface CapturedIo extends CliIO {
+interface CapturedIo extends CliIO {
   stdoutText: () => string;
   stderrText: () => string;
   stdoutChunks: string[];
@@ -36,7 +36,7 @@ export function captureIo(): CapturedIo {
   };
 }
 
-export const MINIMAL_MANIFEST = {
+const MINIMAL_MANIFEST = {
   name: "@acme/hello",
   version: "1.0.0",
   type: "agent",

@@ -1,24 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Regression guard for a load-bearing library contract: the AS must honour a
- * per-org MCP resource audience added to `validAudiences` AT RUNTIME.
+ * The RFC 8707 resource gate on the token/authorize endpoints, and the one
+ * property that must never regress: a per-org MCP resource created AT RUNTIME
+ * is mintable immediately — no restart, no re-wire.
  *
- * The org-aware allowlist (`mcp/audiences.ts`) mutates the array passed by
- * reference into the oauth-provider + oidc-guards plugins. This proves both read
- * it LIVE on `/oauth2/token`: a per-org resource is rejected before it is added
- * and accepted (past the resource gate) right after — no restart, no re-wire.
+ * The mechanism is the persisted resource model (`@better-auth/oauth-provider`
+ * ≥ 1.7.3): the AS resolves every requested `resource` against `oauth_resources`
+ * PER REQUEST, so a row inserted while the process runs (what the mcp module
+ * does on `onOrgCreate`) is honoured on the very next call — and, because the
+ * table is shared, on every other replica too. This file drives that table
+ * directly rather than the mcp module so the resource lookup is the only
+ * discriminator.
  *
- * If this ever fails after a dependency bump, `@better-auth/oauth-provider` has
- * started snapshotting `validAudiences` at plugin construction instead of
- * reading it live (see the LIBRARY CONTRACT note in `auth/plugins.ts`). Per-org
- * minting then silently breaks for every org created after boot; the fix is a
- * library patch or consent-time binding, not a code change here.
+ * If the "after" case ever fails, the plugin has started caching resource rows
+ * that were not opted into `cachedResources` (see the note on that option in
+ * `auth/plugins.ts`): per-org minting then silently breaks for every org created
+ * after boot.
  */
 
-import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll, afterEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
-import { truncateAll } from "../../../../../../test/helpers/db.ts";
+import { createTestOrg, createTestUser } from "../../../../../../test/helpers/auth.ts";
+import { db, truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import {
@@ -27,15 +33,11 @@ import {
   snapshotProtectedResources,
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import {
-  getMcpOrgResourceUri,
-  orgIdFromMcpAudience,
-  addMcpOrgAudience,
-  _resetMcpOrgAudiencesForTesting,
-} from "../../../../mcp/audiences.ts";
+import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
+const REDIRECT_URI = "http://localhost:9931/callback";
 
 async function register() {
   const res = await app.request("/api/auth/oauth2/register", {
@@ -43,46 +45,78 @@ async function register() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       client_name: "Claude Code (org-audience spike)",
-      redirect_uris: ["http://localhost:9931/callback"],
+      redirect_uris: [REDIRECT_URI],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
       scope: "openid profile email offline_access",
+      // A loopback http callback is only registrable by a NATIVE client (OIDC
+      // Dynamic Registration §2) — which is what an MCP client on a loopback
+      // port is. A `web` client would be refused `invalid_redirect_uri`.
+      application_type: "native",
     }),
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   return String(json.client_id);
 }
 
-async function tokenWithResource(clientId: string, resource: string) {
-  // The resource gate runs in the /oauth2/token before-hook, ahead of code
-  // validation — a bogus code is enough to reach (and read) the gate's verdict.
-  const res = await app.request("/api/auth/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code: "irrelevant-code",
-      client_id: clientId,
-      redirect_uri: "http://localhost:9931/callback",
-      code_verifier: "x".repeat(43),
-      resource,
-    }).toString(),
+/**
+ * `/oauth2/authorize` resolves the requested resource BEFORE it looks for a
+ * session, so an anonymous GET is enough to read the resource gate's verdict:
+ * a rejected resource redirects to `redirect_uri?error=…`, an accepted one
+ * carries on to the login page. Returns both halves — a caller asserting the
+ * accepted case must name the destination, or a 500 with no `Location` would
+ * read as "got past the gate".
+ */
+async function authorizeFor(clientId: string, resource?: string) {
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: REDIRECT_URI,
+    scope: "openid profile",
+    state: "s",
+    code_challenge: "x".repeat(43),
+    code_challenge_method: "S256",
   });
+  if (resource) query.set("resource", resource);
+  const res = await app.request(`/api/auth/oauth2/authorize?${query.toString()}`);
+  const location = res.headers.get("location");
+  if (!location) return { status: res.status };
+  const target = new URL(location, REDIRECT_URI);
   return {
     status: res.status,
-    json: (await res.json().catch(() => ({}))) as Record<string, unknown>,
+    pathname: target.pathname,
+    error: target.searchParams.get("error") ?? undefined,
   };
 }
 
-/** A resource-gate rejection (either plugin). NOT a downstream grant error. */
-function isResourceRejection(error: string): boolean {
-  return error === "invalid_request" || error === "invalid_target" || error === "invalid_resource";
+/** POST `/oauth2/token`. The guard runs in the before-hook, ahead of the grant. */
+async function tokenErrorFor(clientId: string, resource?: string) {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: "irrelevant-code",
+    client_id: clientId,
+    redirect_uri: REDIRECT_URI,
+    code_verifier: "x".repeat(43),
+  });
+  if (resource) body.set("resource", resource);
+  const res = await app.request("/api/auth/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  return { status: res.status, error: json.error };
 }
 
-describe("per-org MCP audience honoured live on /oauth2/token (library contract)", () => {
-  const orgId = "00000000-0000-0000-0000-0000000000aa";
-  const orgUri = getMcpOrgResourceUri(orgId);
+describe("RFC 8707 resource gate on the AS", () => {
+  // A fresh org id per case. `oauth_resources` sits outside `truncateAll`, and
+  // the mcp module's periodic reconcile deletes per-org rows whose org is
+  // absent from `organizations` — so a case that needs its row to stay creates
+  // the organization, and one that asserts the row's absence simply never does.
+  let orgId: string;
+  let orgUri: string;
+  let ownerId: string;
 
   // The protected-resource registry is a process-wide singleton shared with the
   // live app. Snapshot before this file replaces the family and restore after,
@@ -99,11 +133,13 @@ describe("per-org MCP audience honoured live on /oauth2/token (library contract)
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
-    _resetMcpOrgAudiencesForTesting();
+    orgId = crypto.randomUUID();
+    orgUri = getMcpOrgResourceUri(orgId);
+    ({ id: ownerId } = await createTestUser());
     // Register the per-org resource FAMILY (mirrors the production registration
     // in `mcp/router.ts`) so the self-service resource-restriction guard (which
-    // checks the protected-resource registry, not validAudiences) passes —
-    // isolating the validAudiences live-read as the discriminator.
+    // checks the protected-resource registry, not the resource table) passes —
+    // isolating the `oauth_resources` lookup as the discriminator.
     resetProtectedResources();
     registerProtectedResourceFamily({
       prefix: "/api/mcp/o",
@@ -115,18 +151,77 @@ describe("per-org MCP audience honoured live on /oauth2/token (library contract)
     });
   });
 
-  it("rejects the per-org resource BEFORE it is added to validAudiences", async () => {
-    const clientId = await register();
-    const { json } = await tokenWithResource(clientId, orgUri);
-    expect(isResourceRejection(String(json.error))).toBe(true);
+  // `oauth_resources` is deliberately outside `truncateAll` (see
+  // `oidc/test/tables.ts`), so this file owns its own row lifecycle.
+  afterEach(async () => {
+    await db.delete(oauthResource).where(eq(oauthResource.identifier, orgUri));
   });
 
-  it("accepts the per-org resource AFTER a runtime addMcpOrgAudience()", async () => {
+  it("rejects the per-org resource with invalid_target BEFORE its row exists", async () => {
+    // No organization, no row: the reconcile can only converge on the state
+    // this case asserts.
     const clientId = await register();
-    addMcpOrgAudience(orgId);
-    const { json } = await tokenWithResource(clientId, orgUri);
-    // Past the resource gate now — the call still fails on the bogus code, but
-    // NOT with a resource/audience error.
-    expect(isResourceRejection(String(json.error ?? ""))).toBe(false);
+    expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
+  });
+
+  it("accepts the per-org resource AFTER its row is inserted at runtime", async () => {
+    const clientId = await register();
+    // The organization does not exist yet, so nothing can insert its row.
+    expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
+    // Now the org is real and its row is written, exactly as `onOrgCreate`
+    // does — and the reconcile keeps it rather than sweeping it away.
+    await createTestOrg(ownerId, { id: orgId, slug: `liveread-${orgId.slice(0, 8)}` });
+    await db
+      .insert(oauthResource)
+      .values({
+        id: crypto.randomUUID(),
+        identifier: orgUri,
+        name: `MCP endpoint for organization ${orgId}`,
+      })
+      .onConflictDoNothing({ target: oauthResource.identifier });
+    // Past the resource gate now — the request carries on to the login page.
+    // Naming the destination is what separates it from a 500.
+    expect(await authorizeFor(clientId, orgUri)).toMatchObject({
+      pathname: "/api/oauth/login",
+      error: undefined,
+    });
+  });
+
+  it("rejects a resource whose row is disabled", async () => {
+    const clientId = await register();
+    // A live org, so `disabled` is the only thing the gate can be reading: the
+    // reconcile writes the same identifier, and the upsert wins over its row.
+    await createTestOrg(ownerId, { id: orgId, slug: `liveread-${orgId.slice(0, 8)}` });
+    await db
+      .insert(oauthResource)
+      .values({
+        id: crypto.randomUUID(),
+        identifier: orgUri,
+        name: "disabled org endpoint",
+        disabled: true,
+      })
+      .onConflictDoUpdate({ target: oauthResource.identifier, set: { disabled: true } });
+    expect((await authorizeFor(clientId, orgUri)).error).toBe("invalid_target");
+  });
+
+  it("rejects a token request carrying NO resource (our guard, not the library)", async () => {
+    // Upstream tolerates a missing `resource` — it just mints an unbound token.
+    // Ours must not: an opaque, audience-less access token is unverifiable by
+    // the platform Bearer strategy, which would 401 every later request with no
+    // hint. The rejection is `invalid_request`, distinct from `invalid_target`.
+    const clientId = await register();
+    const { status, error } = await tokenErrorFor(clientId);
+    expect(status).toBe(400);
+    expect(error).toBe("invalid_request");
+  });
+
+  it("rejects a token request for a resource that was never registered", async () => {
+    // A self-service client may bind a token to one registered protected
+    // resource and nothing else, so an arbitrary identifier is `invalid_target`
+    // at the guard, before the AS ever resolves it against `oauth_resources`.
+    const clientId = await register();
+    const { status, error } = await tokenErrorFor(clientId, "https://evil.example.com");
+    expect(status).toBe(400);
+    expect(error).toBe("invalid_target");
   });
 });

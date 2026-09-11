@@ -48,21 +48,27 @@ describe("buildPlatformPromptInputs", () => {
     expect(inputs.timeoutSeconds).toBe(120);
   });
 
-  it("derives input / config / output schemas from the root manifest wrappers", () => {
+  it("derives input / output schemas from the root manifest wrappers", () => {
     const root = pkg(
       "@acme/agent@1.0.0",
       {
         type: "agent",
-        input: { schema: { properties: { q: { type: "string" } }, required: ["q"] } },
-        config: { schema: { properties: { verbose: { type: "boolean" } } } },
+        input: {
+          schema: {
+            properties: { q: { type: "string" }, verbose: { type: "boolean" } },
+            required: ["q"],
+          },
+        },
         output: { schema: { properties: { result: { type: "string" } }, required: ["result"] } },
       },
       { "prompt.md": "T" },
     );
     const inputs = buildPlatformPromptInputs(bundleOf(root), ctx());
-    expect(inputs.inputSchema?.properties).toEqual({ q: { type: "string" } });
+    expect(inputs.inputSchema?.properties).toEqual({
+      q: { type: "string" },
+      verbose: { type: "boolean" },
+    });
     expect(inputs.inputSchema?.required).toEqual(["q"]);
-    expect(inputs.configSchema?.properties).toEqual({ verbose: { type: "boolean" } });
     expect(inputs.outputSchema).toEqual({
       properties: { result: { type: "string" } },
       required: ["result"],

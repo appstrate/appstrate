@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 
 /**
- * Org/app context for queries. The headers are spec-declared params passed
+ * Org/space context for queries. The headers are spec-declared params passed
  * explicitly (instead of relying on the client middleware alone) so they are
- * part of the React Query key — switching org or application refetches
+ * part of the React Query key — switching org or space refetches
  * instead of serving another scope's cached page.
  */
 export function useOrgScope() {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return {
-    enabled: !!orgId && !!applicationId,
+    enabled: !!orgId && !!spaceId,
     header: {
       "X-Org-Id": orgId ?? undefined,
-      "X-Application-Id": applicationId ?? undefined,
+      "X-Space-Id": spaceId ?? undefined,
     },
   };
 }

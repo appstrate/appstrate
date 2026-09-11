@@ -18,13 +18,20 @@ Please include as much detail as possible:
 
 ## Supported Versions
 
-| Version        | Support Level         |
-| -------------- | --------------------- |
-| Latest release | Full support          |
-| Previous major | Security patches only |
-| Older versions | Not supported         |
+| Version                                    | Support Level         |
+| ------------------------------------------ | --------------------- |
+| Latest release                             | Full support          |
+| Previous major                             | Security patches only |
+| Pre-1.0: the last 12 releases, or 6 months | Security patches only |
+| Older versions                             | Not supported         |
 
 We recommend always running the latest release. Security patches for the previous major version are provided on a best-effort basis and only for critical or high severity issues.
+
+**The pre-1.0 row is not a footnote — it is the whole window.** With one major
+version published and ~190 tags behind it, "previous major" names nothing, so
+until a `2.0.0` exists the supported window is the last 12 releases or 6 months,
+whichever reaches further back. An upgrade from outside that window is not
+supported: re-install rather than upgrade in place.
 
 ## Response Timeline
 
@@ -147,13 +154,14 @@ Each run creates an isolated, ephemeral environment with two containers and a de
     ║  │ - NO PLATFORM_API_URL │ ← no ExtraHosts  ║
     ║  │ - NO credentials      │                  ║
     ║  │ - NO SIDECAR_URL      │ ← deleted from   ║
-    ║  │                       │   env after boot ║
+    ║  │ - NO SIDECAR_AUTH_    │   env after boot ║
+    ║  │      TOKEN            │                  ║
     ║  │ - Runs LLM agent code │                  ║
     ║  └───────────────────────┘                  ║
     ╚═════════════════════════════════════════════╝
 ```
 
-**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`<provider>_call`, `run_history`), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` is `delete`d from `process.env` — the LLM-facing bash extension never sees it. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
+**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`{ns}__api_call`, `run_history`, `recall_memory` — see [How the agent makes authenticated API calls](#how-the-agent-makes-authenticated-api-calls) for the naming), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` **and** `SIDECAR_AUTH_TOKEN` are `delete`d from `process.env` — the LLM-facing bash extension never sees either. Deleting the URL removes only the convenience (`NO_PROXY` still names the sidecar host); deleting the per-run bearer is what removes the capability. Full design: `docs/architecture/SIDECAR.md`. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
 
 **What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens, **or the sidecar URL itself** (deleted from env after runtime bootstrap).
 
@@ -230,7 +238,7 @@ Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeA
 The platform API (`/internal/integration-credentials/{scope}/{name}`) enforces additional controls:
 
 - **Run must be active** — tokens for completed/failed runs are rejected (`internal.ts`)
-- **Integration must be declared and installed** — `assertAgentDeclaresIntegration` rejects any integration absent from the running agent's `dependencies.integrations`, and a second check rejects one that is not active in the run's application. An agent cannot reach credentials it did not declare.
+- **Integration must be declared and installed** — `assertAgentDeclaresIntegration` rejects any integration absent from the running agent's `dependencies.integrations`, and a second check rejects one that is not active in the run's space. An agent cannot reach credentials it did not declare.
 - **Access is logged** — every credential fetch is recorded with run ID, integration package ID, and the resolved auth/delivery-plan counts
 
 ### Credential encryption at rest
@@ -441,8 +449,8 @@ if (!rows[0] || rows[0].status !== "running") {
 
 Privileged operations (package import, configuration, deletion, …) are gated on a
 **permission**, not on a role name. There is no `requireAdmin()` / `requireOwner()`
-middleware: role → permission expansion happens once, in the org-context stage of
-the request pipeline, and every route asserts the concrete permission it needs.
+middleware: role → permission expansion happens in the pipeline, and every route
+asserts the concrete permission it needs.
 The single runtime path is `makePermissionGuard` in
 `packages/core/src/permissions.ts`, wrapped by three typed façades —
 `requirePermission` (`apps/api/src/middleware/require-permission.ts`, core +
@@ -466,17 +474,60 @@ export function makePermissionGuard(required: string) {
 router.post("/path", requirePermission("agents", "write"), handler);
 ```
 
-Three properties matter for the threat model:
+**Two levels, one Set.** Every permission string belongs to exactly one level
+(`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4): an ORG role
+(`owner`/`admin`/`member`/`guest`) grants org-level strings; a SPACE role — one
+of the four presets (`admin`/`builder`/`operator`/`viewer`) or one of the org's
+own bundles — grants space-level ones. The pipeline therefore writes three
+context keys instead of one:
+
+| Key              | Written by                                  | Value                                                                                                 |
+| ---------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `orgPermissions` | auth pipeline, once the org role is known   | the org-level effective set                                                                           |
+| `scopeCeiling`   | auth pipeline                               | an API key's `scopes`, an OIDC scope claim; `undefined` for a cookie                                  |
+| `permissions`    | auth pipeline **and** `requireSpaceContext` | `ceiling(orgPermissions)`, then `ceiling(orgPermissions ∪ spacePermissions)` once a space is resolved |
+
+`makePermissionGuard` keeps reading `permissions` and nothing else. **The
+ceiling is applied on every write of that key**, never once at the edge, so a
+bearer scoped to `runs:read` cannot inherit `org:delete` from the subject behind
+it — and a route outside a space context sees org-level strings only, which is
+why a space-level guard can never be satisfied on an org route.
+
+A module may add org-level strings to `orgPermissions` for ONE named principal
+rather than for a role (`principalPermissions`, RBAC spec §4.2 — the ee module's
+billing managers): each module declares up front what it may ever grant, anything else
+its resolver returns is dropped, the strings may never be API-key- or
+end-user-grantable, and the surface is evaluated for session-shaped callers
+only, so no delegated credential can carry such a grant. The answers are cached
+per `(orgId, userId)` behind a 10s TTL and dropped across replicas by the
+granting module's own `invalidatePrincipalPermissions(orgId, userId)`, which
+names one principal per call — there is no org-wide form, because the cache is
+keyed by that pair rather than prefixed by org.
+
+`applySpacePermissions(c, space)` (`middleware/space-context.ts`) is the single
+place the space slice is added: it loads the caller's `space_members` row, runs
+the resolver, and refuses with 403 `not_a_space_member` (or 404 for a `private`
+space) when there is no role. It is exported: the in-tree `mcp` module calls it
+directly, and a module gating a space-level resource on a route family the
+platform does not space-scope reaches it through the core seam
+`enterSpaceContext` (`chat`, `webhooks`) — a module that skips both holds no
+space-level string, so its own guard fails closed.
+
+Four properties matter for the threat model:
 
 - **Fail-closed.** An absent or malformed permission set denies; it never falls
   through to a role comparison.
 - **Denials are audited exactly once.** The handler is registered at boot
   (`installPermissionAuditLogger`), and a throwing audit handler is swallowed so
   an authz denial can never be converted into a 500 that masks the 403.
+- **A credential can never exceed its ceiling.** Both halves of the union are
+  intersected with `scopeCeiling` on the way into `permissions`, including an
+  empty OIDC scope claim.
 - **Modules cannot widen core.** A module gates on core resources through
   `requireCorePermission` (typechecked against the core catalog) and on its own
-  through `requireModulePermission`; the role→permission matrix lives in
-  `apps/api/src/lib/permissions.ts`.
+  through `requireModulePermission`; the role→permission policy lives in
+  `apps/api/src/lib/permissions.ts` and its level table in
+  `@appstrate/core/permissions`.
 
 ### Orphaned run recovery
 
@@ -499,48 +550,57 @@ for (const runId of orphanIds) {
 
 ## Layer 6 — Data Isolation (Two-Tier Scoping)
 
-**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/app-context.ts`, `apps/api/src/services/state/`, all route handlers
+**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/space-context.ts`, `apps/api/src/services/state/`, all route handlers
 
-Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and app-scoped resources are additionally scoped by `applicationId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the app-context middleware (`X-Application-Id`) validates the application belongs to the org.
+Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and space-scoped resources are additionally scoped by `spaceId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the space-context middleware (`X-Space-Id`) validates the space belongs to the org.
 
-| Table                              | Scoping          | SELECT         | INSERT                | UPDATE                | DELETE                |
-| ---------------------------------- | ---------------- | -------------- | --------------------- | --------------------- | --------------------- |
-| `runs`                             | Org + App        | App members    | Own user + app member | —                     | —                     |
-| `run_logs`                         | Org              | Org members    | Org members           | —                     | —                     |
-| `application_packages`             | App              | App members    | App admins            | App admins            | App admins            |
-| `packages`                         | Org              | Org members    | Org admins            | Org admins            | Org admins            |
-| `package_schedules`                | Org + App        | App members    | Own user + app member | Own user + app member | Own user + app member |
-| `webhooks`                         | Org + App        | App admins     | App admins            | App admins            | App admins            |
-| `api_keys`                         | Org + App        | App admins     | App admins            | —                     | App admins            |
-| `application_provider_credentials` | App              | App members    | App admins            | App admins            | App admins            |
-| `user_provider_connections`        | Org + Credential | Own user + org | Own user + org member | Own user + org member | Own user + org member |
+Belonging to the org is not enough to enter one of its spaces: the same middleware then resolves the caller's role in that space from the `space_members` row (or from the org role, or from an `open` space's default) and refuses when there is none — 403 `not_a_space_member`, or 404 for a `private` space, which must not confirm its own existence to a non-member. So the second tier filters rows by `spaceId` **and** gates entry to the space, and a `guest` reaches exactly the spaces someone put them in.
 
-App-context middleware resolves the application from the `X-Application-Id` header (session auth) or from the API key's `applicationId`:
+| Table               | Scoping     | SELECT        | INSERT                  | UPDATE                  | DELETE                  |
+| ------------------- | ----------- | ------------- | ----------------------- | ----------------------- | ----------------------- |
+| `runs`              | Org + Space | Space members | Own user + space member | —                       | —                       |
+| `run_logs`          | Org         | Org members   | Org members             | —                       | —                       |
+| `space_packages`    | Space       | Space members | Space admins            | Space admins            | Space admins            |
+| `packages`          | Org         | Org members   | Org admins              | Org admins              | Org admins              |
+| `package_schedules` | Org + Space | Space members | Own user + space member | Own user + space member | Own user + space member |
+| `webhooks`          | Org + Space | Space admins  | Space admins            | Space admins            | Space admins            |
+| `api_keys`          | Org + Space | Space admins  | Space admins            | —                       | Space admins            |
+
+Credential connections carry the same model with a per-actor owner on top, so they get their own row:
+
+| Table                     | Scoping | SELECT                    | INSERT                  | UPDATE                        | DELETE |
+| ------------------------- | ------- | ------------------------- | ----------------------- | ----------------------------- | ------ |
+| `integration_connections` | Space   | Owner or shared, in space | Own user + space member | Owner (metadata: + org admin) | Owner  |
+
+Three things that row cannot say in a cell:
+
+- **`Scoping` is `Space`, not `Org + Space`, because the table has no `org_id` column** (`packages/db/src/schema/integrations.ts:49`) — `space_id` is `NOT NULL` with `ON DELETE CASCADE` (`:61`). The org tier is still enforced, procedurally rather than by a predicate: `/api/integrations` is in `SPACE_SCOPED_PREFIXES` (`middleware/space-context.ts:40`) so the space is validated against the org before a handler runs, and the service re-asserts it with `assertSpaceInScope` (`services/spaces.ts:81`) before every write. Same shape as `space_packages` above.
+- **Reads admit shared rows; writes never do.** A connection's owner is exactly one of `user_id` / `end_user_id` (DB CHECK `integration_conn_exactly_one_owner`), and `shared_with_org = true` widens **reads** to any actor in the same space — `actorOrSharedFilter` on SELECT vs `actorFilter` on UPDATE/DELETE (`apps/api/src/lib/actor.ts:44`, `:96`). Non-owned rows come back with `identity_claims: null` (`services/integration-connections.ts:2438`).
+- **The UPDATE cell has two answers.** A credential rewrite is owner-only in SQL (`services/integration-connections.ts:2204`). The metadata `PATCH` is SQL-unscoped and gated entirely at the route — owner **or** org admin, with `shared_with_org` itself restricted to the owner (`routes/integrations.ts:1183`–`:1223`). The system token-refresh write-back is keyed by id alone (`:2274`), reached only from a row already resolved through a scoped read.
+
+Space-context middleware resolves the space from the `X-Space-Id` header (session auth) or from the API key's own `spaceId`:
 
 ```typescript
-// app-context.ts — verify application belongs to org
-const app = await db
-  .select({ id: applications.id, isDefault: applications.isDefault })
-  .from(applications)
-  .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+// space-context.ts — verify the space belongs to the org
+assertSpaceId(spaceId); // `spc_` + canonical UUID, or 400
+const [space] = await db
+  .select({ id: spaces.id, orgId: spaces.orgId, isDefault: spaces.isDefault })
+  .from(spaces)
+  .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
   .limit(1);
-if (!app) throw notFound("Application not found in this organization");
-c.set("applicationId", applicationId);
+if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
+c.set("spaceId", spaceId);
 
-// Every app-scoped query filters by both orgId and applicationId
+// Every space-scoped query filters by both orgId and spaceId
 const rows = await db
   .select()
   .from(runs)
-  .where(
-    and(
-      eq(runs.packageId, packageId),
-      eq(runs.orgId, orgId),
-      eq(runs.applicationId, applicationId),
-    ),
-  );
+  .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId), eq(runs.spaceId, spaceId)));
 ```
 
-**Standard:** Two-tier org+app-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
+A pinned space (API key, OIDC JWT) wins over the header: when both are present and disagree the request is a **403**, so a bearer token scoped to space A cannot reach space B in the same org by sending `X-Space-Id: B`.
+
+**Standard:** Two-tier org+space-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
 
 ---
 
@@ -550,15 +610,15 @@ const rows = await db
 
 All external inputs are validated using Zod schemas before processing:
 
-| Input               | Validation                                               | Location                         |
-| ------------------- | -------------------------------------------------------- | -------------------------------- |
-| Agent manifests     | Zod schema with slug regex, typed enums, required fields | `schema.ts:validateManifest()`   |
-| Agent configuration | AJV against manifest config schema                       | `schema.ts:validateConfig()`     |
-| Run input           | AJV against manifest input schema                        | `schema.ts:validateInput()`      |
-| File uploads        | Extension allowlist, size limit, count limit             | `schema.ts:validateFileInputs()` |
-| Agent output        | Schema-typed `output` tool + AJV validation at ingestion | `schema.ts:validateOutput()`     |
-| Package imports     | Size limit, manifest validation, content validation      | `bundle-import.ts`               |
-| Agent IDs           | Slug regex at DB level and Zod level                     | `schema.ts`, `001_initial.sql`   |
+| Input                | Validation                                               | Location                            |
+| -------------------- | -------------------------------------------------------- | ----------------------------------- |
+| Agent manifests      | Zod schema with slug regex, typed enums, required fields | `schema.ts:validateManifest()`      |
+| Agent input settings | AJV against manifest input schema                        | `schema.ts:validateAgainstSchema()` |
+| Run input            | AJV against manifest input schema                        | `schema.ts:validateInput()`         |
+| File uploads         | Extension allowlist, size limit, count limit             | `schema.ts:validateFileInputs()`    |
+| Agent output         | Schema-typed `output` tool + AJV validation at ingestion | `schema.ts:validateOutput()`        |
+| Package imports      | Size limit, manifest validation, content validation      | `bundle-import.ts`                  |
+| Agent IDs            | Slug regex at DB level and Zod level                     | `schema.ts`, `0000_init.sql`        |
 
 **Output validation:** When an agent defines `output.schema`, the schema becomes the input schema of the `output` runtime tool (`packages/core/src/runtime-tool-defs.ts`) — the model sees the exact JSON Schema in the tool definition and the tool call is AJV-validated in-container. At ingestion, the platform re-validates the result against the schema (`run-event-ingestion.ts`); on mismatch — or when the agent never called `output` despite required fields — the run is marked **failed**. This dual-layer approach (tool-level + platform-level) prevents malformed output from being persisted as a successful run.
 
@@ -570,13 +630,26 @@ All external inputs are validated using Zod schemas before processing:
 
 ### Rate limiting
 
-Token bucket rate limiting prevents abuse:
+Token bucket rate limiting prevents abuse. The authenticated limiter (`rateLimit`, `apps/api/src/middleware/rate-limit.ts`) keys on `method:path:identity`, where the identity is the API key id when one authenticated the request and the user id otherwise — so a budget is per route AND per credential, and rotating between an API key and a session does not merge the two. Public routes use `rateLimitByIp` instead.
 
-| Endpoint                   | Limit     | Scope    |
-| -------------------------- | --------- | -------- |
-| `POST /api/agents/:id/run` | 20/minute | Per user |
-| `POST /api/agents/import`  | 10/minute | Per user |
-| `POST /api/agents`         | 10/minute | Per user |
+Representative limits, all read from the route registrations:
+
+| Endpoint                                                                                    | Limit                                                   | Scope               |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------- |
+| `POST /api/agents/{scope}/{name}/run`                                                       | 20/minute                                               | Per user or API key |
+| `POST /api/packages/import` · `/import-bundle` · `/import-github`                           | 10/minute each                                          | Per user or API key |
+| `POST /api/agents/{scope}/{name}/schedules`                                                 | 10/minute                                               | Per user or API key |
+| `POST /api/runs/inline` · `/api/runs/inline/validate`                                       | `INLINE_RUN_LIMITS.rate_per_min` (60)                   | Per user or API key |
+| `POST /api/runs/remote`                                                                     | `PLATFORM_RUN_LIMITS.per_org_global_rate_per_min` (200) | Per user or API key |
+| `POST /api/uploads`                                                                         | 20/minute                                               | Per user or API key |
+| `PUT /api/uploads` (signed upload sink)                                                     | 60/minute                                               | Per IP              |
+| `POST /api/auth/bootstrap/redeem`                                                           | 5/minute                                                | Per IP              |
+| `POST /api/models/test` · `/api/model-provider-credentials/test` · `/api/proxies/{id}/test` | 5/minute                                                | Per user or API key |
+| `GET /api/runs/{id}/logs` · `GET /api/files/{id}/content`                                   | 120/minute                                              | Per user or API key |
+
+The two limits in parentheses are the schema defaults; both are operator-tunable through the `INLINE_RUN_LIMITS` / `PLATFORM_RUN_LIMITS` JSON env vars (`apps/api/src/services/run-limits.ts`).
+
+Package **creation** — `POST /api/packages/{agents|skills|integrations}`, the JSON-body editor path — carries no `rateLimit`. It is gated by `requirePermission(<type>, "write")` only. The rate-limited write paths are the three import routes above, which accept an arbitrary caller-supplied archive.
 
 ### Run timeout
 

@@ -8,7 +8,7 @@ import type { DataColumn } from "../../components/data-table";
 import { CliSessionIcon } from "../../components/cli-session-icon";
 import { TableRowActions } from "../../components/table-row-actions";
 import { deriveLabel, displayIp, type CliSessionDisplay } from "../../lib/cli-sessions";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 
 export interface AdminCliSession extends CliSessionDisplay {
   userId: string;

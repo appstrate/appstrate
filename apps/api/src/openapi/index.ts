@@ -39,10 +39,11 @@ import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
 import { notificationsPaths } from "./paths/notifications.ts";
 import { packagesPaths } from "./paths/packages.ts";
-import { applicationsPaths } from "./paths/applications.ts";
+import { spacesPaths } from "./paths/spaces.ts";
+import { rolesPaths } from "./paths/roles.ts";
 import { endUsersPaths } from "./paths/end-users.ts";
 import { uploadsPaths } from "./paths/uploads.ts";
-import { documentsPaths } from "./paths/documents.ts";
+import { filesPaths } from "./paths/files.ts";
 import { adminStorageDeletionPaths } from "./paths/admin-storage-deletion.ts";
 import { credentialProxyPaths } from "./paths/credential-proxy.ts";
 import { llmProxyPaths } from "./paths/llm-proxy.ts";
@@ -70,10 +71,11 @@ const corePaths = {
   ...metaPaths,
   ...notificationsPaths,
   ...packagesPaths,
-  ...applicationsPaths,
+  ...spacesPaths,
+  ...rolesPaths,
   ...endUsersPaths,
   ...uploadsPaths,
-  ...documentsPaths,
+  ...filesPaths,
   ...adminStorageDeletionPaths,
   ...credentialProxyPaths,
   ...llmProxyPaths,

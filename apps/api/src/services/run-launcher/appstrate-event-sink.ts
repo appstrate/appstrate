@@ -1,153 +1,45 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-backed {@link EventSink} implementation — the platform
- * write-through that persists `run_logs`, snapshots token usage onto
- * the run row, and appends cost to the unified `llm_usage` ledger.
+ * Run-event write-through — persists `run_logs`, snapshots token usage onto the
+ * run row, and upserts the run's `llm_usage` runner row.
  *
- * {@link PersistingEventSink} is fan-out only: the ingestion hot path
- * rebuilds one sink per request, calls `handle()`, and drops it. No
- * in-memory state is kept between events, so every method is total —
- * no getter throws because of an unsupported mode.
+ * A runner row's `cost_usd` is computed HERE, server-side, from the run's
+ * kickoff rate snapshot (`runs.model_cost`) and the token counts the runner
+ * reports — never from the `cost` the container reports; see
+ * {@link resolveRunnerCost}.
  *
- * Canonical AFPS aggregation (`snapshot()` / `RunResult`) is NOT this
- * sink's job. A caller that needs to read an aggregate back composes a
- * runtime reducer (`createReducerSink()` from
- * `@appstrate/afps-runtime/sinks`) next to this sink and drives both;
- * no platform code path does.
- *
- * Event routing:
- *
- *   Platform write-through:
- *     output.emitted  → run_logs (result/output)
- *     log.written     → run_logs (progress/log) with level
- *
- *   Platform-specific (`appstrate.*` namespace):
- *     appstrate.progress → run_logs (progress/progress) with message/data/level
- *     appstrate.error    → run_logs (system/adapter_error) + lastAdapterError
- *     appstrate.metric   → runs.tokenUsage snapshot (running total)
- *                         + llm_usage ledger row (source="runner")
- *                         + schedules a throttled `run_metric` broadcast
- *                           which also persists `cost_so_far` onto the
- *                           run row (monotonic-max guarded)
- *
- * This sink is the single writer of the `llm_usage` runner rows and
- * the single reader/writer of `runs.tokenUsage`. `runs.cost` is cached
- * aggregate of `llm_usage` and is refreshed on two paths: the throttled
- * broadcaster (during streaming, via {@link scheduleRunMetricBroadcast})
- * and `finalizeRun` (terminal write). Both writers use a monotonic guard
- * so the recorded value never regresses.
+ * This module is the single writer of the `llm_usage` runner rows and the
+ * single reader/writer of `runs.tokenUsage`.
  */
 
-import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { documentUri } from "@appstrate/core/document-uri";
-import { db, type Db } from "@appstrate/db/client";
+import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
+import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
-import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
+import { computeTokenCost, type TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { type CredentialSource } from "../llm-usage-ledger.ts";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
-import type { AppScope } from "../../lib/scope.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
 
-export interface PersistingEventSinkOptions {
-  scope: AppScope;
-  runId: string;
-  /**
-   * When `true`, `appstrate.metric` events write a runner-source row to
-   * the `llm_usage` ledger. At most one runner row per run; concurrent
-   * writers race via ON CONFLICT DO NOTHING. The ingestion path turns
-   * this on. Defaults to `false` — fail-closed, so a caller that has
-   * not thought about billing never writes the ledger by accident.
-   */
-  writeLedger?: boolean;
-  /**
-   * Run's model source (`"system"` platform-provided, `"org"` BYOK, or null)
-   * — stamped as `llm_usage.credential_source` on the runner row so the
-   * attribution matches the proxy path. Only consulted when {@link writeLedger}.
-   */
-  modelSource?: string | null;
-  /**
-   * Run's kickoff pricing snapshot (`runs.model_cost`) — the rates the
-   * container was handed as `MODEL_COST`. The container computes the cost it
-   * reports, so this is what lets the row's `pricing_status` be derived
-   * SERVER-SIDE instead of trusted. Only consulted when {@link writeLedger}.
-   */
-  modelCost?: ModelCost | null;
-}
-
-/**
- * Persists each {@link RunEvent} to `run_logs` + (for `appstrate.metric`)
- * to `runs.tokenUsage` + the `llm_usage` ledger.
- *
- * Stateless across events: a fresh instance is built per ingested
- * envelope by the route handler. Calls to this sink are total —
- * no method ever throws because of an unsupported mode.
- */
-export class PersistingEventSink implements EventSink {
-  readonly runId: string;
-  protected readonly scope: AppScope;
-  protected lastAdapterError: string | null = null;
-  private readonly writeLedger: boolean;
-  private readonly modelSource: string | null;
-  private readonly modelCost: ModelCost | null;
-
-  constructor(opts: PersistingEventSinkOptions) {
-    this.scope = opts.scope;
-    this.runId = opts.runId;
-    this.writeLedger = opts.writeLedger ?? false;
-    this.modelSource = opts.modelSource ?? null;
-    this.modelCost = opts.modelCost ?? null;
-  }
-
-  async handle(event: RunEvent): Promise<void> {
-    await this.persist(event);
-  }
-
-  async finalize(_result: RunResult): Promise<void> {
-    // Persistence-only sink — finalize is the route handler's job.
-    // The interface contract requires the method, so we no-op.
-  }
-
-  /**
-   * Last `appstrate.error.message` observed during the lifetime of this
-   * sink instance. Per-instance — short-lived in the ingestion path.
-   */
-  get lastError(): string | null {
-    return this.lastAdapterError;
-  }
-
-  protected async persist(event: RunEvent): Promise<void> {
-    const adapterError = await persistRunEvent(db, this.scope, this.runId, event, {
-      writeLedger: this.writeLedger,
-      modelSource: this.modelSource,
-      modelCost: this.modelCost,
-    });
-    if (adapterError !== null) this.lastAdapterError = adapterError;
-  }
-}
+const FILE_PUBLISHED_EVENT_TYPE = "file.published";
 
 /**
  * Dispatch one {@link RunEvent} through the platform write-through table.
- * Extracted so the ingestion hot path can run the dispatch inside a
- * Drizzle transaction (passing `tx` as the executor) — that way the CAS
- * advance of `runs.last_event_sequence` and the `run_logs` INSERT
- * commit-or-roll-back atomically. A transient INSERT failure no longer
- * leaves a sequence advanced with no log row to back it.
- *
- * Returns the `appstrate.error.message` if this event was one, so the
- * caller can update its own `lastAdapterError` cache.
+ * Returns the `appstrate.error.message` when this event was one, else null.
+ * `executor` is a parameter so the ingestion path can pass its transaction: the
+ * `runs.last_event_sequence` CAS and the `run_logs` INSERT must commit together.
  */
 export async function persistRunEvent(
   executor: Db,
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
   event: RunEvent,
   opts: {
@@ -178,40 +70,35 @@ export async function persistRunEvent(
         (level === "info" || level === "warn" || level === "error") &&
         typeof message === "string"
       ) {
-        // `event='log'` (not the generic `'progress'`) tags rows that came from
-        // the agent's explicit `log` runtime tool, so consumers can isolate the
-        // agent's own narration from auto-emitted lifecycle/tool-call
-        // breadcrumbs (which share `type='progress'`). The chat run card shows
-        // ONLY these `log` rows. The dashboard log viewer treats unknown events
-        // generically, so it renders them unchanged.
+        // `event='log'` marks rows from the agent's explicit `log` tool, not
+        // auto-emitted breadcrumbs. The chat run card shows ONLY these.
         await appendRunLog(scope, runId, "progress", "log", message, null, level, executor);
       }
       return null;
     }
 
-    case "document.published": {
-      // A run document was stored on the platform (via the `publish_document`
-      // tool or the entrypoint outputs sweep). The `documents` row already
-      // exists (created by the POST /api/runs/:id/documents route) — this
-      // event carries no new DB state, it only persists a run_log so the
-      // published document streams over the existing run_log SSE and replays.
-      // Stored as `type='result' event='document'`, mirroring output.
-      const documentId = typeof event.document_id === "string" ? event.document_id : null;
-      if (documentId) {
+    case FILE_PUBLISHED_EVENT_TYPE: {
+      // The `files` row already exists (POST /api/runs/:id/files); this event
+      // only persists a run_log so the file streams over the run_log SSE. The
+      // tag comes from `PUBLISHED_FILE_LOG_EVENT` (`@appstrate/core/file-uri`),
+      // which is also what the readers' membership set is built from — writing
+      // the literal here is what let a "shared" list have an unshared writer.
+      // The set carries no retired spelling: none survives the rename.
+      const fileId = typeof event.file_id === "string" ? event.file_id : null;
+      if (fileId) {
         await appendRunLog(
           scope,
           runId,
           "result",
-          "document",
+          PUBLISHED_FILE_LOG_EVENT,
           null,
           {
-            document_id: documentId,
-            uri: typeof event.uri === "string" ? event.uri : documentUri(documentId),
+            file_id: fileId,
+            uri: typeof event.uri === "string" ? event.uri : fileUri(fileId),
             name: typeof event.name === "string" ? event.name : null,
             mime: typeof event.mime === "string" ? event.mime : null,
             size: typeof event.size === "number" ? event.size : null,
             sha256: typeof event.sha256 === "string" ? event.sha256 : null,
-            presentation: event.presentation === "primary" ? "primary" : null,
           },
           "info",
           executor,
@@ -237,6 +124,8 @@ export async function persistRunEvent(
 
     case "appstrate.metric": {
       const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
+      // Advisory on a platform run (see {@link resolveRunnerCost}); the
+      // recorded cost only for a remote-origin run.
       const cost = typeof event.cost === "number" ? event.cost : null;
 
       // Token usage is a running-total snapshot on the run row.
@@ -248,18 +137,10 @@ export async function persistRunEvent(
           executor,
         );
       }
-      // Ledger row — only the ingestion path opts in. The runner emits
-      // cumulative running totals on each metric event, so concurrent
-      // writers (a later metric event, the finalize-time fallback)
-      // UPSERT the row with monotonic-max semantics.
-      //
-      // A runner write is NEVER deferred to the durable retry queue: a replay
-      // could only land after the run settled, and a cumulative snapshot
-      // replayed past settlement is REFUSED (see `runNotTerminalSql`). A
-      // failure therefore throws, aborting the surrounding ingestion
-      // transaction — the sequence never advances, so the runner re-POSTs and
-      // its NEXT cumulative snapshot supersedes the lost one. Cumulativity is
-      // what makes discarding a failed write safe here.
+      // Ledger row — only the ingestion path opts in. A runner write is never
+      // retried asynchronously (a replay past settlement is refused): it throws
+      // and aborts the ingestion transaction, so the sequence never advances
+      // and the runner's next cumulative snapshot replaces this one.
       if (opts.writeLedger) {
         await writeRunnerLedgerRow(
           scope,
@@ -267,10 +148,8 @@ export async function persistRunEvent(
           { cost, usage, modelSource: opts.modelSource, modelCost: opts.modelCost },
           { executor },
         );
-        // Best-effort live broadcast — never blocks the ingestion hot
-        // path nor fails it. The broadcaster throttles per-run to
-        // avoid flooding SSE subscribers under bursty metric emission
-        // (e.g. tool-heavy turns).
+        // Best-effort live broadcast, throttled per run — never blocks the
+        // ingestion hot path nor fails it.
         scheduleRunMetricBroadcast(runId);
       }
       return null;
@@ -290,59 +169,55 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
 }
 
 /**
- * Write (upsert) the runner-source row for a run in the `llm_usage` ledger.
+ * Upsert the run's `source="runner"` row in the `llm_usage` ledger. `cost_usd`
+ * is NOT `row.cost` — see {@link resolveRunnerCost}.
  *
- * The runner emits cumulative running totals on every `appstrate.metric`
- * event, so the row tracks the latest total seen — concurrent writers
- * (a later metric event, the finalize-time fallback) UPSERT into the
- * partial unique index `uq_llm_usage_runner_run_id`. The conflict clause
- * is two-level monotonic: an UPDATE takes effect when the incoming
- * `cost_usd` is strictly larger than the stored value, OR the cost is
- * equal and the incoming total token count is strictly larger. The token
- * tiebreak keeps a zero-cost model's snapshot advancing (cost stays 0
- * while tokens climb), so:
- *
- *   - rapid-fire metric events keep the row in sync with the latest total
- *   - a finalize-fallback emit with a smaller `result.cost` (e.g. when
- *     a fresh metric already landed) cannot regress the bill
- *   - reorder is safe — the highest-seen total wins regardless of arrival
- *     order
- *
- * `opts.executor` writes inside the ingestion transaction; the finalize-fallback
- * caller omits it and runs outside any transaction.
+ * The runner reports CUMULATIVE totals, so this is one row per run (partial
+ * unique index `uq_llm_usage_runner_run_id`) upserted with the latest total,
+ * never an append of a delta. It advances on a strictly larger `cost_usd`, or
+ * an equal cost with a strictly larger token total (which keeps a zero-cost
+ * model advancing) — so reorder and replay are safe.
  */
 export async function writeRunnerLedgerRow(
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
   row: {
+    /** Cost as the CONTAINER computed it — see {@link resolveRunnerCost}. */
     cost: number | null;
     usage: TokenUsage | null;
-    /** Run's model source — stamped as `credential_source` (see below). */
+    /** Run's model source — stamped as `credential_source`. */
     modelSource?: string | null;
-    /** Run's kickoff rate snapshot — classifies `pricing_status` (see below). */
+    /** Run's kickoff rate snapshot — prices the row and classifies it. */
     modelCost?: ModelCost | null;
   },
   opts: {
-    /** Executor — pass the ingestion transaction on the metric hot path. */
+    /** Executor — the ingestion transaction on the metric hot path. */
     executor?: Db;
     /**
-     * Finalization barrier: require the terminal cumulative snapshot to be in
-     * Postgres before the run becomes settled. Cloud claims a runner row by its
-     * existing serial id, so asynchronously updating it after settlement could
-     * otherwise strand the final delta.
+     * Require the write to be durable before the run settles: a settled runner
+     * row is claimed by a billing cursor once, by its existing serial id, so a
+     * later update strands the delta.
      */
     required?: boolean;
   } = {},
 ): Promise<void> {
-  // Skip degenerate events with neither usage nor cost — nothing to bill
-  // or audit. NOTE the asymmetry the pricing status exists for: a run with
-  // tokens but a NULL cost is NOT skipped — it lands as a `costUsd: 0` row
-  // below, and that zero is precisely the one that must not read as "free".
-  if (row.cost === null && !row.usage) return;
+  // Degenerate-event skip — nothing to bill or audit. Keyed on whichever input
+  // this row's cost is DERIVED from: the usage snapshot on a platform run, the
+  // reported `cost` on a remote-origin run. A platform run with tokens but no
+  // rates is NOT skipped — it lands as a `costUsd: 0` row carrying a pricing
+  // status, and that zero must not read as "free".
+  const serverPriced = costIsServerComputed(row.modelSource);
+  if (!row.usage && (serverPriced || row.cost === null)) return;
+
+  const { costUsd, pricingStatus } = resolveRunnerCost(scope.orgId, runId, row);
+  warnOnReportedCostDivergence(scope.orgId, runId, row.cost, costUsd, {
+    serverPriced,
+    // `required` is set only by finalize's terminal ledger barrier, which makes
+    // it this producer's once-per-run hook.
+    terminal: opts.required === true,
+  });
 
   try {
-    // The single ledger writer performs the monotonic upsert against the
-    // partial unique index (highest cumulative total wins).
     await recordLlmUsageReliably(
       {
         source: "runner",
@@ -353,8 +228,8 @@ export async function writeRunnerLedgerRow(
         outputTokens: row.usage?.output_tokens ?? 0,
         cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
         cacheWriteTokens: row.usage?.cache_creation_input_tokens ?? null,
-        costUsd: row.cost ?? 0,
-        pricingStatus: resolveRunnerPricingStatus(scope.orgId, runId, row),
+        costUsd,
+        pricingStatus,
       },
       {
         executor: opts.executor,
@@ -377,42 +252,115 @@ function coerceCredentialSource(modelSource: string | null | undefined): Credent
 }
 
 /**
- * Pricing provenance of a runner row, derived SERVER-SIDE.
- *
- * The container computed the `cost` this row carries, so the platform cannot
- * ask it whether that number was backed by real rates — it answers from the
- * snapshot it took at kickoff (`runs.model_cost`).
- *
- * `runs.model_source IS NULL` short-circuits to `null`, and that branch is not a
- * defensive default: a NULL model source is precisely how a REMOTE-origin run is
- * identified (it resolves no platform model — the same fact `notRunnerMirrorSql`
- * keys on). Its inference was accounted elsewhere, typically as per-call proxy
- * rows that carry their own status. Stamping `unpriced` there would mislabel
- * every remote run as a platform pricing gap.
- *
- * The snapshot is a JSONB column, so it is NARROWED rather than trusted: a row
- * whose `model_cost` is malformed (hand-edited, or written by an older shape)
- * must classify as `unpriced`, not as `priced`. `classifyTokenPricing` only
- * probes `cost == null` and `cost.cacheRead`, so an unvalidated `{}` would
- * otherwise sail through as fully priced — the exact false confidence this
- * column exists to remove.
+ * True when the platform resolved a model for this run and therefore holds its
+ * rates (`runs.model_cost`). A NULL `model_source` is the remote-origin
+ * signature (the same fact `notRunnerMirrorSql` keys on): no server-side rates,
+ * so the runner's own figure is all there is.
  */
-function resolveRunnerPricingStatus(
+function costIsServerComputed(modelSource: string | null | undefined): boolean {
+  return coerceCredentialSource(modelSource) !== null;
+}
+
+interface RunnerCostVerdict {
+  costUsd: number;
+  pricingStatus: TokenPricingStatus | null;
+}
+
+/**
+ * Price a runner row SERVER-SIDE, and classify what that price is worth.
+ *
+ * The `cost` on an `appstrate.metric` event is produced inside the agent
+ * container and is advisory: the platform holds both factors itself — the
+ * kickoff snapshot `runs.model_cost` and the reported counts — and multiplies
+ * them with `computeTokenCost`, the same formula the LLM-proxy meter uses. That
+ * also lets `MODEL_COST` be withheld from a container running an aliased model
+ * without changing what the run is billed.
+ *
+ * A run that dies without terminal usage (watchdog kill, crash, timeout,
+ * cancel) is priced from the cumulative snapshot finalize preserved
+ * (`test/integration/services/llm-usage-settlement.test.ts`).
+ *
+ * Never recompute from a per-event DELTA: the upsert discards a snapshot whose
+ * cost went down, and only cumulative counters × constant rates is monotone.
+ *
+ * Cost and status come from ONE set of inputs. A NULL `model_source`
+ * short-circuits both: `null` status (the platform makes no claim — that run's
+ * inference is accounted elsewhere) and the pass-through cost. `model_cost` is
+ * JSONB, so both halves read it narrowed: an unvalidated `{}` would classify as
+ * fully priced and make `computeTokenCost` write `NaN`.
+ */
+function resolveRunnerCost(
   orgId: string,
   runId: string,
-  row: { usage: TokenUsage | null; modelSource?: string | null; modelCost?: ModelCost | null },
-): TokenPricingStatus | null {
-  if (coerceCredentialSource(row.modelSource) === null) return null;
+  row: {
+    cost: number | null;
+    usage: TokenUsage | null;
+    modelSource?: string | null;
+    modelCost?: ModelCost | null;
+  },
+): RunnerCostVerdict {
+  if (!costIsServerComputed(row.modelSource)) {
+    return { costUsd: row.cost ?? 0, pricingStatus: null };
+  }
   const parsedCost = modelCostSchema.safeParse(row.modelCost);
-  return resolvePricingStatus({
+  const rates = parsedCost.success ? parsedCost.data : null;
+  const usage = row.usage ?? {};
+  return {
+    costUsd: computeTokenCost(usage, rates),
+    pricingStatus: resolvePricingStatus({
+      orgId,
+      // The run's model label is not in the sink context, so the warn line is
+      // keyed on the org alone and names the run instead.
+      model: null,
+      usage,
+      cost: rates,
+      context: { source: "runner", runId },
+    }),
+  };
+}
+
+/**
+ * Tolerance below which the container's figure and the server's are the same
+ * number: far above float noise, far below any real formula disagreement.
+ */
+const REPORTED_COST_DIVERGENCE_USD = 1e-6;
+
+/**
+ * Divergence probe on the container's advisory `cost`. The server number is
+ * authoritative either way — this only reports that the two formulas disagreed.
+ *
+ * It retires with the `cost` field on the `appstrate.metric` envelope, in the
+ * same commit: the probe is the evidence for dropping that field, and dropping
+ * the field is what makes the probe unreachable. Concrete signal to do both: a
+ * deployment window over which `runner-reported cost diverges` appears zero
+ * times in the platform logs. Until the field is gone the probe stays, because
+ * a container is otherwise free to report a number nothing looks at.
+ *
+ * `apps/api/test/unit/runner-cost-parity.test.ts` pins the two formulas against
+ * each other on constructed input; this catches the inputs that test does not
+ * model.
+ *
+ * Fires at most once per run, on the terminal write: the counters are
+ * cumulative, so that snapshot carries the run's full gap.
+ */
+function warnOnReportedCostDivergence(
+  orgId: string,
+  runId: string,
+  reportedCostUsd: number | null,
+  costUsd: number,
+  at: { serverPriced: boolean; terminal: boolean },
+): void {
+  if (!at.terminal) return;
+  // The pass-through branch writes the reported number verbatim; there are no
+  // two numbers to compare.
+  if (!at.serverPriced || reportedCostUsd === null) return;
+  const deltaUsd = reportedCostUsd - costUsd;
+  if (Math.abs(deltaUsd) <= REPORTED_COST_DIVERGENCE_USD) return;
+  logger.warn("llm_usage: runner-reported cost diverges from the server-computed cost", {
+    runId,
     orgId,
-    // The run's model label is not part of the sink context, so the warn line
-    // is keyed on the org alone (one line per org+status per process) and names
-    // the run instead — `runs.model_label` is one lookup away, and the ledger
-    // column is the complete, queryable record either way.
-    model: null,
-    usage: row.usage ?? {},
-    cost: parsedCost.success ? parsedCost.data : null,
-    context: { source: "runner", runId },
+    reportedCostUsd,
+    costUsd,
+    deltaUsd,
   });
 }

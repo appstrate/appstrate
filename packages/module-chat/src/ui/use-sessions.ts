@@ -13,35 +13,59 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChatHeaders, type GetHeaders } from "./runtime-context.ts";
-import { fetchSessions, SESSIONS_QUERY_KEY, type SessionSummary } from "./sessions.ts";
+import {
+  fetchSessions,
+  sessionsQueryKey,
+  spaceIdFromHeaders,
+  type SessionSummary,
+} from "./sessions.ts";
 
-// Re-exported for the app shell: the SSE dispatcher invalidates this key on
-// `chat_session_update` frames, and this module's `"./unread"` entry is the
-// shell's single import surface into the chat UI.
+// Re-exported for the app shell: the SSE dispatcher invalidates this PREFIX on
+// `chat_session_update` frames (the live keys carry the space id after it), and
+// this module's `"./unread"` entry is the shell's single import surface into
+// the chat UI.
 export { SESSIONS_QUERY_KEY } from "./sessions.ts";
 
 /** Reconciliation-only refetch — SSE is the primary freshness signal. */
-const SAFETY_NET_REFETCH_MS = 60_000;
+export const SAFETY_NET_REFETCH_MS = 60_000;
 /**
- * Fast backstop while a turn is generating. The `generating` flip is announced
- * by a fire-and-forget NOTIFY (realtime.ts) — if that frame is lost (SSE
- * reconnect window, dropped NOTIFY) the sidebar spinner would otherwise stick
- * for up to the 60s safety net. Only active while at least one session reports
- * `generating`, so the idle cost stays the slow interval.
+ * Backstop while a turn is generating. The `generating` flips are announced by
+ * the `chat_session_update` frames the server emits on `setActiveStream` /
+ * `clearActiveStream` — that push is the primary signal, and it is what makes
+ * the spinner react within a round trip. This interval only covers a LOST
+ * frame (SSE reconnect window, dropped NOTIFY): the next poll reads the row's
+ * real state. A marker whose producer died is cleared by the resume route
+ * when that conversation is next opened (or at boot without Redis), not by
+ * this poll. Only active while at least one session reports `generating`, so
+ * the idle cost stays the slow interval.
  */
-const GENERATING_REFETCH_MS = 3_000;
+export const GENERATING_REFETCH_MS = 10_000;
 
-function sessionsRefetchInterval(query: { state: { data?: SessionSummary[] } }): number {
+/**
+ * `refetchInterval` callback for the session-list query. Exported for its
+ * test; the two constants above are the only thing it decides between.
+ */
+export function sessionsRefetchInterval(query: {
+  state: { data?: SessionSummary[] | undefined };
+}): number {
   return query.state.data?.some((s) => s.generating)
     ? GENERATING_REFETCH_MS
     : SAFETY_NET_REFETCH_MS;
 }
 
-export function useSessions() {
-  const getHeaders = useChatHeaders();
+export function useSessions(headers?: GetHeaders) {
+  const contextHeaders = useChatHeaders();
+  // ChatPage owns the provider below its render, so its own observer receives
+  // the host headers directly. Descendants read the same headers from context.
+  const getHeaders = headers ?? contextHeaders;
+  const spaceId = spaceIdFromHeaders(getHeaders);
   return useQuery({
-    queryKey: SESSIONS_QUERY_KEY,
+    queryKey: sessionsQueryKey(spaceId),
     queryFn: () => fetchSessions(getHeaders),
+    // The route requires `X-Space-Id`. Firing before the host's space store
+    // resolves (first login, org switch) would be a guaranteed 400; the key
+    // carries the space, so it refetches the moment one arrives.
+    enabled: !!spaceId,
     refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
   });
@@ -56,12 +80,15 @@ export function useSessions() {
  * when the chat feature is off.
  */
 export function useChatUnreadCount(getHeaders?: GetHeaders, enabled = true): number {
+  const spaceId = spaceIdFromHeaders(getHeaders);
   const { data } = useQuery({
-    queryKey: SESSIONS_QUERY_KEY,
+    queryKey: sessionsQueryKey(spaceId),
     queryFn: () => fetchSessions(getHeaders),
     refetchInterval: sessionsRefetchInterval,
     refetchIntervalInBackground: false,
-    enabled,
+    // The badge is mounted on every page, including before a space is picked.
+    // Same gate as the list — and the same key, so both share one request.
+    enabled: enabled && !!spaceId,
   });
   return useMemo(() => (data ?? []).filter((s) => s.unread).length, [data]);
 }

@@ -21,6 +21,7 @@
 import { resolve } from "node:path";
 import afpsAgentManifestSchema from "@afps-spec/schema/v0/agent.schema.json" with { type: "json" };
 import openapiTS, { astToString } from "openapi-typescript";
+import type { OpenAPI3 } from "openapi-typescript";
 import ts from "typescript";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
 import { collectModuleOpenApi } from "./lib/module-openapi.ts";
@@ -135,7 +136,8 @@ async function generate(): Promise<string> {
   if (spec.paths) spec.paths = sortKeys(spec.paths);
   if (spec.components?.schemas) spec.components.schemas = sortKeys(spec.components.schemas);
 
-  const ast = await openapiTS(inlineOfflineSchemaRefs(JSON.parse(JSON.stringify(spec))), {
+  const inlined = inlineOfflineSchemaRefs(JSON.parse(JSON.stringify(spec))) as OpenAPI3;
+  const ast = await openapiTS(inlined, {
     // Wire enums stay string literal unions (default) — keep options explicit
     // and minimal so output stays stable across openapi-typescript upgrades.
     defaultNonNullable: true,

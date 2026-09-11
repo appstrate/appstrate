@@ -143,6 +143,48 @@ describe("tapSseUsage (anthropic-messages)", () => {
     const frames = `event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n`;
     expect(await tapSseUsage(streamFrom([frames]), anthropicMessagesAdapter)).toBeNull();
   });
+
+  it("an idle upstream ends the tap with what it parsed, instead of hanging", async () => {
+    // Without a bound here the tap kept a pending `read()` forever: the ledger
+    // row for a paid 2xx was never written (the module's accounting invariant),
+    // and the tee branch it holds kept the upstream socket pinned.
+    const enc = new TextEncoder();
+    const seed = `event: message_start\ndata: {"type":"message_start","message":{"id":"m","usage":{"input_tokens":11,"output_tokens":1}}}\n\n`;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode(seed));
+        // Never closes, never speaks again.
+      },
+    });
+    const usage = await tapSseUsage(source, anthropicMessagesAdapter, 25);
+    expect(usage?.inputTokens).toBe(11);
+  });
+
+  it("idle stall releases BOTH tee branches, so the upstream source is cancelled", async () => {
+    // `tee()` cancels its source only once BOTH branches are cancelled. The
+    // client branch alone was not enough: the metering tap held the other one,
+    // and `guardedFetch` has already detached its timer at the headers — so a
+    // stream that died after its headers landed stayed pinned with no deadline
+    // behind it at all.
+    const enc = new TextEncoder();
+    let cancelled = false;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode('data: {"type":"x"}\n\n'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const [clientBranch, tapBranch] = source.tee();
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(clientBranch, (e) => seen.push(e), 25);
+    await Promise.all([tapSseUsage(tapBranch, anthropicMessagesAdapter, 25), readAll(guarded)]);
+    // Both cancels are fired as detached promises; let them settle.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(cancelled).toBe(true);
+    expect(seen).toHaveLength(1);
+  });
 });
 
 async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -227,6 +269,90 @@ describe("guardSseTeardown", () => {
     expect(seen).toEqual([boom]);
   });
 
+  // --- inter-chunk idle bound ---
+  //
+  // `guardSseTeardown` also bounds how long the UPSTREAM may stay silent
+  // between two chunks (`LLM_STREAM_IDLE_TIMEOUT_MS`, 120 s in production;
+  // passed as a few ms here). Four of the ten api shapes this platform maps
+  // ignore pi-ai's own `timeoutMs`, so before this bound a stalled
+  // Gemini/Vertex/Bedrock stream on the chat path had no deadline at all.
+  //
+  // Two invariants are pinned below: expiry follows the module's
+  // never-error contract (report via `onTeardownError`, close cleanly), and a
+  // SLOW CONSUMER on a healthy upstream is not a timeout.
+
+  it("idle upstream: reports via onTeardownError and closes cleanly (never errors the stream)", async () => {
+    const enc = new TextEncoder();
+    // One frame, then permanent silence — the consumer keeps pulling, so the
+    // read stays pending and only the idle bound can end it.
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode("partial"));
+      },
+    });
+
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(source, (e) => seen.push(e), 25);
+
+    // Resolves, does NOT reject: erroring here would re-open the
+    // unhandled-rejection leak this module exists to close (the guard is
+    // wrapped BEFORE the alias-swap `pipeThrough`).
+    expect(await readAll(guarded)).toBe("partial");
+    expect(seen).toHaveLength(1);
+    // The message is a SERVER-SIDE signal only (`onTeardownError` is a logger
+    // call at the real call site, and the client stream closes cleanly), so
+    // this pins that the stall is reported and named — not that the wording
+    // reaches the caller. See the branch in `metering.ts` for what the caller
+    // actually classifies on.
+    expect((seen[0] as Error).message).toMatch(/timed out/i);
+  });
+
+  it("does NOT trip on a slow consumer reading a healthy upstream", async () => {
+    // REGRESSION CONTROL. `pull` is demand-driven: an idle timer that keeps
+    // running between pulls (or one hung off a "time since last chunk"
+    // counter) would kill a merely slow consumer on a perfectly healthy
+    // upstream. The upstream below answers every pull instantly; the consumer
+    // waits far longer than the idle bound between reads.
+    const enc = new TextEncoder();
+    const payloads = ["a", "b", "c", "d"];
+    let next = 0;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (next >= payloads.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(enc.encode(payloads[next]!));
+        next += 1;
+      },
+    });
+
+    const idleTimeoutMs = 15;
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(source, (e) => seen.push(e), idleTimeoutMs);
+
+    const consumerGapMs = idleTimeoutMs * 5;
+    const reader = guarded.getReader();
+    const dec = new TextDecoder();
+    let out = "";
+    const gaps: number[] = [];
+    for (;;) {
+      const before = Date.now();
+      await new Promise((r) => setTimeout(r, consumerGapMs));
+      const { done, value } = await reader.read();
+      gaps.push(Date.now() - before);
+      if (done) break;
+      out += dec.decode(value, { stream: true });
+    }
+
+    expect(out).toBe(payloads.join(""));
+    expect(seen).toEqual([]);
+    // Proof the control tests the right thing: every consumer gap really did
+    // exceed the idle bound, so any implementation timing the wrong interval
+    // would have reported a teardown above.
+    expect(Math.min(...gaps)).toBeGreaterThan(idleTimeoutMs);
+  });
+
   it("full forward path: upstream errors mid-flux under alias-swap → body completes, no escape", async () => {
     // End-to-end through `forwardMeteredResponse` (tee + tap + pipeThrough swap
     // + guard). The upstream emits one frame then errors. With the guard wired
@@ -250,8 +376,12 @@ describe("guardSseTeardown", () => {
       headers: { "content-type": "text/event-stream" },
     });
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      swap: { alias: "alias-model", real: "real-model" },
-      logLabel: "test",
+      swap: {
+        alias: "alias-model",
+        real: "real-model",
+        clientApiShape: "anthropic-messages" as const,
+        backingApiShape: "anthropic-messages" as const,
+      },
       recordUsage: collectUsage().recordUsage,
     });
     const out = await readAll(res.body!);
@@ -286,7 +416,66 @@ describe("guardSseTeardown", () => {
 // shared allowlist, so neither prose nor headers can fingerprint the backing.
 // The no-swap path stays byte-for-byte permissive (subscription gateways).
 describe("forwardMeteredResponse — aliased error synthesis and header allowlist", () => {
-  const swap = { alias: "appstrate-medium", real: "deepseek-SECRET" };
+  const swap = {
+    alias: "appstrate-medium",
+    real: "deepseek-SECRET",
+    // The gateway PROXIES: its caller already speaks the backing's protocol,
+    // so both fields carry the same shape (unlike the sidecar on an aliased
+    // agent run, whose client speaks `pi-messages`).
+    clientApiShape: "anthropic-messages" as const,
+    backingApiShape: "anthropic-messages" as const,
+  };
+
+  it("forwards a GENERIC upstream status verbatim on an aliased model", async () => {
+    // The control that keeps the projection from becoming a blanket 502: a
+    // status every vendor answers alike carries no fingerprint, and collapsing
+    // it would lose the one classification signal the scrubbed body left.
+    //
+    // 405/413/415 are here on the same footing: they are verdicts on the HTTP
+    // framing (method, body size, media type) that any server answers, so no
+    // candidate backing is singled out — and forwarded they stay TERMINAL
+    // under pi-ai's classifier, which is what an oversized prompt deserves.
+    for (const status of [400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503, 504]) {
+      const upstream = new Response(JSON.stringify({ error: { message: "x" } }), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+      const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+        swap,
+      });
+      expect(res.status).toBe(status);
+    }
+  });
+
+  it("collapses a vendor-identifying 4xx to a TERMINAL 400, not a retryable 502", async () => {
+    // The status is disclosed twice on this path — as the HTTP status and
+    // inside the synthetic body — so a code only some candidates answer is a
+    // fingerprint either way. 402 (an aggregating gateway out of credit),
+    // 422 (Mistral's validation verdict where Anthropic/OpenAI answer 400) and
+    // 431 (an edge/CDN code) are all such codes, and all three are PERMANENT:
+    // collapsing them to 502 would put them inside pi-ai's retryable pattern
+    // and spend the container's whole budget re-sending a doomed request.
+    for (const fingerprint of [402, 422, 431]) {
+      const upstream = new Response(
+        JSON.stringify({ error: { message: "insufficient credits" } }),
+        {
+          status: fingerprint,
+          headers: { "content-type": "application/json" },
+        },
+      );
+      const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+        swap,
+      });
+      expect(res.status).toBe(400);
+      const text = await res.text();
+      // The number in the body is the PROJECTED one: the two disclosures of
+      // the status must not disagree, or the body re-leaks what the status
+      // line was scrubbed of.
+      expect(text).toContain("status 400");
+      expect(text).not.toContain(String(fingerprint));
+      expect(text).not.toContain("credits");
+    }
+  });
 
   it("replaces an aliased upstream error body with the synthetic envelope and strips fingerprinting headers", async () => {
     const upstream = new Response(
@@ -309,12 +498,14 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
 
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       swap,
-      logLabel: "test",
     });
 
-    // Status flows for retry/backoff; the body is the neutral envelope —
-    // nothing of the upstream prose (nor the real id) survives.
-    expect(res.status).toBe(529);
+    // The body is the neutral envelope — nothing of the upstream prose (nor
+    // the real id) survives. The STATUS is projected before it is disclosed:
+    // 529 is Anthropic's own overload code, so forwarding it would name the
+    // backing the body was scrubbed to hide. It collapses to 502, which is
+    // still retryable, so the retry/backoff contract is unchanged.
+    expect(res.status).toBe(502);
     expect(res.headers.get("content-type")).toBe("application/json");
     const text = await res.text();
     expect(text).toContain("appstrate-medium");
@@ -338,9 +529,7 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
       headers: { "content-type": "application/json", server: "cloudflare" },
     });
 
-    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      logLabel: "test",
-    });
+    const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {});
 
     expect(res.status).toBe(529);
     // Permissive path intact: the fingerprinting header passes through.
@@ -359,7 +548,6 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
     const meter = collectUsage();
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
       swap,
-      logLabel: "test",
       recordUsage: meter.recordUsage,
     });
 
@@ -383,7 +571,6 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
     });
 
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      logLabel: "test",
       recordUsage: collectUsage().recordUsage,
     });
 
@@ -412,7 +599,6 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
 
     const meter = collectUsage();
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      logLabel: "test",
       recordUsage: meter.recordUsage,
     });
     // The tap runs out-of-band of the client stream: drain the body first.
@@ -433,7 +619,6 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
 
     const meter = collectUsage();
     await forwardMeteredResponse(upstream, openaiCompletionsAdapter, makeCtx(), {
-      logLabel: "test",
       recordUsage: meter.recordUsage,
     });
 
@@ -449,7 +634,6 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
 
     const meter = collectUsage();
     await forwardMeteredResponse(upstream, openaiCompletionsAdapter, makeCtx(), {
-      logLabel: "test",
       recordUsage: meter.recordUsage,
     });
 

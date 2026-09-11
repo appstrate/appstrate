@@ -6,15 +6,14 @@ import { useOrg } from "./use-org";
 /**
  * Single source of truth for the org storage gauge. Wraps the org-detail fetch
  * (`GET /api/orgs/{orgId}`) and the used/limit/percent math so every page that
- * shows storage usage (billing, org-settings general, documents) reads the same
+ * shows storage usage (billing, org-settings general, files) reads the same
  * numbers with the same clamping.
  *
  * `limitBytes` = effective_limit_bytes ?? null (null = unlimited). `percent` is
  * the clamped 0–100 integer, or null when unlimited (no meaningful ratio).
  *
- * The optional `enabled` composes with the presence of an org id, mirroring the
- * per-page gating each caller used inline before (e.g. billing also gates on the
- * cloud feature flag).
+ * The optional `enabled` composes with the presence of an org id, so a caller
+ * that must not fire the fetch yet passes `false`.
  */
 export function useOrgStorage(options?: { enabled?: boolean }) {
   const { currentOrg } = useOrg();

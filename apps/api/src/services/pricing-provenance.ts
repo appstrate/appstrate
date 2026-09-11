@@ -47,7 +47,7 @@ const WARNED_KEYS_CAP = 500;
  */
 const warnedKeys = new Set<string>();
 
-export interface PricingProvenanceInput {
+interface PricingProvenanceInput {
   /** Tenant the spend is attributed to — half of the log de-dup key. */
   orgId: string;
   /**

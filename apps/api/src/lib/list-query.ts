@@ -17,7 +17,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { invalidRequest } from "./errors.ts";
 
-export interface ListPagination {
+interface ListPagination {
   limit: number;
   offset: number;
 }

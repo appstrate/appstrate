@@ -21,7 +21,7 @@ import { runWithSpan } from "@appstrate/core/telemetry";
 export interface ExecuteAgentInBackgroundInput {
   runId: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   agent: LoadedPackage;
   context: ExecutionContext;
   plan: AppstrateRunPlan;
@@ -70,7 +70,7 @@ export async function executeAgentInBackground(
       attributes: {
         "appstrate.run.id": input.runId,
         "appstrate.org.id": input.orgId,
-        "appstrate.application.id": input.applicationId,
+        "appstrate.space.id": input.spaceId,
         "appstrate.package.id": input.agent.id,
       },
     },
@@ -82,7 +82,7 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
   const {
     runId,
     orgId,
-    applicationId,
+    spaceId,
     agent,
     context,
     plan,
@@ -91,7 +91,7 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
     sinkCredentials,
   } = input;
 
-  const scope = { orgId, applicationId };
+  const scope = { orgId, spaceId };
   const startTime = Date.now();
   const controller = trackRun(runId);
   const { signal } = controller;
@@ -131,7 +131,7 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
       orgId,
       runId,
       packageId: agent.id,
-      applicationId,
+      spaceId,
       status: "started",
       packageEphemeral,
       ...(modelSource ? { modelSource } : {}),

@@ -6,69 +6,1229 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Two-layer RBAC — an org role, and a role per space.** Organization roles
+  gain **`guest`**: an org identity with no implicit reach into any space, for
+  outside collaborators. Every space now carries a **visibility** (`open`,
+  `closed`, `private`) and a default role, and membership in it is a row of its
+  own: a member holds one of four presets (`admin`, `builder`, `operator`,
+  `viewer`) or an organization-defined **custom role** — a named bundle of
+  space-level permissions, assignable anywhere in the org. An invitation carries
+  its **space assignments** with it, so an invitee lands with the access they
+  were invited for; an email may hold at most one pending invitation per
+  organization, and a second is refused rather than silently replacing the
+  first. Every permission is org-level or space-level, so a space-level grant
+  can never be satisfied outside a space. Grants hold when they change, not only
+  when they are read: a scheduled run rechecks its actor's `agents:run` in the
+  space at every fire and disables itself once it is gone, an invitation is
+  consumed with the role and assignments current at its atomic claim, and a
+  space grant serializes with the removal or promotion of the same member.
+
+- **A fifth space-role preset — `runner`, for people who launch without
+  reading.** It holds `agents:run`, its own runs (`runs:read`, `runs:cancel`),
+  `files:read`, `persistence:read` and its own integration connections
+  (`integrations:read/connect/disconnect`), plus chat and MCP so the friendly
+  surfaces work. It does **not** hold `agents:read`, `skills:read`,
+  `mcp-servers:read`, `schedules:read`, `end-users:*`, `runs:read-all` or any
+  `:write`: a runner starts what someone else built, sees what its own runs
+  produced, and never reads the agent's content, its skills or anyone else's
+  runs. What makes that usable is that `agents:run` carries a **summary read**
+  of the agent: the list, the detail and the resolved model answer a runner with
+  what the launch form needs — the parameter schema with its stored values and
+  locked fields, the output shape, the enforced timeout, the caller's own run
+  counters, and the integrations the agent talks to, which a runner is the one
+  who connects — and omit the manifest, the prompt, the authoring history, and
+  the skills and MCP servers the agent is built from. Every other agent route,
+  and every skill or MCP-server route, still answers 403. It is a preset and not a custom role on purpose —
+  custom roles need the `custom_roles` feature, and this reach has to exist on
+  the open-source build as a code constant. Assign it wherever the other four
+  are offered, including as a space's default role. In the dashboard, the
+  sidebar entries and the routes ask for the permission their page needs — so
+  the agent and skill editors now refuse a caller without `agents:write` /
+  `skills:write` up front, instead of opening a form whose save would answer 403. The presets stop being a
+  single ladder here: `runner` and `viewer` grant things the other does not, so
+  neither is "above" the other. Migration **0060** widens the three space-role
+  CHECK constraints; it is applied automatically at boot, with no operator step.
+  One thing to check before deploying: an organization that defined a **custom
+  role keyed `runner`** must rename it first — the migration refuses rather than
+  let a bundle shadow the preset, and says so by name.
+
+  **API consumers**: `dependencies.skills`, `dependencies.mcp_servers` and
+  `forked_from` are optional on the agent DTOs from now on — a summary read
+  omits a withheld group rather than emptying it, and `skills: []` would say the
+  agent declares none, which is false rather than unknown. A loosening like this
+  is not a breaking change and `detect:breaking` does not classify it, so it is
+  written out here.
+
+- **Role preview — see the product as a role before you assign it.** An owner or
+  administrator can have every request answered as a lesser persona (an org role,
+  optionally with a role in one space) from Org settings → Roles or Space
+  settings → Members. It is enforced by the server, not hidden in the UI: what
+  the previewed role cannot reach, the previewing administrator cannot reach
+  either, on the API, on the realtime streams and inside a chat turn's tool
+  calls. A permanent banner names the persona and carries the only exit, the
+  audit trail keeps the real actor beside the persona, and the preview is
+  dropped rather than silently ignored the moment it stops being valid.
+
+- **`anthropic-compatible` model provider** — a second custom-endpoint entry in
+  `core-providers` next to `openai-compatible`, for any self-hosted or
+  third-party endpoint speaking the Anthropic Messages API (LiteLLM proxy, …).
+
+- **`POST /api/model-provider-credentials/discover`** — asks an endpoint once
+  for its listing (`GET <base_url>/models`) and returns the ids it serves,
+  each described from the fields the listing publishes (vLLM `max_model_len`,
+  Mistral `capabilities`, OpenRouter `context_length` / `architecture` /
+  `top_provider` / `supported_parameters`, LM Studio `max_context_length`) and,
+  for the rest, from the vendored pricing catalog (the provider's own, then any
+  by exact id, then by the id with one leading `<vendor>/` stripped); `source`
+  says which described it, `label` is catalog-only, an id in no catalog comes
+  back all-null. Takes an existing `credential_id` or an inline `provider_id` +
+  `api_key` (+ `base_url_override`), so the model form can list a custom
+  endpoint before its credential exists. Persists nothing, never echoes the
+  key, refuses OAuth providers (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`),
+  and never returns a per-token cost: an endpoint serving a vendor's model id is
+  not billed at the vendor's rate. Rate limited to 6/min behind
+  `model-provider-credentials:write`.
+
+- **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
+  out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
+  re-imported by `lib/boot.ts`, `services/input-parser.ts` and
+  `services/system-packages.ts`. `appstrate skills sync` needs the same pool
+  against the rate-limited package routes; a copy in the CLI would have been
+  the third in the repo, and the first two had already diverged on
+  abort-on-rejection.
+
+- **`appstrate skills sync` — the org's skills in Claude Code and Codex,
+  refreshed without a manual step.** Materializes every skill installed in the
+  profile's pinned space as an [Agent Skills](https://agentskills.io/specification)
+  directory, into `claude-plugin` (a complete Claude Code plugin under
+  `$XDG_DATA_HOME/appstrate/claude-plugin/`, the default), `codex`
+  (`~/.agents/skills/`) or `claude-user` (`~/.claude/skills/`). The auto-sync is
+  a Claude Code marketplace `command` source re-running the CLI once per
+  session — no server change, no hook, no daemon — so `--print-path` prints the
+  plugin directory as the only stdout line and the output is byte-deterministic.
+  Published `latest` by default (integrity-verified), `--source draft` for
+  authors. Exactly one thing is rewritten in `SKILL.md`, the frontmatter `name`,
+  so it matches the directory; an artifact published before the platform's
+  frontmatter gate is synced as authored and named once on stderr. An ownership
+  ledger keyed by target and `HOME` root makes the shared roots safe (nothing it
+  does not own is written or removed), a `mkdir` lock serializes concurrent
+  sessions, and per-skill failures never cost the plugin under `--print-path`.
+  On a fresh machine the plugin install still succeeds before the CLI is
+  connected: it gets a single `/appstrate:setup` skill naming the missing step
+  and a `SessionStart` hook that surfaces it at every session start, both
+  replaced by the organization's skills on the first connected sync.
+  Full behaviour: `apps/cli/README.md` → `appstrate skills`.
+
+- **Two release gates joined `bun run check`: `verify:release-version` and
+  `verify:env-docs`.** Both close a hole that a green check had been reporting
+  as fine.
+
+  `verify:release-version` (`scripts/verify-release-version.ts`) compares the
+  hardcoded `${APPSTRATE_VERSION:-<version>}` fallback in every shipped compose
+  file and `.env.example` against the git tag namespace. That fallback is what a
+  self-hoster gets from the documented `docker compose up -d` without exporting
+  the variable, and nothing checked it: measured at `v1.0.0-beta.53` all five
+  compose files still said `1.0.0-beta.41` — 79 sites, twelve releases stale —
+  while `.env.example` said `1.0.0-beta.51`, a third value again. The #1201
+  image-trio guard structurally cannot see this: it compares the platform, the
+  `PI_IMAGE` and the `SIDECAR_IMAGE` refs to EACH OTHER, and all three read the
+  same stale fallback, so the trio is perfectly coherent — coherently twelve
+  releases old. The gate has two arms: a FLOOR (not behind the newest `v*` tag)
+  run by `check.yml` on every PR, and an EXACT match run by the `verify-version`
+  preflight in `release.yml` that every publishing job `needs:`. The floor is
+  deliberately not an equality, so the bump PR — during which the fallback is
+  one release ahead of every tag that exists — is not the thing it fails.
+
+  `verify:env-docs` (`scripts/verify-env-docs.ts`) turns `docs/ENV.md`'s
+  "superset of the schema" claim from an assertion into a check:
+  `keys(envSchema) ⊆ rows(ENV.md)` and `keys(*.env.example) ⊆ rows(ENV.md) ∪
+INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
+  table was missing two schema keys and seven `.env.example` keys. It is a
+  completeness check only and never writes the file: the Notes column carries
+  cross-field boot rules and failure behaviour no Zod schema encodes. Three
+  vacuity floors fail the run rather than pass it when a population parses
+  empty. It cannot reach variables read straight from `process.env` — they are
+  in no schema and in no example file — which `docs/ENV.md`'s own header now
+  says out loud.
+
+- **The runtime container e2e now runs one inference turn through the BUILT
+  pi + sidecar pair (#1197).** `runtime-pi/test/inference-container.e2e.test.ts`
+  launches both images on a private Docker network — the agent reaching the
+  sidecar on its `sidecar` DNS alias, exactly as the platform wires them — and
+  drives a single Codex OAuth turn against a stub upstream on the host. It
+  asserts what actually arrives there: one `POST /codex/responses`, the real
+  subscription bearer swapped in and the container's placeholder JWT present in
+  no header, Pi's own `chatgpt-account-id` / `originator` / `OpenAI-Beta` /
+  `User-Agent` fingerprint forwarded verbatim, the container→sidecar-only
+  `x-appstrate-sidecar-auth` header stripped, and the `content-encoding: zstd`
+  body decompressing and parsing — which is the byte-identity witness a
+  mismatched pair cannot produce (#1195 was an older sidecar text-decoding that
+  frame; both halves were individually correct and every in-process test stayed
+  green).
+
+### Changed
+
+- **`runs:read` now means the runs you launched, and nothing else.** Your manual
+  runs and the runs of your own schedules — not a colleague's, not an
+  end-user's. The space-wide view is a permission of its own, **`runs:read-all`**,
+  held by the `admin` and `builder` presets and grantable to a custom role or an
+  API key; the `operator` and `viewer` presets do not hold it, so **an existing
+  operator stops seeing other members' runs**. It narrows every surface a run
+  reaches — the run list, an agent's run list, run detail, logs, cancel, the
+  in-flight counts and `last_run` on the agents pages, a schedule's run list,
+  `rerun_from` (replaying a run returns its input), the run outputs in the file
+  gallery, and the realtime streams (`run_update`, `run_log` and `run_metric`
+  carry only your runs, and the single-run stream refuses one you may not read)
+  — and a run you may not read answers `404`, never `403`. Bulk-deleting an
+  agent's runs takes `runs:read-all` alongside `runs:delete`: it spans the whole
+  space. The three realtime channels now answer one uniform rule: the `run_log`
+  and `run_metric` payloads carry the run's actor, which the log channel had no
+  way to read before and so could not gate on at all.
+  `GET /api/runs?user=me` is now strictly your own runs for every caller,
+  end-user and actor-less runs included, whether or not you hold `read-all`,
+  and composes with the other filters (`kind`, `status`, dates,
+  `chat_session_id`) instead of ignoring them.
+  Attaching a file to a chat reads as wide as the gallery you picked it from:
+  `ChatAttachmentRequest.permissions` (`@appstrate/core/chat-contract`) carries
+  the caller's set, so a `runs:read-all` holder attaches a colleague's run
+  output and everyone else attaches only their own.
+
+  **OPERATOR ACTIONS.** The `run_log` gate lives in a trigger body the API
+  installs at boot (`createNotifyTriggers`), not in a migration, so a replica
+  still running the previous version re-installs the actor-less body and the new
+  replicas then drop every `run_log` frame for a subscriber without
+  `runs:read-all` — silently, and fail-closed. Deploy every API replica in one
+  step; a single-replica deployment is unaffected.
+
+- **The commercial module stores its tables in the platform database.**
+  `@appstrate/module-ee` does not run a PostgreSQL database of its own: it reads
+  `DATABASE_URL`, opens its own pool on it and migrates its seven `ee_*` tables
+  there at `init()`. Two
+  journals in one database — it records what it applied in
+  `drizzle.ee_migrations` and never writes the platform's
+  `drizzle.__drizzle_migrations`, so the Apache-2.0 schema in `packages/db`
+  still declares no `ee_*` table and the licence boundary has not moved. One URL
+  to back up and one to restore, and no auto-created database whose failure mode
+  was a wrong name silently starting every organization on an empty free plan
+  while Stripe kept charging them. The module needs PostgreSQL outright: under
+  tier 0 (PGlite, no `DATABASE_URL`) it refuses to start, naming `DATABASE_URL`.
+  Its remaining variables are the four `STRIPE_*` and the three
+  `EE_RECONCILIATION_*`.
+
+  **OPERATOR ACTIONS.** None of its own: this entry and the in-tree move below
+  ship together, so a deployment coming from `@appstrate/cloud` has ONE upgrade
+  path and it is written out under that entry. A new deployment needs nothing.
+
+- **The commercial module moved into this repository as `packages/module-ee`,
+  under its own licence.** The `appstrate/cloud` repo no longer holds code: the
+  Stripe billing, credit quotas, usage metering and billing managers now live in
+  the public tree, source-available under `packages/module-ee/LICENSE` rather
+  than Apache-2.0 (`bun run verify:license-boundary` enforces the split file by
+  file). It is still opt-in and still inert when absent from `MODULES` — the
+  specifier is now `@appstrate/module-ee` — and it ships inside the single
+  `ghcr.io/appstrate/appstrate` image, so there is no second image, no separate
+  release, and no `@appstrate/core` peer range to keep in lockstep
+  (`workspace:*`). `CLOUD_DATABASE_URL` disappears rather than being renamed —
+  the module reads `DATABASE_URL` (the entry above) — while
+  `CLOUD_RECONCILIATION_{INTERVAL_SECONDS,REPLAY_WINDOW,BATCH_SIZE}` become
+  `EE_RECONCILIATION_*`. The module's own migration `0005_rename_ee_tables`
+  renames its seven tables off the `cloud_` prefix for a database that runs the
+  chain — a fresh install — with every index and constraint Postgres had named
+  after them; an existing deployment's rows reach the `ee_*` names through the
+  move below instead, which is why that move accepts a `cloud_*` source.
+
+  **OPERATOR ACTIONS.** One path, for a deployment coming from
+  `@appstrate/cloud`; a new one needs none of it. Rehearse all of it on a
+  restored copy of both databases and note the per-table counts. In `MODULES`,
+  replace `@appstrate/cloud` with `@appstrate/module-ee`. Stop the platform (let
+  the running runs drain) and `pg_dump` the billing database as the safety net.
+  Move its rows into the platform database with
+  `bun scripts/migration/0010-ee-tables-into-platform-db.ts --apply`,
+  `EE_SOURCE_DATABASE_URL` = the EXACT value `CLOUD_DATABASE_URL` held and
+  `DATABASE_URL` = the platform database; without `--apply` it only counts, and
+  a dry run first is the point. A `cloud_*` source at migration level `0003` is
+  the expected shape — it detects the prefix, copies the columns both sides
+  share (`billing_email` and `billing_cc` take their defaults, `ee_billing_managers`
+  copies nothing), migrates the target and copies in one transaction, then
+  prints a per-table source/target count that must be the rehearsal's. It
+  refuses (exit `1`, nothing written) a source mixing both prefixes, an
+  `ee_`/`cloud_` table it does not move, a source column the target does not
+  declare, or a target already holding `ee_*` rows — so a second `--apply`
+  refuses rather than double-counting; a missing variable exits `2`. Then delete
+  `CLOUD_DATABASE_URL` and, if they were set, re-spell the three
+  `CLOUD_RECONCILIATION_*` keys `EE_RECONCILIATION_*` or they silently revert to
+  the defaults (`300`, `200`, `100`); the four `STRIPE_*` keys are unchanged.
+  `EE_DATABASE_URL` never existed in a release — do not set it, nothing reads
+  it. The cutover is verified by the script's own per-table count table, which
+  must read source = target on every row. Deploy, then check the boot log for
+  `Module loaded` with `"id":"ee"` and `billing sweeper started`, and that
+  `select count(*) from drizzle.ee_migrations` on the platform database counts
+  every file in `packages/module-ee/drizzle/migrations` (7 today). Keep
+  the old database read-only (`REVOKE`) for a week, then `DROP DATABASE`; until
+  that drop the rollback is the previous image with `CLOUD_DATABASE_URL`
+  restored, losing only writes made on the platform copy after the cutover.
+
+- **A key is renamed through its edit dialog only.** The inline click-to-edit
+  label in the credentials table is gone (`InlineEditableLabel` deleted).
+
+- **A custom-endpoint credential is named after its host.**
+  `POST /api/model-provider-credentials` without a `label` defaults to
+  `<host> · <provider display name>` (`localhost:11434 · OpenAI-compatible
+(custom)`) when a `baseUrlOverride` is supplied; deduplication unchanged.
+
+- **The model form is one arrangement for every provider: pick the provider,
+  describe the endpoint, then pick or type the model.** `baseUrlOverridable`
+  puts the "Type d'API" and base URL on screen (every such entry collapses
+  into one "Endpoint personnalisé" picker row); `authMode` decides key or
+  connection. The endpoint block is shared with the credentials tab. The model
+  step is one searchable checkbox list for every provider — `catalogue` /
+  `endpoint` badge, "Tout sélectionner", "Ajouter N modèles" — fed by the
+  vendored catalog ("Recommandés" / "Tous les modèles"; filtered by what the
+  plan serves for a subscription), the OpenRouter live search, or "Détecter
+  les modèles" for a custom endpoint. A catalog pick is created from its id
+  alone, so the weekly catalog refresh keeps reaching it; a detected or
+  searched row ships what described it (OpenRouter rate included).
+  "Configurer manuellement" types the id in (not for a subscription). An edit
+  is always the typed-in arrangement, provider locked, credential as a chip.
+  The `__custom__` model sentinel and the OpenRouter combobox are removed.
+
+- **Several models at a time.** One `POST /api/models` per checked row against
+  the one key they share (created first when typed inline). A refused model
+  keeps the dialog open with the failed ids checked; a retry binds to the key
+  already created. The "Mes clés" picker of an overridable provider lists every
+  key saved for it, whatever URL is typed, and picking one fills and pins the
+  base URL. The credentials list's `providerId` is documented as always set for
+  a `custom` credential.
+
+- **Limits and capabilities behind one toggle, "Définir moi-même les limites
+  et capacités".** Off, a sentence states the fallback chain (row override →
+  catalog → runtime defaults: 128k context, 16k output tokens, text only, no
+  reasoning); on, every field ships, an unticked box included. On an edit,
+  toggle off or a blanked limit sends `null` and drops the stored override. The
+  toggle opens on only when the row differs from its catalog entry, so a
+  catalogued model never gets the catalog's numbers frozen as overrides. The
+  "Avancé" fold and its "détection automatique du SDK" copy are removed.
+
+- **Model discovery lists the provider's models once.** `discoverAvailableModels`
+  sends ONE guarded `GET <base_url>/models` (`listServedModels`), parsed per
+  `apiShape` (`{ data: [{ id }] }`, or `{ models: [{ name: "models/<id>" }] }`
+  for the Google shapes), and persists the discovery candidates present in it
+  as `available_model_ids`. An auth failure, an unreadable listing, a 429 that
+  survives one retry, or an empty intersection leave the previous list untouched.
+- **Wire change** — `POST /api/model-provider-credentials/{id}/refresh-models`
+  answers `candidate_count` in place of `probed_count` (the candidates
+  considered; static providers report theirs instead of 0).
+
+- **`appstrate self-update`, `scripts/bootstrap.sh` and `scripts/bootstrap-runner.sh`
+  resolve "latest" by listing GitHub Releases and picking the newest platform
+  `v<semver>` one, never through `releases/latest`.** GitHub's "latest" is
+  whichever non-prerelease Release was created last, whatever its tag; the
+  `make_latest: false` on the npm workflows (`cli@`, `core@`, `afps-shared@`)
+  keeps it correct only as long as every future workflow and every hand-made
+  Release remembers the flag. The consumers now filter by tag themselves
+  (drafts and prereleases skipped, as before), so a stray Release can no
+  longer point an update at assets that do not exist. Both walk pages of 30
+  (5 at most) until one holds a `v*` Release; the CLI then takes the highest
+  version on that page rather than the most recently created one, so a hotfix
+  for an older line published after a newer release is not "latest" (the shell
+  scripts keep creation order: no `sort -V` on macOS, and the rendered
+  installer pins its version anyway). The CLI names the releases it skipped
+  when no `v*` one is found; `releaseUrls` no longer has a `latest/download`
+  branch because nothing reaches it any more.
+
+- **BREAKING (wire): WRITING a skill whose `SKILL.md` frontmatter has no
+  `description`, or a `name` that breaks the Agent Skills naming rule, is now a 400.** The platform only required the `name` KEY to be present, so a skill
+  created with the editor's default skeleton — `name:` and `description:` both
+  blank — was accepted, published, and produced an artifact Codex rejects and
+  Claude Code never auto-invokes. AFPS §3.3 spells both fields SHOULD; the
+  platform is a PRODUCER of these artifacts and holds itself to MUST.
+
+  A `SKILL.md` is accepted only when its frontmatter declares a `name` of 1-64
+  characters of lowercase `a-z`, `0-9` and `-` with no leading, trailing or
+  consecutive hyphen ([Agent Skills
+  specification](https://agentskills.io/specification)) and a non-empty
+  `description` of at most 1024 characters — both counted in Unicode code
+  points. That `name` is the BARE skill slug (`triage`), a different namespace
+  from the `@scope/name` package id, and must be written **inline on one line**:
+  `name:\n  triage` and `name : triage` are valid YAML the platform's package
+  loader cannot read, so writing one is refused rather than frozen into a
+  version no run could load.
+
+  The frontmatter is parsed with the **`yaml` library, at the same major the
+  skill runtime uses** (`@earendil-works/pi-coding-agent` parses `SKILL.md`
+  with `yaml` 2.9), mirroring its delimiters and newline handling, so the
+  platform cannot accept a document the agent then fails to PARSE. Block
+  scalars, folded scalars, next-line values, quoted escapes, inline
+  `# comments` and CRLF all read correctly; what YAML refuses, the platform
+  refuses (`description: a: b`, `name:x`, a duplicate key, a non-mapping block,
+  a non-string field); and a leading **BOM is rejected** rather than stripped,
+  because the runtime tests `startsWith("---")` and silently drops the skill.
+  The RULES are deliberately stricter than the runtime's, which only warns on a
+  spec violation and counts UTF-16 units — being stricter costs an author one
+  edit, being looser mints an immutable artifact no agent will load. A parity
+  test (`packages/runner-pi/test/skill-frontmatter-parity.test.ts`) runs the
+  real runtime loader and asserts the asymmetry only ever points that way.
+
+  The rule lives once, in `@appstrate/afps-shared`'s `checkSkillMarkdown`,
+  declared as the `skill` entry's `validateContent` on the shared package-type
+  config and applied by every path that WRITES skill content: `POST
+/api/packages/skills`, `PUT /api/packages/skills/{scope}/{name}`, `POST
+.../versions`, `POST .../versions/{version}/restore`, `POST
+/api/packages/import` (both the AFPS and the bare-skill-ZIP fallback),
+  `/import-bundle`, `/import-github`, and the MCP module's
+  `validate_package_file` / `import_package_file`. The 400 is an ordinary
+  problem+json whose first field error carries the machine-readable reason —
+  `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`,
+  `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or
+  `skill_invalid_frontmatter_description` — so a client can tell "no
+  description" from "bad name" without parsing prose.
+
+  **READING and RE-IMPORTING existing artifacts are deliberately untouched, and
+  that is the load-bearing half.** Published versions are immutable: a skill
+  published without a description cannot be repaired in place, so gating the
+  read side would have failed every RUN of every agent depending on one.
+  `checkCompanionFiles` — which `extractRootFromAfps` and the run launcher's
+  package catalog call — therefore still asks only for a frontmatter `name`,
+  through the exact same permissive probe as before. And the rule applies to
+  the ROOT of an import only, never to a dependency copy a bundle carries.
+
+  What changes for existing data is the DRAFT — every write, and only writes. A
+  stored skill draft whose `SKILL.md` does not conform must be completed before
+  its next save or publish. **Operator step, after deploying this release:**
+  `bun scripts/migration/0007-skill-frontmatter-quote-descriptions.ts` (dry-run;
+  `--apply` to write) quotes the `description:` lines `yaml` cannot parse — 17
+  of production's 66 skills carry an unquoted `description: … : …`, which the
+  agent runtime already fails to load — and names the rest for a manual edit.
+  **Restoring a legacy published version is refused** for the same reason: a restore writes a draft. Forking is NOT gated
+  — it byte-copies an already-published artifact, so nothing new enters the
+  world. The skill editor, the publish modal and the version-restore
+  confirmation translate the server's reason codes, so the author sees the
+  missing field rather than an English `detail` — or, as the restore dialog did
+  before, nothing at all.
+
+- **Chat turns shed their fixed per-hop costs** (#1243). The preamble reads
+  (models, default space, caller context, session) run in parallel; the
+  resumable recording is coalesced (50 ms / 16 KiB) instead of one store
+  append per SSE chunk and is released ten seconds after persistence settles;
+  the final assistant message is extracted in a single pass; session
+  bookkeeping is one UPDATE per persisted message; the MCP operation index is
+  memoised per permission set; the package hints query is bounded in SQL. The
+  chat UI throttles message re-renders and polls the session list every 10 s
+  while a turn is generating (60 s idle), and the resume route clears a
+  marker whose producer died. MCP `invoke_operation` audit inserts are no
+  longer awaited on the response path: they are tracked in-process and
+  drained (5 s cap) by graceful shutdown before the DB closes. Every
+  process-local TTL cache in the platform is now an instance of
+  `@appstrate/core/cache`, whose `invalidate`/`clear` broadcast to every
+  replica over the Postgres NOTIFY channel `cache_invalidate`.
+
+- **BREAKING: the `application` entity is now `space`, everywhere, with no
+  compatibility layer** (#1227). The org-scoped container that delimits agents,
+  skills and integrations is renamed across 619 files — wire, database, headers,
+  routes, CLI, SPA and telemetry. `docs/NO_TRANSITIONAL_CODE.md` §1 forbids
+  aliases and dual-read paths, so this breaks the contract ON PURPOSE: a caller
+  still sending `X-Application-Id` or calling `/api/applications` now fails
+  loudly rather than being quietly accommodated. Verified: no `/api/applications`
+  route survives anywhere in `apps/`.
+  `app_`-prefixed ids become `spc_`; the header is `X-Space-Id`; the OTel
+  attribute is `appstrate.space.id` (the old series goes to zero without
+  erroring, so dashboards must be repointed rather than debugged).
+  `@appstrate/core` and `@appstrate/afps-runtime` both change public surface —
+  each needs a major release, and `cloud` needs a CODE change, not just a
+  version bump.
+
+  **Deploying this is a maintenance window, not a rolling deploy**, and the
+  operator steps are not optional:
+  - One replica, port closed, migrations at boot. §1 forbids the
+    expand-migrate-contract that would make a rolling deploy possible.
+  - `pg_dump -Fc` immediately before. **There is no down migration**, and
+    rolling the image back does not roll the schema back: the watermark is
+    compared by timestamp, so a reverted deploy finds nothing to apply and runs
+    old code against a renamed schema.
+  - **Two artifacts, both required.** `0053_applications_to_spaces.sql` applies
+    at boot and renames the catalog;
+    `scripts/migration/0003-application-ids-to-space-ids.sql` is run BY HAND and
+    rewrites the values. Neither is sufficient alone.
+  - Then `VALIDATE CONSTRAINT` on `webhooks_level_values`,
+    `webhooks_level_check` and `oauth_clients_level_check` — `0053` adds them
+    `NOT VALID` because the rows still hold the old value at that point.
+  - **Do NOT rewrite storage keys.** `files.storage_key`,
+    `uploads.storage_key` and `storage_deletion_jobs.storage_key` keep their
+    `app_` path segment deliberately: `0003` moves no bytes, so rewriting the
+    keys would point every row at an object that does not exist. Nothing
+    compares a storage key to a space id. New objects are written under `spc_`;
+    old ones stay where they are.
+  - Do not run `audit:storage-orphans` until verification is complete.
+  - Announce the CLI break: nothing gates an installed CLI to a version, and §1
+    forbids building such a mechanism, so users run `npm i -g appstrate@latest`
+    on the day. Open dashboard tabs must hard-refresh, and OAuth connect flows
+    in flight will fail (short Redis TTL, drainable).
+
+  Untouched, because the word means something else there: `appfile://` (it
+  encodes a `file_` id and never carried a space id), `APP_URL`, `--app-url`,
+  the turborepo `apps/` directory, the Hono `app` variable, the ~3,100
+  `application/*` MIME literals, `appp_`, and every use meaning the platform
+  itself or a third-party OAuth app registered at Google, GitHub or Discord.
+
+- **BREAKING: every remaining JSON request body is `.strict()` too — an unknown
+  key is a `400` instead of a silent strip.** The entry above closed the package
+  JSON bodies; this closes the rest of the API. `apps/api/src/routes/*.ts` went
+  from 23 `.strict()` schemas to 68 — **45 more request bodies across 16 route
+  files**: `integrations` (10), `models` (5), `organizations` and `spaces` (4
+  each), `model-provider-credentials`, `packages`, `profile` and `proxies` (3
+  each), `model-providers-oauth` (2), and one each in `agents`, `api-keys`,
+  `auth-bootstrap`, `me`, `uploads`, `user-agents` and `welcome`. All 45 are
+  top-level body schemas reached through `readJsonBody`; not one is a nested
+  object tightened by accident.
+
+  **This is a wire-contract change, not a validation tidy-up.** A client sending
+  a property the body does not model used to get its `2xx` and have the property
+  dropped on the floor. It now gets `400` `validation_failed`. The shape that
+  breaks is read-modify-write — `GET` a resource, edit one field, `PUT` the
+  whole object back — because every property of the response the update body
+  does not model is now refused BY NAME, exactly as described for the package
+  bodies above.
+
+  The OpenAPI spec follows with no second edit: `z.toJSONSchema()` emits
+  `additionalProperties: false` for a `.strict()` object, so every body wired
+  through `apps/api/src/openapi/zod-schema-registry.ts` — which is nearly all of
+  them — now advertises the refusal it enforces.
+
+- **BREAKING (API keys): five more `GET` routes enforce a read permission.**
+  Same class as the eight run and schedule reads gated in `1.0.0-beta.52`, and
+  the same reasoning: each was gated on org membership alone and enforced
+  nothing about what the caller may do.
+
+  - `GET /api/agents` → `agents:read`
+  - `GET /api/agents/{scope}/{name}/proxy` → `agents:read`
+  - `GET /api/agents/{scope}/{name}/model` → `agents:read`
+  - `GET /api/spaces/{spaceId}/packages` → `spaces:read`
+  - `GET /api/spaces/{spaceId}/packages/{scope}/{name}` → `spaces:read`
+
+  On the two agent detail routes the permission check is registered BEFORE
+  `requireAgent()` on purpose: that middleware `404`s on an unknown agent, so
+  the reverse order would answer "does this agent exist?" for a caller not
+  allowed to read agents at all.
+
+  **No dashboard user loses anything.** Every org role down to `guest` already
+  holds `agents:read` and `spaces:read` (`apps/api/src/lib/permissions.ts`), so
+  the SPA is unaffected. What changes is an ALREADY-MINTED API key scoped
+  without the matching permission: it reached these five reads through org
+  membership and now gets `403`. Both scopes are grantable to API keys — re-mint
+  the key with them.
+
+- **BREAKING: the package JSON bodies are `.strict()` — an unknown key is a
+  `400` instead of a silent strip.** `source_code` was dropped from the package
+  contract when its last reader died with the `tool` package type, and the
+  schemas were left open, so a client still sending it got a `201` and a package
+  without it with nothing anywhere saying the field had gone. A retired name
+  must fail loudly (`docs/NO_TRANSITIONAL_CODE.md` §1) — the rule that closed
+  the four launch surfaces in #1187, and this surface was left out of it. The
+  barrier is generic and names no field: it refuses any key the body does not
+  model. Seven request bodies carry `additionalProperties: false` in the spec to
+  match — `POST /api/packages/{skills,agents,integrations}` and
+  `PUT /api/packages/{skills,agents,integrations,mcp-servers}/{scope}/{name}`.
+  Refusals answer `400` `validation_failed` blaming the field `body`.
+
+  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
+  `400`.** `packageJsonUpdateSchema` accepts three keys — `manifest`, `content`
+  and `lock_version` — and every other property of the object the matching `GET`
+  hands back is now refused BY NAME.
+
+  For agents, `GET /api/packages/agents/{scope}/{name}` answers with the
+  `AgentDetail` component's 19 properties, of which the update body accepts
+  exactly two (`content` is not among them — an agent's content comes back as
+  `prompt`). The other 17 are refused: `id`, `display_name`, `description`,
+  `source`, `scope`, `version`, `prompt`, `updatedAt`, `input`, `output`,
+  `dependencies`, `last_run`, `running_runs`, `version_count`, `forked_from`,
+  `has_unarchived_changes`, `effective_timeout_seconds`.
+
+  For skills, integrations and mcp-servers the `GET` answers with
+  `OrgPackageItemDetail`, 18 properties, of which the update body accepts three.
+  The other 15 are refused: `id`, `orgId`, `name`, `description`, `source`,
+  `created_by`, `auto_installed`, `version`, `manifest_name`, `version_count`,
+  `has_unarchived_changes`, `forked_from`, `agents`, `createdAt`, `updatedAt`.
+
+  A third-party client that does the obvious thing — `GET` the package, edit
+  `manifest`, `PUT` the object back — previously had those keys stripped and got
+  a `200`; it now gets a `400` on `id`. **Send only `manifest`, `content` and
+  `lock_version`.** In-repo callers are unaffected: the three `toWireBody`
+  implementations already send exactly that, and `useCreatePackage`'s body type
+  declared an `id?: string` no caller ever passed, removed here — a key declared
+  against a now-strict body is a `400` waiting for its first caller.
+
+  `detect:breaking` reports this as non-breaking, and that is correct about the
+  OpenAPI _document_: it does not model a request body tightening
+  `additionalProperties`, which is invisible to both it and the generated SPA
+  types. This entry is the only signal a consumer gets. Same reasoning as the
+  schedule-body entry further down, which enumerates its 15 refused fields for
+  the same reason.
+
+- **BREAKING: an AFPS integration declaring a bare auth-scheme `prefix` is
+  refused at install time.** AFPS §7.6 defines `delivery.http.prefix` as a
+  literal prepended to the rendered value — every spec example writes the
+  trailing space. Appstrate additionally accepted the bare scheme (`"Bearer"`)
+  in `Authorization` position and spliced the separator in at request time; its
+  own comment called it "this compatibility rule". The injector now concatenates
+  verbatim and inspects nothing, and validator rule (1d) rejects the bare form
+  where the manifest author can act on it, naming the replacement
+  (`Write "Bearer ".`).
+
+  **51 in-repo system integrations wrote the bare form** — 44 `Bearer`,
+  6 `Basic`, 1 `Zoho-oauthtoken` — and every one is fixed here with a patch
+  bump and a rebuilt archive, per the immutable-published-version precedent of
+  #928.
+  Without the bump the fix stays inert in production. No exact-version pin
+  references any of them.
+
+  **Operators: an org-imported or org-published integration stored before this
+  change stops resolving.** System packages are unexposed (`resolvePublishedManifest`
+  short-circuits on the in-memory registry the rebuilt archives replaced), but
+  `packages.draft_manifest` and `package_versions.manifest` hold the author's
+  bytes verbatim and are never revalidated on read, so a stored bare prefix now
+  fails `invalid_manifest` at the first read — which the route maps onto `404`,
+  presenting as a missing integration rather than a bad prefix. Apply
+  `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`; its `WHERE` is
+  exactly the condition it removes (RFC 9110 token grammar, under
+  `Authorization` or `Proxy-Authorization`, case-insensitive) and it is
+  idempotent. It deliberately does not rewrite the uploaded archive bytes, so
+  `package_versions.integrity` is untouched and the boot sync's refuse-overwrite
+  guard still holds — the archive keeps the author's original spelling, and
+  re-importing it now fails loudly at the install gate.
+
+- **Run logs: an untagged `appstrate.progress` row renders as runtime output,
+  not as model prose.** `assistant_message` is the only marker of
+  model-authored text; the run-detail log view additionally treated a data-less
+  `debug`-level progress row as agent text, "compatibility with runs emitted
+  before `assistant_message` was stamped". No in-tree emitter produces that
+  shape as agent text, and the one shape still producible from outside the tree
+  is a runner lifecycle breadcrumb by definition — so the fallback was
+  attributing a container-lifecycle line to the model. Bounded and cosmetic: for
+  runs predating the stamp, such rows now carry the runtime dot instead of the
+  speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
+
+- **Every rate limit keeps a per-process budget behind Redis.** Each limiter the
+  platform builds — auth, OIDC, run, proxy — now carries a `RateLimiterMemory`
+  insurance limiter of the same points and duration
+  (`apps/api/src/infra/rate-limit/redis-rate-limit.ts`). While Redis is
+  unreachable the store rejects with an `Error` rather than a decision, which
+  Better Auth's limiter turns into a 500 on every `/api/auth/**` route; the
+  insurance budget answers instead, so a Redis outage degrades each limit from
+  per cluster to per process for its length rather than removing it or refusing
+  the call. A rejection that still reaches a caller means both backends failed.
+
+### Fixed
+
+- **The hosted connect portal names the missing OAuth client instead of a
+  generic "please try again" 502 (#1263).** Opening a `connect_url` for an
+  oauth2 auth in a space with no registered client — and no system client or
+  auto-provisioning to fall back to — rendered "Could not start the connection.
+  Please try again." with a 502, although the condition is a configuration gap
+  that no retry can clear. The programmatic `POST …/connect/oauth2` already
+  answered the same case with a 403 naming the action ("Administrator must
+  register OAuth client credentials…"); the catch around the hosted dispatch
+  swallowed that error, and the auto-provisioning failure written to be shown
+  verbatim with it. A client-side (4xx) refusal from the OAuth strategy now
+  reaches the popup with its own status and detail, and the single-use link is
+  handed back rather than burned — nothing was minted on its strength — so a
+  retry once the client is registered works from the very same link instead of
+  the previous second misleading "This connect link has already been used."
+  Transient and unknown failures keep the generic wording, the 502 and the burn.
+
+- **Deleting an organization reserves the deletion before any module tears
+  anything down (migration `0058`).** `DELETE /api/orgs/:orgId` checked
+  deletability without a lock, emitted `onOrgDelete` — where modules cancel a
+  Stripe subscription and drop rows of their own — and only then opened the
+  transaction that re-checks in-progress runs and refuses when it finds any. A
+  run admitted in that window turned the refusal into a surviving organization
+  stripped of what the handlers had already destroyed, with no repair path. The
+  check and a `organizations.deleting_at` stamp now commit together under the
+  per-org advisory key run admission takes, and `createRun` refuses a reserved
+  organization (409 `org_deleting`), so the decision cannot be invalidated
+  behind the modules' back. Chat admission and `/api/llm-proxy` refuse a reserved
+  organization with the same 409, because a chat turn is not a `runs` row and
+  the deletability count never saw it — usage admitted there would be
+  cascade-deleted unbilled. A DELETE that fails after the reservation leaves it
+  standing and can simply be retried; module `onOrgDelete` handlers must
+  therefore tolerate a second call for the same organization. The reservation is
+  visible: `deleting_at` is on the organization wire object (`GET
+/api/orgs/{orgId}` and the listing), null on every organization not being
+  deleted. The migration is one nullable column and rewrites no row.
+
+  **OPERATOR ACTIONS.** None, unless a DELETE was abandoned. The platform never
+  lifts a reservation — retrying the DELETE is the recovery, and it is the only
+  one, because module handlers that already ran cannot be undone. An operator
+  who decides to abandon a deletion instead can clear the stamp with
+  `UPDATE organizations SET deleting_at = NULL WHERE id = '<org-uuid>';`. That
+  is safe ONLY when no `onOrgDelete` handler ran — i.e. the DELETE failed at the
+  reservation itself, which answers `400 delete_failed` with `runs are in
+progress` and emits nothing. Once a handler has run the organization is
+  already gutted (the subscription is cancelled, the billing rows are gone) and
+  clearing the stamp returns a broken organization to service; finish the
+  deletion instead.
+
+- **Revoking an API key requires `api-keys:revoke` in the key's own space.**
+  The guard answered for the space the request carried and the service then
+  updated org-wide, so a delegated administrator of one space could revoke a
+  key of a private sibling space, given only its id. A key whose space the
+  caller cannot reach now answers with that space's own wall (404 for a private
+  one, 403 `not_a_space_member` otherwise). An API key still revokes only inside
+  the space it is pinned to. The request re-enters the key's space before it
+  writes, so the audit row names the KEY's space, not the space the request came
+  in through.
+
+- **Integration OAuth clients are `integrations:configure`, not
+  `integrations:install`.** Registering, rotating, deleting a BYO OAuth client
+  and choosing the default one are governance (RBAC spec §3.4), and `install`
+  is API-key-grantable — so a key could swap the OAuth application a whole
+  space authenticates through. The four routes now require the session-only
+  permission the SPA already gated them on. **OPERATOR ACTION: an API key that
+  registered, rotated or deleted a BYO OAuth client, or set the default one, now
+  gets 403 on those four routes — do that work from a session.**
+
+- **The realtime streams resolve the same org half as HTTP.** SSE runs outside
+  the auth pipeline and rebuilt the caller's org permissions without the grants a
+  module makes to one named principal, so an ee billing manager reached every
+  HTTP route their grant opens and none of the streams. The stream now reads
+  `principalGrants` exactly as the pipeline does, and its audit rows name the
+  session transport rather than the credential the query parameter carried.
+
+- **A malformed `space_id` in a space assignment answers 400, not 404.**
+  `space_assignments[].space_id` on an invitation and on an OAuth signup policy
+  is shape-checked (`spc_` + a UUID); anything else is `400 Malformed space id`
+  instead of a 404 that reads as "that space was deleted".
+
+- **Billing: deleting an org with no billing account still clears its billing
+  state (`@appstrate/module-ee`).** The handler returned as soon as it found no
+  account row, leaving the org's usage buckets and its billing managers behind —
+  rows naming an organization that no longer exists. The cleanup now runs for
+  every org, and the account row is only what decides whether Stripe is called.
+
+- **Billing: `POST /api/billing/checkout` and `/plan` answer 404 for an org with
+  no billing account (`@appstrate/module-ee`).** They answered 503, which tells a
+  client to retry something no retry can fix.
+
+- **A disabled install checkbox in the library says why.** The row now names the
+  reason — a system package, or the permission the caller lacks — and shows
+  nothing at all while permissions are still loading, rather than a bare disabled
+  box that reads as a broken control.
+
+- **The billing managers card no longer clears itself when the member roster
+  fails to load.** Without the roster every saved manager read as "no longer a
+  member", which made the list dirty and turned Save into a `PUT` of the empty
+  set. The card stops at an error state instead.
+
+- **The models page stops asking for credentials a member cannot read.** The
+  credentials list and the provider registry are both behind
+  `model-provider-credentials:read`; they are now fetched only when the caller
+  holds it, instead of collecting two guaranteed 403s per visit.
+
+- **A role can be repaired after a module is unloaded.** The role editor
+  rendered only the permissions it could name, kept the rest selected
+  invisibly, and resent them on every save, which the server refused with a 400
+  no control could clear. Permissions the platform no longer knows are now
+  listed as unavailable, with a way to remove them.
+
+- **Billing: a Stripe cancellation that fails on org deletion is now retried
+  instead of forgotten (`@appstrate/module-ee`).** `onOrgDelete` logged the
+  failure and deleted the billing account anyway, so the subscription id died
+  with the row: a Stripe blip left a subscription charging a customer every month
+  for an organization that no longer existed, with nothing able to name it. The
+  intent is now stamped on `ee_billing_accounts.cancel_requested_at` before the
+  call, the rows survive an unconfirmed cancellation, and every billing tick
+  retries them until Stripe confirms — a subscription Stripe no longer has counts
+  as confirmed, and a second `onOrgDelete` for the same org is a no-op.
+
+- **Billing: the shutdown drain no longer closes the database under a running
+  storage reconcile (`@appstrate/module-ee`).** It snapshotted the in-flight
+  sweep and reconcile once, at entry, but the tick starts the reconcile from
+  inside the very promise that snapshot awaits — so a shutdown entered mid-sweep
+  returned the moment the sweep ended and `closeEeDb()` ran underneath a
+  reconcile that had begun in between. It now re-reads both handles after every
+  wait, and its timeout is a constant rather than a parameter no caller passed.
+
+- **Billing: upgrading a paying organization no longer creates a second
+  subscription (`@appstrate/module-ee`).** The plan picker always opened Stripe
+  Checkout, and Checkout only ever CREATES — so an org that already subscribed
+  came out of an upgrade with two live subscriptions and two charges.
+  `POST /api/billing/checkout` now refuses an account whose subscription is one
+  Stripe still HOLDS — `active`, `trialing`, `past_due`, `unpaid`, `paused` or
+  `incomplete` (`409 subscription_exists`) — because Checkout only creates, and
+  Stripe holds all six. The new `POST /api/billing/plan` (`billing:manage`,
+  5/min) moves the existing subscription's price item onto the chosen plan with
+  proration. Which door a plan click opens is the server's answer, not the
+  dashboard's guess: `GET /api/billing` carries a `plan_action` field
+  (`checkout` | `plan-change` | `portal`) and the SPA follows it. Downgrading to
+  free is unchanged — it is a cancellation, taken through the Customer Portal.
+
+- **Billing: an old subscription's events no longer destroy the active one
+  (`@appstrate/module-ee`).** Every subscription-scoped Stripe webhook matched on
+  `metadata.orgId` alone, which says which org OWNS a subscription and not that
+  the org is still on it — so a `customer.subscription.deleted` for a replaced
+  `sub_old` downgraded the live `sub_new` account to free with zero credits while
+  Stripe kept charging it. Reversed order and late delivery did the same through
+  `customer.subscription.updated` and `invoice.paid`, and a superseded
+  subscription's dunning notice reached the customer as if their current plan
+  were failing. Each handler now writes only to the account carrying that exact
+  subscription id, and an event about any other subscription is logged and
+  ignored. The three handlers whose job includes ATTACHING one — checkout
+  completion, subscription creation and the first paid invoice — also accept an
+  account with no subscription, and one whose id names a subscription Stripe no
+  longer HOLDS: only `customer.subscription.deleted` nulls the column, so an org
+  sitting at `canceled` (or one whose `deleted` event was lost) still carries a
+  dead id, and pinning on the id alone dropped its next paid checkout as
+  "superseded" — charged, with no plan and no quota.
+  `customer.subscription.created` additionally never rewrites an account already
+  on that subscription: a creation event delivered late carries creation-time
+  status and plan, and replaying it over a subscription that has since moved
+  puts the account back where it started.
+
+- **Billing: the usage the cutover excluded is no longer billed on the second
+  sweep (`@appstrate/module-ee`).** The cursor was seeded at the platform's
+  settled frontier and the first pass billed nothing — as documented — but every
+  later pass reads `EE_RECONCILIATION_REPLAY_WINDOW` ids BELOW the watermark to
+  catch rows that commit late, and that read walked straight back under the seed
+  and debited the whole history. `ee_billing_cursor.floor_id` records the seeded
+  frontier once and never moves, and both the sweep and the org-deletion drain
+  now select from `max(floor_id, watermark − replay window)` through one shared
+  rule. `floor_id` defaults to `0` for a cursor that predates it: its original
+  frontier was never recorded, and 0 is exactly the behaviour those deployments
+  already had.
+
+- **Billing: a ledger row the platform could not price is no longer settled as
+  free (`@appstrate/module-ee`).** The sweep summed `cost_usd` blind, so a row
+  whose `pricing_status` is `unpriced` (cost 0 because no rates were available —
+  not because the call was free) was claimed as zero spend and could never be
+  recovered. Rows are now claimed with their status stamped on
+  `ee_billed_llm_usage.pricing_status`: `priced` is billed, `partial` is billed
+  on its floor and counted, and `unpriced` or an absent status is claimed for 0
+  credits so it is never double-billed and stays auditable. Each sweep pass and
+  each org drain emits one `error` line with the counts and the affected orgs,
+  and the counts ride the per-tick heartbeat.
+
+- **Billing: the final drain on org deletion no longer misses a late-committed
+  row (`@appstrate/module-ee`).** It started strictly above the global watermark,
+  so a row of the org that took a low serial id and committed after the watermark
+  passed it was debited 0 — and unlike the periodic sweep, the drain has no
+  second chance: the org's ledger rows cascade away moments later. It now uses
+  the same selection rule as the sweep.
+
+- **Unit tests green again after the 2026-09-07 LiteLLM catalog refresh
+  (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
+  `curated-model-drift` rightly flagged as unreviewed for Codex: the vendor
+  page (https://learn.chatgpt.com/docs/models) lists it as recommended for
+  ChatGPT sign-in (Pro plans and above), so it joins the Codex
+  `modelDiscoveryCandidates` and `featuredModels`, newest first. The same
+  refresh marks the whole 5.6 family `temperature: "unsupported"` on the
+  OpenAI API, so the `resolveCatalogDefaults` test that proves the Codex
+  override rejects temperature now reads `gpt-5.4`, an id the API still
+  supports it on.
+
+- **A custom endpoint's key and models show a neutral icon.** Rows resolve
+  their registry entry by `providerId` (`resolveProviderEntry`), falling back
+  to the `(apiShape, baseUrl)` match only where the binding is hidden; the
+  custom-endpoint entries' `iconUrl` is `custom-endpoint`, a server glyph, not
+  the vendor logo of the API they speak.
+
+- **Editing an OpenRouter key opens on its provider.** The credential form's
+  picker no longer filters `openrouter` out.
+
+- **Deleting a key a model still runs on says so.** The dialog counts the
+  models on the key and disables Confirm until they are gone; a delete the
+  server refuses (409 `credential_in_use`) or otherwise fails, models
+  included, is reported as a toast.
+
+- **The Playwright suite keeps its own `data/e2e/{pglite,storage}`** instead
+  of inheriting `PGLITE_DATA_DIR` / `FS_STORAGE_PATH`, which pointed a second
+  process at the developer's `data/pglite` (PGlite aborts with
+  `RuntimeError: Aborted()` and can corrupt the first process's catalog).
+
+- **A custom (OpenAI-compatible) model can be created from the model form
+  again.** The picker submitted a client-only `__custom__` sentinel as the
+  credential's `providerId` (`400 Unknown providerId`); the custom entry is now
+  the registry's own `openai-compatible` provider, whose credential carries the
+  shape and base URL the server reads.
+
+- **A Dynamic Client Registration body without `scope` now yields the full
+  self-service scope set (#1267).** An MCP client registering without `scope`
+  got the identity scopes alone, so authorizing for `mcp:read` / `mcp:invoke`
+  was bounced with `invalid_scope`. Narrow registrations stay narrow — and an
+  already-registered scope-less client reads as one, so it must re-register.
+
+- **A killed `appstrate skills sync` no longer locks the next ten minutes of
+  sessions out.** Closing a Claude Code session seconds after opening it kills
+  the background sync it spawned, and the `mkdir` lock only expired by age —
+  every session in the following ten minutes reported `Another appstrate
+skills sync is running` and kept the stale plugin. The lock is now
+  `flock(2)` on `skills-sync/sync.lock` (through `bun:ffi` — Bun is the
+  runtime on every channel): the kernel releases it when the holder ends,
+  however it ends, so there is no pid to trust, no age to guess and nothing
+  left behind.
+
+- **`appstrate self-update`, `bootstrap.sh` and `bootstrap-runner.sh` no longer
+  break for the days between an npm release and the next platform tag.** The
+  `cli@`, `core@` and `afps-shared@` publish workflows each create a GitHub
+  Release, and GitHub made the newest one "latest" — so `releases/latest`
+  answered `cli@1.0.0-beta.56`, the CLI prefixed it with `v` and asked for
+  `vcli@1.0.0-beta.56/checksums.txt.minisig` (404). Every one of the 15
+  non-`v*` releases to date opened such a window. Those workflows now pass
+  `make_latest: false`, and the CLI names a non-platform `latest` tag instead
+  of building a URL from it.
+
+### Removed
+
+- **BREAKING (operators): the organization role `viewer` is retired; `guest`
+  replaces it, and moving the rows is a two-file deploy in ONE maintenance
+  window.** A `viewer` was read-only everywhere; that is a space concern now, so
+  a former viewer becomes an org `guest` plus an explicit `viewer` role in every
+  space that exists at migration time — the same reach, and it does not widen
+  onto spaces created later. Mapping them to `member` instead would have handed
+  them every open space's default preset, which is `operator`: write access they
+  never had.
+
+  **The two files, in this order.** `packages/db/drizzle/0056_space_roles.sql`
+  applies at boot with the rest of the pending batch; then
+  `scripts/migration/0008-org-viewer-to-guest.sql` runs BY HAND, before the new
+  version serves traffic. Between them a row still reading `viewer` resolves no
+  permission set at all and every request from that user fails, so the window
+  covers both — this is not two deploys. **Rollback is one-way from `0056`**:
+  it promotes `chat_sessions.space_id` to NOT NULL and the previous build
+  inserts without it. Roll forward.
+
+  `0008` is idempotent, runs in one transaction, and verifies by coverage
+  rather than by a count that reads the same whether it worked or not: it
+  aborts unless every pre-flip (user, space) pair carries a `space_members` row
+  and every pending invitation carries its space snapshot.
+
+  **A third file can be needed first.** `0056` also creates the partial unique
+  index behind "one pending invitation per (organization, email)", and a
+  duplicate pair left by a race under earlier code fails that statement and
+  rolls the whole migration back. Count the pairs before the deploy and run
+  `scripts/migration/0009-org-invitations-dedupe-pending.sql` if there are any.
+  **The runbook, including that query, is `scripts/migration/README.md` → RBAC
+  rollout**; rehearse the whole sequence against a restored `pg_dump` copy first,
+  since the row counts are unmeasured until you do.
+
+  Two more consequences an operator should know about. **An API key pinned to a
+  space cannot mutate a package installed in more than one space**, whatever its
+  scopes: a package's draft, versions and identity are shared across its
+  installations, so a mutation needs authority in every one of them, and a key
+  delegates authority in exactly one. Re-run such a mutation from a session, or
+  uninstall the package from the spaces the key does not cover. And the audience
+  of billing mail moved: `ModuleInitContext.getOrgAdminEmails` is gone from the
+  module contract, replaced by `getOrgOwnerEmails` and `getOrgMembers` (see
+  `packages/core/CHANGELOG.md`), so an unset billing contact now falls back to
+  the org's OWNERS rather than fanning out to every administrator.
+
+- **BREAKING (operators): migration `0055` drops `org_invitations.accepted_by`
+  and `accepted_at` — and THE RELEASE CARRYING IT CANNOT BE ROLLED BACK.**
+  Nothing read either column: `markInvitationAccepted`
+  (`apps/api/src/services/invitations.ts`) wrote both beside the
+  `status = 'accepted'` flip and no query anywhere read them back. This release
+  is the one that stops writing them.
+
+  The forward pin is the part an operator has to plan for. Migrations are
+  applied AT BOOT, before the health gate (`apps/api/src/lib/boot.ts`), so the
+  two columns are gone from the shared database the moment a container of this
+  release starts — before anything has decided the deploy is good. Redeploying
+  the previous image, which is the documented recovery path, then brings back a
+  binary whose accept-invitation `UPDATE` names a column that no longer exists:
+  Postgres `42703`, and every invitation acceptance `500`s until the image is
+  rolled forward. Drizzle's runner has no down step and this migration has no
+  inverse, so nothing restores them on the way back.
+
+  **Roll FORWARD.** Redeploy this release or a later one rather than the
+  previous image. If this release genuinely has to be abandoned, the previous
+  image needs the two columns back first — the migration header ships the exact
+  `ADD COLUMN` statements for that case. The other three sections of `0055` are
+  rollback-safe; this one is what pins the release.
+
+- **The `/applications` and `/app-settings` dashboard redirects are gone.** Both
+  shipped through `v1.0.0-beta.53` as `<Navigate>` routes into
+  `/org-settings/…`. The application → space rename moved them to `/spaces` and
+  `/space-settings`, and this release removes them rather than renaming them
+  again. A bookmark on any of the four spellings does not `404`: the
+  authenticated shell's catch-all (`<Route path="*">` in `apps/web/src/app.tsx`)
+  sends the visitor to the dashboard. What is lost is the deep link, not the
+  session — the destinations themselves, `/org-settings/spaces` and
+  `/org-settings/space/general`, are unchanged and reachable from the nav.
+
+- **BREAKING (chat): `parent_id` and `format` are gone from the chat history
+  response, and from the table behind it.** `GET /api/chat/sessions/{id}`
+  returned each message as `{ id, parent_id, format, content }`, with all four
+  `required` on the `ChatMessage` component; it now returns `{ id, content }`,
+  in `seq` order. Both columns are dropped by migration `0054` in the same
+  change — a column still echoed to the client cannot be dropped from one side.
+
+  Neither had a reader. Every read of the table sorts by `seq`; nothing branched
+  on `format`, nothing walked `parent_id` (no FK, no uniqueness), and the SPA's
+  decoder already destructured `{ id, content }`. The transcript is a flat list.
+  `parent_id` is a `DROP COLUMN`, so its values are discarded permanently — the
+  migration header records what a row could have held and ships the pre-flight
+  queries to measure it before applying.
+
+  `detect:breaking` reports `0 breaking` here and always will:
+  `scripts/detect-breaking-changes.ts` strips module-owned paths and schemas
+  from both sides before comparing, so `ChatMessage` is absent from
+  `apps/api/src/openapi/baseline.json` entirely. The gate is structurally blind
+  to every chat wire change; this entry is the only signal. The first-party
+  reader is safe by construction — the SPA is baked into the platform image, so
+  a served build cannot be older than the platform serving it — but the route is
+  a public one, and **a third-party client reading either field must stop.**
+
+- **BREAKING (operators): the boot-time self-heal for the RFC 8707 oauth
+  `resources` columns is gone — a database whose `__drizzle_migrations`
+  watermark is ahead of its real schema now REFUSES TO BOOT.** Until now
+  `reconcileOAuthResourceColumns()` re-ran migration `0006`'s DDL on every boot
+  of every deployment, forever, so a drifted database silently worked. Nothing
+  recorded when that repair could stop shipping.
+
+  **If the check fires, the API will not start.** Apply
+  `scripts/migration/0004-oauth-resources-watermark-drift.sql` to the database
+  and restart; the boot error names the file. The repair is idempotent and a
+  few seconds of additive DDL.
+
+  **Most upgrades will not see it, and that is not reassurance.** The self-heal
+  ran on every boot of every release up to this one, so a database that drifted
+  earlier already had these columns restored and will pass the check with its
+  watermark still corrupt. The check is a signature for one migration, not a
+  drift detector: it catches a drift that first appears from here on, or a
+  restore of a backup taken before the heal. Run the ledger diagnostic in the
+  script's header to see the real extent on any database you suspect.
+
+  Refusing rather than warning is deliberate: drizzle's postgres-js migrator
+  applies by `max(created_at)`, so a corrupted watermark skipped **every**
+  migration below it, not just `0006`. A process that kept running would serve
+  from a schema nobody can enumerate and fail later at unrelated queries naming
+  none of this. The check is a signature, not a proof — a watermark corrupted
+  _after_ `0006` applied leaves these columns present and passes — so the script
+  also ships the diagnostic query for the true extent of the drift. It
+  deliberately does not touch the ledger: lowering a watermark makes the
+  migrator replay migrations that did apply, and most are not idempotent.
+
+  Tier 0 (PGlite) cannot reach this state — `applyCorePGliteMigrations` keys on
+  the journal tag, not on a watermark.
+
+- **BREAKING (internal API): `GET /internal/mcp-server-bundle/{scope}/{name}`
+  now returns `400` when `?version=` is absent on a non-system mcp-server**,
+  where it used to serve the latest non-yanked version. That fallback existed
+  for pre-#588 sidecars: the platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a
+  version contract, and `@appstrate/env` fails boot on a disagreeing trio, so a
+  sidecar that old cannot be paired with this platform by tag. It silently
+  reintroduced the exact manifest/bytes skew #588 closed.
+
+  This is a container-to-host route; no external client calls it, and the
+  sidecar in the matching image sends the parameter for every package that has
+  a version to send. System mcp-servers have none — they are served from the
+  in-memory boot registry by id alone — and still omit it, which is why the
+  parameter stays optional in the spec rather than becoming `required`.
+
+  The guard is not airtight, and this entry does not lean on it. Digest pinning
+  is supported, and `findRuntimeImageTagMismatch` skips a digest-pinned ref
+  outright; the guard also says nothing about containers already running when
+  the platform restarts, which is why the release notes carry a drain step. So
+  a pre-#588 sidecar CAN reach this platform, and it now 400s on every
+  local-source integration instead of silently running skewed bytes. The load-
+  bearing argument is the other one: nothing in a matching image omits the
+  parameter, because the resolver only leaves it unset for system mcp-servers,
+  which the route answers before it reads the query at all.
+
+- **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired.**
+  `scripts/bootstrap.sh` does not read it at all — nothing in the repository
+  does. It was a fourth trigger for a decision three live signals already make
+  (`--yes`, `CI=true|1|yes`, stdout is not a TTY), and its only justification
+  was preserving the pre-two-step "always auto-install" default for IaC written
+  against it.
+
+  **OPERATOR ACTION: replace `APPSTRATE_AUTO_INSTALL=1` with `--yes`**
+  (`curl -fsSL https://get.appstrate.dev | bash -s -- --yes`). An Ansible /
+  cloud-init run that still exports it takes the two-step path and exits 0
+  having dropped the binary and installed nothing, with no message naming the
+  variable — so fix the caller rather than waiting for one. CI runners and
+  non-TTY contexts already select unattended mode on their own and need no
+  change. `APPSTRATE_NO_LAUNCH=1` is untouched.
+
+### Fixed
+
+- **Migration `0055` repairs three shapes the declared schema and the database
+  disagreed on.** All three were found by diffing the declared schema against a
+  catalog built by replaying the migration journal
+  (`migration-schema-parity.test.ts`); none is a query bug, and none rewrites a
+  row value.
+
+  - **`audit_events.space_id` no longer carries a foreign key.** It had
+    `REFERENCES spaces(id) ON DELETE SET NULL`, twelve lines below the table's
+    own comment arguing that `org_id` is deliberately NOT a foreign key because
+    "an audit log is an immutable historical record: it must outlive the
+    entities it describes". `DELETE /api/spaces/:id` is a live route, so every
+    historical audit row for a deleted space lost its attribution the moment it
+    ran, irreversibly — `action` is a verb and `resource_id` names the resource,
+    not its container. The column is now a denormalised `text`, same posture as
+    `org_id`: a `space_id` may name a space that no longer exists, which is the
+    intent.
+  - **Two indexes for the space-deletion cascade.** Deleting a space CASCADEs
+    into `notifications` and `package_persistence`, and neither had an index
+    whose LEADING column is `space_id` — Postgres indexes only the REFERENCED
+    side of a foreign key. Both cascades seq-scanned under a held row lock.
+    Added: `idx_notifications_space` and `pkp_space`, single-column and
+    non-partial. The third cascade target, `audit_events`, needs no index — the
+    change above removed the scan instead.
+  - **Two foreign-key names past Postgres' 63-byte identifier limit.** Drizzle
+    derived `integration_org_defaults_connection_id_integration_connections_id_fk`
+    (68 bytes) and
+    `model_provider_pairings_credential_id_model_provider_credentials_id_fk`
+    (70), and Postgres silently truncates at creation — so the catalog had only
+    ever held the short forms while the TypeScript schema claimed the long ones.
+    They are renamed to what the catalog holds.
+
+  Every constraint the migration touches is located through `pg_constraint` by
+  its COLUMNS and its TARGET, never by its name. That is not stylistic:
+  production's `audit_events` predates drizzle's `_fk` convention and carries
+  Postgres' own `_fkey` spelling, and a `DROP CONSTRAINT "<declared name>"` is
+  exactly what failed the beta.24 deploy with `42704`, aborting the whole batch.
+
+- **The weekly system-package conformance monitor can fail again.** The job
+  captured the harness's exit code into a step output, used it only to decide
+  whether to file a tracking issue, and never re-raised it — so
+  `.github/workflows/conformance-monitor.yml` reported success while the
+  harness reported `4 fail`, and issue #1206 sat open and uncommented for
+  three days behind a green run. The code is now re-raised by a final step
+  that runs _after_ the issue is filed, keeping the ordering that made the
+  capture necessary in the first place: a job that dies on the harness never
+  reaches the reporting step, so a red run would otherwise destroy its own
+  diagnostics.
+
+- **`@appstrate/clickup-mcp` 1.2.1 → 1.2.2 and `@appstrate/gmail-mcp`
+  2.3.1 → 2.3.2 declare the tools their servers actually expose.** ClickUp
+  advertises `clickup_create_task_comment`, `clickup_merge_document` and
+  `clickup_merge_document_page` (all three named as deferred follow-up in
+  #1172 and confirmed by the monitor since); Gmail has added
+  `update_message_labels` (`gmail.modify`, like the other label mutations)
+  and `get_draft` (`gmail.readonly`, like `list_drafts`) upstream. Both
+  packages are version-bumped and their archives rebuilt — a published
+  version is immutable, so an unbumped manifest fix never reaches production
+  (#928).
+
+- **The `refresh-strategy` waiver list is a ratchet instead of a wall.**
+  `UNVERIFIED_CEILING` was an upper bound, so it caught a growing backlog but
+  waved through a shrinking one — verify a provider, remove its entry, and the
+  ceiling silently kept the free seat for the next waiver. It is now an
+  equality: the backlog cannot grow, and it cannot shrink without the ceiling
+  being lowered in the same commit. The burn-down procedure — what "verifying
+  one entry" actually means, and which four things to edit — is documented on
+  the list itself.
+
 ### Security
 
-- **The agent bundle export now requires each dependency type's read scope** —
-  `GET /api/agents/{scope}/{name}/bundle` gated on `agents:read` alone. That
-  covers the root agent, whose files the export narrows to `manifest.json` +
-  `prompt.md`, but a dependency goes into the archive as its ENTIRE stored file
-  map: a bundle carrying a skill hands out exactly the bytes
-  `GET /api/packages/skills/{id}/files[/content]` serves, which #1123/#1124
-  settled need `skills:read`. This route was the last looser door to the same
-  content — a credential `403`'d on the file explorer was served the identical
-  bytes here. The guard now runs against the ASSEMBLED bundle rather than the
-  root manifest, so transitive dependencies are covered by construction and an
-  unrecognised type fails closed. It gates on SCOPE, not visibility:
-  dependency resolution stays org-scoped, so a bundle can still reach a skill
-  that is not installed in the calling application, exactly like the run it
-  mirrors.
+- **The sidecar's HTTP control surface is authenticated, deny-by-default.**
+  Every route on the sidecar app now sits behind an `app.use("*")` middleware
+  (`runtime-pi/sidecar/app.ts`) that refuses any request not presenting the
+  run's sidecar token on the `x-appstrate-sidecar-auth` header
+  (`SIDECAR_AUTH_HEADER`, `packages/core/src/sidecar-types.ts`). The comparison
+  is constant-time and fails closed on both halves — an absent header AND an
+  unconfigured sidecar are each a refusal, so a sidecar with no token answers
+  nobody. The refusal is a bare `401 { "error": "unauthorized" }`: no
+  `WWW-Authenticate` challenge and no hint about which half failed. `GET /health`
+  is the single exemption, because the orchestrator probes it before the run
+  exists and it discloses one bit.
 
-  **Behaviour change for scoped credentials.** A credential holding
-  `agents:read` but NOT `skills:read` now gets `403` where it used to get
-  `200`, on both `?source=draft` and the published export, whenever the agent
-  declares a skill dependency. In practice that is a scoped API key or OIDC
-  token — every org role (owner, admin, member, viewer) carries both scopes, so
-  no dashboard user is affected. An agent with no skill dependency is still
-  exported to an `agents:read`-only key. Audit the scopes of any key that
-  exports bundles from CI before upgrading.
+  **The per-run Docker network had stopped being the boundary.**
+  `integration-runtime-adapter-docker.ts` attaches every third-party integration
+  runner to the same bridge and hands it `http://sidecar:<port>`, so "on the
+  network" no longer meant "is the agent": without a token, a
+  `source.kind: "local"` integration reached the LLM reverse proxy with one
+  `curl` and spent the organization's provider credential unattributed. `/llm/*`,
+  `/mcp`, `/integrations/boot-report` and `/runtime-events` had each ended up
+  open one at a time, which is why the gate is deny-by-default rather than
+  per-route opt-in — a route added later is protected without anyone remembering
+  to say so.
 
-- **Package file responses are never served from a fresh browser cache** —
-  `Cache-Control: private, max-age=300` on the file explorer routes let a
-  browser serve authenticated, tenant-scoped, RBAC-gated artifact bytes for
-  five minutes with zero server contact. A revoked `<type>:read`, a member
-  removed from the org, or a package uninstalled from the application all left
-  the cached `200` being handed out until it expired, and `Vary` cannot rescue
-  that — revocation changes no request header. Every response on both routes is
-  now `private, no-cache`, which was already the behaviour for drafts,
-  dist-tags, semver ranges and yanked versions. `no-cache` still permits the
-  304 round-trip; it only forbids serving without one, and forcing that
-  round-trip re-runs `hasPackageAccess` and the read-permission guard on every
-  hit. **The trade**: a repeat view of the same file now pays a conditional
-  request instead of reading the local cache. That revalidation answers a
-  version's 304 from one DB read, with no storage GET and no unzip.
+  **The token is NOT the run token and carries none of its authority.** It is
+  256 bits minted per run by the launcher (`randomBytes(32)`,
+  `apps/api/src/services/run-launcher/pi.ts`) and handed to both sides of the
+  pair — the sidecar's `SIDECAR_AUTH_TOKEN` and, via `buildRuntimePiEnv`, the
+  agent container's. It asserts "I am the agent container talking to my own
+  sidecar" and nothing more; the zero-knowledge boundary is unchanged, the agent
+  still holds no token that can call the platform back, and this one cannot be
+  used to derive one. It gets its own header rather than `Authorization` because
+  on `/llm/*` that slot already carries the vendor credential placeholder the
+  sidecar swaps for the real key, and both `/llm/*` forwarding paths strip it
+  (and its `x-appstrate-pi-sdk` sibling) so it never rides on to a vendor.
 
-- **Package `GET` routes now enforce a read permission (#1123)** — every
-  `GET` under `/api/packages` was gated on `hasPackageAccess` alone, which
-  answers "is this package installed in this application, or a system
-  package?" and nothing about what the caller may do. An API key scoped
-  **without** `skills:read` could read a skill's manifest and its full
-  `SKILL.md` (the detail route serves the authored `content`), and pull the
-  published ZIP through `/{scope}/{name}/{version}/download`. Every `GET`
-  on the router now requires the matching `agents:read` / `skills:read` /
-  `integrations:read` / `mcp-servers:read`, and `/{version}/download`
-  additionally goes through `hasPackageAccess` like the rest of the surface —
-  it previously served artifact bytes for packages not installed in the
-  calling application.
+  `runtime-pi/entrypoint.ts` now deletes `SIDECAR_AUTH_TOKEN` alongside
+  `SIDECAR_URL` once the MCP client, the runtime-event drainer and the Pi model
+  record each hold their own copy — together they are the capability to spend
+  the org's provider credential, and the agent loop runs model-chosen shell
+  commands over attacker-influenced input.
 
-  **The read-permission change is breaking for API keys.** No org role loses
-  access through the new RBAC guard (every role, down to `viewer`, holds all
-  four read scopes), but a key minted without the matching `*:read` scope now
-  gets `403` where it used to get `200`. Separately, the download visibility
-  fix affects every caller: a package not installed in the calling application
-  now returns `404`, including for org-role sessions. Audit issued key scopes
-  before upgrading.
+  **Operators: the platform and both runtime images must move together.** A
+  sidecar image predating this change ignores the header and stays open; an
+  agent image predating it presents nothing and gets `401` on every call. The
+  #1201 image-trio boot guard already refuses a deployment whose platform,
+  `PI_IMAGE` and `SIDECAR_IMAGE` versions disagree, so a correctly pinned
+  compose file cannot land in either state.
+
+- **`TRUST_PROXY=false` refuses to boot in production behind a non-loopback
+  `APP_URL`.** The platform terminates no TLS, so that pair means a proxy is in
+  front by construction, and ignoring `X-Forwarded-For` there hands every caller
+  the proxy's own address — collapsing every per-IP rate limit and every audit
+  record into one bucket. `@appstrate/env` now rejects the combination at boot
+  instead of running degraded.
+
+  **Operators: name the hop count.** `TRUST_PROXY=1` behind a single reverse
+  proxy, `N` behind N hops you control. The self-hosting example ships `1` and
+  passes the variable through in all four of its compose files.
+
+- **A token request that identifies no client is held to the self-service
+  confinement.** `/oauth2/token` confines a self-registered (DCR / CIMD) client
+  to exactly one protected-resource audience; a request naming no client now
+  falls under the same rule rather than past it, so dropping `client_id` is not
+  a way to mint a token for the broad platform audience. `private_key_jwt` keeps
+  working: the client id is read from the `client_assertion`'s `sub` (RFC 7523
+  §3, `iss` must agree when present), unverified — the provider then verifies
+  the assertion against the row that id names, so a forged assertion naming an
+  operator-provisioned client dies on the signature check and one naming a
+  self-service client stays confined.
+
+- **Operators: run `scripts/migration/0011` after the drizzle batch carrying
+  `0057`, on any deployment that has ever accepted a self-registered client.**
+  `0057` adds `oauth_clients.self_service` and leaves it `false` on every row;
+  `0011` fills it from the `selfService` key already in `metadata`. Until it
+  runs, a self-registered client reads as operator-provisioned and its tokens
+  are not confined. Idempotent, one transaction, and it never flips a `true`
+  back.
+
+## [1.0.0-beta.53] - 2026-08-26
+
+No entries were recorded for this release. `CHANGELOG.md` is byte-identical at
+`v1.0.0-beta.52` and `v1.0.0-beta.53`, so everything below shipped in beta.52
+or earlier.
+
+## [1.0.0-beta.52] - 2026-08-25
 
 ### Added
+
+- **The `check` chain now fails on dead exports** (`bun run verify:dead-code`,
+  backed by [knip](https://knip.dev) and `knip.config.ts`). `no-unused-vars`
+  only sees locals — an exported symbol is "used" by construction — so nothing
+  in the gate could answer "does this exported symbol still have a reader".
+  That blind spot is what let the dead weight removed in the previous audit
+  accumulate for months. The same pass also reports dead files and unused
+  dependencies. Entries and ignores in `knip.config.ts` each carry a
+  justification: an entry says _what reaches the file_, an ignore says _why
+  knip is structurally blind_.
+
+  Published packages are deliberately out of scope for public-export death:
+  `@appstrate/core`, `@appstrate/afps-runtime` and the `@appstrate/module-*`
+  packages are consumed out of tree, so "no in-repo reader" is not evidence.
+  That exemption is obtained by hand, not inherited: knip derives no entry
+  from a package manifest — it reads neither `exports` nor `bin`, `main` or
+  `module` — and declaring an `entry` array for a workspace replaces even its
+  filename defaults. So each published workspace must re-declare every target
+  of its export map in `knip.config.ts`, or its whole public surface reads as
+  dead. Letting that drift is what produced a ~161-finding false red.
 
 - **`integration_dropped` — a run that starts without an integration it
   declared now says so, in the run log** — "run with what you have" is a
@@ -92,12 +1252,684 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the marker swallows its own write failures so it can neither slow down nor
   fail a kickoff that is otherwise ready.
 
-- **Opt-in observability module (#847)** — OpenTelemetry moves out of core
-  behind the `@appstrate/core/telemetry` façade into a workspace module
-  `@appstrate/module-observability`. Core ships zero OTel footprint; add the
-  module to `MODULES` and set `OTEL_ENABLED` to activate tracing/metrics.
-
 ### Changed
+
+- **BREAKING: run and schedule `GET` routes now enforce a read permission.**
+  Eight reads were gated on org membership alone and enforced nothing about
+  what the caller may do, so any credential that could reach the org could
+  list runs, read a run, stream its logs, and read every schedule. Each now
+  requires the scope it was always documented to require:
+
+  | Route                                      | Scope            |
+  | ------------------------------------------ | ---------------- |
+  | `GET /api/runs`                            | `runs:read`      |
+  | `GET /api/runs/{id}`                       | `runs:read`      |
+  | `GET /api/runs/{id}/logs`                  | `runs:read`      |
+  | `GET /api/agents/{scope}/{name}/runs`      | `runs:read`      |
+  | `GET /api/schedules`                       | `schedules:read` |
+  | `GET /api/schedules/{id}`                  | `schedules:read` |
+  | `GET /api/schedules/{id}/runs`             | `schedules:read` |
+  | `GET /api/agents/{scope}/{name}/schedules` | `schedules:read` |
+
+  **No org role loses access.** Every role down to `viewer` holds both scopes,
+  and session auth derives permissions from the role, so the dashboard and any
+  cookie-authenticated client are unaffected.
+
+  **The change is breaking for API keys and OIDC clients**, which carry exactly
+  the scopes they were minted with, intersected with the creator's role — there
+  is no "narrow scope implies the rest" fallback. **Audit issued key scopes
+  before upgrading.**
+
+  Two callers are affected in a way worth naming, because both LAUNCH before
+  they read and so leave a billed run behind rather than failing cleanly:
+
+  - `appstrate run --remote` and `appstrate/github-action` trigger with
+    `agents:run`, then poll `GET /api/runs/{id}` and `…/logs`. A key narrowed
+    to `agents:run` now starts the run and 403s on every poll. The CLI's own
+    failure hint used to name `agents:run` alone and now names both scopes.
+  - `run_and_wait` over MCP dispatches the launch in-process with the caller's
+    own auth and then polls the same route; its tool description tells the
+    model not to fall back to `getRun`, so there was no recovery path. It now
+    pre-checks `runs:read` alongside `mcp:invoke` and refuses BEFORE launching.
+
+  `detect:breaking` reports these as non-breaking additions, and that is
+  correct about the OpenAPI _document_ — adding a `403` response is schema-
+  additive. It says nothing about runtime behaviour, which is why this entry
+  exists.
+
+- **BREAKING: `document` is now `file`, everywhere the concept is named
+  (#1177) — and the compatibility layer the rename shipped with is gone.**
+  `publish_document` accepted Markdown, HTML, source code, a PDF, an image —
+  anything on the agent's filesystem — but "document" promises a Word or a PDF
+  to whoever reads the tool description, the model included. The word was a
+  false friend, so the concept is renamed from the schema to the wire.
+
+  The rename first shipped a READ alias on every wire-visible spelling, each
+  one justified by a single sentence: "the runtime image and the platform
+  deploy independently". `v1.0.0-beta.51` is precisely the artifact on the
+  other side of that sentence, and it speaks every retired shape: it registers
+  `/api/runs/{runId}/documents` and `/api/runs/{runId}/documents/{name}` and
+  not one `/files` route; `runtime-pi/publish.ts` posts each deliverable to
+  `…/documents` under `X-Document-Name`; `runtime-pi/provision.ts` fetches its
+  input manifest from `…/documents`; `packages/afps-runtime/src/events/cloudevents.ts`
+  stamps `dataschema` on every canonical event; and its row ids are `doc_`. So
+  the argument for deleting the layer is NOT that nobody ever spoke the old
+  shapes — the last release did. It is that the PAIRING of such an artifact
+  with this platform is now refused at boot: the environment schema will not
+  start unless the platform's own `APP_VERSION` and both runtime image tags
+  agree (see the entry below), so an old image cannot be _configured_ against
+  a new platform.
+
+  **That rule has blind spots, and they are the whole residual risk.** They
+  come in two kinds. The comparison carves itself out wherever a tag cannot
+  answer the question — a runtime ref pinned by digest alone silences it
+  outright (`findRuntimeImageTagMismatch` returns `null` the moment either ref
+  parses to no tag), and a platform with no release identity drops out of the
+  trio, degrading the rule to the image-pair rule it grew from; the
+  authoritative list of those carve-outs lives with the comparison in
+  `@appstrate/core/image-ref`. And then there is the one that is not a carve-out
+  at all: this is an env-schema check evaluated at BOOT, so it says nothing
+  whatsoever about containers **already running** when the platform restarts.
+  (Same-tag-two-builds drift — `:latest` rebuilt on one side — is invisible to
+  tag comparison by construction; `runtime-image-pair.ts` catches it from the
+  OCI revision labels after the pre-pull, and only WARNS.)
+
+  That second kind is the operational one, and it needs a step in the upgrade
+  rather than a paragraph. A run container started by the PREVIOUS
+  platform process survives a `compose up -d`: the boot sweep finalizes only
+  runs whose heartbeat has already gone stale (`listOrphanRunIds`, cutoff
+  `RUN_STALL_THRESHOLD_SECONDS`), and the container sweep preserves anything in
+  state `running` (`isReclaimableContainer`); a container still executing a run
+  satisfies neither reap condition. It keeps posting to the new API, and its
+  `POST …/documents` now
+  404s. In the uploader a 404 is a non-retryable 4xx, so the deliverable is
+  abandoned and the outputs sweep reports `artifacts.status: "partial"`. That
+  field is not an input to the run's status — `mapTerminalStatus` reads only
+  `result.status` / `result.error` — so **a run whose work succeeded still
+  settles `success`, with its deliverable simply missing**, which is the exact
+  silent failure the aliases existed to prevent. **Drain in-flight runs before
+  restarting the platform**; see OPERATOR ACTIONS below.
+
+  What is verified about released consumers is narrower, and holds: the
+  released CLI never called the retired paths, neither `cloud` nor
+  `connect-helper` contains any retired wire shape, and the SPA is baked into
+  the platform image, so a served build cannot be older than the platform
+  serving it. The layer is deleted, not deprecated.
+
+  | Surface             | Before                                                                                    | After                                                                     |
+  | ------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+  | Runtime tool        | `publish_document`                                                                        | `publish_file`                                                            |
+  | URI scheme          | `document://<id>`                                                                         | `appfile://<id>`                                                          |
+  | REST                | `/api/documents/*`, `/api/runs/{id}/documents[/{name}]`, `/preview/documents/{id}`        | `/api/files/*`, `/api/runs/{id}/files[/{name}]`, `/preview/files/{id}`    |
+  | MCP tools           | `list_documents`, `read_document`, `import_package_document`, `validate_package_document` | `list_files`, `read_file`, `import_package_file`, `validate_package_file` |
+  | Run event / run log | `document.published`, `event: "document"`                                                 | `file.published`, `event: "file"`                                         |
+  | Run DTO             | `document_counts`                                                                         | `file_counts`                                                             |
+  | Inline launch body  | `context_documents`                                                                       | `context_files`                                                           |
+  | Upload header       | `X-Document-Name`                                                                         | `X-File-Name`                                                             |
+  | Permission resource | `documents:read`, `documents:delete`                                                      | `files:read`, `files:delete`                                              |
+  | Problem code        | `document_count_exceeded`                                                                 | `file_count_exceeded`                                                     |
+  | Tables              | `documents`, `document_links`                                                             | `files`, `file_links`                                                     |
+  | French UI           | « Documents »                                                                             | « Fichiers »                                                              |
+
+  `appfile://` rather than `file://`: the latter already means the local
+  filesystem and is what MCP uses for local resources, so an opaque platform id
+  under it is ambiguous to the model and to every MCP client.
+
+  **The rename now reaches the physical layer too**, and none of it has an
+  alias. The row-id prefix is `file_` (`prefixedId("file")`, validated by
+  `FILE_ID_RE`); the durable storage bucket and its `storage_key` prefix are
+  `files`, and the run-workspace input prefix is `{runId}/files/`; the
+  `storage_deletion_jobs.reason` labels are `file_deleted` / `file_expired`;
+  and the four file-limit environment variables are renamed:
+
+  | Before                     | After                       |
+  | -------------------------- | --------------------------- |
+  | `DOCUMENT_MAX_FILE_BYTES`  | `FILE_MAX_BYTES`            |
+  | `DOCUMENT_RETENTION_DAYS`  | `FILE_RETENTION_DAYS`       |
+  | `RUN_MAX_DOCUMENTS`        | `RUN_MAX_FILES`             |
+  | `WORKSPACE_MAX_DOCS_BYTES` | `WORKSPACE_MAX_FILES_BYTES` |
+
+  An `.env` still carrying an old variable name is not read — the schema
+  ignores it and the limit silently reverts to its default — so grep for the
+  left column above. See `docs/ENV.md` and `docs/architecture/FILES.md`.
+
+  **What is gone, and what a caller gets instead:**
+
+  1. **The nine `/documents` route registrations — six on the file routes,
+     three run-scoped — are gone. They 404.** Eight operations drop out of the
+     OpenAPI document, along with both alias generators in the spec (the second
+     of which was a divergent copy that hand-rolled an unanchored
+     `replace("/files", "/documents")`). The baseline is regenerated in the same
+     commit, as `detect:breaking` requires, so CI reports no change and this
+     list is the record. Use `/api/files/*` and
+     `/api/runs/{id}/files[/{name}]`.
+  2. **`X-Document-Name` is gone, and `X-File-Name` is now properly
+     `required`** — the alias was the only reason it was not. An upload
+     arriving without `X-File-Name` is an explicit `400`.
+  3. **`context_documents` on both inline-run bodies, and the `dataschema`
+     CloudEvents attribute on the run-events ingestion route, are `400`s.**
+     Each of those bodies is `.strict()`, so the retired field is refused by
+     name rather than stripped. The `run_and_wait` TOOL ARGUMENT of the same
+     name used to be canonicalized to `context_files` by the shared launch
+     client; it is now refused by name there too. Refused rather than merely
+     unread, because that client builds the launch body from an allowlist —
+     an argument nobody names is invisible, and the run would start with
+     nothing mounted while every layer reported success.
+  4. **`document.published` is no longer accepted as a runtime-tool event**, at
+     either acceptor — and the two are safe for different reasons. Inside the
+     container the reason is structural: the only producer of that name is
+     core's own `filePublishedEvent`, bundled into the SAME artifact as the
+     trust-boundary acceptor `reEmitRuntimeToolEvents`, so there is no version
+     boundary between them and the retired name can only arrive forged, which
+     is what the acceptor's drop is for. The platform-side sink
+     (`persistRunEvent`) is a DIFFERENT artifact reached over HTTP, so that
+     argument does not reach it; what does is the image-tag rule above — plus
+     the fact that the event's own precondition went with it, since a
+     pre-`#1177` container emits `document.published` only after a SUCCESSFUL
+     `POST …/documents`, and that route now 404s.
+  5. **`workspace/documents/` and the `documents` twin key in the run-input
+     manifest are gone from both sides.** `runtime-pi/provision.ts` no longer
+     probes `/documents` after a `404` on `/files` (that `404` is the ordinary
+     "this run carries no input files" case, so the fallback cost a second
+     signed round-trip on the common boot path to reach a route no platform
+     serves), no longer reads `manifest.files ?? manifest.documents`, and no
+     longer symlinks `documents -> files` in the workspace. The manifest's
+     `documents` key was in `required`, which made the deprecated spelling
+     contractually mandatory. A pre-rename manifest object now fails loudly at
+     both consumers: the serve path `500`s and the container dies with
+     `Failed to fetch files manifest` rather than starting with an empty
+     workspace, and the deletion path throws and dead-letters.
+  6. **`document://` no longer parses.** It survived to read historical rows,
+     but every URI ever written under it addresses a `doc_` id and `FILE_ID_RE`
+     stopped accepting those, so the only form the accept path could still have
+     matched was `document://file_…` — which no build has ever emitted. A
+     `document://` value now fails at `parseFileUri` instead of one line later
+     on the id, in the same `400`.
+  7. **`documents:read` / `documents:delete` are refused, and this is the one
+     retirement with a real caller behind it.** The read-time alias layer is
+     gone: `LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
+     `canonicalPermissions`, `acceptedPermissionSpellings`, the second-chance
+     branch inside `makePermissionGuard` (which backs all three permission
+     guards), and the scope canonicalizers across the OIDC module. The alias
+     itself never shipped — but `documents:*` **is** the spelling every
+     released Appstrate advertised, so a third-party OAuth client integrated
+     against `v1.0.0-beta.51` holds it in config and now gets `invalid_scope`
+     at `/oauth2/authorize` instead of being silently rewritten. That is a
+     deliberate trade: for a beta with no production data, a loud refusal is
+     the right failure and a silently under-granted scope is not. The live
+     windows are bounded by their own TTLs — an access token expires in 15
+     minutes, a pending authorization code in 10 — and an
+     `OIDC_INSTANCE_CLIENTS` value still naming `documents:read` fails boot
+     with a message that prints the offending string rather than rewriting it.
+     What the caller SENDS is refused; what is already STORED is migrated —
+     `0046` rewrites every persisted spelling, so no existing credential is
+     silently narrowed. See "Migrations" below.
+
+     The API-key write path now refuses on the same principle. `POST
+/api/api-keys` with a scope that is not grantable at all — an unknown
+     string, a retired spelling like `documents:read`, or a session-only
+     permission — is a `400` naming the offender, where it previously filtered
+     the value out and answered `201` with a key that then 403'd on
+     everything. A scope that is valid but above the creator's own role is
+     still narrowed silently: that is a real rule ("you cannot delegate more
+     than you hold"), not a swallowed typo, and the scopes-omitted default
+     branch relies on it.
+
+     Three tests were passing only because of the alias, which justifies the
+     removal on its own: `enduser-token-auth` minted tokens carrying
+     `documents:read` and asserted `/api/files/*` answered `200`. #1193 renamed
+     the routes and left the scopes on the old spelling; the alias hid the gap.
+
+  **Nothing reads an old spelling any more.** The rename shipped with a read
+  alias on every wire-visible spelling. The last five were kept on the
+  strongest ground available — a value a RELEASED build wrote into a place the
+  current build still reads, or a vocabulary a protocol had told a client was
+  stable — and they are gone too, because no such value and no such client
+  exists:
+
+  - `run_logs` rows tagged `event: "document"` are no longer rendered
+    (`PUBLISHED_FILE_LOG_EVENTS` is now just `["file"]`). Such a row would show
+    without its attachment — an absence, not an error.
+  - The `documents` key of a persisted `run_and_wait` result, and items keyed
+    `document_id`, are no longer read. Only `files` / `id` / `file_id` are.
+  - `publish_document` in `manifest.runtime_tools` is no longer canonicalized.
+    Author input naming it is REFUSED; a stored manifest has it DROPPED and the
+    drop REPORTED to the caller — never silently reinterpreted as `publish_file`.
+  - The four retired MCP tool names are no longer registered. A client holding
+    a cached tool list gets `-32602 Unknown tool` and re-lists; that was the one
+    alias with a live protocol argument behind it (`tools.listChanged: false`),
+    and the cost is transient where the second dispatch path was permanent.
+  - `context_documents` as a `run_and_wait` tool argument is REFUSED BY NAME.
+    That distinction is the whole point: the launch body is built from an
+    allowlist, so merely not reading it would make it invisible — the run would
+    start with nothing mounted and every layer would report success.
+
+  Two more went with them: the `setDocumentStorageLimit` platform-services
+  alias (`@appstrate/cloud` now binds `setFileStorageLimit`; see the ship order
+  below) and every retired run-detail tab hash. The `result.text` /
+  `result.text_truncated` fields of the removed `report` tool left the run
+  resource at the same time.
+
+  **Ship order, and it is not optional — the platform goes FIRST.**
+  `@appstrate/cloud` binds the storage capability off the LIVE services object
+  this platform injects, not off its pinned types, so the rename does not reach
+  its read. The instinct is to ship cloud first; the build topology says
+  otherwise. The cloud image is built
+  `FROM ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION}` and resolves
+  `@appstrate/core` out of that image, so the two are ONE deployed artifact and
+  never meet each other's old version at runtime. What gates cloud is its CI,
+  which typechecks inside the newest PUBLISHED release: `v1.0.0-beta.51` has
+  only `setDocumentStorageLimit`, so appstrate/cloud#52 is red until a release
+  carries the new name. Sequence: merge and release this → re-run cloud's
+  checks → merge cloud. Publishing core `8.0.0` to npm is NOT on that critical
+  path; cloud never resolves core from the registry.
+
+  **What a consumer has to do:**
+
+  1. **The run resource field `document_counts` is now `file_counts`, and
+     `primary_document_id` is gone.** There is NO response-side alias for
+     either: an out-of-tree API consumer still reading them gets `undefined`,
+     silently, with a `200`. This repo has already broken a consumer exactly
+     this way (`github-action` sending a removed field), so it is spelled out
+     rather than left to the diff. Read `file_counts.{input,output}`; for "which
+     file to show", see the derived rule under Removed.
+  2. **Five RFC 9457 problem codes are renamed, and NONE of them has a read
+     alias.** The code is a string a client branches on; an unrecognised value
+     falls to whatever the client's default arm does, silently.
+
+     | Before                    | After                 | Raised by                                                                                       |
+     | ------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
+     | `document_count_exceeded` | `file_count_exceeded` | `413`, `RUN_MAX_FILES` over-cap (`@appstrate/core/api-errors`)                                  |
+     | `document_in_use`         | `file_in_use`         | `409`, `DELETE /api/files/{id}` on a file a live run still links (`services/files.ts`)          |
+     | `document_unavailable`    | `file_unavailable`    | `409`, an input file deleted between resolve and run creation (`services/state/runs.ts`)        |
+     | `duplicate_document_name` | `duplicate_file_name` | `400`, colliding workspace names in a run's input manifest (`services/run-file-naming.ts`)      |
+     | `document_uri_in_prompt`  | `file_uri_in_prompt`  | field-level code inside the `400 validation_failed` on an inline run (`services/inline-run.ts`) |
+
+     The limits and the statuses are unchanged; only the strings moved.
+
+  3. **`publish_document` is now `publish_file` and no longer accepts
+     `presentation`.** The retired id is not aliased: author input naming it is
+     refused, and a stored manifest has it DROPPED with the drop REPORTED to
+     the caller. That report is the part that matters —
+     `dropRetiredRuntimeTools()` removes ids it does not recognise, so a silent
+     drop would strip the tool from an agent that had selected it with nothing
+     in any log. A caller that still sends `presentation` has it ignored, not
+     rejected.
+  4. **The four MCP tools are renamed, and the old names are gone.**
+     `list_documents`, `read_document`, `import_package_document` and
+     `validate_package_document` are no longer registered, hidden or otherwise,
+     and the `document_uri` argument is no longer renamed on the way in. The
+     server advertises `tools: { listChanged: false }`, so a client that listed
+     before the upgrade and calls an old name after it gets `-32602 Unknown
+tool` and re-lists. That is the one alias here with a live protocol
+     argument behind it; the cost of dropping it is transient, where a second
+     dispatch path for four capabilities was permanent.
+
+     One MCP break is NOT covered by any alias, and it is client-facing: a
+     dynamically-registering client whose published Client ID Metadata Document
+     still declares `documents:read` / `documents:write` now fails registration
+     with `invalid_scope`. `@better-auth/cimd` lists `scope` in
+     `ALLOWED_METADATA_FIELDS` and feeds it into
+     `createOAuthClientEndpoint(..., { isRegister: true })`, which validates
+     every requested scope against the server's set and throws on anything
+     outside it. Nothing is silently mis-granted — registration is refused
+     outright — but the client's own metadata has to be updated to the `files:`
+     spelling. Tell any partner registering through CIMD before you deploy.
+
+  5. **The four OpenTelemetry metric series are renamed:
+     `appstrate.documents.created`, `.deleted`, `.storage_limit_rejections` and
+     `.partial_publications` are now `appstrate.files.*`.** Nothing errors —
+     dashboards, alerts and recording rules built on the old series simply go to
+     zero and stay there. Repoint them, and check any alert whose condition is
+     "below threshold": those fire, and the ones that are "above threshold" go
+     quiet without ever telling you why.
+  6. **`@appstrate/core`: the `./document-uri` subpath is now `./file-uri`**,
+     with `DOCUMENT_URI_PREFIX` → `FILE_URI_PREFIX`, `isDocumentUri` →
+     `isFileUri`, `parseDocumentUri` → `parseFileUri`, `documentUri()` →
+     `fileUri()`, `extractDocumentIds[FromText]` → `extractFileIds[FromText]`,
+     plus renames on `./permissions`, `./telemetry`, `./api-errors`, `./module`
+     and `./run-and-wait-client`. **Core is NOT published from this branch** —
+     but this build cannot ship before it is. `cloud` binds
+     `services.setFileStorageLimit` off the LIVE services object this platform
+     injects at boot, and the deprecated `setDocumentStorageLimit` alias that
+     used to cover that seam is gone. A type-level pin never protected it: a
+     property read at boot does not typecheck. Ship order is this platform
+     release → `cloud` (appstrate/cloud#52, whose CI cannot go green until such
+     a release exists) → npm publication of core `8.0.0` when it suits other
+     consumers. Cloud's range is raised to `>=8.0.0` as a truthful declaration
+     — the published `7.0.0` exposes only the old name — not as a resolution
+     constraint, since core is an optional peer it takes from the image.
+     `connect-helper` reads none of this surface. See
+     `packages/core/CHANGELOG.md`.
+
+  **OPERATOR ACTIONS, and SQL cannot perform them.** Migration
+  `0044_finish_file_rename` carries the data half — it rewrites every
+  `files.storage_key` from `documents/…` to `files/…`, the outbox's copy of the
+  bucket name, the run-workspace keys the outbox holds, and the two deletion
+  reasons. **It moves no bytes.** Until the objects follow, a download `404`s on
+  a file that physically exists. In the same window:
+
+  - **drain in-flight runs BEFORE the platform restarts**, and do not launch
+    new ones until the window closes. A container the previous platform process
+    started is not stopped by the upgrade and is not reaped at boot while it is
+    still heartbeating, so it survives into the new platform and its
+    `POST …/documents` 404s — losing the deliverable while the run finalizes
+    green. This is the same drain the run-workspace rename below needs, so one
+    drain covers both;
+  - copy the `documents` bucket onto `files` and drop the old one
+    (`aws s3 sync s3://documents s3://files`, or `mc mirror`); on filesystem
+    storage (tier ≤ 2) it is a directory rename under
+    `./data/storage/`, `documents` → `files`;
+  - rewrite the second key segment of every `{runId}/documents/<name>`
+    run-workspace object to `{runId}/files/<name>`. **In-flight runs do not
+    survive that rename — drain them first.**
+
+  **A database holding `doc_` ids should be reset, not migrated.** Existing
+  `files.id` values are deliberately NOT re-minted, and `FILE_ID_RE` now
+  accepts only `file_`, so those rows are unaddressable: the id fails
+  validation before any query reaches them. Re-minting is not a two-table
+  `UPDATE` — the id is quoted inside `runs.input`, `runs.result`, `run_logs`,
+  chat payloads and append-only `audit_events.after` — and a partial rewrite
+  would silently break every rerun, which is worse than none.
+
+  **Stored permission scopes are the opposite case — they ARE migrated.** The
+  verdict above does not extend to them: `0046_legacy_permission_scope_strings`
+  rewrites every persisted `documents:*` spelling to `files:*` at migration
+  time, across all seven columns that carry the vocabulary — the five `text[]`
+  ones (`api_keys.scopes`, `oauth_clients.scopes`, `oauth_consents.scopes`,
+  `oauth_refresh_tokens.scopes`, `oauth_access_tokens.scopes`) and the two
+  space-delimited `text` ones (`cli_refresh_tokens.scope`, `device_codes.scope`).
+  A credential issued under the old spelling therefore keeps exactly the grant
+  it was issued with. That rewrite is load-bearing, not cosmetic: with the read
+  alias gone, `resolveApiKeyPermissions` intersects a key's stored scope set
+  with its creator's role permissions and DROPS what it does not recognise, so
+  an un-migrated `documents:read` would leave the key authenticating and
+  silently granting less — the same silent under-grant on every CLI refresh
+  rotation (`narrowScopeToClient`) and every live bearer token
+  (`scopesToPermissions`).
+
+  **The read path stays canonical-only, by design.** Nothing translates
+  `documents:*` at read time any more, and nothing should: an OAuth client that
+  still SENDS the old spelling is refused outright with `invalid_scope` at
+  `/oauth2/authorize`. That is the deliberate trade — a loud refusal a caller
+  can see and fix, rather than a rewrite that hides the drift. The migration
+  fixes what is already STORED; it does not make the old spelling acceptable on
+  the wire.
+
+  **Migrations.** `0042` drops the `presentation` column with its partial unique
+  index and CHECK. `0043` is a pure `ALTER … RENAME` of the tables, columns,
+  enum type, indexes and constraints — catalog-only, no table rewrite, no data
+  movement, no window where a constraint is absent. The previous `0044` and
+  `0045`, which rewrote persisted `documents:*` scope strings, are **deleted**
+  along with their journal entries and snapshots, and their numbers reused:
+  `0044_finish_file_rename` is the physical-layer migration described above,
+  and `0045_drop_integration_refresh_failure_timestamp` drops one more
+  write-only column. Their scope rewrite is not lost — it lands at
+  `0046_legacy_permission_scope_strings`, which carries both column shapes in
+  one file. All of them are idempotent and converge from a partially applied
+  state.
+
+  A database that already applied the OLD `0044`/`0045` carries a
+  `drizzle.__drizzle_migrations` watermark that now matches no journal entry.
+  Drizzle compares timestamps rather than tags, so nothing errors and the new
+  `0044`, `0045` and `0046` all still run; the bookkeeping table simply records
+  two migrations this folder can no longer explain, and the forward-only scope
+  rewrite they performed produced exactly the strings `0046` produces, so it
+  finds nothing left to do.
+
+  **`0043` is irreversible, and the rollback is a hard outage, not a degraded
+  mode.** There is no down migration in the repo and `0043` creates no
+  compatibility view. Once boot has applied it, the previous release's code
+  queries `documents`, `document_links` and `organizations.documents_bytes_*` —
+  none of which exist under those names any more. **Take a database snapshot
+  immediately before the deploy**; it is the only fast way back. To reverse by
+  hand:
+
+  ```sql
+  ALTER TABLE "files" RENAME TO "documents";
+  ALTER TABLE "file_links" RENAME TO "document_links";
+  ALTER TABLE "document_links" RENAME COLUMN "file_id" TO "document_id";
+  ALTER TABLE "organizations" RENAME COLUMN "files_bytes_used" TO "documents_bytes_used";
+  ALTER TABLE "organizations" RENAME COLUMN "files_bytes_limit" TO "documents_bytes_limit";
+  ALTER TYPE "public"."file_purpose" RENAME TO "document_purpose";
+  ```
+
+  Constraint and index names are cosmetic to the old code and can be left
+  alone. `0042` is not reversible at all — the `presentation` column and its
+  data are dropped, and only the snapshot brings them back. Neither is the
+  physical `0044`: the object move it requires is yours to undo too.
+
+  **Deploy order is now enforced rather than documented — for the pairings the
+  check can see.** Rolling the platform and the runtime images out of step used
+  to be a live hazard — a new image against an old platform posted every
+  `publish_file` to a `/files` route that did not exist, so the run finished
+  with no deliverable and nothing in the platform log said why. The version
+  contract below refuses to boot on that pairing, so for a configured mismatch
+  the failure moved from "silent, at run time" to "loud, at start". It stays
+  silent wherever that check is blind — its own carve-outs (`image-ref.ts`),
+  and above all a container already running when the platform restarts, which
+  no boot-time check can see — which is why the drain step above is part of
+  this upgrade. Ship the platform and both images from one version, which is what
+  all four shipped compose paths already do.
+
+- **BREAKING: the runtime images must now agree with the PLATFORM's version,
+  not just with each other — and a disagreement fails boot.** #1201 turned
+  `PI_IMAGE` / `SIDECAR_IMAGE` into a version contract, but the check compared
+  the pair to itself: a platform at version X with both runtime images at X−1
+  booted happily and then failed runs with the opaque upstream error the
+  contract exists to prevent. That is exactly the skew half a dozen
+  compatibility shims in this codebase were justified by, including the
+  `document` aliases removed above.
+
+  The comparison now includes `APP_VERSION`, which already existed — baked by
+  the Dockerfile, fed by `release.yml` as the git ref, surfaced on `/health`
+  and in the SPA footer. No new variable, no file read at boot.
+
+  The two halves are deliberately not symmetric. `PI_IMAGE` and `SIDECAR_IMAGE`
+  are always compared to each other literally, as they were under the pair
+  rule: every compose file sets both from one `${APPSTRATE_VERSION}`, so any
+  difference between them is a half-done edit whatever tag family it is in. The
+  platform joins the comparison only when **all three values are release
+  versions**. `APP_VERSION` is a git ref name, so it can equal an image tag only
+  in the one family (`{{version}}`) the two namespaces share; `release.yml`
+  publishes three others for the very same image (`latest` — documented as the
+  compat fallback for consumers that skip the CLI —, `{{major}}.{{minor}}`, and
+  `sha-<sha>`). Comparing against those, or against a non-release build stamp
+  (`dev`, the Dockerfile default and source-run fallback; `health-container-e2e`,
+  what the container health job builds with against `:local` images), does not
+  detect skew — it makes the rule unsatisfiable, since no legitimately-built
+  image tag can ever equal such a value and the only escape would be pinning
+  digests. Any of those drops the platform out and the rule degrades to the pair
+  rule, which is what keeps dev boxes, preview deployments, that CI job and
+  `:latest` consumers booting. A digest-pinned ref on either image is exempt
+  outright: a digest identifies an image by content, so there is no version to
+  compare, and an operator pinning digests has taken explicit control of image
+  identity.
+
+  **What this deliberately does not catch.** Both runtime refs floating on
+  `:latest` under a released platform is accepted. That is not a gap left open
+  by choice of predicate — tag comparison cannot see it at all: `APP_VERSION` is
+  baked at build time and reads identically whether the platform image was
+  pulled by its version tag or by `:latest`, so `{platform 1.0.0-beta.52, pi
+latest, sidecar latest}` is byte-for-byte the same input as the supported
+  all-`:latest` deployment. Only something reading the images actually present
+  on the host can separate them. `runtime-image-pair.ts` is untouched and stays
+  complementary for exactly that reason: it compares OCI revision labels after
+  the pre-pull — the same-tag-two-builds case — and it warns rather than
+  refusing. Promoting that guard to a refusal, not re-tightening the tag rule,
+  is the way to close this.
+
+- **Long Anthropic cache retention is refused on the model record, not by
+  convention — and `cacheRetention` is no longer forwarded from the
+  container.** Both doorways to 1-hour cache creation were open:
+  `FORWARDED_OPTION_KEYS` carried `cacheRetention` and `projectRequestOptions`
+  relayed it verbatim from the container's own request body, and pi-ai also
+  resolves the option from `process.env` at request time, so agent code inside
+  the container could set `PI_CACHE_RETENTION` directly. Either way Anthropic
+  bills those cache-creation tokens at 2× the input rate while
+  `computeTokenCost` has no term for them, so the platform's authoritative
+  price came out low with nothing to notice.
+
+  Both model builders now set `compat.supportsLongCacheRetention: false`, which
+  pi-ai honours on every API shape it drives (`anthropic-messages`,
+  `openai-responses`, `openai-completions`); the sidecar's `compat` is no
+  longer conditional on adaptive reasoning, with the existing
+  `forceAdaptiveThinking` folded in. `cacheRetention` also leaves the forwarded
+  option set on boundary-hygiene grounds — `"none"` steers caching too, and the
+  sidecar has no business honouring a container-chosen knob whose semantics
+  differ per vendor. It is logged as discarded by the existing set difference.
+  Caching itself is unaffected; only the 1-hour TTL is.
+
+- **The run page is four fixed tabs: Outcome, Fichiers, Exécution,
+  Configuration.** The previous set (Résultat / Deliverable / logs / memory /
+  files / info) grew by accretion, mixed three unrelated questions across five
+  panes, and made two of them appear and disappear per run — so the strip had a
+  different shape depending on which run you opened. Now every pane renders for
+  every run: **Outcome** is what the run produced (the `output` tool's value,
+  the files it produced, the memory it wrote), **Fichiers** is every file
+  attached to the run — imported and produced, **Exécution** is how it ran
+  (logs, execution details, usage, per-turn breakdown, input payload,
+  identifiers), **Configuration** is how it was set up (agent, version, trigger,
+  connections).
+
+  « Résultat » is now « Output »: the section is literally what the `output`
+  tool emitted, not a verdict on the run. The top bar states whether a run is an
+  inline run or an agent run.
+
+  **The retired tab hashes no longer resolve.** `#deliverable`, `#result`,
+  `#memory`, `#documents`, `#logs` and `#info` were each mapped onto the pane
+  that absorbed them and rewritten in the address bar; the whole table, its
+  mapping function and the rewrite effect are gone. A bookmark, a back-history
+  entry or a link pasted into an old chat message now opens the default pane,
+  silently — the page cannot tell that anchor apart from any other it does not
+  know. Accepted so these anchors have one vocabulary rather than two.
+
+- **BREAKING: the schedule launch bodies are validated too — it was the fourth
+  launch surface, and the one where a bad value is permanent.** #1189 made every
+  agent-launch body `.strict()` and value-checked, and covered three surfaces.
+  `POST /api/agents/{scope}/{name}/schedules` and `PUT /api/schedules/{id}`
+  freeze exactly these fields onto `package_schedules` and replay them at every
+  fire, so a defect there is not one mis-executed run, it is a wrong run forever
+  with a `201` as the only receipt. Three gaps, all closed against the run
+  route's existing rules: `connection_overrides` values lacked `.min(1)`, and
+  the pin is applied with a truthy check, so an empty id was skipped without a
+  trace and every fire fell through to actor-fallback or died with
+  `412 must_choose_connection`; neither schema was `.strict()`, so an unknown
+  field was silently stripped; and `dependency_overrides` values were never
+  checked, because a schedule resolves through `resolveEffectiveInput` +
+  `validateInput` and never calls the parser the agent route gets that gate from
+  — so an unresolvable value froze onto the row and failed at every fire instead
+  of at the write. `minLength: 1` on `connection_overrides` is now documented at
+  the three run surfaces as well: the Zod has always enforced it, and the spec
+  said plain `{ "type": "string" }`.
+
+  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
+  `400`.** The spec's `Schedule` response component has 26 properties;
+  `updateScheduleSchema` accepts 11 of them (`name`, `cron_expression`,
+  `timezone`, `input`, `enabled`, the four `*_override` fields,
+  `connection_overrides`, `dependency_overrides` — plus `actor`, which is not a
+  response field). The other 15 are now refused BY NAME: `id`, `packageId`,
+  `userId`, `endUserId`, `orgId`, `applicationId`, `last_run_at`, `next_run_at`,
+  `createdAt`, `updatedAt`, `actor_name`, `actor_type`, `running_runs`,
+  `unread_count`, `last_run_number`. A third-party client that does the obvious
+  thing — `GET /api/schedules/{id}`, flip `enabled`, `PUT` the object back —
+  previously had those keys stripped and got a `200`; it now gets a `400` on
+  `id`. In-repo callers are unaffected: `useUpdateSchedule`
+  (`apps/web/src/hooks/use-schedules.ts`) destructures `id` into the path and
+  sends only the remaining fields as the body. Send only the fields you mean to
+  change.
+
+- **BREAKING: the launch body is validated. An unknown field is a `400`, not a
+  silent drop.** The three launch surfaces handled an undeclared field three
+  different ways: `POST /api/runs/remote` refused it (`.strict()`),
+  `POST /api/runs/inline` stripped it (a non-strict `z.object`), and
+  `POST /api/agents/{scope}/{name}/run` — which had no schema at all, only a
+  `c.req.json<T>()` cast — ignored it and answered `201`. The last one is the
+  failure that matters: the release above removed `config` from that body with
+  no alias and no deprecation window, so a CLI, SDK or CI job still sending it
+  got an accepted run executing with parameters nobody asked for, with no
+  error, no log and no echoed field. Silently dropping a value the caller sent
+  is how a run does something other than what was asked — the rule
+  `assertFieldsUnlocked` already states, and the one `run_and_wait` was fixed
+  on in the same release. Each surface now owns a `.strict()` schema for its
+  own fields, and `parseRequestInput` receives an already-validated body
+  instead of re-reading the request.
+
+  Three observable changes, all on the way in:
+
+  - an unknown field, or a declared field of the wrong type, is `400`
+    `validation_failed` on all three surfaces;
+  - a malformed JSON body is `400` instead of being swallowed into `{}` and
+    launched as an input-less run (the `c.req.json().catch(() => ({}))`
+    dialect `readJsonBody` was written to replace — the launch body was its
+    last user in the API);
+  - `dependency_overrides` on `POST /api/runs/inline` is `400`. It was
+    accepted there and then dropped: `triggerInlineRun` never forwarded it, so
+    a caller pinning a dependency got a run that ignored the pin.
+
+  An empty body is still a valid launch (a run whose input resolves entirely
+  from stored values sends none), and every documented field is unchanged.
+
+- **`generation` is documented on the inline launch surfaces.** It was accepted
+  and honoured by `POST /api/runs/inline` and `/inline/validate` but absent
+  from the spec, so no generated client could reach it. The agent-run body is
+  now registered in the Zod<>OpenAPI comparison, which is what turns that kind
+  of drift into a failing check.
+
+- **An agent declares ONE parameter schema, `input`. `config` is gone.** An
+  AFPS manifest used to carry two — `input`, asked on every run, and `config`,
+  set once at setup. Whether a value is asked every time or stored once is a
+  deployment policy, not a property of the package, so it moved out of the
+  portable format and into the platform: stored values plus per-field locks on
+  `application_packages.input_settings`. AFPS 0.3 removes the field
+  (afps-spec#16); `schema_version` still accepts any `0.x`, so a manifest that
+  still carries `config` keeps validating — the platform simply ignores it.
+
+  Input now resolves in four layers, last wins: author `default` keywords ->
+  the application's stored values -> a schedule's frozen values -> the caller's
+  input. A LOCKED field is refused from the last two with 400
+  `locked_input_field` rather than silently dropped.
+
+  This closes a real gap. `POST /runs` is gated by
+  `requirePermission("agents", "run")` and nothing else, and the body accepted
+  `config_override` with NO per-key check — so anyone who could run an agent
+  could overwrite any stored value. Delegating an agent with fixed parameters,
+  an admin pinning `days = 30` before handing it to their team, was not
+  actually possible.
+
+- **The platform prompt loses its `## Configuration` section.** Those values now
+  render under `## User Input`. This changes the prompt sent to every agent.
+
+- **The "configuration required" badge is gone.** With a single schema, an
+  unfilled required field is simply asked at launch.
+
+- **Migration `0040` folds every dropped column into its `input` counterpart
+  before dropping it**, so no row loses a parameter: `application_packages.config`
+  becomes `input_settings.values`, and `package_schedules.config_override` and
+  `runs.config` merge into the respective `input`. On a key collision `input`
+  wins, the same rule the manifest merge applies.
+
+  **The manifest half was a separate, manual pass.** The DDL runs automatically
+  at boot; rewriting manifests and `{{config.x}}` prompt references was done by
+  `scripts/migrate-config-to-input.ts --apply`, which could only run afterwards
+  because it read the renamed column. Until it had run, published agents still
+  carried `{{config.x}}`, which the renderer resolves to the empty string with
+  no error. That script was single-use and has since been deleted; nothing in
+  the tree declares a manifest `config` section any more.
+
+- **Three endpoints now report malformed JSON as `validation_failed` instead of
+  `invalid_request`.** Two on `runs-events.ts` and one on `runs.ts`, as a side
+  effect of routing their bodies through `readJsonBody`. The HTTP status is
+  unchanged and no first-party client branches on the code, but `runs-events` is
+  runtime-facing wire surface, so a third party matching on the string will see
+  the new value.
+- **`LOG_LEVEL` now reaches sidecar containers.** It was missing from
+  `SIDECAR_OPERATOR_ENV_KEYS`, which made every `logger.debug` in the sidecar
+  permanently unreachable under `RUN_ADAPTER=docker` and `firecracker`. Turning
+  those diagnostics on is the point of the fix, so note the flip side: a host
+  already running `LOG_LEVEL=debug` will now get debug output from sidecar
+  containers where it previously got none. The default is `info` in both
+  `.env.example` and `docker-compose.yml`.
 
 - **A malformed `SYSTEM_INTEGRATIONS` entry now aborts boot instead of being
   skipped** — `initSystemIntegrations` logged an error and `continue`d past an
@@ -123,37 +1955,243 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   read by counting braces. Client secrets and system `client_id`s are redacted
   from the message, so it is safe to paste into a ticket.
 
-- **`@appstrate/core` released as 6.2.0** — 6.1.0 was already published to npm,
-  so the four export subpaths added since (`./package-files` and
-  `./mcp-server-meta` from #1118, `./model-generation` from #1099, `./url` from
-  #1122) could not be resolved by out-of-tree consumers installing from npm,
-  even though the code ships in the tarball. Additive only, so a minor;
-  `CORE_VERSION` moves with it. **Maintainers**: bump `cloud` and
-  `connect-helper` to `^6.2.0` right after the `core@6.2.0` tag is pushed —
-  leaving them at 6.1.0 makes the next core release compute a delta of 2 and
-  hard-fail the lockstep gate.
-
-- **Inline `run_and_wait` manifests are concise without becoming limited** —
-  callers may omit AFPS boilerplate and provide only a task-specific
-  `display_name`; the shared client derives the canonical name and fills
-  runtime/output defaults before the existing full validation boundary. Any
-  supplied field remains an exact override, including `runtime_tools: []` and
-  complete deterministic schemas. The chat prompt prefers `run_and_wait` for
-  launch-and-wait flows while keeping the fire-and-forget `runInline` and
-  `runAgent` operations fully discoverable and invokable.
-
 ### Removed
 
-- **`source_code` from the package create/update contract** — the
-  `sourceFileName` plumbing behind it has been unreachable since the `tool`
-  package type was dropped: no route config declared it, so `source_code` was
-  never on the wire and sending one in a request body was already a no-op (such
-  a body is still accepted, now stripped by non-strict Zod instead of parsed
-  and ignored). No runtime behaviour changes — the published OpenAPI spec
-  simply stops advertising a field that never existed at runtime, which
-  `detect:breaking` reports as 27 response-field removals.
+- **Three columns that were written and never read**, with their writers
+  (migrations `0044` and `0045`). The `last_refresh_failure_at` columns on
+  `model_provider_credentials` and on `integration_connections` were stamped
+  beside `refresh_failure_count` on
+  every transient refresh failure; it is the COUNTER that drives the
+  `needs_reconnection` escalation, and the timestamp was never a term in that
+  predicate, appeared in no DTO and in no query, and was read only by the
+  integration tests asserting its own write.
+  `model_provider_pairings.consumed_from_ip` was written by `consumePairing`
+  and read by nothing — its "for audit" justification never held, because
+  `cleanupExpiredPairings` DELETEs the row an hour past expiry and the audit
+  entry written at redeem time omits the IP, so the trail it was meant to leave
+  was erased and the record that survives never carried it. All three had been
+  kept on the premise that they held real data already collected. Forward-only
+  and cheaply so: none was an input to any decision.
+
+- **`presentation: "primary"`, and everything behind it.** The
+  `publish_document` argument, the `documents.presentation` column, its partial
+  unique index `uq_documents_run_primary`, its CHECK constraint, the
+  `X-Document-Presentation` ingestion header, and the derived run-DTO field
+  `primary_document_id` are all gone (migration `0042`).
+
+  It conflated two different questions — how important a file is, and whether
+  the UI opens it — and forced at most one per run, which made the producing
+  agent arbitrate a presentation decision that was never its call: an agent that
+  wrote three peer files had to crown one or leave the run looking empty.
+
+  What replaced it is derived from what the run produced, computed client-side
+  and applied identically on the run page and in the chat: **0 produced files →
+  nothing is featured; exactly 1 → it is shown by default; N → all listed, none
+  opened, the user picks.** Only files with `purpose = 'agent_output'` whose own
+  `run_id` is this run count — never an input, and never a file chained in from
+  an earlier run via `appfile://` (which is listed in the run's container while
+  still carrying `purpose: 'agent_output'`, because an earlier run produced it).
+  Nothing server-side stores or computes it, which is why the dropped column
+  needed no replacement pointer: there is no second place left to go stale when
+  a file is deleted, expires, or is detached. In the chat the rule additionally
+  waits for a settled run, because a run publishing three files emits them one
+  at a time and a mid-stream count of 1 is not the final count.
+
+  A `presentation` argument sent by a stale caller is ignored rather than
+  rejected — losing a real deliverable over a dead argument would be the worse
+  failure — and a runtime image older than the platform may still send
+  `X-Document-Presentation`, which the ingestion route reads as nothing and
+  never answers `400` to.
+
+- **Dead declarations the new gate surfaced.** ~500 superfluous `export`
+  keywords (types and values used only inside their own file), plus a handful
+  of declarations that had no reader at all once the re-export was dropped —
+  `createTestSession`, `parseSSEStream`, `patchProcessExit`, `seedOrgProxy`,
+  `connectLoginBlock`, `getSystemPackagesByType`, `hasExternalDb`, `hasS3`,
+  `itRequiresRedis`/`Docker`/`S3`/`Postgres`. No runtime behaviour changes.
+
+- **Dependencies no source file imports.** `apps/web` declared 14
+  `@radix-ui/*` packages plus `ajv`, `ajv-formats`, `class-variance-authority`,
+  `clsx`, `cmdk` and `tailwind-merge` that belong to (and are declared by)
+  `@appstrate/ui`; `apps/api` declared `ajv-formats`, `semver` and the
+  deprecated `@types/ioredis` stub; the root manifest duplicated `ajv`,
+  `@types/json-schema` and `@types/semver` already declared by
+  `@appstrate/core`; `packages/db` declared `@better-auth/drizzle-adapter`
+  and `@appstrate/runner-pi` declared `ajv`. Only `@appstrate/runner-pi` is
+  published, and it never imported `ajv`, so installs get one fewer transitive
+  package.
+
+- **Every `config` wire field, with no alias and no deprecation window.**
+  `config` on the run / inline-run / remote-run bodies; `config` and
+  `config_override` on the Run resource; `config_override` on schedules;
+  `config` on the installed-package listing and on `GET .../run-config`;
+  `--config` on the CLI; and the error code `invalid_config`, replaced by
+  `invalid_input` and joined by `locked_input_field` and
+  `locked_required_field_empty`. `PUT /api/agents/{scope}/{name}/config` is now
+  `PUT /api/agents/{scope}/{name}/input-settings`.
+
+  `detect:breaking` reports "no changes" for all of it because the OpenAPI
+  baseline was regenerated in the same commit. CI will not flag any of the
+  above — this list is the record.
+
+- **Twelve unscoped package endpoints are gone.** `GET`, `PUT` and `DELETE` on
+  each of `/api/packages/agents/{id}`, `/api/packages/skills/{id}`,
+  `/api/packages/integrations/{id}` and `/api/packages/mcp-servers/{id}`. Use
+  the scoped forms instead — `/api/packages/agents/{scope}/{name}`, and so on
+  for the other three types.
+
+  Every package identifier Appstrate produces is `@scope/name`
+  (`buildPackageId()` returns that unconditionally, and `0000_init.sql` is
+  squashed), so no unscoped id has ever existed to address. But "unreachable"
+  is too strong and is why this is a release note rather than only a source
+  comment: the routes took a single-segment path parameter, so a client that
+  percent-encoded a scoped id — `encodeURIComponent("@scope/name")` →
+  `%40scope%2Fname` — got a working request. No in-repo or first-party consumer
+  did this (`apps/cli`, `apps/web`, `e2e`, `runtime-pi`, `docs`, the GitHub
+  Action, `cloud` and `connect-helper` all return zero hits), so the exposure is
+  third-party integrations only. These are API-key-authenticated public routes
+  removed without a deprecation window; if you call them, switch to the scoped
+  form.
 
 ### Fixed
+
+- **`appstrate run` validates the resolved input against the agent's schema
+  again.** The `config` → `input` collapse (#1179) deleted the CLI's validation
+  and replaced it with nothing: at `v1.0.0-beta.51` the site read
+  `validateConfig(config, configSchema)` and exited with a field summary, and
+  afterwards it was a bare `resolveLocalInput(...)` with no validator at all.
+  The docstring claimed "the bundle's own `required` check sees the truth";
+  there is no such check — the runtime reads `input.schema.required` only to
+  print the word "required" beside the field. So a required field answered
+  nowhere reached the model as an empty render, and a wrong-typed or
+  out-of-enum value launched the container and burned tokens instead of failing
+  fast, which is exactly the local/remote parity #1179 set out to deliver.
+  `validateLocalInput` calls the same `validateAgainstSchema` the server's
+  `validateInput` wraps, so the same (input, schema) pair reaches the same
+  verdict on both sides. An agent declaring no `input.schema` accepts anything,
+  so the gate is a no-op there rather than a rejection.
+
+- **A `charset` parameter no longer routes a binary download through the text
+  decoder.** `isTextLikeMimeType` tested for `;charset=` BEFORE looking at the
+  media type, so an OOXML spreadsheet type answered with a `charset=utf-8`
+  parameter appended took the lossy `fatal:false` text decode — the OOXML
+  corruption class this resolver was rewritten to prevent.
+  The docblock defended the order with "an OOXML container carries no charset",
+  which is an assumption about upstream servers rather than an invariant: one
+  that blanket-appends a charset defeats it. The charset rule now applies only
+  when the base media type is ambiguous. A third local MIME parser in the same
+  file goes with it: it did not lowercase, and its output fed an exact-literal
+  comparison against `application/octet-stream`, so an upstream answering
+  `Application/Octet-Stream` was treated as unambiguous — magic-byte sniffing
+  was skipped and the stored file kept the mixed-case string as its `mime`.
+
+- **A graceful shutdown is no longer pinned to its full 10s cap by a job that
+  is only counting down.** `LocalQueue.shutdown()` waits for `activeJobs` to
+  reach zero, and a job sleeping between retry attempts counted as active — its
+  `run()` awaits its own retry timer. So a single permanently-failing job (a
+  ledger replay whose org was deleted, say) held the count above zero for its
+  entire retry schedule and delayed every restart by the full cap. `shutdown()`
+  now abandons jobs with nothing in flight, and the retry path refuses to
+  schedule or resume once shutting down — abandoning is this queue's documented
+  semantics, since in-memory jobs do not survive the process and a retry that
+  has not started has nothing to lose. Retry timers are `unref`'d, matching the
+  existing rationale for the drain and cron intervals. Found by diagnosing a
+  test flake rather than by raising its deadline: no test deadline changed.
+
+- **CLI output redirected to a file no longer contains terminal escape codes.**
+  `@clack` gates only an extra newline on CI and writes `cursor.up` /
+  `erase.down` unconditionally, so `appstrate install > install.log` wrote
+  control sequences into the file. The spinner now branches on `isTTY`, like
+  the CLI's own colour policy, and emits plain lines otherwise. In the same
+  pass, five more command modules (`doctor`, `models`, `internal`, `logout`,
+  `self-update`) take the `CommandIO` sink instead of writing to the process
+  globals, every direct `clack.*` call outside `lib/ui.ts` is gone, and
+  `no-console` is an ESLint rule over `apps/*/src` and `packages/*/src` rather
+  than a convention enforced by review — it was enabled nowhere, and one real
+  offender had survived in `lib/self-update.ts`.
+
+- **Sixteen endpoints' documented request bodies did not match the Zod that
+  validates them.** The OpenAPI gate locked ~42 documented request bodies to the Zod
+  that validates them and checked none of the rest, so a launch surface could
+  drift from its published body with every gate green. `verify-openapi.ts` §4b
+  now fails when a documented request body is neither registered against its
+  Zod nor exempt with a stated reason (16 are, each with one), mirroring what
+  §7b already did for responses. The drift it surfaced: the package `PUT`
+  bodies required `manifest` + `content` although the handler explicitly
+  supports content-only and manifest-only saves; `POST /api/packages/agents`
+  required `content` where its skill and integration siblings do not; six
+  documented fields were missing their length constraints; fields carrying a
+  `default:` were marked `required` (Zod's default output view marks a
+  `.default()` field required, which is wrong for a request body — the
+  conversion now uses `io: "input"`); and two module routes (`webhooks` rotate,
+  `smtp-config/test`) had no spec entry at all. The generated document is
+  otherwise byte-identical: the header-block and `{values, locked_fields}`
+  de-duplication in the same pass changed no wire shape.
+
+- **One Ajv instance, so the per-run validator cache behaves.** `apps/api` stood
+  up a second instance with its own `compileCached`, and the two had diverged:
+  core wraps `compile` in `try/finally` with `removeSchema` and evicts FIFO,
+  while the `apps/api` copy did neither — so its registry grew unbounded in a
+  long-lived process, and a schema carrying `$id` compiled twice from two
+  objects would throw. This is the per-run hot path. Both behaviours are now
+  pinned by tests from either caller.
+
+- **A file attached in the chat now becomes an input of the inline run it
+  triggers.** It did not, for two independent reasons that had to be fixed
+  together: the chat system prompt never told the model that a top-level
+  `context_files` argument existed, so it had no way to pass the attachment on;
+  and the shared `run_and_wait` launch client
+  (`packages/core/src/run-and-wait-client.ts`) read only the canonical
+  `context_files` name and dropped the legacy `context_documents` spelling
+  before the HTTP call — an allowlist builds the launch body, so a model that
+  reached for the argument under its pre-#1177 name, from an earlier turn or a
+  stale tool listing, watched it disappear with no `400` from anywhere. The run
+  started anyway, with no error and no file — the agent simply worked without
+  the attachment the user had just given it. The client now canonicalizes the
+  retired argument name to `context_files`; the HTTP route itself no longer
+  knows the old spelling at all, and answers `400` to it.
+
+- **Two indexes the schema declared but production never had** (#1182) —
+  `idx_runs_package_started` and `idx_runs_schedule_id` were absent from the
+  production database. They were the only two missing of the 132 indexes the
+  schema declared when production was audited — 0039 has since dropped 18,
+  leaving 114 — so every query planned around them had been running without
+  them. Migration `0041_restore_squash_indexes.sql` creates both, guarded with
+  `IF NOT EXISTS` because every database created FROM the squash already has
+  them and the whole pending batch runs in one transaction — an unguarded
+  `already exists` would abort the deploy for nearly every install.
+
+  **Why nothing looked wrong.** `0000_init.sql` is a SQUASH and production
+  predates it. Drizzle replays only the entries past a database's watermark,
+  so for a database older than the squash `0000_init` is history, never
+  pending work: anything the squash introduced by itself — rather than through
+  a forward migration production also ran — silently never arrived. The
+  bookkeeping was healthy throughout (39 rows, no gap), which is exactly why
+  this went unnoticed; no migration was skipped and no record was wrong, only
+  DDL was missing. The class is structural, not a one-off: the next squash
+  reopens it for every index, constraint and default it introduces.
+
+  **New operator check.** `DATABASE_URL=… bun scripts/check-index-drift.ts`
+  reports every index the schema declares that a live database lacks and exits
+  non-zero; `DATABASE_URL` is its only input, so it runs from a jump host with
+  nothing but a production connection string. It diffs against the snapshot
+  matching that database's OWN migration watermark, not the newest on disk (a
+  database with migrations pending legitimately lacks the indexes they add),
+  and refuses rather than guess when the watermark matches no journal entry.
+  NAMES only — an index present under the expected name with lost uniqueness
+  or a lost partial predicate reads as present. Run it against production
+  after a squash. `apps/api/test/unit/migration-index-parity.test.ts`
+  pins the rest in CI: it replays the journal into a throwaway PGlite and fails
+  if the latest snapshot declares an index no SQL in the journal creates, then
+  drops these two to model the production population and re-runs 0041 against
+  it — both must come back, and the partial one must come back partial.
+
+  **The rule this leaves behind:** a `DROP INDEX` must verify the SURVIVING
+  index against the live database before dropping anything. Neither the TS
+  schema nor `0000_init.sql` is evidence that an index exists in production —
+  migration 0039 dropped `idx_runs_package_id` on the grounds that
+  `idx_runs_package_started` covers it, and that cover was itself absent from
+  production at the time.
 
 - **An absent `client_secret` registered a PUBLIC OAuth client nobody asked
   for, and put `client_secret=` on the wire** — `POST /api/integrations/{packageId}/auths/{authKey}/oauth-clients`
@@ -269,6 +2307,135 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   also stamps the run's `metadata.degraded_integrations[]`, so the finished run
   shows a reconnect banner instead of the gap living only in the agent's
   transcript.
+
+## Released before v1.0.0-beta.52
+
+The changes below shipped in `v1.0.0-beta.51` or an earlier release. Most were
+already recorded here at that tag, accumulated under a single `[Unreleased]`
+heading across several releases; a few were reconstructed from the code
+afterwards because they had shipped with no entry at all. Either way this file
+cannot attribute them to individual versions;
+`git log v1.0.0-beta.N-1..v1.0.0-beta.N -- CHANGELOG.md` is the authority for
+any given release.
+
+### Security
+
+- **The agent bundle export now requires each dependency type's read scope** —
+  `GET /api/agents/{scope}/{name}/bundle` gated on `agents:read` alone. That
+  covers the root agent, whose files the export narrows to `manifest.json` +
+  `prompt.md`, but a dependency goes into the archive as its ENTIRE stored file
+  map: a bundle carrying a skill hands out exactly the bytes
+  `GET /api/packages/skills/{id}/files[/content]` serves, which #1123/#1124
+  settled need `skills:read`. This route was the last looser door to the same
+  content — a credential `403`'d on the file explorer was served the identical
+  bytes here. The guard now runs against the ASSEMBLED bundle rather than the
+  root manifest, so transitive dependencies are covered by construction and an
+  unrecognised type fails closed. It gates on SCOPE, not visibility:
+  dependency resolution stays org-scoped, so a bundle can still reach a skill
+  that is not installed in the calling application, exactly like the run it
+  mirrors.
+
+  **Behaviour change for scoped credentials.** A credential holding
+  `agents:read` but NOT `skills:read` now gets `403` where it used to get
+  `200`, on both `?source=draft` and the published export, whenever the agent
+  declares a skill dependency. In practice that is a scoped API key or OIDC
+  token — every org role (owner, admin, member, viewer) carries both scopes, so
+  no dashboard user is affected. An agent with no skill dependency is still
+  exported to an `agents:read`-only key. Audit the scopes of any key that
+  exports bundles from CI before upgrading.
+
+- **Package file responses are never served from a fresh browser cache** —
+  `Cache-Control: private, max-age=300` on the file explorer routes let a
+  browser serve authenticated, tenant-scoped, RBAC-gated artifact bytes for
+  five minutes with zero server contact. A revoked `<type>:read`, a member
+  removed from the org, or a package uninstalled from the application all left
+  the cached `200` being handed out until it expired, and `Vary` cannot rescue
+  that — revocation changes no request header. Every response on both routes is
+  now `private, no-cache`, which was already the behaviour for drafts,
+  dist-tags, semver ranges and yanked versions. `no-cache` still permits the
+  304 round-trip; it only forbids serving without one, and forcing that
+  round-trip re-runs `hasPackageAccess` and the read-permission guard on every
+  hit. **The trade**: a repeat view of the same file now pays a conditional
+  request instead of reading the local cache. That revalidation answers a
+  version's 304 from one DB read, with no storage GET and no unzip.
+
+- **Package `GET` routes now enforce a read permission (#1123)** — every
+  `GET` under `/api/packages` was gated on `hasPackageAccess` alone, which
+  answers "is this package installed in this application, or a system
+  package?" and nothing about what the caller may do. An API key scoped
+  **without** `skills:read` could read a skill's manifest and its full
+  `SKILL.md` (the detail route serves the authored `content`), and pull the
+  published ZIP through `/{scope}/{name}/{version}/download`. Every `GET`
+  on the router now requires the matching `agents:read` / `skills:read` /
+  `integrations:read` / `mcp-servers:read`, and `/{version}/download`
+  additionally goes through `hasPackageAccess` like the rest of the surface —
+  it previously served artifact bytes for packages not installed in the
+  calling application.
+
+  **The read-permission change is breaking for API keys.** No org role loses
+  access through the new RBAC guard (every role, down to `viewer`, holds all
+  four read scopes), but a key minted without the matching `*:read` scope now
+  gets `403` where it used to get `200`. Separately, the download visibility
+  fix affects every caller: a package not installed in the calling application
+  now returns `404`, including for org-role sessions. Audit issued key scopes
+  before upgrading.
+
+### Added
+
+- **Opt-in observability module (#847)** — OpenTelemetry moves out of core
+  behind the `@appstrate/core/telemetry` façade into a workspace module
+  `@appstrate/module-observability`. Core ships zero OTel footprint; add the
+  module to `MODULES` and set `OTEL_ENABLED` to activate tracing/metrics.
+
+### Changed
+
+- **The schedule worker runs schedules in parallel** — `concurrency: 1` with a
+  `max: 5/min` limiter made every schedule in every organization queue behind
+  one worker, so a single long run stalled everyone else's due schedules and the
+  five-per-minute cap was reached by five tenants firing on the hour. It is now
+  `{ concurrency: 10, limiter: { max: 30, duration: 60_000 } }`
+  (`apps/api/src/services/scheduler.ts`), where the limiter is a global abuse
+  backstop rather than a serialization mechanism. Recorded here after the fact:
+  this shipped with no changelog entry, and `git log` places it before
+  `v1.0.0-beta.49`.
+
+- **`@appstrate/core` released as 6.2.0** — 6.1.0 was already published to npm,
+  so the four export subpaths added since (`./package-files` and
+  `./mcp-server-meta` from #1118, `./model-generation` from #1099, `./url` from
+  #1122) could not be resolved by out-of-tree consumers installing from npm,
+  even though the code ships in the tarball. Additive only, so a minor;
+  `CORE_VERSION` moves with it. **Maintainers**: bump `cloud` and
+  `connect-helper` to `^6.2.0` right after the `core@6.2.0` tag is pushed —
+  leaving them at 6.1.0 makes the next core release compute a delta of 2 and
+  hard-fail the lockstep gate.
+
+- **Inline `run_and_wait` manifests are concise without becoming limited** —
+  callers may omit AFPS boilerplate and provide only a task-specific
+  `display_name`; the shared client derives the canonical name and fills
+  runtime/output defaults before the existing full validation boundary. Any
+  supplied field remains an exact override, including `runtime_tools: []` and
+  complete deterministic schemas. The chat prompt prefers `run_and_wait` for
+  launch-and-wait flows while keeping the fire-and-forget `runInline` and
+  `runAgent` operations fully discoverable and invokable.
+
+### Removed
+
+- **`source_code` from the package create/update contract** — the
+  `sourceFileName` plumbing behind it has been unreachable since the `tool`
+  package type was dropped: no route config declared it, so `source_code` was
+  never on the wire and sending one in a request body did nothing. The
+  published OpenAPI spec stops advertising a field that never existed at
+  runtime, which `detect:breaking` reports as 27 response-field removals.
+
+  **Sending one is now a `400`, not a silent strip.** This entry originally
+  said the body was still accepted and the key stripped by non-strict Zod, and
+  that no runtime behaviour changed; both stopped being true when the three
+  package JSON body schemas were made `.strict()`. A retired name must fail
+  loudly (`docs/NO_TRANSITIONAL_CODE.md` §1). See **BREAKING: the package JSON
+  bodies are `.strict()`** under _Unreleased_ → _Changed_ for the refusal and
+  what else it refuses.
+
+### Fixed
 
 - **Saving an integration destroyed its `INTEGRATION.md`** — `draft_content` is
   overloaded for integrations: the importer stores the bundle's

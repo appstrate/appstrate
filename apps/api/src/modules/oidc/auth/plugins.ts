@@ -11,28 +11,30 @@
  *   1. **Org-level** (`level: "org"`): dashboard users (org operators) scoped
  *      to a single organization pinned at client creation. Tokens carry
  *      `actor_type: "dashboard_user"` + `org_id` + `org_role`.
- *   2. **Application-level** (`level: "application"`): application end-users
- *      scoped to a single application. Tokens carry `actor_type: "end_user"`
- *      + `application_id` + `end_user_id`.
+ *   2. **Space-level** (`level: "space"`): space end-users
+ *      scoped to a single space. Tokens carry `actor_type: "end_user"`
+ *      + `space_id` + `end_user_id`.
  *
- * `customAccessTokenClaims` reads the parsed `metadata` JSON column for the
- * active OAuth client and dispatches to `buildOrgLevelClaims` or
- * `buildApplicationLevelClaims` accordingly. All claim names are RFC 9068 / OIDC Core
- * snake_case.
+ * The claim builder reaches that level through the `oauth_clients` ROW, and is
+ * registered as a provider claim extension for exactly that reason: an
+ * extension receives the resolved client, while `customAccessTokenClaims`
+ * receives only the provider-owned `metadata` JSON, which a registration body
+ * may set. All claim names are RFC 9068 / OIDC Core snake_case.
  *
- * The JWT plugin is bundled automatically by oauth-provider
- * (disableJwtPlugin defaults to false). The JWKS is served at
- * `/api/auth/jwks`, OIDC discovery at `/api/auth/.well-known/openid-configuration`,
- * and the token / authorize / userinfo / revoke / introspect endpoints at
- * `/api/auth/oauth2/*`.
+ * `jwt()` is listed explicitly below: `getJwtPlugin` throws
+ * `BetterAuthError("jwt_config")` when oauth-provider mints a JWT access token
+ * and no JWT plugin is installed. The JWKS is served at `/api/auth/jwks`, OIDC
+ * discovery at `/api/auth/.well-known/openid-configuration`, and the token /
+ * authorize / userinfo / revoke / introspect endpoints at `/api/auth/oauth2/*`.
  *
  * Client secret storage matches the `oauth-admin` service hash (SHA-256 hex).
  */
 
 import { randomInt, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { oauthProvider } from "@better-auth/oauth-provider";
+import { oauthProvider, type OAuthOptions, type Scope } from "@better-auth/oauth-provider";
 import { cimd } from "@better-auth/cimd";
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { bearer, jwt } from "better-auth/plugins";
 import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { APIError } from "better-auth/api";
@@ -44,42 +46,28 @@ import { getOrgSettings } from "../../../services/organizations.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
-  AppSignupClosedError,
-  loadAppById,
+  SpaceSignupClosedError,
+  loadSpaceById,
 } from "../services/enduser-mapping.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isBlockedUrl } from "@appstrate/core/ssrf";
 import {
   OrgSignupClosedError,
+  OrgSignupConfigurationError,
   loadClientSignupPolicy,
   resolveOrCreateOrgMembership,
 } from "../services/orgmember-mapping.ts";
-import { hashSecret } from "../services/oauth-admin.ts";
+import {
+  hashSecret,
+  getClientCached,
+  markClientSelfService,
+  type OAuthClientRecord,
+} from "../services/oauth-admin.ts";
 import { socialOverridePlugin } from "../services/ba-social-override-plugin.ts";
 import { oidcGuardsPlugin } from "./guards.ts";
 import { cliTokenPlugin } from "./cli-plugin.ts";
 import { assertUserRealm } from "./realm-check.ts";
-import { getAppstrateScopes, OIDC_IDENTITY_SCOPES } from "./scopes.ts";
-import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
-import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
-import { markClientSelfService } from "../services/oauth-admin.ts";
-import { mcpValidAudiences, initMcpValidAudiences } from "../../mcp/audiences.ts";
-
-export type ActorType = "dashboard_user" | "end_user" | "user";
-export type { OrgRole as OrgRoleClaim } from "@appstrate/core/permissions";
-
-export interface ClientMetadata {
-  level?: "org" | "application" | "instance";
-  referencedOrgId?: string;
-  referencedApplicationId?: string;
-  /**
-   * The OAuth client id — stashed by `createClient` so the
-   * `customAccessTokenClaims` closure can recover the client identity and
-   * look up mutable policy (e.g. `allowSignup` / `signupRole`) via
-   * `loadClientSignupPolicy`. The Better Auth oauth-provider plugin does not
-   * pass `client.clientId` to the closure directly.
-   */
-  clientId?: string;
-}
+import { getAppstrateScopes, getSelfServiceScopes } from "./scopes.ts";
 
 const SHA256_HEX_LENGTH = 64;
 
@@ -129,7 +117,7 @@ export async function sha256HexVerify(clientSecret: string, storedHash: string):
   return timingSafeEqual(a, b);
 }
 
-export interface OidcBetterAuthPluginsOptions {
+interface OidcBetterAuthPluginsOptions {
   /**
    * ClientIds of first-party (`skip_consent = true`) OAuth clients known at
    * boot. Forwarded to `oauthProvider({ cachedTrustedClients })` so the
@@ -142,48 +130,35 @@ export interface OidcBetterAuthPluginsOptions {
   cachedTrustedClientIds?: readonly string[];
 }
 
+/**
+ * Platform policy gate for a CIMD `client_id` URL, run before the document is
+ * fetched. The LITERAL denylist (`@appstrate/core/ssrf`) — IP literals,
+ * `localhost`, cloud-metadata names and the run network's Docker aliases
+ * `sidecar` / `agent`, which upstream's public-routability check lets through
+ * as ordinary names. No DNS here: resolving would re-open the TOCTOU window the
+ * pinned transport closes. `isBlockedUrl` is total over strings, so a malformed
+ * URL reads as blocked.
+ *
+ * Exported for unit testing — not part of the module's public surface.
+ */
+export function isCimdMetadataDocumentUrlAllowed(clientIdUrl: string): boolean {
+  return !isBlockedUrl(clientIdUrl);
+}
+
 export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): unknown[] {
   const env = getEnv();
-  // The AS accepts these as RFC 8707 `resource` values and stamps the matching
-  // one as the token `aud`. The inbound MCP server is exposed per organization
-  // (`/api/mcp/o/:org`), so its protected resources are NOT static URIs — there
-  // is one canonical URI per org, layered onto this allowlist at runtime.
-  //
-  // Org-aware, mutable allowlist: the static platform + AS audiences plus one
-  // per-org MCP resource URI each, kept in sync via `mcp/audiences.ts` (seeded
-  // from the `organizations` table at boot, updated on `onOrgCreate` /
-  // `onOrgDelete`). Passed BY REFERENCE to both plugins below; both read it live
-  // per request (the library's `checkResource` reads `opts.validAudiences` on
-  // every mint, the guard reads it per request), so a freshly-created org's
-  // resource becomes mintable without a restart. Never reassign — mutate in
-  // place through the audiences module. The generic `/api/mcp/o/:org` URIs are
-  // per-org; there is no bare `/api/mcp` resource.
-  //
-  // LIBRARY CONTRACT (verified ≤ @better-auth/oauth-provider 1.7.0-beta.4):
-  // `oauth-provider` must read `opts.validAudiences` LIVE on every
-  // `/oauth2/token` call — its `checkResource` rebuilds a Set from
-  // `opts.validAudiences.filter(...)` per call, and `opts` holds this array by
-  // reference (a spread of the options object, not a clone). If a future version
-  // snapshots `validAudiences` into a Set at plugin construction, per-org minting
-  // silently breaks for orgs created after boot. The regression guard is
-  // `oidc/test/integration/services/mcp-org-audience-liveread.test.ts` (add an
-  // org audience at runtime → mint accepts it). Keep `mcpValidAudiences` a plain
-  // array — the library calls `.filter` on it.
-  initMcpValidAudiences([env.APP_URL, `${env.APP_URL}/api/auth`]);
-  const validAudiences = mcpValidAudiences;
-
   // Scopes a self-service (DCR / CIMD) client may request: identity scopes +
   // module-contributed end-user-grantable scopes (currently mcp:read/invoke).
   // Deliberately EXCLUDES core action scopes (agents:run, llm-proxy:call, …) —
   // those remain for admin-managed first-party clients. The user-consent screen
   // and the caller's own permissions still gate the actual grant on top of this.
-  const selfServiceScopes = [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
+  const selfServiceScopes = getSelfServiceScopes();
   const cachedTrustedClients =
     opts.cachedTrustedClientIds && opts.cachedTrustedClientIds.length > 0
       ? new Set(opts.cachedTrustedClientIds)
       : undefined;
   return [
-    oidcGuardsPlugin({ validAudiences }),
+    oidcGuardsPlugin(),
     socialOverridePlugin(),
     jwt({
       jwks: { keyPairConfig: { alg: "ES256" } },
@@ -208,17 +183,6 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // rotating refresh instead of a 7-day BA session.
     cliTokenPlugin(),
     deviceAuthorization({
-      // `schema: {}` is a workaround for better-auth 1.6.9's
-      // `deviceAuthorizationOptionsSchema` defining `schema: z.custom(() => true)`
-      // (device-authorization/index.mjs:28). Under zod 4.4.3 (pinned via the
-      // root `overrides.zod` since #512), `z.custom()` rejects missing keys
-      // with `expected: "nonoptional"`, so the plugin factory throws at
-      // construction unless the key is present. The plugin merges this with
-      // its own default schema via `mergeSchema(schema, options?.schema)`.
-      // CI clean installs hit this; local stale `node_modules` (mixed zod
-      // versions) masks it. Remove once better-auth fixes its options schema
-      // upstream.
-      schema: {},
       expiresIn: "10m",
       // 2s polling interval — RFC 8628 §3.2 suggests 5s as a *default*, not a
       // floor. `gh auth login`, `gcloud auth login`, and `aws sso login` all
@@ -244,24 +208,47 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // `oidcGuardsPlugin.hooks.before` on `/device/approve`.
       validateClient: validateDeviceFlowClient,
     }),
+    // `satisfies` is load-bearing, not decoration. `oauthProvider` is declared
+    // `<O extends OAuthOptions<Scope[]>>(options: O)` — a NAKED type parameter,
+    // so TypeScript infers `O` as this literal's own type and performs no
+    // excess-property check at all: a misspelled or non-existent option compiles
+    // clean and is silently ignored. Checking the literal against the interface
+    // first restores TS2353. Do not remove.
     oauthProvider({
       loginPage: "/api/oauth/login",
       consentPage: "/api/oauth/consent",
-      // basePath is `/api/auth` (not `/`), so BA advises ensuring the
-      // discovery doc at `/.well-known/oauth-authorization-server/api/auth` is
-      // served. BA itself only exposes the suffix form
-      // (`/api/auth/.well-known/...`); the RFC 8414 path-inserted form at the
-      // origin root is served by this module's router (see `routes.ts` OIDC
-      // discovery). The warning is purely advisory for the non-root basePath;
-      // clear it via the documented flag.
-      silenceWarnings: { oauthAuthServerConfig: true },
       // OIDC scope vocabulary (identity scopes + OIDC_ALLOWED_SCOPES). Owned
       // wholly by this module — there is no cross-module scope contribution
       // point, so load ordering is irrelevant. Advertised in discovery
       // `scopes_supported` and enforced by the oauth-provider plugin's own
       // scope filter.
       scopes: [...getAppstrateScopes()],
-      validAudiences,
+      // RFC 8707 protected resources, PERSISTED as `oauth_resources` rows. The
+      // AS resolves a requested `resource` against that table on every token
+      // call and answers `invalid_target` for an identifier it has no row for.
+      // Seeded here are the two STATIC platform identifiers; the inbound MCP
+      // server is exposed per organization (`/api/mcp/o/:org`), so its resources
+      // are NOT static — the mcp module writes one row per org
+      // (`modules/mcp/index.ts`). There is no bare `/api/mcp` resource.
+      //
+      // `resourceSeedMode` is left at its `insertOnly` default: a row an
+      // operator edited must survive a restart. `cachedResources` is
+      // deliberately NOT passed — an identifier outside that set is read from
+      // the DB per request, which is exactly what makes an org row inserted at
+      // runtime mintable immediately, including from another replica. The
+      // implicit `${baseURL}/oauth2/userinfo` identifier is accepted without a
+      // row and must never get one.
+      resources: [env.APP_URL, `${env.APP_URL}/api/auth`],
+      // Upstream defaults this to TRUE, which would require an
+      // `oauth_client_resources` row per (client, resource) pair before any
+      // mint. Appstrate does not model per-client resource linkage: any client
+      // may request any configured resource, and the confinement that actually
+      // holds is (a) the self-service rule in `guards.ts` — exactly one
+      // protected resource, never the platform audience — and (b) the
+      // downstream org-membership check on every request. `false` preserves
+      // that behaviour byte for byte. Tightening it is a product decision, not
+      // a dependency-bump side effect.
+      enforcePerClientResources: false,
       cachedTrustedClients,
       // Dynamic Client Registration (RFC 7591) — the fallback discovery path
       // for MCP clients that can't host a CIMD document. Unauthenticated
@@ -270,22 +257,51 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // self-service scope set (identity + module scopes), PKCE is enforced by
       // the plugin, and the /oauth2/register endpoint is rate-limited in
       // routes.ts. The user-consent screen remains the real authorization gate.
+      // Default and ceiling are ONE array, so they cannot drift: the provider
+      // unions them, and a default outside the ceiling would widen it silently.
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
-      clientRegistrationDefaultScopes: [...OIDC_IDENTITY_SCOPES],
+      clientRegistrationDefaultScopes: selfServiceScopes,
       clientRegistrationAllowedScopes: selfServiceScopes,
+      // The grants the AS actually serves. Upstream's default adds
+      // `client_credentials`, which no Appstrate client registers and no code
+      // path issues — advertising it in discovery invites a request that can
+      // only fail.
+      grantTypes: ["authorization_code", "refresh_token"],
+      // Per-IP budgets for the unauthenticated endpoints the provider mounts,
+      // enforced by Better Auth against the platform's shared limiter
+      // (`rateLimit.customStorage`), so one budget spans the fleet. Each value
+      // is the tighter of the provider's default and the platform's own
+      // ceiling. `register` inserts an `oauth_clients` row per call, hence the
+      // smallest budget. `userinfo` keeps the provider default: it is
+      // session-authenticated.
+      //
+      // Per-IP is the whole model here: there is no per-client budget, and the
+      // credential-guessing surface is covered by BA's own `/sign-in*` rule.
+      rateLimit: {
+        token: { window: 60, max: 20 },
+        authorize: { window: 60, max: 30 },
+        introspect: { window: 60, max: 60 },
+        revoke: { window: 60, max: 30 },
+        register: { window: 60, max: 5 },
+      },
       storeClientSecret: {
         hash: hashSecret,
         verify: sha256HexVerify,
       },
 
-      /**
-       * Polymorphic claim builder. Branches on `metadata.level` (set at
-       * client registration via `services/oauth-admin.ts`) and returns a
-       * snake_case claim payload compatible with RFC 9068 + OIDC Core.
-       */
-      customAccessTokenClaims: async ({ user, metadata }) =>
-        buildClaimsForClient(user ?? null, metadata as ClientMetadata | undefined),
+      extensions: [
+        {
+          claims: {
+            // Polymorphic claim builder. A claim extension is handed the
+            // resolved `oauth_clients` row, so the level dispatch reads a
+            // platform column instead of the provider-owned `metadata` JSON that
+            // `customAccessTokenClaims` would hand it. Re-derived identically at
+            // opaque-token introspection, and a throw here fails the mint.
+            accessToken: ({ user, client }) => buildClaimsForClient(user ?? null, client.clientId),
+          },
+        },
+      ],
 
       /**
        * Surface the same polymorphic claims on /userinfo so satellites can
@@ -309,7 +325,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
           return {
             ...base,
             org_id: strOrNull(claims.org_id),
-            application_id: strOrNull(claims.application_id),
+            space_id: strOrNull(claims.space_id),
             end_user_id: strOrNull(claims.end_user_id),
           };
         }
@@ -327,51 +343,49 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
         }
         return withVerified;
       },
-    }),
+    } satisfies OAuthOptions<Scope[]>),
     // Client ID Metadata Documents (CIMD, SEP-991) — the MCP-spec-preferred
     // discovery path: a client identifies by an HTTPS URL whose document the AS
     // fetches, validates, and caches. Must come AFTER oauthProvider — its
     // init() appends a clientDiscovery entry to the provider and advertises
     // `client_id_metadata_document_supported` in the well-known metadata.
     //
-    // The plugin already enforces SSRF (private/link-local/cloud-metadata
-    // ranges), a 5s timeout, a 5KB body cap, JSON-only, and no redirects. The
-    // upstream guard and our `isBlockedUrl` are both LITERAL (no DNS), so we
-    // resolve DNS here in `allowFetch` (the documented hostname-defense seam)
-    // and block any URL whose A/AAAA resolves to a private/internal address —
-    // closing the rebind-to-internal vector for the metadata-document fetch.
-    // Also blocks internal Docker hostnames (`sidecar`/`agent`). Origin binding
-    // (redirect/post-logout/client URIs must share the client_id origin) is
-    // left at its secure default.
+    // The plugin enforces a 5s timeout, a 5KB body cap, JSON-only, and a
+    // bounded request-amplification budget. Origin binding (post-logout and
+    // client URIs must share the client_id origin; redirect URIs deliberately
+    // excluded upstream, exact matching at authorization time covering them)
+    // is left at its default.
     cimd({
-      // TOCTOU: `isBlockedUrlWithDns` resolves the hostname and blocks any
-      // A/AAAA in a private/internal range, but the actual metadata-document
-      // fetch is performed by the upstream CIMD plugin against the HOSTNAME —
-      // it re-resolves independently, so a hostile resolver can return a
-      // public IP to this check and an internal one at connect time (classic
-      // DNS-rebind). Fully closing this needs resolve-then-connect-to-pinned-IP,
-      // which the runtime-agnostic plugin does not expose via `allowFetch`
-      // (boolean-only seam). This guard is defence-in-depth over the
-      // literal-only `isBlockedUrl`, not a complete pin. FAIL CLOSED: any
-      // error (incl. resolution failure) blocks the fetch — `isBlockedUrlWithDns`
-      // already returns `true` on every failure path, and the explicit
-      // try/catch guarantees a thrown error can never be read as "allowed".
-      allowFetch: async (url) => {
-        try {
-          return !(await isBlockedUrlWithDns(url));
-        } catch {
-          return false;
-        }
-      },
+      // The metadata-document transport is the AS's SSRF boundary and upstream
+      // makes it the application's responsibility: resolve the hostname EXACTLY
+      // ONCE, refuse every non-public-routable answer, connect to that pinned
+      // address and never follow a redirect. Wrapping `fetch` cannot express
+      // that — it re-resolves after any check, leaving a DNS-rebind window open.
+      // `@better-auth/cimd/node` is upstream's conforming implementation; it
+      // reaches for `node:dns`/`node:https`, and Bun exposes no address-pinning
+      // seam that would satisfy the contract.
+      //
+      // Called through a lambda so the module binding is read per request: the
+      // integration suite replaces the upstream export to serve a document
+      // in-process, and plugins are built once, at boot.
+      fetchClientMetadataResource: (input, init) => fetchClientMetadataResource(input, init),
+      // MCP 2026-07-28 pins CIMD draft-00, which makes `client_name` and
+      // `redirect_uris` mandatory. MCP clients are who this path serves, and a
+      // document missing either cannot complete an authorization anyway.
+      metadataProfile: "mcp-2026-07-28",
+      isMetadataDocumentUrlAllowed: isCimdMetadataDocumentUrlAllowed,
       // A CIMD client is written straight to the DB by the plugin with no
-      // platform `level`, so `buildClaimsForClient` would reject its tokens.
-      // Stamp it as a self-service instance client (same model as a DCR
-      // client) so it can mint instance tokens — which the RFC 8707 audience
-      // confinement then restricts to the protected resource it was issued
-      // for. Without this the entire CIMD onboarding path mints nothing.
+      // platform discriminator, so its tokens would be rejected for a missing
+      // level. Stamp it as a self-service instance client (same model as a DCR
+      // client): it mints instance tokens, which the RFC 8707 audience
+      // confinement then restricts to one protected resource.
       onClientCreated: async ({ client }) => {
-        const clientId = (client as { clientId?: unknown }).clientId;
-        if (typeof clientId === "string") await markClientSelfService(clientId);
+        await markClientSelfService(client.clientId);
+      },
+      // A refresh rewrites the row from the re-fetched document, so re-assert
+      // the stamp on every one. Idempotent.
+      onClientRefreshed: async ({ client }) => {
+        await markClientSelfService(client.clientId);
       },
     }),
   ];
@@ -434,32 +448,30 @@ function strOrNull(value: unknown): string | null {
 }
 
 /**
- * Dispatch on `metadata.level`. Defensive fallback returns `{}` so the
- * plugin still mints a token — at worst the strategy rejects it at verify
- * time because `actor_type` is missing.
+ * Dispatch on the client row's `level` column. The row is read through the
+ * short-TTL client cache; `level` and the `referenced_*` FKs are immutable for
+ * a client's lifetime (`oauth_clients_level_immutable` trigger), so a cached
+ * copy cannot answer a stale level.
  */
 async function buildClaimsForClient(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean } | null,
-  metadata: ClientMetadata | undefined,
+  clientId: string,
 ): Promise<Record<string, unknown>> {
   if (!user) return {};
-  const level = metadata?.level;
-  if (level === "instance") {
-    return buildInstanceLevelClaims(user);
+  const client = await getClientCached(clientId);
+  if (!client) {
+    logger.warn("oidc: token requested for an unknown oauth_client — rejecting", {
+      module: "oidc",
+      userId: user.id,
+      clientId,
+    });
+    throw new APIError("BAD_REQUEST", {
+      message: "Unknown OAuth client — cannot issue token",
+    });
   }
-  if (level === "org") {
-    return buildOrgLevelClaims(user, metadata!);
-  }
-  if (level === "application") {
-    return buildApplicationLevelClaims(user, metadata!);
-  }
-  logger.warn("oidc: oauth_client metadata missing level — rejecting token", {
-    module: "oidc",
-    userId: user.id,
-  });
-  throw new APIError("BAD_REQUEST", {
-    message: "OAuth client metadata missing level — cannot issue token",
-  });
+  if (client.level === "instance") return buildInstanceLevelClaims(user);
+  if (client.level === "org") return buildOrgLevelClaims(user, client);
+  return buildSpaceLevelClaims(user, client);
 }
 
 async function buildInstanceLevelClaims(user: {
@@ -470,9 +482,9 @@ async function buildInstanceLevelClaims(user: {
 }): Promise<Record<string, unknown>> {
   // Instance clients serve platform audiences — dashboard SPA + satellite
   // admin tools. Reject end-user realm sessions so an OIDC token minted
-  // under app A's scope cannot be replayed to mint an instance token.
+  // under space A's scope cannot be replayed to mint an instance token.
   await assertUserRealm(user.id, "platform", { clientLevel: "instance" });
-  // Instance tokens carry NO org or application context. The user is a
+  // Instance tokens carry NO org or space context. The user is a
   // Better Auth user who may belong to multiple organizations — org is
   // resolved per-request via X-Org-Id after authentication.
   return {
@@ -485,9 +497,9 @@ async function buildInstanceLevelClaims(user: {
 
 async function buildOrgLevelClaims(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean },
-  metadata: ClientMetadata,
+  client: OAuthClientRecord,
 ): Promise<Record<string, unknown>> {
-  const orgId = metadata.referencedOrgId;
+  const orgId = client.referencedOrgId;
   if (!orgId) {
     logger.warn("oidc: org-level client missing referencedOrgId — rejecting token", {
       module: "oidc",
@@ -516,7 +528,7 @@ async function buildOrgLevelClaims(
   }
 
   // Org-level clients serve platform audiences (dashboard users mapped to
-  // org_members). Reject end-user realm sessions — an end-user of app A
+  // org_members). Reject end-user realm sessions — an end-user of space A
   // cannot become a dashboard user of org X by OIDC replay.
   await assertUserRealm(user.id, "platform", { clientLevel: "org", orgId });
 
@@ -524,10 +536,14 @@ async function buildOrgLevelClaims(
   // back to the "closed" default if the client was deleted/disabled or its
   // metadata drifted — better to reject a legitimate mint than silently
   // auto-join to a wrong role.
-  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
-  const policy: { allowSignup: boolean; signupRole: "admin" | "member" | "viewer" } =
+  const loaded = await loadClientSignupPolicy(client.clientId);
+  const policy: Parameters<typeof resolveOrCreateOrgMembership>[2] =
     loaded && loaded.level === "org" && loaded.orgId === orgId
-      ? { allowSignup: loaded.allowSignup, signupRole: loaded.signupRole }
+      ? {
+          allowSignup: loaded.allowSignup,
+          signupRole: loaded.signupRole,
+          signupSpaceAssignments: loaded.signupSpaceAssignments,
+        }
       : { allowSignup: false, signupRole: "member" };
 
   // Resolve or create the membership. For existing members this is a
@@ -557,6 +573,9 @@ async function buildOrgLevelClaims(
       org_role: resolved.role,
     };
   } catch (err) {
+    if (err instanceof OrgSignupConfigurationError) {
+      throw new APIError("FORBIDDEN", { error: "access_denied", error_description: err.message });
+    }
     if (err instanceof OrgSignupClosedError) {
       logger.warn("oidc: user is not a member of the pinned org — rejecting token", {
         module: "oidc",
@@ -569,67 +588,61 @@ async function buildOrgLevelClaims(
       throw new APIError("FORBIDDEN", {
         error: "access_denied",
         error_description:
-          "Registration is disabled for this application. Contact your administrator to be added to the organization.",
+          "Registration is disabled for this space. Contact your administrator to be added to the organization.",
       });
     }
     throw err;
   }
 }
 
-async function buildApplicationLevelClaims(
+async function buildSpaceLevelClaims(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean },
-  metadata: ClientMetadata,
+  client: OAuthClientRecord,
 ): Promise<Record<string, unknown>> {
-  const applicationId = metadata.referencedApplicationId;
-  if (!applicationId) {
-    logger.warn(
-      "oidc: application-level client missing referencedApplicationId — rejecting token",
-      {
-        module: "oidc",
-        userId: user.id,
-      },
-    );
+  const spaceId = client.referencedSpaceId;
+  if (!spaceId) {
+    logger.warn("oidc: space-level client missing referencedSpaceId — rejecting token", {
+      module: "oidc",
+      userId: user.id,
+    });
     // Structured OAuth2 error (like the org-level path) so the caller gets a
     // diagnosable body instead of a bare Error that BA surfaces as an opaque
     // 500. The client's server-side config is broken, not the request.
     throw new APIError("INTERNAL_SERVER_ERROR", {
       error: "server_error",
       error_description:
-        "This application client is misconfigured (no application is bound to it). Contact the administrator.",
+        "This space client is misconfigured (no space is bound to it). Contact the administrator.",
     });
   }
-  const app = await loadAppById(applicationId);
-  if (!app) {
-    logger.warn("oidc: application referenced by oauth_client has been deleted", {
+  const space = await loadSpaceById(spaceId);
+  if (!space) {
+    logger.warn("oidc: space referenced by oauth_client has been deleted", {
       module: "oidc",
       userId: user.id,
-      applicationId,
+      spaceId,
     });
     throw new APIError("INTERNAL_SERVER_ERROR", {
       error: "server_error",
       error_description:
-        "The application bound to this client no longer exists. Contact the administrator.",
+        "The space bound to this client no longer exists. Contact the administrator.",
     });
   }
 
-  // Application-level tokens are end-user tokens. Enforce that the
-  // authenticating BA user was provisioned for THIS application — reject
-  // platform admins (realm="platform") and end-users of a different app
+  // Space-level tokens are end-user tokens. Enforce that the
+  // authenticating BA user was provisioned for THIS space — reject
+  // platform admins (realm="platform") and end-users of a different space
   // (realm="end_user:B"). Per decision #2 (no cross-audience sharing),
-  // a platform admin wanting to test their own app as an end-user must
+  // a platform admin wanting to test their own space as an end-user must
   // re-signup with a separate account.
-  await assertUserRealm(user.id, `end_user:${applicationId}`, {
-    clientLevel: "application",
-    applicationId,
+  await assertUserRealm(user.id, `end_user:${spaceId}`, {
+    clientLevel: "space",
+    spaceId,
   });
   // Load the signup policy via the short-TTL cache — closed default on any
   // lookup failure. Same rationale as `buildOrgLevelClaims`.
-  const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
+  const loaded = await loadClientSignupPolicy(client.clientId);
   const signupPolicy = {
-    allowSignup:
-      loaded?.level === "application" &&
-      loaded.applicationId === applicationId &&
-      loaded.allowSignup,
+    allowSignup: loaded?.level === "space" && loaded.spaceId === spaceId && loaded.allowSignup,
   };
 
   // NOTE: this call may be the SECOND invocation for a given login —
@@ -647,7 +660,7 @@ async function buildApplicationLevelClaims(
         name: user.name ?? null,
         emailVerified: user.emailVerified === true,
       },
-      app,
+      space,
       signupPolicy,
     );
     return {
@@ -655,22 +668,22 @@ async function buildApplicationLevelClaims(
       email: resolved.email ?? user.email,
       name: resolved.name ?? user.name ?? user.email,
       org_id: resolved.orgId,
-      application_id: resolved.applicationId,
+      space_id: resolved.spaceId,
       end_user_id: resolved.endUserId,
     };
   } catch (err) {
     if (err instanceof UnverifiedEmailConflictError) {
       logger.warn("oidc: unverified-email conflict during token issuance", {
         module: "oidc",
-        applicationId: err.applicationId,
+        spaceId: err.spaceId,
         email: err.email,
       });
       throw err;
     }
-    if (err instanceof AppSignupClosedError) {
+    if (err instanceof SpaceSignupClosedError) {
       logger.warn("oidc: end-user signup blocked by client policy", {
         module: "oidc",
-        applicationId: err.applicationId,
+        spaceId: err.spaceId,
         authUserId: err.authUserId,
       });
       // Map to a structured OAuth2 error so downstream satellites (portal)
@@ -678,17 +691,15 @@ async function buildApplicationLevelClaims(
       throw new APIError("FORBIDDEN", {
         error: "access_denied",
         error_description:
-          "Sign-up is disabled for this application. Ask your administrator to create your account before signing in.",
+          "Sign-up is disabled for this space. Ask your administrator to create your account before signing in.",
       });
     }
     logger.error("oidc: end-user resolution failed during token issuance", {
       module: "oidc",
       userId: user.id,
-      applicationId,
+      spaceId,
       error: getErrorMessage(err),
     });
     throw err;
   }
 }
-
-export { getOidcAuthApi } from "./api.ts";

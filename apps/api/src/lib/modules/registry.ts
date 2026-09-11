@@ -6,14 +6,14 @@
  *
  * The registry is AGNOSTIC — it only knows package specifiers, never
  * module internals. Each module is a dynamic import that must export
- * a default AppstrateModule (or an `appstrateModule` named export).
+ * a default AppstrateModule.
  */
 
 import { db } from "@appstrate/db/client";
 import { organizationMembers, organizations, user } from "@appstrate/db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
-import type { ModuleInitContext, PlatformServices } from "@appstrate/core/module";
+import type { ModuleInitContext, ModuleOrgMember, PlatformServices } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
 // ---- Platform service imports (for buildPlatformServices) -----------------
@@ -24,14 +24,14 @@ import { listLlmUsage, getSettledFrontierId } from "../../services/state/runs.ts
 import { dispatchInProcess } from "../platform-app.ts";
 import {
   recordChatUsage,
-  resolveSubscriptionChatModel,
+  resolveChatModel,
   checkUsageAllowed,
-} from "../../services/chat-subscription.ts";
+} from "../../services/chat-platform-services.ts";
 import {
   resolveChatAttachment,
-  detachOrDeleteContainedDocuments,
-  setOrgDocumentStorageLimit,
-} from "../../services/documents.ts";
+  detachOrDeleteContainedFiles,
+  setOrgFileStorageLimit,
+} from "../../services/files.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -95,9 +95,9 @@ export function getModuleRegistry(): string[] {
 /**
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
- * minimal — `usage.list` / `usage.settledFrontier` (the cloud metering module's cursor
- * sweep of the `llm_usage` ledger), `inProcess.dispatch`, and the chat seam
- * (`resolveSubscriptionChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
+ * minimal — `usage.list` / `usage.settledFrontier` (the EE module's cursor sweep
+ * of the `llm_usage` ledger), `inProcess.dispatch`, and the chat seam
+ * (`resolveChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
  * which the chat module drives the single generic in-process Pi chat engine,
  * meters it, and gates admission — the module resolves credentials/tokens,
  * records usage, and gates through here because it has no DB access. See the
@@ -126,27 +126,27 @@ function buildPlatformServices(): PlatformServices {
     // fresh token (credential resolution stays server-side), meters each turn,
     // and gates admission for EVERY turn (subscription included) through these,
     // since it has no DB access.
-    resolveSubscriptionChatModel,
+    resolveChatModel,
     recordChatUsage,
     checkUsageAllowed,
     // Chat attachments — materialize a composer upload into a chat-session-scoped
-    // document (or validate an existing document) and hand back its stable
-    // `document://` URI. The module has no DB access, so it crosses here.
+    // file (or validate an existing file) and hand back its stable
+    // `appfile://` URI. The module has no DB access, so it crosses here.
     resolveChatAttachment,
-    // Chat session teardown — detach-or-delete the session's contained documents
+    // Chat session teardown — detach-or-delete the session's contained files
     // before the session row is removed (the module has no DB/storage access).
-    cleanupSessionDocuments: (chatSessionId, tx) =>
-      detachOrDeleteContainedDocuments(
+    cleanupSessionFiles: (chatSessionId, tx) =>
+      detachOrDeleteContainedFiles(
         { chatSessionId },
         // `tx` is opaque in the core contract (no Drizzle dep there); it is the
         // chat module's own open transaction handle, so the teardown runs in the
         // same tx as the `chat_sessions` delete.
-        tx as Parameters<typeof detachOrDeleteContainedDocuments>[1],
+        tx as Parameters<typeof detachOrDeleteContainedFiles>[1],
       ),
-    // Per-org document storage limit — a metering/plan module (cloud) writes the
-    // org's technical byte ceiling here; the platform enforces it on every write.
-    // Billing-neutral: the core stores a byte limit, never a plan/price.
-    setDocumentStorageLimit: setOrgDocumentStorageLimit,
+    // Per-org file storage limit — a metering/plan module (the EE module) writes
+    // the org's technical byte ceiling here; the platform enforces it on every
+    // write. Billing-neutral: the core stores a byte limit, never a plan/price.
+    setFileStorageLimit: setOrgFileStorageLimit,
   };
 }
 
@@ -157,10 +157,26 @@ export function buildModuleInitContext(): ModuleInitContext {
     appUrl: env.APP_URL,
     getSendMail: async () => {
       // Lazy import to break circular dep: email.ts -> app-config.ts -> modules
-      const { sendMail } = await import("../../services/email.ts");
-      return sendMail;
+      const [{ sendMail }, { isSmtpConfigured }] = await Promise.all([
+        import("../../services/email.ts"),
+        import("../app-config.ts"),
+      ]);
+      // Modules get the same "is mail configured at all" gate the platform
+      // applies to its own mail (`sendEmail`), rather than the raw transport:
+      // on an install with no SMTP credentials every module send would
+      // otherwise reach nodemailer and log a transport error per event. The
+      // check is per call, not per `getSendMail()`, so a module that captures
+      // the mailer once still sees the current configuration.
+      return async (to: string, subject: string, html: string): Promise<void> => {
+        if (!isSmtpConfigured()) {
+          logger.debug("Module email skipped — SMTP is not configured", { to, subject });
+          return;
+        }
+        await sendMail(to, subject, html);
+      };
     },
-    getOrgAdminEmails,
+    getOrgOwnerEmails,
+    getOrgMembers,
     getOrgName,
     services: buildPlatformServices(),
   };
@@ -168,22 +184,52 @@ export function buildModuleInitContext(): ModuleInitContext {
 }
 
 // ---------------------------------------------------------------------------
-// DI: org admin emails query
+// DI: org membership queries
 // ---------------------------------------------------------------------------
 
-async function getOrgAdminEmails(orgId: string): Promise<string[]> {
-  const admins = await db
+/**
+ * Emails of the org's owners.
+ *
+ * Owner only, not owner-or-admin: this is the fallback recipient for billing
+ * mail, and an admin is an operational role. A module that wants a wider
+ * audience names the users itself and resolves them through
+ * {@link getOrgMembers}.
+ */
+async function getOrgOwnerEmails(orgId: string): Promise<string[]> {
+  const owners = await db
     .select({ email: user.email })
     .from(organizationMembers)
     .innerJoin(user, eq(organizationMembers.userId, user.id))
-    .where(
-      and(
-        eq(organizationMembers.orgId, orgId),
-        inArray(organizationMembers.role, ["admin", "owner"]),
-      ),
-    );
+    .where(and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.role, "owner")));
 
-  return admins.map((a) => a.email);
+  return owners.map((row) => row.email);
+}
+
+/**
+ * Resolve `userIds` to members of `orgId`. An id that is not a member is
+ * absent from the result — the caller asked which of its stored ids still hold
+ * membership, and "no longer a member" is an answer, not an error.
+ */
+async function getOrgMembers(
+  orgId: string,
+  userIds: readonly string[],
+): Promise<ModuleOrgMember[]> {
+  if (userIds.length === 0) return [];
+  const rows = await db
+    .select({
+      userId: organizationMembers.userId,
+      email: user.email,
+      role: organizationMembers.role,
+    })
+    .from(organizationMembers)
+    .innerJoin(user, eq(organizationMembers.userId, user.id))
+    .where(and(eq(organizationMembers.orgId, orgId), inArray(user.id, [...userIds])));
+
+  return rows.map((row) => ({
+    userId: row.userId,
+    email: row.email,
+    role: row.role,
+  }));
 }
 
 // ---------------------------------------------------------------------------

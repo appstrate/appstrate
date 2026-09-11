@@ -53,6 +53,11 @@ function i18nBootPreload(): Plugin {
             const match = LOCALE_MODULE_RE.exec(moduleId);
             if (!match) continue;
             const [, language, namespace] = match;
+            // Both groups are non-optional in LOCALE_MODULE_RE, so a match
+            // always fills them — but `noUncheckedIndexedAccess` types a
+            // capture as `string | undefined` and it is right to: this file was
+            // in no tsc program until now, so nothing had ever said so.
+            if (language === undefined || namespace === undefined) continue;
             if (!bootNamespaces.has(namespace)) continue;
             (byLanguage[language] ??= []).push(`${base}${output.fileName}`);
             break;
@@ -177,9 +182,8 @@ export default defineConfig({
               test: /node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//,
             },
             // Query, narrowed from all of `@tanstack/*`: the entry graph needs
-            // the query client, while the other `@tanstack` packages (table,
-            // virtual, …) are reached from lazy routes only and were being
-            // dragged forward by the wider test.
+            // the query client, while `@tanstack/react-virtual` is reached from
+            // lazy routes only and was being dragged forward by the wider test.
             { name: "query", test: /node_modules\/@tanstack\/(query-core|react-query)\// },
             // Icons are imported by nearly every route; one shared chunk beats
             // the same icon module being duplicated across route chunks.

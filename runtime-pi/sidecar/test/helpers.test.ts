@@ -639,3 +639,61 @@ describe("concatAndRelease", () => {
     expect(concatAndRelease([], 0).byteLength).toBe(0);
   });
 });
+
+/**
+ * The two LLM upstream deadlines are operator knobs, not laws: an `org_models`
+ * row may point at a self-hosted `baseUrl` (Ollama / llama.cpp / vLLM) whose
+ * cold model load blows past both the 60 s headers bound and the 120 s
+ * inter-chunk bound. Both are resolved at MODULE INIT from `process.env`, so —
+ * as in `request-body-cap.test.ts` — a fresh process per scenario is the only
+ * honest way to exercise them: mutating `process.env` here would come too late
+ * and `import()` caches the evaluated module.
+ */
+describe("LLM deadline overrides", () => {
+  const HELPERS = new URL("../helpers.ts", import.meta.url).pathname;
+  const SCRIPT = `
+const helpers = await import(${JSON.stringify(HELPERS)});
+console.log(JSON.stringify({ idle: helpers.LLM_STREAM_IDLE_TIMEOUT_MS }));
+`;
+
+  async function probe(overrides: Record<string, string>) {
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    delete env.SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS;
+    delete env.SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS;
+    Object.assign(env, overrides);
+    const proc = Bun.spawn(["bun", "-e", SCRIPT], { env, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { exitCode, stdout: stdout.trim(), stderr };
+  }
+
+  it("falls back to the shared compiled default when unset", async () => {
+    const { exitCode, stdout } = await probe({});
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout).idle).toBe(120_000);
+  });
+
+  it("honours SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS", async () => {
+    const { exitCode, stdout } = await probe({ SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS: "600000" });
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout).idle).toBe(600_000);
+  });
+
+  it("fails loud at import on a malformed idle override", async () => {
+    const { exitCode, stderr } = await probe({ SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS: "2 minutes" });
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS must be a positive integer/);
+  });
+
+  it("fails loud at import on a malformed first-response override", async () => {
+    // The TTFB constant is module-private, so the refusal is what proves the
+    // variable is actually read — a silently ignored knob is the failure mode
+    // this case exists to catch.
+    const { exitCode, stderr } = await probe({ SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS: "0" });
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS must be a positive integer/);
+  });
+});

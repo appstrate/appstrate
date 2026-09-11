@@ -13,34 +13,19 @@
  *      the user locally logged in.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  loadTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
-import { setProfile, getProfile } from "../src/lib/config.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { loadTokens } from "../src/lib/keyring.ts";
+import { getProfile } from "../src/lib/config.ts";
 import { logoutCommand } from "../src/commands/logout.ts";
-
-// In-memory keyring — same shape as `keyring.test.ts` but scoped to
-// this file so test isolation stays clean.
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 type FetchCall = {
   url: string;
@@ -49,15 +34,12 @@ type FetchCall = {
   body: string | null;
 };
 
-let tmpDir: string;
-// Captured at `beforeAll` rather than module load. If another test file
-// running earlier in the same Bun worker mutated `XDG_CONFIG_HOME` and
-// forgot to restore it, a module-level capture would snapshot the stale
-// value — and our `afterAll` would then write that wrong value back
-// into the worker's env, poisoning any test that runs next.
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-logout-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
+let dataHome: string;
+let previousDataHome: string | undefined;
 
 function installFetch(responder: (url: string, init?: RequestInit) => Promise<Response>): void {
   const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -78,42 +60,23 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
-
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-logout-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  previousDataHome = process.env.XDG_DATA_HOME;
+  dataHome = await mkdtemp(join(tmpdir(), "appstrate-logout-data-"));
+  process.env.XDG_DATA_HOME = dataHome;
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
+  if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+  else process.env.XDG_DATA_HOME = previousDataHome;
+  await rm(dataHome, { recursive: true, force: true });
 });
-
-async function seedLoggedInProfile(name: string): Promise<void> {
-  await setProfile(name, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "a@example.com",
-  });
-  await saveTokens(name, {
-    accessToken: "tok-abc",
-    expiresAt: Date.now() + 15 * 60 * 1000,
-    refreshToken: "rt-xyz",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  });
-}
 
 describe("logout (with refresh token)", () => {
   it("calls POST /api/auth/cli/revoke with refresh_token + client_id, then wipes state", async () => {
@@ -185,4 +148,17 @@ describe("logout (idempotency)", () => {
     await logoutCommand({ profile: "never-logged-in" });
     expect(fetchCalls).toHaveLength(0);
   });
+});
+
+it("removes credentials even when the synchronization lock cannot be opened", async () => {
+  const { mkdir } = await import("node:fs/promises");
+  const { getLockPath } = await import("../src/lib/skills-sync/lock.ts");
+  const { createMemoryIO } = await import("./helpers/memory-io.ts");
+  await seedLoggedInProfile("default");
+  await mkdir(getLockPath(), { recursive: true });
+  const { io, stderr } = createMemoryIO();
+  await logoutCommand({}, io);
+  expect(await loadTokens("default")).toBeNull();
+  expect(await getProfile("default")).toBeNull();
+  expect(stderr()).toContain("could not complete skills cleanup");
 });

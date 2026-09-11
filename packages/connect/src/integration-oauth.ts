@@ -49,7 +49,7 @@ const PKCE_S256 = "S256";
 /** PKCE-plain marker. RFC 7636 §4.2 — only used when the IdP does not advertise S256. */
 const PKCE_PLAIN = "plain";
 
-export interface InitiateIntegrationOAuthInput {
+interface InitiateIntegrationOAuthInput {
   /** Integration package id (e.g. `@official/gmail`). */
   packageId: string;
   /** Auth key as declared in `manifest.auths.{key}`. */
@@ -124,9 +124,9 @@ export interface InitiateIntegrationOAuthInput {
    * for non-oauth2 auths, which have no OAuth client and never reach token refresh.
    */
   clientRef?: string;
-  /** Org / app / actor context — propagated to the callback handler. */
+  /** Org / space / actor context — propagated to the callback handler. */
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor;
   /**
    * When true, append `prompt=select_account` to the authorize URL so the
@@ -149,7 +149,7 @@ export interface InitiateIntegrationOAuthInput {
   discover?: typeof resolveOAuthEndpoints;
 }
 
-export interface InitiateIntegrationOAuthResult {
+interface InitiateIntegrationOAuthResult {
   authUrl: string;
   state: string;
 }
@@ -226,7 +226,7 @@ export async function initiateIntegrationOAuth(
     orgId: input.orgId,
     userId: input.actor.type === "user" ? input.actor.id : null,
     endUserId: input.actor.type === "end_user" ? input.actor.id : null,
-    applicationId: input.applicationId,
+    spaceId: input.spaceId,
     subjectId: integrationSubjectIdSentinel(input.packageId, input.authKey),
     codeVerifier,
     scopesRequested: uniqueScopes,
@@ -273,7 +273,7 @@ export interface IntegrationOAuthCallbackResult {
   packageId: string;
   authKey: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor;
   accessToken: string;
   refreshToken?: string;
@@ -370,7 +370,7 @@ export async function handleIntegrationOAuthCallback(
     packageId: integration.packageId,
     authKey: integration.authKey,
     orgId: stateRow.orgId,
-    applicationId: stateRow.applicationId,
+    spaceId: stateRow.spaceId,
     actor,
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,

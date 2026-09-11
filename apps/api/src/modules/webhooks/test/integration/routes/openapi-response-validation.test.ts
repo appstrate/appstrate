@@ -46,8 +46,8 @@ describe("OpenAPI response validation — webhooks", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          level: "application",
-          applicationId: ctx.defaultAppId,
+          level: "space",
+          spaceId: ctx.defaultSpaceId,
           url: "https://example.com/hook",
           events: ["run.success"],
         }),
@@ -71,9 +71,9 @@ describe("OpenAPI response validation — webhooks", () => {
       const schema = getResponseSchema("/api/webhooks", "GET", "200");
       expect(schema).not.toBeNull();
 
-      await seedWebhook({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await seedWebhook({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
-      const res = await app.request(`/api/webhooks?applicationId=${ctx.defaultAppId}`, {
+      const res = await app.request(`/api/webhooks?spaceId=${ctx.defaultSpaceId}`, {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
@@ -98,7 +98,7 @@ describe("OpenAPI response validation — webhooks", () => {
       const schema = getResponseSchema("/api/webhooks/{id}", "GET", "200");
       expect(schema).not.toBeNull();
 
-      const wh = await seedWebhook({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      const wh = await seedWebhook({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
       const res = await app.request(`/api/webhooks/${wh.id}`, {
         headers: authHeaders(ctx),

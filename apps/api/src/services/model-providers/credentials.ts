@@ -27,7 +27,7 @@ import { toISORequired } from "../../lib/date-helpers.ts";
 import { getModelProvider } from "./registry.ts";
 import { resolveCatalogBackedCandidates } from "./model-selection.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
-import type { ModelProviderIdentity } from "@appstrate/core/module";
+import type { ModelProviderDefinition, ModelProviderIdentity } from "@appstrate/core/module";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getSystemModelProviderCredentials, getSystemModels } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
@@ -36,7 +36,7 @@ import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────
 
-export interface ApiKeyBlob {
+interface ApiKeyBlob {
   kind: "api_key";
   apiKey: string;
 }
@@ -57,7 +57,7 @@ export type OAuthBlob = OAuthTokenResponse & {
   email?: string;
 };
 
-export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
+type CredentialsBlob = ApiKeyBlob | OAuthBlob;
 
 // ─── Decrypted-for-inference shape ─────────────────────────────────────────
 
@@ -67,7 +67,7 @@ export type CredentialsBlob = ApiKeyBlob | OAuthBlob;
  * `baseUrl` inline so downstream consumers don't have to re-look-up
  * `getModelProvider`.
  */
-export interface DecryptedModelProviderCredentials {
+interface DecryptedModelProviderCredentials {
   /** Canonical registry id ("anthropic", "openai", …). */
   providerId: string;
   apiShape: ModelApiShape;
@@ -122,11 +122,23 @@ export function findMissingIdentityClaims(
   return (required ?? []).filter((k) => !identity[k]);
 }
 
-function effectiveBaseUrl(providerId: string, override: string | null): string | null {
-  const cfg = getModelProvider(providerId);
-  if (!cfg) return null;
-  if (override && cfg.baseUrlOverridable) return override;
-  return cfg.defaultBaseUrl;
+/**
+ * Sole owner of the base-URL-override predicate. It decides which endpoint a
+ * stored API key is sent to, so it is declared once and called everywhere
+ * rather than re-inlined per site. `null` = the stored override does not apply
+ * (unset, or the provider forbids overriding) — the caller falls back to the
+ * registry default or persists `null`.
+ */
+function resolveBaseUrlOverride(
+  cfg: ModelProviderDefinition,
+  override: string | null | undefined,
+): string | null {
+  return override && cfg.baseUrlOverridable ? override : null;
+}
+
+/** The endpoint a credential actually talks to: honoured override, else default. */
+function effectiveBaseUrl(cfg: ModelProviderDefinition, override: string | null): string {
+  return resolveBaseUrlOverride(cfg, override) ?? cfg.defaultBaseUrl;
 }
 
 function decryptBlob(ciphertext: string): CredentialsBlob | null {
@@ -138,22 +150,37 @@ function decryptBlob(ciphertext: string): CredentialsBlob | null {
 }
 
 /**
- * Shared "raw load" used by both `loadDbCredential` (inference read path)
- * and the OAuth token resolver. Returns the decrypted blob + the registry
- * overlay + the row id/orgId, or `null` when the row is missing, the
- * provider is unknown, or decryption fails. Caller maps `null` to its
+ * Shared "raw load" behind every credential read path — the inference read
+ * path, the OAuth token resolver, and the metadata-only listings. Returns the
+ * row identity, the registry overlay (`config` + the derived `apiShape` /
+ * `baseUrl`), and the decrypted blob, or `null` when the row is missing, the
+ * org doesn't match, or the provider is unknown. Caller maps `null` to its
  * preferred error mode (notFound() vs silent fallback).
+ *
+ * A blob that will not decrypt yields `blob: null` on an otherwise-populated
+ * result, NOT `null`: the registry overlay is derived from the plaintext
+ * `provider_id` column and stays resolvable for a credential whose secret is
+ * unreadable — which is exactly what the metadata-only callers need in order
+ * to render a dead row instead of dropping it. Callers that need the secret
+ * test `blob` themselves.
+ *
+ * `config` is non-nullable: an unknown `providerId` returns `null` outright
+ * (below), so every returned object has one.
  *
  * `expectedOrgId` is enforced when provided — used as defense-in-depth by
  * the sidecar token-resolver path (run pinned to a specific org).
  */
-export interface RawCredentialLoad {
+interface RawCredentialLoad {
   id: string;
   orgId: string;
   providerId: string;
   baseUrlOverride: string | null;
-  blob: CredentialsBlob;
-  config: ReturnType<typeof getModelProvider>;
+  blob: CredentialsBlob | null;
+  config: ModelProviderDefinition;
+  /** Registry-derived — see {@link DecryptedModelProviderCredentials}. */
+  apiShape: ModelApiShape;
+  /** Registry default, or the row's override when the provider allows one. */
+  baseUrl: string;
 }
 
 export async function loadCredentialRow(
@@ -181,55 +208,21 @@ export async function loadCredentialRow(
     });
     return null;
   }
-  const blob = decryptBlob(row.credentialsEncrypted);
-  if (!blob) return null;
   return {
     id: row.id,
     orgId: row.orgId,
     providerId: row.providerId,
     baseUrlOverride: row.baseUrlOverride,
-    blob,
+    blob: decryptBlob(row.credentialsEncrypted),
     config,
+    apiShape: config.apiShape,
+    baseUrl: effectiveBaseUrl(config, row.baseUrlOverride),
   };
-}
-
-/**
- * Registry-derived credential metadata WITHOUT decrypting the secret blob.
- * `providerId` is a plaintext column; `apiShape`/`baseUrl` come from the
- * provider registry. Used by metadata-only listings (e.g. the chat model
- * picker) that need to resolve the protocol family + base URL but never the
- * key itself — the real secret is decrypted later, at inference time.
- */
-export interface CredentialMetadata {
-  providerId: string;
-  apiShape: ModelApiShape;
-  baseUrl: string;
-}
-
-export async function loadCredentialMetadata(
-  id: string,
-  orgId: string,
-): Promise<CredentialMetadata | null> {
-  const [row] = await db
-    .select({
-      orgId: modelProviderCredentials.orgId,
-      providerId: modelProviderCredentials.providerId,
-      baseUrlOverride: modelProviderCredentials.baseUrlOverride,
-    })
-    .from(modelProviderCredentials)
-    .where(eq(modelProviderCredentials.id, id))
-    .limit(1);
-  if (!row || row.orgId !== orgId) return null;
-  const cfg = getModelProvider(row.providerId);
-  if (!cfg) return null;
-  const baseUrl =
-    row.baseUrlOverride && cfg.baseUrlOverridable ? row.baseUrlOverride : cfg.defaultBaseUrl;
-  return { providerId: row.providerId, apiShape: cfg.apiShape, baseUrl };
 }
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
-export interface CreateApiKeyCredentialInput {
+interface CreateApiKeyCredentialInput {
   orgId: string;
   userId: string;
   label: string;
@@ -248,8 +241,7 @@ export async function createApiKeyCredential(input: CreateApiKeyCredentialInput)
       `Provider ${input.providerId} requires OAuth (authMode=${cfg.authMode}); use createOAuthCredential instead`,
     );
   }
-  const baseUrlOverride =
-    input.baseUrlOverride && cfg.baseUrlOverridable ? input.baseUrlOverride : null;
+  const baseUrlOverride = resolveBaseUrlOverride(cfg, input.baseUrlOverride);
   const blob: ApiKeyBlob = { kind: "api_key", apiKey: input.apiKey };
   const [row] = await db
     .insert(modelProviderCredentials)
@@ -314,7 +306,7 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
   return row!.id;
 }
 
-export interface ReconnectOAuthCredentialInput {
+interface ReconnectOAuthCredentialInput {
   orgId: string;
   id: string;
   providerId: string;
@@ -371,7 +363,6 @@ export async function reconnectOAuthCredential(
       credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
       expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
       refreshFailureCount: 0,
-      lastRefreshFailureAt: null,
       updatedAt: new Date(),
     })
     .where(
@@ -392,7 +383,7 @@ export async function reconnectOAuthCredential(
 
 // ─── Update ────────────────────────────────────────────────────────────────
 
-export interface UpdateModelProviderCredentialPatch {
+interface UpdateModelProviderCredentialPatch {
   label?: string;
   baseUrlOverride?: string | null;
   /** Rotate an api_key credential. Rejected on OAuth rows — refresh path uses {@link updateOAuthCredentialTokens}. */
@@ -473,11 +464,24 @@ export async function dedupeCredentialLabel(orgId: string, base: string): Promis
 }
 
 /**
+ * Default label: `<host> · <displayName>` for a credential on its own endpoint,
+ * the display name otherwise. A base label — run it through {@link dedupeCredentialLabel}.
+ */
+export function deriveCredentialLabel(
+  cfg: Pick<ModelProviderDefinition, "displayName" | "baseUrlOverridable">,
+  baseUrlOverride: string | null | undefined,
+): string {
+  if (!cfg.baseUrlOverridable || !baseUrlOverride) return cfg.displayName;
+  const host = URL.parse(baseUrlOverride)?.host;
+  return host ? `${host} · ${cfg.displayName}` : cfg.displayName;
+}
+
+/**
  * Persist refreshed OAuth tokens. Called by the refresh worker / on-demand
  * resolver after a successful upstream refresh. Preserves blob fields the
  * upstream didn't return (e.g. `email`, `accountId` when not rotated).
  */
-export interface UpdateOAuthCredentialTokensInput {
+interface UpdateOAuthCredentialTokensInput {
   accessToken: string;
   refreshToken: string;
   expiresAt: number | null;
@@ -587,7 +591,7 @@ export async function updateOAuthCredentialTokens(
     // working refresh proves the credential is healthy again, so the
     // escalation counter must not carry over. See
     // `recordModelCredentialRefreshFailure`.
-    { refreshFailureCount: 0, lastRefreshFailureAt: null },
+    { refreshFailureCount: 0 },
   );
 }
 
@@ -632,7 +636,6 @@ export async function recordModelCredentialRefreshFailure(
     .update(modelProviderCredentials)
     .set({
       refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1`,
-      lastRefreshFailureAt: sql`now()`,
       updatedAt: sql`now()`,
     })
     .where(
@@ -780,7 +783,7 @@ export async function listOrgModelProviderCredentials(
         id: r.id,
         label: r.label,
         apiShape: cfg?.apiShape ?? "openai-completions",
-        baseUrl: effectiveBaseUrl(r.providerId, r.baseUrlOverride) ?? "",
+        baseUrl: cfg ? effectiveBaseUrl(cfg, r.baseUrlOverride) : "",
         source: "custom",
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,
@@ -859,15 +862,16 @@ export async function loadInferenceCredentials(
   // `loadDbCredential` helper had only this one caller and added no
   // value beyond the registry-overlay projection.
   const loaded = await loadCredentialRow(id, orgId);
-  if (!loaded || !loaded.config) return null;
-  const baseUrl = effectiveBaseUrl(loaded.providerId, loaded.baseUrlOverride);
-  if (!baseUrl) return null;
+  // A blob that will not decrypt is as dead as a missing row for inference —
+  // the raw load keeps such a credential alive for the metadata callers, this
+  // path does not.
+  if (!loaded || !loaded.blob) return null;
   if (loaded.blob.kind === "oauth" && loaded.blob.needsReconnection) return null;
 
   const common = {
     providerId: loaded.providerId,
-    apiShape: loaded.config.apiShape,
-    baseUrl,
+    apiShape: loaded.apiShape,
+    baseUrl: loaded.baseUrl,
   };
   if (loaded.blob.kind === "api_key") {
     return { ...common, apiKey: loaded.blob.apiKey };

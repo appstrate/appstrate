@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
+
 /**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */
@@ -116,7 +118,7 @@ export const responses = {
   RateLimited: {
     description: "Too many requests",
     headers: {
-      "Request-Id": { $ref: "#/components/headers/RequestId" },
+      ...REQUEST_ID_ONLY_HEADERS,
       "Retry-After": { $ref: "#/components/headers/RetryAfter" },
       RateLimit: { $ref: "#/components/headers/RateLimit" },
       "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
@@ -138,9 +140,7 @@ export const responses = {
   },
   IdempotencyInProgress: {
     description: "A request with the same Idempotency-Key is already being processed",
-    headers: {
-      "Request-Id": { $ref: "#/components/headers/RequestId" },
-    },
+    headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -152,6 +152,48 @@ export const responses = {
             "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
           code: "idempotency_in_progress",
           requestId: "req_abc123",
+        },
+      },
+    },
+  },
+  /**
+   * The 409 every run-creation operation answers with — idempotency guard or
+   * deletion reservation. Shared so an operation cannot document one and
+   * return the other.
+   */
+  RunAdmissionConflict: {
+    description:
+      "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being " +
+      "processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, " +
+      "so no new work is admitted and a retry will not succeed.",
+    headers: REQUEST_ID_ONLY_HEADERS,
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        examples: {
+          idempotencyInProgress: {
+            summary: "Same Idempotency-Key still in flight",
+            value: {
+              type: "https://docs.appstrate.dev/errors/idempotency-in-progress",
+              title: "Idempotency In Progress",
+              status: 409,
+              detail:
+                "A request with the same Idempotency-Key is already being processed. Please wait and retry.",
+              code: "idempotency_in_progress",
+              requestId: "req_abc123",
+            },
+          },
+          orgDeleting: {
+            summary: "The organization's deletion is reserved",
+            value: {
+              type: "https://docs.appstrate.dev/errors/org-deleting",
+              title: "Organization Is Being Deleted",
+              status: 409,
+              detail: "This organization is being deleted; no new work can be admitted.",
+              code: "org_deleting",
+              requestId: "req_abc123",
+            },
+          },
         },
       },
     },
@@ -187,9 +229,7 @@ export const responses = {
       "(`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so " +
       "reaching it means the archive is a bomb or was stored before the gate covered this path " +
       "— republish the package. RFC 9457 problem+json.",
-    headers: {
-      "Request-Id": { $ref: "#/components/headers/RequestId" },
-    },
+    headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -205,11 +245,110 @@ export const responses = {
       },
     },
   },
+  /**
+   * The 404 shared by both schedule writes.
+   *
+   * It is NOT one cause on both: `POST` resolves the manifest the schedule will
+   * FIRE and 404s a never-published agent (`assertScheduleTargetValid`), while
+   * `PUT` loads the schedule row FIRST (`loadScheduleOr404`) — so an unknown
+   * schedule id is the DOMINANT 404 there, and the publish cause only reaches
+   * `PUT` when the patch carries `input` or `version_override`. The description
+   * therefore names every cause and says which operation each belongs to; the
+   * component is shared so the two operations cannot drift, not because they
+   * refuse for identical reasons.
+   *
+   * It was written out inline on `POST` only, so `PUT` declared the generic
+   * `NotFound` while returning this — and the test that was supposed to catch
+   * that read the create operation alone and reported green. Then the first fix
+   * `$ref`'d POST's wording onto PUT verbatim, which left PUT's own primary 404
+   * (unknown schedule id) undocumented.
+   */
+  NoPublishedVersion: {
+    description:
+      "Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself " +
+      "does not exist (or belongs to another space) — that check runs first. Both writes " +
+      "also answer 404 when the target agent does not exist, or has no published version " +
+      "(`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or " +
+      "`version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, " +
+      "so a never-published agent is refused at the write rather than 404ing on every tick; pin " +
+      'the working copy with `version_override: "draft"` to schedule it anyway.',
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/not-found",
+          title: "Not Found",
+          status: 404,
+          detail: "Agent '@acme/reporter' has no published version",
+          code: "no_published_version",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
+  ViewAsRefused: {
+    description:
+      "The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse " +
+      "(bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential " +
+      "cannot carry a persona: only a cookie session and the CLI/instance token authenticate the " +
+      "user themselves; every other credential carries a ceiling of its own and no session to " +
+      "narrow. The other refusals reuse the " +
+      "statuses already documented on this operation: `403 view_as_forbidden` when the real org " +
+      "role is not owner/admin, the role is not grantable by the caller in that space, or a " +
+      "custom role is previewed where the `custom_roles` feature is off, and " +
+      "`404 view_as_not_found` when the space is not in the organization, the custom role does " +
+      "not exist, or the organization named alongside the persona is not the caller's. Those four " +
+      'codes are the complete set that means "drop the preview" — a plain `not_found` under an ' +
+      "active persona is the previewed role's own wall, not a refusal of the persona. A refused " +
+      "preview is never answered with the caller's real permissions.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        examples: {
+          invalid: {
+            summary: "Header does not parse",
+            value: {
+              type: "https://docs.appstrate.dev/errors/invalid-view-as",
+              title: "Invalid View-As Header",
+              status: 400,
+              detail: "X-View-As could not be parsed: space and role must be provided together",
+              code: "invalid_view_as",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+          notFound: {
+            summary: "The persona names something that is gone",
+            value: {
+              type: "https://docs.appstrate.dev/errors/view-as-not-found",
+              title: "View-As Target Not Found",
+              status: 404,
+              detail: "Space 'spc_…' not found in this organization",
+              code: "view_as_not_found",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+          unsupported: {
+            summary: "Credential cannot carry a persona",
+            value: {
+              type: "https://docs.appstrate.dev/errors/view-as-unsupported",
+              title: "View-As Not Supported",
+              status: 400,
+              detail:
+                "X-View-As is only supported for a user session or the CLI/instance token, not for api_key authentication.",
+              code: "view_as_unsupported",
+              param: "X-View-As",
+              requestId: "req_abc123",
+            },
+          },
+        },
+      },
+    },
+  },
   IdempotencyConflict: {
     description: "Same Idempotency-Key used with a different request body",
-    headers: {
-      "Request-Id": { $ref: "#/components/headers/RequestId" },
-    },
+    headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },

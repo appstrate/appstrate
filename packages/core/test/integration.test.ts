@@ -15,13 +15,13 @@ import {
   integrationManifestSchema,
   type IntegrationManifest,
   API_CALL_TOOL_NAME,
-  canonicalizeApiToolName,
   getConnectToolNames,
   getDeclaredToolNames,
   getApiCallConfigs,
   getAvailableScopes,
   connectableAuthKeysForAgent,
   requiredScopesForAgent,
+  partitionScopesByAuthCatalog,
   scopesContributedByTools,
   expandScopesGranted,
   missingScopesForConnection,
@@ -533,6 +533,57 @@ describe("integrationManifestSchema — delivery.http.in install gate", () => {
 });
 
 // ─────────────────────────────────────────────
+// delivery.http.prefix install gate (§7.6)
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — delivery.http.prefix install gate", () => {
+  const withPrefix = (name: string, prefix: string) =>
+    baseManifest({
+      source: { kind: "none" },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: { http: { in: "header", name, value: "{$credential.api_key}", prefix } },
+        },
+      },
+    });
+
+  it("rejects a bare auth scheme and names the separator-carrying form", () => {
+    const r = integrationManifestSchema.safeParse(withPrefix("Authorization", "Bearer"));
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const onPrefix = r.error.issues.find(
+        (i) => i.path.join(".") === "auths.key.delivery.http.prefix",
+      );
+      expect(onPrefix).toBeDefined();
+      expect(onPrefix!.message).toContain('Write "Bearer ".');
+    }
+  });
+
+  it("rejects a bare scheme in Proxy-Authorization position too", () => {
+    expect(
+      integrationManifestSchema.safeParse(withPrefix("Proxy-Authorization", "Basic")).success,
+    ).toBe(false);
+  });
+
+  it("accepts every prefix that already carries its own separator", () => {
+    // "Bearer " / "Basic " (canonical schemes), "Token token=" (vendor
+    // composite — not a bare token), and "" (no prefix at all).
+    for (const prefix of ["Bearer ", "Basic ", "Zoho-oauthtoken ", "Token token=", ""]) {
+      expect(integrationManifestSchema.safeParse(withPrefix("Authorization", prefix)).success).toBe(
+        true,
+      );
+    }
+  });
+
+  it("leaves a non-auth header's bare prefix alone — there it is a literal", () => {
+    expect(integrationManifestSchema.safeParse(withPrefix("Cookie", "session")).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
 // mtls + delivery.http install gate (§7.6)
 // ─────────────────────────────────────────────
 
@@ -1019,7 +1070,10 @@ describe("getApiCallConfigs", () => {
 
   it("keeps valid long auth keys while deriving bounded stable multi-auth names", () => {
     const longAuthKey = "authentication_key_that_is_valid_but_long";
-    const legacyCall = `api_call__${longAuthKey}`;
+    // The bounded canonical name. The raw `api_call__{longAuthKey}` spelling
+    // used to be accepted alongside it; that alias is gone, so the canonical
+    // token is the only name a manifest may use.
+    const canonicalCall = "api_call__h0a0593260c3968fd8";
     const auth = (envName: string) => ({
       type: "api_key",
       credentials: { schema: { type: "object", properties: {} } },
@@ -1029,7 +1083,7 @@ describe("getApiCallConfigs", () => {
     const manifest = parse(
       baseManifest({
         source: { kind: "none" },
-        default_tools: [legacyCall],
+        default_tools: [canonicalCall],
         auths: { short: auth("SHORT"), [longAuthKey]: auth("LONG") },
         _meta: {
           "dev.appstrate/api": {
@@ -1044,19 +1098,46 @@ describe("getApiCallConfigs", () => {
 
     const config = getApiCallConfigs(manifest).find((entry) => entry.authKey === longAuthKey)!;
     expect(config.authKey).toBe(longAuthKey);
-    expect(config.toolName).toBe("api_call__h0a0593260c3968fd8");
+    expect(config.toolName).toBe(canonicalCall);
     expect(config.uploadToolName).toBe(config.toolName.replace(/^api_call/, "api_upload"));
     expect(`${"n".repeat(24)}__${config.uploadToolName}`).toHaveLength(TOOL_NAME_MAX_LEN);
-    expect(canonicalizeApiToolName(manifest, legacyCall)).toBe(config.toolName);
-    expect(readDefaultTools(manifest)).toEqual([legacyCall]);
+    expect(readDefaultTools(manifest)).toEqual([canonicalCall]);
 
-    const hiddenLegacy = {
+    const hiddenCanonical = {
       ...manifest,
-      hidden_tools: [legacyCall],
+      hidden_tools: [canonicalCall],
     } as IntegrationManifest;
-    expect(resolveIntegrationToolCatalog({ integration: hiddenLegacy })).toEqual([
+    expect(resolveIntegrationToolCatalog({ integration: hiddenCanonical })).toEqual([
       { name: "api_call__short" },
     ]);
+  });
+
+  it("refuses a manifest naming the pre-bounding raw auth-key spelling", () => {
+    // `api_call__{longAuthKey}` is not a tool this integration exposes any
+    // more. It must fail validation rather than be silently canonicalized —
+    // an accepted-but-rewritten name is how two spellings for one capability
+    // came to exist in the first place.
+    const longAuthKey = "authentication_key_that_is_valid_but_long";
+    const auth = (envName: string) => ({
+      type: "api_key",
+      credentials: { schema: { type: "object", properties: {} } },
+      authorized_uris: ["https://api/**"],
+      delivery: { env: { [envName]: { value: "{$credential.k}" } } },
+    });
+    expect(() =>
+      parse(
+        baseManifest({
+          source: { kind: "none" },
+          default_tools: [`api_call__${longAuthKey}`],
+          auths: { short: auth("SHORT"), [longAuthKey]: auth("LONG") },
+          _meta: {
+            "dev.appstrate/api": {
+              auths: { short: {}, [longAuthKey]: { upload_protocols: ["google-resumable"] } },
+            },
+          },
+        }),
+      ),
+    ).toThrow(/not a tool this integration exposes/);
   });
 
   it("returns [] when the integration declares no api_call extension", () => {
@@ -1110,7 +1191,12 @@ describe("getDeclaredToolNames / getAvailableScopes", () => {
 });
 
 // ─────────────────────────────────────────────
-// getConnectToolNames — spec-natural + vendor _meta back-compat (R8b N-2)
+// getConnectToolNames — spec-natural ONLY (R8b N-2)
+//
+// No vendor-`_meta` fallback exists: `getConnectToolNames` reads
+// `connect.tool.name` and nothing else. The header claimed one for as long as
+// this section has existed, which is the same false back-compat the guide
+// correction deleted from `writing-an-integration-with-connect.md`.
 // ─────────────────────────────────────────────
 
 /** Build a custom-auth integration carrying a `connect.tool` block under the
@@ -1209,9 +1295,9 @@ describe("scopesContributedByTools / requiredScopesForAgent", () => {
         manifest: m,
         authKey: "oauth",
         agentTools: ["read_tool"],
-        agentScopes: ["extra"],
+        agentScopes: ["write:org"],
       }).sort(),
-    ).toEqual(["extra", "read:org"].sort());
+    ).toEqual(["read:org", "write:org"].sort());
   });
 
   it('requiredScopesForAgent returns the auth\'s default_scopes when agentTools is "*"', () => {
@@ -1255,6 +1341,184 @@ describe("scopesContributedByTools / requiredScopesForAgent", () => {
         agentScopes: ["extra"],
       }).sort(),
     ).toEqual(["extra", "read", "write"]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// requiredScopesForAgent — per-auth catalog filter
+//
+// The agent's `scopes` selection names no auth and is validated at publish
+// against the UNION of every auth's catalog (`getAvailableScopes`), while the
+// connect kickoff is per-auth. Relaying a sibling auth's scope as this auth's
+// `required_scopes` made the kickoff reject the platform's own value.
+// ─────────────────────────────────────────────
+
+describe("requiredScopesForAgent — per-auth scope_catalog", () => {
+  /** Two oauth2 auths, each advertising a catalog the other does not. */
+  function twoAuthManifest(catalogOnA = true): IntegrationManifest {
+    const oauth = {
+      type: "oauth2",
+      issuer: "https://accounts.google.com",
+      authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+      token_endpoint: "https://oauth2.googleapis.com/token",
+      authorized_uris: ["https://gmail.googleapis.com/**"],
+      delivery: {
+        http: {
+          in: "header",
+          name: "Authorization",
+          prefix: "Bearer ",
+          value: "{$credential.access_token}",
+        },
+      },
+    };
+    return parse(
+      baseManifest({
+        tools_policy: { read_tool: { required_scopes: { a: ["a:read"], b: ["b:read"] } } },
+        auths: {
+          a: {
+            ...oauth,
+            ...(catalogOnA ? { scope_catalog: [{ value: "a:read", label: "A read" }] } : {}),
+          },
+          b: {
+            ...oauth,
+            scope_catalog: [
+              { value: "b:read", label: "B read" },
+              { value: "b:write", label: "B write" },
+            ],
+          },
+        },
+      }),
+    );
+  }
+
+  it("drops an agent scope declared only by the SIBLING auth's catalog", () => {
+    expect(
+      requiredScopesForAgent({
+        manifest: twoAuthManifest(),
+        authKey: "a",
+        agentTools: [],
+        agentScopes: ["b:write"],
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps an agent scope the target auth's own catalog declares", () => {
+    expect(
+      requiredScopesForAgent({
+        manifest: twoAuthManifest(),
+        authKey: "a",
+        agentTools: [],
+        agentScopes: ["a:read"],
+      }),
+    ).toEqual(["a:read"]);
+  });
+
+  it("keeps everything when the target auth declares no catalog", () => {
+    // No closed set to filter against — the IdP arbitrates at consent time.
+    expect(
+      requiredScopesForAgent({
+        manifest: twoAuthManifest(false),
+        authKey: "a",
+        agentTools: [],
+        agentScopes: ["b:write", "anything"],
+      }).sort(),
+    ).toEqual(["anything", "b:write"]);
+  });
+
+  it("leaves tool-contributed scopes alone — they are per-auth already", () => {
+    // A tool scope the target auth's catalog does NOT declare, which is the
+    // only shape that can tell the filter apart: with a catalogued scope the
+    // assertion holds whether or not tool scopes are filtered. The schema
+    // cannot express it (cross-field rule 4 makes `required_scopes[auth]` a
+    // subset of that auth's catalog), so it is written onto the parsed
+    // manifest — the helper's contract is what is under test: the filter is
+    // keyed to the agent's auth-less `scopes` selection, never to the
+    // per-auth tool map.
+    const manifest = twoAuthManifest();
+    (
+      manifest as unknown as {
+        tools_policy: Record<string, { required_scopes: Record<string, string[]> }>;
+      }
+    ).tools_policy.read_tool!.required_scopes.b = ["b:undeclared"];
+    expect(
+      requiredScopesForAgent({
+        manifest,
+        authKey: "b",
+        agentTools: ["read_tool"],
+        agentScopes: undefined,
+      }),
+    ).toEqual(["b:undeclared"]);
+  });
+
+  it("missingScopesForConnection inherits the filter", () => {
+    // A connection on auth `a` is not under-scoped for a scope only `b`
+    // advertises — nothing could ever grant it there.
+    expect(
+      missingScopesForConnection({
+        manifest: twoAuthManifest(),
+        authKey: "a",
+        granted: ["a:read"],
+        agentTools: [],
+        agentScopes: ["b:write"],
+      }),
+    ).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// partitionScopesByAuthCatalog — the single definition of catalog membership
+// (moved here from `apps/api/test/unit/services/integration-manifest-helpers.test.ts`
+// when the api-side complement was folded into this helper).
+// ─────────────────────────────────────────────
+
+describe("partitionScopesByAuthCatalog", () => {
+  const auth = { scope_catalog: [{ value: "gmail.readonly" }, { value: "gmail.send" }] };
+
+  it("declares every scope the auth's catalog lists, in caller order", () => {
+    expect(partitionScopesByAuthCatalog(auth, ["gmail.send", "gmail.readonly"])).toEqual({
+      declared: ["gmail.send", "gmail.readonly"],
+      undeclared: [],
+    });
+  });
+
+  it("splits a mixed request, deduping the undeclared half in caller order", () => {
+    expect(
+      partitionScopesByAuthCatalog(auth, [
+        "gmail.send",
+        "drive.file",
+        "gmail.modify",
+        "drive.file",
+      ]),
+    ).toEqual({ declared: ["gmail.send"], undeclared: ["drive.file", "gmail.modify"] });
+  });
+
+  it("declares everything when the auth declares no catalog", () => {
+    // No catalog = no closed set: the IdP arbitrates at consent time, the same
+    // contract `validateAgentIntegrationScopes` applies to an agent selection.
+    for (const none of [{}, { scope_catalog: [] }, undefined]) {
+      expect(partitionScopesByAuthCatalog(none, ["anything.at.all"])).toEqual({
+        declared: ["anything.at.all"],
+        undeclared: [],
+      });
+    }
+  });
+
+  it("is keyed by ONE auth — a sibling auth's catalog does not widen it", () => {
+    // The connect kickoff is keyed by `authKey`, so unlike the agent-manifest
+    // side (`getAvailableScopes`, which unions every auth) a scope advertised
+    // only by a sibling auth stays undeclared here.
+    expect(partitionScopesByAuthCatalog(auth, ["calendar.events"])).toEqual({
+      declared: [],
+      undeclared: ["calendar.events"],
+    });
+  });
+
+  it("accepts an empty request", () => {
+    expect(partitionScopesByAuthCatalog(auth, [])).toEqual({ declared: [], undeclared: [] });
+    expect(partitionScopesByAuthCatalog(auth, undefined)).toEqual({
+      declared: [],
+      undeclared: [],
+    });
   });
 });
 

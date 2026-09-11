@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { EventEmitter } from "node:events";
-import type { PubSub } from "./interface.ts";
+import type { PubSub } from "@appstrate/core/platform-types";
 
 /**
  * In-memory Pub/Sub using EventEmitter.

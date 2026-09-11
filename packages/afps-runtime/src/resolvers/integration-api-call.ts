@@ -38,14 +38,14 @@
  * `api_call` dispatcher keyed by a providerId enum.
  */
 
-import type { Bundle, Tool } from "./types.ts";
+import type { Tool } from "@afps-spec/types";
+import type { Bundle } from "../bundle/types.ts";
 import {
   makeApiCallTool,
   resolveBodyForFetch,
   serializeFetchResponse,
   applyTransportHeaders,
   isReproducibleBody,
-  matchesAuthorizedUriSpec,
   type ApiCallFn,
   type ApiCallMeta,
 } from "./http-call-core.ts";
@@ -66,6 +66,7 @@ import {
   type HttpDeliveryPlan,
 } from "./http-delivery.ts";
 import {
+  isBareAuthSchemePrefix,
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
@@ -93,7 +94,7 @@ export interface IntegrationRef {
  * the auth's URL allowlist, the auth type, and the auth's `delivery.http`
  * config (if any).
  */
-export interface ApiCallIntegrationMeta {
+interface ApiCallIntegrationMeta {
   /** Scoped package id (e.g. `@appstrate/gmail`). */
   name: string;
   /**
@@ -235,7 +236,14 @@ function toApiCallMeta(meta: ApiCallIntegrationMeta): ApiCallMeta {
   };
 }
 
-/** Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`. */
+/**
+ * Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`.
+ *
+ * Package-internal: dropped from the `resolvers` barrel because nothing outside
+ * this package ever consumed it. The `export` keyword survives only so
+ * `test/resolvers/integration-api-call.test.ts` can pin the 56-character tool
+ * name cap directly.
+ */
 export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
   return `${meta.namespace}__${meta.toolName}`;
 }
@@ -253,7 +261,7 @@ export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
  */
 const RESERVED_TRANSPORT_HEADERS: ReadonlySet<string> = new Set([
   "authorization",
-  "x-application-id",
+  "x-space-id",
   "x-org-id",
   "x-session-id",
   "x-integration-id",
@@ -301,7 +309,7 @@ export interface IntegrationApiCallResolver {
  * resolver derives the header from the integration manifest's
  * `delivery.http` plan (auth-type defaults included).
  */
-export interface LocalIntegrationCredentialsFile {
+interface LocalIntegrationCredentialsFile {
   version: number;
   integrations: Record<
     string,
@@ -321,7 +329,40 @@ export interface LocalIntegrationCredentialsFile {
   >;
 }
 
-export interface LocalIntegrationResolverOptions {
+/**
+ * Creds-file load gate — the local-path twin of the integration manifest
+ * validator's rule (1d) (`@appstrate/core/integration`).
+ *
+ * `injection.headerPrefix` is hand-authored in the creds file and reaches the
+ * injector without ever passing through a manifest, so the install-time gate
+ * cannot see it and this is the only place the defect can be caught. Refusing
+ * the whole file when it is read — before a single tool is built, let alone
+ * called — puts the error where the operator can still edit the file, rather
+ * than in an upstream 401 mid-run that names nothing.
+ *
+ * Returns `creds` so both materialisation points (parsed object in the
+ * constructor, JSON file in {@link LocalIntegrationResolver.loadCreds}) gate in
+ * one expression.
+ */
+function assertUsableCredsFile(
+  creds: LocalIntegrationCredentialsFile,
+): LocalIntegrationCredentialsFile {
+  for (const [name, entry] of Object.entries(creds.integrations)) {
+    const prefix = entry.injection?.headerPrefix;
+    // The default mirrors `resolveLocalDeliveryPlan`'s: an override that names
+    // no header lands in Authorization position, where a bare scheme is a
+    // defect.
+    const headerName = entry.injection?.headerName ?? "Authorization";
+    if (typeof prefix === "string" && isBareAuthSchemePrefix(headerName, prefix)) {
+      throw new Error(
+        `LocalIntegrationResolver: integrations["${name}"].injection.headerPrefix "${prefix}" is a bare auth scheme — the prefix is a literal (AFPS §7.6) and is concatenated verbatim, so it must include its own separator. Write "${prefix} ".`,
+      );
+    }
+  }
+  return creds;
+}
+
+interface LocalIntegrationResolverOptions {
   /** Path to a creds JSON file or an already-parsed object. */
   creds: string | LocalIntegrationCredentialsFile;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
@@ -352,7 +393,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       this.creds = null;
       this.credsPath = opts.creds;
     } else {
-      this.creds = opts.creds;
+      this.creds = assertUsableCredsFile(opts.creds);
       this.credsPath = null;
     }
   }
@@ -396,7 +437,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     }
     const fs = await import("node:fs/promises");
     const raw = await fs.readFile(this.credsPath, "utf8");
-    this.creds = JSON.parse(raw) as LocalIntegrationCredentialsFile;
+    this.creds = assertUsableCredsFile(JSON.parse(raw) as LocalIntegrationCredentialsFile);
     return this.creds;
   }
 
@@ -559,6 +600,10 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
  *
  * When neither yields a header (e.g. `custom` auth with no `delivery.http`),
  * returns `null` and the caller injects nothing.
+ *
+ * Both prefixes are concatenated verbatim downstream and neither is inspected
+ * here: the override's was gated by {@link assertUsableCredsFile} when the file
+ * was read, the manifest's by the install-time validator.
  */
 function resolveLocalDeliveryPlan(
   meta: ApiCallIntegrationMeta,
@@ -602,13 +647,13 @@ function applyDeliveryPlan(headers: Record<string, string>, plan: HttpDeliveryPl
 // Remote resolver
 // ─────────────────────────────────────────────
 
-export interface RemoteAppstrateIntegrationResolverOptions {
+interface RemoteAppstrateIntegrationResolverOptions {
   /** Base URL of the Appstrate instance. */
   instance: string;
   /** API key (ask_...) or device-flow JWT with `credential-proxy:call`. */
   apiKey: string;
-  /** Application id (app_...) the caller is scoped to. */
-  applicationId: string;
+  /** Space id (spc_...) the caller is scoped to. */
+  spaceId: string;
   /** Org id (org_...) — required for JWT auth. Optional for API-key auth. */
   orgId?: string;
   /** End-user to impersonate (eu_...). Optional. */
@@ -634,7 +679,7 @@ export interface RemoteAppstrateIntegrationResolverOptions {
 export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallResolver {
   private readonly instance: string;
   private readonly apiKey: string;
-  private readonly applicationId: string;
+  private readonly spaceId: string;
   private readonly orgId: string | undefined;
   private readonly endUserId: string | undefined;
   private readonly sessionId: string;
@@ -644,11 +689,10 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
   constructor(opts: RemoteAppstrateIntegrationResolverOptions) {
     if (!opts.instance) throw new Error("RemoteAppstrateIntegrationResolver: instance is required");
     if (!opts.apiKey) throw new Error("RemoteAppstrateIntegrationResolver: apiKey is required");
-    if (!opts.applicationId)
-      throw new Error("RemoteAppstrateIntegrationResolver: applicationId is required");
+    if (!opts.spaceId) throw new Error("RemoteAppstrateIntegrationResolver: spaceId is required");
     this.instance = opts.instance.replace(/\/$/, "");
     this.apiKey = opts.apiKey;
-    this.applicationId = opts.applicationId;
+    this.spaceId = opts.spaceId;
     this.orgId = opts.orgId;
     this.endUserId = opts.endUserId;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
@@ -702,7 +746,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
       const baseHeaders: Record<string, string> = {
         ...sanitizedAgentHeaders,
         Authorization: `Bearer ${this.apiKey}`,
-        "X-Application-Id": this.applicationId,
+        "X-Space-Id": this.spaceId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
         "X-Session-Id": this.sessionId,
         "X-Integration-Id": meta.name,
@@ -788,6 +832,3 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
     };
   }
 }
-
-// Re-export the URL matcher so callers can reason about authorized_uris.
-export { matchesAuthorizedUriSpec };

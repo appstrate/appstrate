@@ -31,7 +31,7 @@ export const EXIT_TLS = 35;
  * `"unknown"` means we could not confidently classify the error — the
  * caller decides the fallback (generic exit 1 / non-retryable).
  */
-export type NetworkErrorKind = "dns" | "connect" | "timeout" | "tls" | "unknown";
+type NetworkErrorKind = "dns" | "connect" | "timeout" | "tls" | "unknown";
 
 /**
  * Best-effort classifier. Walks the error chain (`cause`) once because

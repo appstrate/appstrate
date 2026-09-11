@@ -14,13 +14,14 @@ import { z } from "zod";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
-import type { ModuleResource, ModuleResources, OrgRole } from "./permissions.ts";
+import type { ModuleResource, ModuleResources, OrgRole, SpaceRolePreset } from "./permissions.ts";
+import type { ModulePrincipalPermissions } from "./principal-permissions.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
   ChatUsageRecord,
   ResolvedChatAttachment,
-  SubscriptionChatResolution,
+  ChatModelResolution,
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts";
@@ -39,7 +40,7 @@ import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts"
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "6.2.0";
+export const CORE_VERSION = "10.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
@@ -240,8 +241,8 @@ export interface AppstrateModule {
    * core org roles grant their actions.
    *
    * Aggregated by the platform at boot and merged into:
-   *   1. `resolvePermissions(role)` — adds module entries to the per-role
-   *      permission set written to `c.get("permissions")`.
+   *   1. `orgPermissions(role)` / `presetPermissions(preset)` — adds module
+   *      entries to the per-role / per-preset set written to `c.get("permissions")`.
    *   2. `API_KEY_ALLOWED_SCOPES` — module entries become grantable
    *      through API keys (filtered against creator's role at issuance).
    *   3. `requirePermission(resource, action)` — runtime check is purely
@@ -263,7 +264,8 @@ export interface AppstrateModule {
    *     {
    *       resource: "tasks",
    *       actions: ["read", "write"],
-   *       grantTo: ["owner", "admin", "member"],
+   *       level: "space",
+   *       presets: ["admin", "builder", "operator"],
    *       apiKeyGrantable: true,
    *     },
    *   ],
@@ -276,12 +278,37 @@ export interface AppstrateModule {
    *   - action names match `^[a-z][a-z0-9_-]*$`
    *   - resource does NOT collide with any core resource (org, agents, …)
    *     or any other module's resource
+   *   - every entry for one resource declares the SAME `level`
+   *   - `grantTo` names a known org role; `presets` a known space preset
+   *   - `presets` is upward-closed: naming a preset also names every preset
+   *     that already grants a superset of it. `runner` and `viewer` are
+   *     incomparable, so neither implies the other.
    *
    * No-op on platforms that don't load this module — neither the type
    * augmentation nor the runtime grants reach core, preserving the
    * zero-footprint invariant.
    */
   permissionsContribution?(): ModulePermissionContribution[];
+
+  /**
+   * Org-level permissions granted to a PRINCIPAL (one user in one org) rather
+   * than to a role — for a population the module maintains (the ee module's
+   * billing managers, RBAC spec §10; an SSO group mapping). Composes with
+   * {@link permissionsContribution}, which still declares the resource and its
+   * role grants; this hands extra copies of those strings to named users.
+   *
+   * Not a `ModuleHooks` member: every declaring module is consulted and the
+   * answers are UNIONED; a throwing resolver is isolated (logged, grants nothing).
+   *
+   * Boot constraints (fail-fast): every `mayGrant` entry is a known ORG-level
+   * permission (core, or contributed at `level: "org"`), and none is
+   * `apiKeyGrantable` / `endUserGrantable` — this surface is never evaluated
+   * for delegated credentials. At runtime the answer is filtered to `mayGrant`;
+   * cache invalidation is the module's job (`invalidatePrincipalPermissions`
+   * from `@appstrate/core/principal-permissions` after its own writes).
+   * No-op when the module is not loaded.
+   */
+  principalPermissions?: ModulePrincipalPermissions;
 
   /**
    * Model providers contributed by this module.
@@ -350,10 +377,7 @@ export interface AppstrateModule {
 }
 
 /**
- * One resource's RBAC contribution from a module — declares the actions
- * available, which org roles grant them, and whether they can be issued
- * through API keys. See `AppstrateModule.permissionsContribution`.
- *
+ * Fields shared by both halves of {@link ModulePermissionContribution}.
  * Distributes over {@link ModuleResources}: the `resource` literal PINS the
  * legal `actions` for that entry, so the runtime contribution can no longer
  * drift from the compile-time `declare module` augmentation that guards the
@@ -363,60 +387,51 @@ export interface AppstrateModule {
  * augmentation — yet was never granted at boot, because the contribution wrote
  * `taks:read` into the role set. The result was a permanent 403 with nothing
  * failing anywhere; consumers documented the invariant by hand instead.
- *
- * A module that contributes permissions MUST therefore ship the `declare
- * module` block: without it `ModuleResources` stays empty, this type resolves
- * to `never`, and `permissionsContribution()` cannot return anything.
+ */
+interface ModulePermissionContributionBase<R extends Extract<ModuleResource, string>> {
+  /**
+   * A key of the module's `ModuleResources` augmentation; unique across loaded
+   * modules and disjoint from core resources (both enforced at boot).
+   */
+  resource: R;
+  /** Actions to grant, narrowed to those the augmentation declares for `R`. */
+  actions: readonly Extract<ModuleResources[R], string>[];
+  /**
+   * When `true`, every `<resource>:<action>` here joins the API-key allowlist.
+   * Defaults to `false` — session-only unless opted in.
+   */
+  apiKeyGrantable?: boolean;
+  /**
+   * When `true`, every `<resource>:<action>` here may be carried by an end-user
+   * OAuth2/OIDC token; the OIDC strategy filters end-user JWT scopes against
+   * this allowlist. Defaults to `false`. Opt in for per-end-user data only,
+   * never for admin/destructive surfaces. Ignored when no end-user pipeline is loaded.
+   */
+  endUserGrantable?: boolean;
+}
+
+/**
+ * One resource's RBAC contribution from a module. `level` is the discriminant
+ * (RBAC spec §3.4): org-level resources are granted by org roles (`grantTo`),
+ * space-level ones by space-role presets (`presets`); no default — a resource
+ * whose rows carry a `space_id` is space-level. Requires the `declare module`
+ * block: without it `ModuleResources` is empty and this type is `never`.
  */
 export type ModulePermissionContribution = {
-  [R in Extract<ModuleResource, string>]: {
-    /**
-     * Resource name (e.g. "tasks") — a key of the module's `ModuleResources`
-     * augmentation. Must be unique across loaded modules and disjoint from
-     * core resources (both enforced at boot).
-     */
-    resource: R;
-    /**
-     * Actions to grant for this resource, narrowed to those the augmentation
-     * declares for `R` (e.g. `["read", "write"]`).
-     */
-    actions: readonly Extract<ModuleResources[R], string>[];
-    /**
-     * Org roles that grant every listed action. The platform writes the
-     * union into `resolvePermissions(role)`. Omit a role to leave it
-     * without access (e.g. `viewer` typically only sees `:read`).
-     *
-     * Granular per-action grants (e.g. owner gets write, member gets read
-     * only) are supported by listing the resource multiple times with
-     * different `actions`/`grantTo` combinations.
-     */
-    grantTo: ReadonlyArray<OrgRole>;
-    /**
-     * When `true`, every `<resource>:<action>` produced by this entry is
-     * added to the API-key allowlist so org admins can mint keys with
-     * these scopes. Defaults to `false` — module permissions are
-     * session-only unless explicitly opted in.
-     */
-    apiKeyGrantable?: boolean;
-    /**
-     * When `true`, every `<resource>:<action>` produced by this entry can be
-     * carried by an end-user OAuth2/OIDC token (the embedding-app flow). The
-     * platform's OIDC strategy filters end-user JWT scopes against this
-     * allowlist before writing them to `c.get("permissions")` — without the
-     * opt-in, a module's resource is unreachable through end-user tokens
-     * even if the JWT advertises it.
-     *
-     * Defaults to `false` — module permissions are dashboard/instance/API-key
-     * only unless explicitly opted in. Use this for modules whose data is
-     * meant to be addressed per-end-user (per-user data streams, end-user
-     * profiles, notifications…). Avoid for admin/destructive surfaces (those should
-     * stay session-only or API-key-only).
-     *
-     * No-op on platforms that don't load the OIDC module — the flag is
-     * simply ignored when no end-user pipeline exists.
-     */
-    endUserGrantable?: boolean;
-  };
+  [R in Extract<ModuleResource, string>]:
+    | (ModulePermissionContributionBase<R> & {
+        level: "org";
+        /**
+         * Org roles that grant every listed action; list the resource twice to
+         * split actions across roles.
+         */
+        grantTo: ReadonlyArray<OrgRole>;
+      })
+    | (ModulePermissionContributionBase<R> & {
+        level: "space";
+        /** Space-role presets that grant every listed action; same split rule as `grantTo`. */
+        presets: ReadonlyArray<SpaceRolePreset>;
+      });
 }[Extract<ModuleResource, string>];
 
 // ---------------------------------------------------------------------------
@@ -428,10 +443,7 @@ export type ModulePermissionContribution = {
 // ---------------------------------------------------------------------------
 
 /**
- * Context passed alongside the `beforeSignup` hook's `email` argument. The
- * second argument is optional for backward compatibility: existing modules
- * that declare `async (email) => {...}` continue to work unchanged
- * (JavaScript silently drops extra arguments).
+ * Context passed alongside the `beforeSignup` hook's `email` argument.
  *
  * Modules that need to read request-scoped state (e.g. a signed cookie
  * pinning an OAuth client for the in-flight signup) should read from
@@ -982,13 +994,13 @@ export interface AuthResolution {
    */
   authMethod: string;
   /**
-   * Optional application binding. End-user strategies (API-key impersonation,
+   * Optional space binding. End-user strategies (API-key impersonation,
    * OIDC end_user flow) pin this so core's strict end-user filter has the
-   * owning app in context. Dashboard strategies (OIDC dashboard flow) leave
-   * it undefined — app context is then supplied per-request via the
-   * `X-Application-Id` header handled by `requireAppContext()`.
+   * owning space in context. Dashboard strategies (OIDC dashboard flow) leave
+   * it undefined — space context is then supplied per-request via the
+   * `X-Space-Id` header handled by `requireSpaceContext()`.
    */
-  applicationId?: string;
+  spaceId?: string;
   /** Permission strings already resolved by the strategy. */
   permissions: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
@@ -1023,7 +1035,7 @@ export interface AuthResolution {
  */
 export interface EndUserContext {
   id: string;
-  applicationId: string;
+  spaceId: string;
   name?: string;
   email?: string;
 }
@@ -1194,7 +1206,7 @@ export interface RunStatusChangeParams {
    * filter applies" (i.e. skip rather than match).
    */
   packageId: string | null;
-  applicationId: string;
+  spaceId: string;
   status: "started" | "success" | "failed" | "timeout" | "cancelled";
   /** Cost in dollars (only on terminal status). */
   cost?: number;
@@ -1214,40 +1226,56 @@ export interface RunStatusChangeParams {
   extra?: Record<string, unknown>;
 }
 
-/**
- * Single field-level error entry carried on
- * {@link RunConnectionMissingParams.errors}. Aliases the core
- * {@link ValidationFieldError} (the shape platform routes return as 4xx
- * envelopes) so modules can forward it verbatim to downstream consumers
- * (webhook payloads, Slack messages) without remapping.
- */
-export type RunConnectionMissingError = ValidationFieldError;
-
 /** Parameters passed to the `onRunConnectionMissing` event. */
 export interface RunConnectionMissingParams {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   /** Agent package id whose kickoff was blocked. */
   packageId: string;
   /** Actor whose request was blocked (user or end_user from the headless API). */
   actor: { type: "user" | "end_user"; id: string };
   /** Field-level errors that triggered the block (same shape as 4xx envelopes). */
-  errors: RunConnectionMissingError[];
+  errors: ValidationFieldError[];
 }
 
 // ---------------------------------------------------------------------------
 // Init context — platform services injected into modules
 // ---------------------------------------------------------------------------
 
+/** One organization member, as `getOrgMembers` resolves it. */
+export interface ModuleOrgMember {
+  userId: string;
+  email: string;
+  role: OrgRole;
+}
+
 export interface ModuleInitContext {
   /** Redis connection string, or null when Redis is absent. */
   redisUrl: string | null;
   /** Public-facing URL of the platform (for OAuth callbacks, etc.). */
   appUrl: string;
-  /** Lazy email sender (breaks circular deps at module load time). */
-  getSendMail: () => Promise<(to: string, subject: string, html: string) => void>;
-  /** Query helper: get org admin emails. */
-  getOrgAdminEmails: (orgId: string) => Promise<string[]>;
+  /**
+   * Lazy email sender (breaks circular deps at module load time).
+   *
+   * The mailer it resolves to is asynchronous: `await`ing the returned promise
+   * means the delivery attempt is over, so a module can sequence on it (send
+   * then mark sent) instead of firing into the void. The platform's own mailer
+   * logs transport failures and settles rather than rejecting, so awaiting it
+   * says "attempted", not "delivered"; a module supplying its own mailer MAY
+   * reject, and a caller that fans out over several recipients should keep one
+   * failure from cancelling the rest.
+   */
+  getSendMail: () => Promise<(to: string, subject: string, html: string) => Promise<void>>;
+  /**
+   * Query helper: emails of the org's OWNERS — the one recipient list that is
+   * always non-empty. Deliberately not admins: billing mail is not operational.
+   */
+  getOrgOwnerEmails: (orgId: string) => Promise<string[]>;
+  /**
+   * Query helper: resolve `userIds` to org members. A non-member id is ABSENT
+   * from the result, not an error — "which of these are still members" in one round trip.
+   */
+  getOrgMembers: (orgId: string, userIds: readonly string[]) => Promise<ModuleOrgMember[]>;
   /**
    * Query helper: resolve an organization's display name, or null when the
    * org no longer exists.
@@ -1283,7 +1311,7 @@ export interface ModuleInitContext {
 // as dead surface, exactly like an `AppstrateModule` member would. Each member's
 // own JSDoc states why the consumer cannot obtain the capability any other way.
 // The previous broad surface (orchestrator /
-// pubsub / realtime / inline / packages / models / applications / run CRUD)
+// pubsub / realtime / inline / packages / models / spaces / run CRUD)
 // mirrored an in-process module that has since been removed — it carried zero
 // live consumers, so it was dropped rather than left as speculative API.
 // Re-add a member here the moment a consumer genuinely needs it.
@@ -1467,10 +1495,7 @@ export interface PlatformServices {
    * so the real subscription token never enters the module's own resolution
    * (only the returned in-memory string, used to build the Pi `AuthStorage`).
    */
-  resolveSubscriptionChatModel(
-    orgId: string,
-    presetId: string,
-  ): Promise<SubscriptionChatResolution>;
+  resolveChatModel(orgId: string, presetId: string): Promise<ChatModelResolution>;
   /**
    * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
    * `proxy`, `run_id` null). The chat module has no DB access, so metering for
@@ -1479,32 +1504,34 @@ export interface PlatformServices {
    */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
   /**
-   * Resolve a chat composer file attachment to a durable `document://` URI:
-   * materialize an `upload://` staged upload into a chat-session-scoped document
-   * (purpose `user_upload`), or validate that an existing `document://` is
-   * readable by the session owner. The chat module has no DB access, so
-   * materialization + the container-inherited ACL check cross through here.
-   * Rejections (over-cap, over-limit, not-found/foreign document) are thrown as
+   * Resolve a chat composer file attachment to a durable `appfile://` URI:
+   * materialize an `upload://` staged upload into a chat-session-scoped file
+   * (purpose `user_upload`), or validate that an existing `appfile://` is
+   * readable by the session owner under the permissions the request carries.
+   * The chat module has no DB access, so materialization + the
+   * container-inherited ACL check cross through here.
+   * Rejections (over-cap, over-limit, not-found/foreign file) are thrown as
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
   /**
-   * Detach-or-delete the documents contained by a chat session being deleted. A
-   * session document a run still consumes is detached (`chat_session_id = NULL`)
+   * Detach-or-delete the files contained by a chat session being deleted. A
+   * session file a run still consumes is detached (`chat_session_id = NULL`)
    * so the run's rerun still resolves it; an unconsumed one is deleted (row +
    * org counter + storage object). The chat module has DB access but no storage
-   * access and no documents-service surface, so this crosses through here. Called
+   * access and no files-service surface, so this crosses through here. Called
    * by the DELETE session route BEFORE removing the `chat_sessions` row, so the
    * FK cascade cannot destroy the evidence first.
    *
    * `tx` is the caller's open DB transaction handle (opaque here — core carries
    * no Drizzle dependency). The chat module passes the SAME transaction it uses
-   * to delete the `chat_sessions` row, so the document teardown and the row
-   * delete commit atomically: a document materializing in the gap can no longer
+   * to delete the `chat_sessions` row, so the file teardown and the row
+   * delete commit atomically: a file materializing in the gap can no longer
    * be cascade-deleted without a storage-deletion outbox job. Omitted → the
-   * platform opens its own transaction (the legacy, non-atomic single call).
+   * platform opens its own transaction, which is correct whenever the caller
+   * has no wider unit of work to join.
    */
-  cleanupSessionDocuments(chatSessionId: string, tx?: unknown): Promise<void>;
+  cleanupSessionFiles(chatSessionId: string, tx?: unknown): Promise<void>;
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this before starting ANY turn, and the platform
@@ -1544,12 +1571,12 @@ export interface PlatformServices {
     subscription: boolean;
   }): Promise<UsageRejection | null>;
   /**
-   * Set (or clear) an organization's per-org document storage limit — the
-   * technical byte ceiling the platform enforces on durable-document writes.
+   * Set (or clear) an organization's per-org file storage limit — the
+   * technical byte ceiling the platform enforces on durable-file writes.
    * A metering module pilots per-org storage by mapping whatever entitlement
    * it owns onto a byte value and writing it here; the platform then enforces
-   * `documents_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited` on every
-   * document write.
+   * `files_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited` (the env var
+   * keeps its legacy name on purpose) on every file write.
    *
    *  - `bytes` a non-negative safe integer → the org's override.
    *  - `bytes` null → clears the override (back to the env default).
@@ -1558,5 +1585,5 @@ export interface PlatformServices {
    * Throws the platform's RFC 9457 errors — a 404 for an unknown `orgId`, a
    * 400 for a negative / non-integer `bytes`.
    */
-  setDocumentStorageLimit(orgId: string, bytes: number | null): Promise<void>;
+  setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
 }

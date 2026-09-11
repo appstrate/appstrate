@@ -26,7 +26,7 @@ export function parseDraftManifest(value: unknown): Partial<Manifest> {
  *
  * The test is deliberately shape-based: the fallback is a serialized JSON
  * object and an `INTEGRATION.md` is markdown, so "starts with `{` and ends with
- * `}`" separates them without parsing a document that may be tens of KB.
+ * `}`" separates them without parsing a file that may be tens of KB.
  *
  * ## It is a HEURISTIC — know what a false positive costs at each call site
  *
@@ -73,16 +73,16 @@ export function extractSkillIdsFromManifest(manifest: Partial<Manifest>): string
   return Object.keys(skillsMap).filter(Boolean);
 }
 
-/** Extract input/config/output JSON schemas from a manifest, with safe narrowing. */
-export function extractManifestSchemas(manifest: Partial<Manifest>): {
-  input?: JSONSchemaObject;
-  config?: JSONSchemaObject;
-  output?: JSONSchemaObject;
-} {
+/**
+ * Extract a manifest's output JSON schema, with safe narrowing.
+ *
+ * Output only. This returned `{ input, output }` until the input half ran out
+ * of readers: every input-schema caller reaches `manifest.input?.schema` at its
+ * own site (`routes/runs.ts`, `routes/schedules.ts`, `services/inline-run.ts`, …).
+ */
+export function extractManifestOutputSchema(
+  manifest: Partial<Manifest>,
+): JSONSchemaObject | undefined {
   const m = manifest as Record<string, { schema?: unknown } | undefined>;
-  return {
-    input: m.input?.schema ? asJSONSchemaObject(m.input.schema) : undefined,
-    config: m.config?.schema ? asJSONSchemaObject(m.config.schema) : undefined,
-    output: m.output?.schema ? asJSONSchemaObject(m.output.schema) : undefined,
-  };
+  return m.output?.schema ? asJSONSchemaObject(m.output.schema) : undefined;
 }

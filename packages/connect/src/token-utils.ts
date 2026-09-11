@@ -69,7 +69,7 @@ export interface ParsedTokenResponse {
  */
 export type TokenErrorKind = "revoked" | "transient";
 
-export interface TokenErrorClassification {
+interface TokenErrorClassification {
   kind: TokenErrorKind;
   /** OAuth2 error code from the response body (e.g. "invalid_grant") if parseable. */
   error?: string;

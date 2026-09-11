@@ -13,9 +13,8 @@
  * social callback, the single-use token binding for magic-link verify, and
  * the server-authored authoritative cookie header
  * (`headersWithAuthoritativePendingClient`) for the in-process register /
- * magic-link-request paths. The browser cookie remains load-bearing for:
- *   - the per-app social credential override (`ba-social-override-plugin`),
- *   - UX fallbacks (deploy-window compatibility for in-flight magic links).
+ * magic-link-request paths. The browser cookie remains load-bearing for the
+ * per-space social credential override (`ba-social-override-plugin`).
  *
  * Why a cookie and not AsyncLocalStorage: the social sign-in flow bounces the
  * browser off a third-party IdP (Google, GitHub) and lands on
@@ -126,7 +125,7 @@ function buildSignedPendingClientValue(clientId: string): string {
  * who fully controls their own request — can simply STRIP or overwrite the
  * cookie (or race a second tab that clobbers the single global cookie) so the
  * resolver sees "no pending client" and mints a full `platform`-realm user for
- * what is really an application (`end_user:<appId>`) flow. That user then
+ * what is really a space (`end_user:<spaceId>`) flow. That user then
  * passes `requirePlatformRealm` on every platform route.
  *
  * By re-deriving the binding from the `client_id` that was already validated

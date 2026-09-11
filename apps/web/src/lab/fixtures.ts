@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { getPreset, getRole, orgPermissionsForRole, spacePermissionsForPreset } from "./role";
+
 /**
  * The fake data lab mode serves.
  *
@@ -137,7 +139,7 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
           auth_key: "drive",
           shared_with_org: true,
           org: { id: ORG_ID, name: "Tractr" },
-          application: { id: APP_ID, name: "Production" },
+          space: { id: APP_ID, name: "Production" },
         },
         {
           connection_id: "conn_personal_lab_2",
@@ -152,12 +154,23 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
           auth_key: "drive",
           shared_with_org: false,
           org: { id: ORG_ID, name: "Tractr" },
-          application: { id: APP_ID, name: "Production" },
+          space: { id: APP_ID, name: "Production" },
         },
       ],
     },
   ],
 };
+
+/**
+ * The permissions the lab serves, taken from the role the panel selects. The
+ * lab exists to SEE the whole surface AND to check what each role loses, so
+ * these are not a fixed grant: flip the role and the same screens must show
+ * less. See `lab/role.ts`, which mirrors the server's matrix.
+ */
+const LAB_ORG_PERMISSIONS = orgPermissionsForRole();
+const LAB_SPACE_PERMISSIONS = spacePermissionsForPreset();
+const LAB_SPACE_PRESET = getPreset();
+const LAB_ORG_ROLE = getRole();
 
 export const orgs: Json200<"/api/orgs", "get"> = {
   object: "list",
@@ -168,7 +181,9 @@ export const orgs: Json200<"/api/orgs", "get"> = {
       name: "Tractr",
       slug: "tractr",
       logo: "emoji:🚜",
-      role: "owner",
+      role: LAB_ORG_ROLE,
+      permissions: LAB_ORG_PERMISSIONS,
+      deleting_at: null,
       createdAt: ago(60),
     },
     {
@@ -177,21 +192,30 @@ export const orgs: Json200<"/api/orgs", "get"> = {
       slug: "appstrate",
       logo: "emoji:⚡️",
       role: "admin",
+      permissions: LAB_ORG_PERMISSIONS,
+      deleting_at: null,
       createdAt: ago(60),
     },
   ],
 };
 
-type Application = Json200<"/api/applications", "get">["data"][number];
+type Space = Json200<"/api/spaces", "get">["data"][number];
 
-function makeApplication(id: string, orgId: string, name: string, isDefault = false): Application {
+function makeSpace(id: string, orgId: string, name: string, isDefault = false): Space {
   return {
     id,
-    object: "application",
+    object: "space",
     orgId,
     name,
     isDefault,
     settings: {},
+    // The lab's viewer is an admin everywhere: the point is to SEE every
+    // screen, and a narrower role hides the ones it gates.
+    visibility: "open",
+    default_role: "operator",
+    access: "member",
+    role: { kind: "preset", key: LAB_SPACE_PRESET, name: LAB_SPACE_PRESET },
+    permissions: LAB_SPACE_PERMISSIONS,
     created_by: USER_ID,
     createdAt: ago(60),
     updatedAt: ago(60),
@@ -204,22 +228,22 @@ function makeApplication(id: string, orgId: string, name: string, isDefault = fa
  * right while proving nothing. Tractr has three, Appstrate one: the asymmetry
  * is the point.
  */
-export const applicationsByOrg: Record<string, Application[]> = {
+export const spacesByOrg: Record<string, Space[]> = {
   [ORG_ID]: [
     {
-      ...makeApplication(APP_ID, ORG_ID, "Production"),
+      ...makeSpace(APP_ID, ORG_ID, "Production"),
       settings: { allowedRedirectDomains: ["appstrate.com"] },
     },
-    makeApplication("app_lab_default", ORG_ID, "Default", true),
-    makeApplication("app_lab_sandbox", ORG_ID, "Bac à sable"),
+    makeSpace("app_lab_default", ORG_ID, "Default", true),
+    makeSpace("app_lab_sandbox", ORG_ID, "Bac à sable"),
   ],
-  org_lab_2: [makeApplication("app_lab_2_default", "org_lab_2", "Default", true)],
+  org_lab_2: [makeSpace("app_lab_2_default", "org_lab_2", "Default", true)],
 };
 
-export const applications: Json200<"/api/applications", "get"> = {
+export const spaces: Json200<"/api/spaces", "get"> = {
   object: "list",
   hasMore: false,
-  data: applicationsByOrg[ORG_ID]!,
+  data: spacesByOrg[ORG_ID]!,
 };
 
 export const availableApiKeyScopes: Json200<"/api/api-keys/available-scopes", "get"> = {
@@ -306,10 +330,8 @@ function makeRun(over: Partial<Run> & Pick<Run, "id" | "status">): Run {
     cost_pricing_status: "priced",
     endUserId: null,
     apiKeyId: null,
-    applicationId: APP_ID,
+    spaceId: APP_ID,
     metadata: null,
-    config: null,
-    config_override: null,
     generation: null,
     generation_override: null,
     user_name: "Olivier Tarbès",
@@ -321,8 +343,7 @@ function makeRun(over: Partial<Run> & Pick<Run, "id" | "status">): Run {
     agent_scope: "@tractr",
     agent_name: "compta-trimestrielle",
     package_ephemeral: false,
-    document_counts: { input: 0, output: 2 },
-    primary_document_id: null,
+    file_counts: { input: 0, output: 2 },
     unread: false,
     runNumber: 128,
     runOrigin: "platform",
@@ -349,8 +370,6 @@ export const runs: Run[] = [
       documents: ["document://doc_lab_3"],
       notifier: "olivier@tractr.net",
     },
-    config: { devise: "CAD", validation_humaine: true, langue: "fr-CA" },
-    config_override: { validation_humaine: true },
     proxy_label: "Sortie Europe",
     runner_name: "Runner Appstrate Montréal",
     runner_kind: "docker",
@@ -362,7 +381,7 @@ export const runs: Run[] = [
         source: "admin_pin",
       },
     ],
-    document_counts: { input: 1, output: 0 },
+    file_counts: { input: 1, output: 0 },
     started_at: ago(2),
     completed_at: null,
     duration: null,
@@ -383,7 +402,6 @@ export const runs: Run[] = [
     runNumber: 130,
     started_at: ago(46),
     input: { trimestre: "2026-Q1", documents: ["document://doc_lab_3"] },
-    config: { devise: "CAD", validation_humaine: false, langue: "fr-CA" },
     result: {
       output: {
         trimestre: "2026-Q1",
@@ -392,8 +410,7 @@ export const runs: Run[] = [
         total_depenses_cad: 48_291.76,
       },
     },
-    primary_document_id: "doc_lab_1",
-    document_counts: { input: 1, output: 2 },
+    file_counts: { input: 1, output: 2 },
     proxy_label: "Sortie Europe",
     runner_name: "Runner Appstrate Montréal",
     runner_kind: "docker",
@@ -407,8 +424,7 @@ export const runs: Run[] = [
     duration: 54_000,
     error: "Le relevé Mastercard ne contenait pas la colonne de devise attendue.",
     input: { trimestre: "2025-Q4", documents: ["document://doc_lab_3"] },
-    config: { devise: "CAD", validation_humaine: true, langue: "fr-CA" },
-    document_counts: { input: 1, output: 0 },
+    file_counts: { input: 1, output: 0 },
   }),
   makeRun({
     id: "run_09",
@@ -419,7 +435,6 @@ export const runs: Run[] = [
     duration: 1_800_000,
     error: "Le rapprochement a dépassé la durée maximale de 30 minutes.",
     input: { trimestre: "2025-Q4", documents: ["document://doc_lab_3"] },
-    config: { devise: "CAD", validation_humaine: false, langue: "fr-CA" },
   }),
   makeRun({
     id: "run_03",
@@ -431,9 +446,8 @@ export const runs: Run[] = [
     duration: 41_000,
     cost: 0.08,
     input: { entreprise: "clicSÉQUR", periode: "2026-08" },
-    config: { mode_recherche: "approfondi", langue: "fr-CA" },
     result: { output: { etape: "authentification", sources_consultees: 2 } },
-    document_counts: { input: 1, output: 0 },
+    file_counts: { input: 1, output: 0 },
     runNumber: 129,
     started_at: ago(180),
     completed_at: ago(179),
@@ -471,7 +485,7 @@ export const runs: Run[] = [
         etat: "analyse interrompue par Olivier",
       },
     },
-    document_counts: { input: 0, output: 0 },
+    file_counts: { input: 0, output: 0 },
     runNumber: 12,
     started_at: ago(1_440),
     completed_at: ago(1_439),
@@ -488,7 +502,7 @@ export const runs: Run[] = [
     user_name: "Pierre",
     duration: 74_000,
     cost: 0.21,
-    document_counts: { input: 0, output: 0 },
+    file_counts: { input: 0, output: 0 },
     runNumber: 95,
     started_at: ago(520),
     completed_at: ago(519),
@@ -517,7 +531,7 @@ export const runs: Run[] = [
         risque_principal: "Renouvellement automatique sans préavis de rappel",
       },
     },
-    document_counts: { input: 1, output: 0 },
+    file_counts: { input: 1, output: 0 },
     duration: 21_000,
     cost: 0.05,
     runNumber: 94,
@@ -621,7 +635,7 @@ export const agents: Json200<"/api/agents", "get"> = {
       version: "0.3.1",
       type: "agent",
       running_runs: 0,
-      dependencies: {},
+      dependencies: { integrations: {} },
     },
     {
       id: "@tractr/analyse-recurrence-articles-tastet",
@@ -635,7 +649,7 @@ export const agents: Json200<"/api/agents", "get"> = {
       version: "0.1.0",
       type: "agent",
       running_runs: 0,
-      dependencies: {},
+      dependencies: { integrations: {} },
     },
     {
       id: "@tractr/reponse-leads",
@@ -651,7 +665,7 @@ export const agents: Json200<"/api/agents", "get"> = {
       version: "0.8.2",
       type: "agent",
       running_runs: 0,
-      dependencies: {},
+      dependencies: { integrations: {} },
     },
     {
       id: "@tractr/radar-ia",
@@ -667,7 +681,7 @@ export const agents: Json200<"/api/agents", "get"> = {
       version: "1.2.0",
       type: "agent",
       running_runs: 0,
-      dependencies: {},
+      dependencies: { integrations: {} },
     },
     {
       id: "@tractr/debrief-appel",
@@ -683,7 +697,7 @@ export const agents: Json200<"/api/agents", "get"> = {
       version: "0.6.0",
       type: "agent",
       running_runs: 0,
-      dependencies: {},
+      dependencies: { integrations: {} },
     },
   ],
 };
@@ -699,13 +713,12 @@ function makeSchedule(over: Partial<Schedule> & Pick<Schedule, "id" | "packageId
     userId: USER_ID,
     endUserId: null,
     orgId: ORG_ID,
-    applicationId: APP_ID,
+    spaceId: APP_ID,
     name: null,
     enabled: true,
     cron_expression: "0 7 * * *",
     timezone: "America/Toronto",
     input: null,
-    config_override: null,
     generation_config_override: null,
     model_id_override: null,
     proxy_id_override: null,
@@ -1360,17 +1373,16 @@ export const qboMcpServerLatestVersion: Json200<
 /* Documents                                                                   */
 /* -------------------------------------------------------------------------- */
 
-type LabDocument = Json200<"/api/documents", "get">["data"][number];
+type LabDocument = Json200<"/api/files", "get">["data"][number];
 
 /** Everything a tile can draw: an image, a spreadsheet, a PDF, and an upload. */
 const documentRows: LabDocument[] = [
   {
-    object: "document",
+    object: "file",
     id: "doc_lab_1",
     uri: "document://doc_lab_1",
     purpose: "agent_output",
-    presentation: "primary",
-    applicationId: APP_ID,
+    spaceId: APP_ID,
     run_id: "run_02",
     chat_session_id: null,
     packageId: "@tractr/compta-trimestrielle",
@@ -1393,12 +1405,11 @@ const documentRows: LabDocument[] = [
     createdAt: ago(2_400),
   },
   {
-    object: "document",
+    object: "file",
     id: "doc_lab_2",
     uri: "document://doc_lab_2",
     purpose: "agent_output",
-    presentation: null,
-    applicationId: APP_ID,
+    spaceId: APP_ID,
     run_id: "run_02",
     chat_session_id: null,
     packageId: "@tractr/compta-trimestrielle",
@@ -1421,12 +1432,11 @@ const documentRows: LabDocument[] = [
     createdAt: ago(2_600),
   },
   {
-    object: "document",
+    object: "file",
     id: "doc_lab_3",
     uri: "document://doc_lab_3",
     purpose: "user_upload",
-    presentation: null,
-    applicationId: APP_ID,
+    spaceId: APP_ID,
     run_id: null,
     chat_session_id: null,
     packageId: null,
@@ -1452,12 +1462,11 @@ const documentRows: LabDocument[] = [
     // A document the caller may see but not read: the metadata capability is
     // off, so the name and mime degrade the way the API degrades them. It is
     // the one row that proves the tile does not assume it may show everything.
-    object: "document",
+    object: "file",
     id: "doc_lab_4",
     uri: "document://doc_lab_4",
     purpose: "user_upload",
-    presentation: null,
-    applicationId: APP_ID,
+    spaceId: APP_ID,
     run_id: "run_03",
     chat_session_id: null,
     packageId: null,
@@ -1480,7 +1489,7 @@ const documentRows: LabDocument[] = [
   },
 ];
 
-export const documents: Json200<"/api/documents", "get"> = {
+export const documents: Json200<"/api/files", "get"> = {
   object: "list",
   data: documentRows,
   hasMore: false,
@@ -1577,9 +1586,11 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
         },
       },
     },
-    runtime_tools: ["output", "log", "note", "pin", "publish_document"],
+    runtime_tools: ["output", "log", "note", "pin", "publish_file"],
   },
   input: {
+    values: {},
+    locked_fields: [],
     schema: {
       type: "object",
       properties: {
@@ -1600,15 +1611,6 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
         missing_documents: { type: "integer" },
         status: { type: "string" },
       },
-    } as never,
-  },
-  config: {
-    schema: {},
-    current: {
-      fiscal_year: "2025-2026",
-      drive_folder: "TRACTR / Finances / 2026-Q2",
-      language: "fr",
-      report_format: "xlsx",
     } as never,
   },
   dependencies: {
@@ -2225,7 +2227,7 @@ export const agentMap: Json200<"/api/agents/{scope}/{name}/map", "get"> = {
           { id: "log", always: false },
           { id: "note", always: false },
           { id: "pin", always: false },
-          { id: "publish_document", always: false },
+          { id: "publish_file", always: false },
           { id: "run_history", always: true },
           { id: "recall_memory", always: true },
         ],
@@ -2494,8 +2496,8 @@ export const webhooks: Json200<"/api/webhooks", "get"> = {
     {
       id: "wh_lab_1",
       object: "webhook",
-      level: "application",
-      applicationId: APP_ID,
+      level: "space",
+      spaceId: APP_ID,
       url: "https://tractr.net/hooks/appstrate/runs",
       events: ["run.succeeded", "run.failed"],
       packageId: "@tractr/compta-trimestrielle",
@@ -2508,7 +2510,7 @@ export const webhooks: Json200<"/api/webhooks", "get"> = {
       id: "wh_lab_2",
       object: "webhook",
       level: "org",
-      applicationId: null,
+      spaceId: null,
       url: "https://hooks.slack.com/services/T0000/B0000/xxxxxxxxxxxx",
       events: ["run.failed"],
       packageId: null,
@@ -2529,7 +2531,7 @@ export const endUsers: Json200<"/api/end-users", "get"> = {
     {
       id: "eu_lab_1",
       object: "end_user",
-      applicationId: APP_ID,
+      spaceId: APP_ID,
       name: "Marie Lavoie",
       email: "marie@client-a.example",
       externalId: "crm-40129",
@@ -2540,7 +2542,7 @@ export const endUsers: Json200<"/api/end-users", "get"> = {
     {
       id: "eu_lab_2",
       object: "end_user",
-      applicationId: APP_ID,
+      spaceId: APP_ID,
       name: null,
       email: null,
       externalId: "crm-40877",
@@ -2555,7 +2557,7 @@ export const endUsers: Json200<"/api/end-users", "get"> = {
 export const endUserDetail: Json200<"/api/end-users/{id}", "get"> = {
   id: "eu_lab_detail",
   object: "end_user",
-  applicationId: APP_ID,
+  spaceId: APP_ID,
   name: "Noémie Caron",
   email: "noemie@client-b.example",
   externalId: "crm-51204",
@@ -2652,11 +2654,12 @@ export const oauthClients: Json200<"/api/oauth/clients", "get"> = {
       name: "TRACTR Dashboard",
       level: "org",
       referencedOrgId: ORG_ID,
-      referencedApplicationId: null,
+      referencedSpaceId: null,
       redirectUris: ["https://dashboard.tractr.net/auth/callback"],
       postLogoutRedirectUris: ["https://dashboard.tractr.net"],
       scopes: ["openid", "profile", "email"],
       disabled: false,
+      signupSpaceAssignments: [],
       isFirstParty: true,
       allowSignup: false,
       signupRole: "member",
@@ -3333,7 +3336,7 @@ export const connectionTest: Json200<"/api/models/{id}/test", "post"> = {
  */
 export const library: Json200<"/api/library", "get"> = {
   object: "library",
-  applications: [
+  spaces: [
     { id: APP_ID, name: "Production", isDefault: true },
     { id: "app_compta", name: "Comptabilité", isDefault: false },
     { id: "app_veille", name: "Veille", isDefault: false },

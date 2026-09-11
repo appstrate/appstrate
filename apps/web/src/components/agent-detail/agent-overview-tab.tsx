@@ -37,7 +37,7 @@ import { useSchedules } from "../../hooks/use-schedules";
 import { useAgentRunActivity } from "../../hooks/use-paginated-runs";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import { AgentMapView } from "../../modules/agent-map/agent-map-view";
 import { AgentFilesView } from "./agent-files-view";
 import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
@@ -325,7 +325,7 @@ export function AgentOverviewTab({
     isError: pinnedError,
     isSuccess: pinnedSuccess,
   } = useAgentPinned(packageId);
-  const readiness = useAgentReadiness(detail, agentModel?.modelId, models, detail.input?.schema);
+  const readiness = useAgentReadiness(detail, agentModel?.modelId, models);
 
   const defaultModel = models?.find((model) => model.is_default);
   const resolvedModel = models?.find((model) => model.id === agentModel?.modelId) ?? defaultModel;
@@ -333,7 +333,15 @@ export function AgentOverviewTab({
   const resolvedProxy = proxies?.find((proxy) => proxy.id === agentProxy?.proxyId) ?? defaultProxy;
   const inputProperties = detail.input?.schema?.properties ?? {};
   const inputCount = Object.keys(inputProperties).length;
-  const configuredCount = Object.keys(detail.config.current ?? {}).length;
+  const configuredCount = Object.keys(detail.input?.values ?? {}).length;
+  // `hasRequiredConfig` a quitté `useAgentReadiness` avec la fusion de `config`
+  // dans `input` : la question se pose maintenant sur les valeurs de l'espace,
+  // pas sur un objet de configuration séparé.
+  const requiredInputFields =
+    (detail.input?.schema as { required?: string[] } | undefined)?.required ?? [];
+  const hasRequiredConfig = requiredInputFields.every(
+    (field) => (detail.input?.values ?? {})[field] !== undefined,
+  );
   const connectionRows = connections?.integrations ?? [];
   const nextSchedule = schedules?.find((schedule) => schedule.enabled && schedule.next_run_at);
   const activeScheduleCount = schedules?.filter((schedule) => schedule.enabled).length;
@@ -380,12 +388,14 @@ export function AgentOverviewTab({
     {
       icon: Brain,
       label: t("detail.overview.skills"),
-      value: t("detail.overview.itemCount", { count: detail.dependencies.skills.length }),
+      value: t("detail.overview.itemCount", { count: (detail.dependencies.skills ?? []).length }),
     },
     {
       icon: Server,
       label: t("detail.overview.mcpServers"),
-      value: t("detail.overview.itemCount", { count: detail.dependencies.mcp_servers.length }),
+      value: t("detail.overview.itemCount", {
+        count: (detail.dependencies.mcp_servers ?? []).length,
+      }),
     },
     {
       icon: Wrench,
@@ -443,7 +453,7 @@ export function AgentOverviewTab({
         }),
         icon: "values",
         href: settingsHref("inputs"),
-        warning: readiness.hasRequiredConfig ? undefined : configurationWarning,
+        warning: hasRequiredConfig ? undefined : configurationWarning,
       },
       proxy: {
         id: "proxy",
@@ -500,7 +510,7 @@ export function AgentOverviewTab({
       skills: {
         id: "skills",
         title: t("detail.overview.skills"),
-        value: t("detail.overview.itemCount", { count: detail.dependencies.skills.length }),
+        value: t("detail.overview.itemCount", { count: (detail.dependencies.skills ?? []).length }),
         icon: "skill",
         onActivate: onOpenFiles,
         warning: readiness.hasRequiredSkills ? undefined : configurationWarning,
@@ -509,7 +519,7 @@ export function AgentOverviewTab({
         id: "mcp-servers",
         title: t("detail.overview.mcpServers"),
         value: t("detail.overview.itemCount", {
-          count: detail.dependencies.mcp_servers.length,
+          count: (detail.dependencies.mcp_servers ?? []).length,
         }),
         icon: "mcp",
         onActivate: onOpenFiles,

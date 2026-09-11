@@ -33,7 +33,7 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   getOrgModelProviderCredential,
   loadInferenceCredentials,
-  loadCredentialMetadata,
+  loadCredentialRow,
 } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -44,7 +44,7 @@ import {
   internalError,
   systemEntityForbidden,
 } from "../lib/errors.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createModelSchema = z
@@ -83,6 +83,7 @@ export const createModelSchema = z
      */
     aliased: z.boolean().optional(),
   })
+  .strict()
   .refine(
     // Canonical model invariant: `input + output <= context`, so a response
     // cap can never reach the full window. Reject impossible overrides at the
@@ -104,30 +105,37 @@ export const updateModelSchema = z
     cost: modelCostSchema.nullable().optional(),
     aliased: z.boolean().optional(),
   })
+  .strict()
   .refine(
     // See createModelSchema: `max_output_tokens < context_window` always holds.
     (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
     { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
   );
 
-export const setDefaultSchema = z.object({
-  modelId: z.string().nullable(),
-});
+export const setDefaultSchema = z
+  .object({
+    modelId: z.string().nullable(),
+  })
+  .strict();
 
-export const seedModelsSchema = z.object({
-  credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
-  modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
-});
+export const seedModelsSchema = z
+  .object({
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
+    modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
+  })
+  .strict();
 
 // The inline test endpoint validates a model config before the user saves it.
 // Callers identify the provider via `credentialId` — the registry resolves
 // `apiShape` and `baseUrl` server-side, so the wire payload doesn't carry them.
-export const testInlineSchema = z.object({
-  credentialId: z.string().min(1, "credentialId is required"),
-  modelId: z.string().min(1),
-  apiKey: z.string().optional(),
-  existingModelId: z.string().optional(),
-});
+export const testInlineSchema = z
+  .object({
+    credentialId: z.string().min(1, "credentialId is required"),
+    modelId: z.string().min(1),
+    apiKey: z.string().optional(),
+    existingModelId: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Map an alias-invariant violation to its 400 — shared by the create and
@@ -342,10 +350,11 @@ export function createModelsRouter() {
     const catalogById = new Map(listCatalogModels(catalogKey).map((m) => [m.id, m]));
     // Foreign-catalog (subscription OAuth) gate: a model is seedable when
     // it's in the featured list OR in the credential's servable set
-    // (`available_model_ids`) — probe-verified for API-key providers (the
-    // probe knows the account's plan, the featured list doesn't), derived
-    // from the catalog for static providers. Reading it off the credential
-    // DTO is what keeps the gate from consulting a stale persisted copy.
+    // (`available_model_ids`) — the candidates the provider's `GET /models`
+    // listing confirmed for API-key providers (the listing knows the
+    // account's plan, the featured list doesn't), derived from the catalog
+    // for static providers. Reading it off the credential DTO is what keeps
+    // the gate from consulting a stale persisted copy.
     const credentialInfo = registry.catalogProviderId
       ? await getOrgModelProviderCredential(orgId, data.credentialId)
       : undefined;
@@ -570,6 +579,27 @@ export function createModelsRouter() {
   router.post("/:id/test", rateLimit(5), requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
+
+    // A model alias must not be probed through this route (Threat A). The test
+    // issues a live `GET {realBaseUrl}/models` on the platform's own
+    // credential and answers `{ ok, latency, status }` — which reports the
+    // BACKING's round-trip time and its upstream HTTP status to a caller who is
+    // never told which vendor that is. Two distinct leaks (a timing signal and
+    // a status signal), plus an unmetered spend of a platform credential on a
+    // request the caller has no stake in.
+    //
+    // Refused before `testModelConnection` so no fetch is issued at all — a
+    // late refusal would still have spent the credential and still have taken
+    // the backing's round-trip time to answer.
+    //
+    // `aliased` is already public on the projection, so a 400 here discloses
+    // nothing new; the message names no binding detail. Non-aliased models are
+    // untouched — their contract is reaching the provider, not hiding it.
+    const existing = await getOrgModel(orgId, modelId);
+    if (existing?.aliased) {
+      throw invalidRequest("Connection testing is not available for a managed model.");
+    }
+
     try {
       const result = await testModelConnection(orgId, modelId);
       if (result.error === "MODEL_NOT_FOUND") {
@@ -674,8 +704,7 @@ export function createModelsRouter() {
       // is dead. A gone credential/provider yields no catalog defaults and
       // the check runs on the stored overrides alone.
       const providerId =
-        newCreds?.providerId ??
-        (await loadCredentialMetadata(current.credentialId, orgId))?.providerId;
+        newCreds?.providerId ?? (await loadCredentialRow(current.credentialId, orgId))?.providerId;
       const catalogDefaults: CatalogDefaults = providerId
         ? resolveCatalogDefaults(providerId, effectiveModelId)
         : {};
@@ -695,10 +724,22 @@ export function createModelsRouter() {
         resourceId: modelId,
         after: data as unknown as Record<string, unknown>,
       });
-      // Return the bare updated resource (#657).
+      // Return the bare updated resource (#657), projected for a model alias
+      // (Threat A) — the same projection the list and effective-default paths
+      // apply.
+      //
+      // The asymmetry with POST is deliberate, not an oversight. A create
+      // response echoes a binding the operator just sent in the request body,
+      // so it discloses nothing the caller did not already hold. An update
+      // does not: `PUT {"enabled":true}` names no binding field, yet the raw
+      // row answers with `apiShape`, `providerId`, `baseUrl`, `modelId`,
+      // `contextWindow` and `cost`. `isSystemModel` above does not cover this
+      // — it rejects env-declared models, while an alias is an ordinary DB row
+      // — so without this projection the update route is a read oracle for
+      // every backing an org admin (or a `models:write` API key) can name.
       const model = await getOrgModel(orgId, modelId);
       if (!model) throw notFound("Model not found");
-      return c.json(model);
+      return c.json(projectAliasedModel(model));
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Model update failed", {

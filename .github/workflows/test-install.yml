@@ -1,9 +1,25 @@
 name: Test Installer
 
+# ⚠️  The two `paths:` lists below are IDENTICAL, deliberately, and must stay
+# that way. They drifted once: the `push` arm omitted `scripts/appstrate.pub`,
+# so a signing-key rotation merged straight to `main` never re-ran the suite
+# that verifies signatures against it — the one change this workflow exists to
+# catch was the one change that could not trigger it. Both arms therefore list
+# every file `publish-installer.yml` renders, signs or embeds:
+#
+#   - `scripts/bootstrap.sh`         the platform installer
+#   - `scripts/bootstrap-runner.sh`  the runner installer (carries the
+#                                    minisign → checksums → sha256 chain for
+#                                    the daemon binary)
+#   - `scripts/verify.sh`            the signature-verification helper both ship
+#   - `scripts/appstrate.pub`        the minisign public key they verify against
+#
+# Adding a file to `publish-installer.yml` means adding it to BOTH lists here.
 on:
   pull_request:
     paths:
       - "scripts/bootstrap.sh"
+      - "scripts/bootstrap-runner.sh"
       - "scripts/verify.sh"
       - "scripts/appstrate.pub"
       - ".github/workflows/test-install.yml"
@@ -12,7 +28,9 @@ on:
     branches: [main]
     paths:
       - "scripts/bootstrap.sh"
+      - "scripts/bootstrap-runner.sh"
       - "scripts/verify.sh"
+      - "scripts/appstrate.pub"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
   workflow_dispatch:
@@ -42,7 +60,7 @@ jobs:
             "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
           echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum --check --strict
           chmod +x /tmp/shfmt
-          /tmp/shfmt -d -i 2 -ci scripts/bootstrap.sh scripts/verify.sh
+          /tmp/shfmt -d -i 2 -ci scripts/bootstrap.sh scripts/bootstrap-runner.sh scripts/verify.sh
 
   workflow-lint:
     runs-on: ubuntu-latest
@@ -321,26 +339,6 @@ jobs:
           test -x "$GITHUB_WORKSPACE/bin-yes/appstrate"
           echo "::endgroup::"
           echo "✓ --yes path OK"
-
-          # ── Scenario 1d: APPSTRATE_AUTO_INSTALL=1 (legacy escape hatch) ─
-          # Existing scripted provisioning (Ansible, cloud-init) that
-          # depends on the previous all-in-one default opts in via this
-          # env var. Same effect as --yes but env-driven.
-          echo "::group::APPSTRATE_AUTO_INSTALL=1"
-          set +e
-          AUTO_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-auto" \
-            APPSTRATE_AUTO_INSTALL=1 \
-            APPSTRATE_FORCE_DUAL=1 \
-            bash /tmp/bootstrap.sh 2>&1)
-          rc=$?
-          set -e
-          echo "$AUTO_OUT"
-          test "$rc" -eq 0 \
-            || { echo "::error::bootstrap exited $rc under APPSTRATE_AUTO_INSTALL=1"; exit 1; }
-          echo "$AUTO_OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
-            || { echo "::error::APPSTRATE_AUTO_INSTALL=1 did not exec the CLI"; exit 1; }
-          echo "::endgroup::"
-          echo "✓ APPSTRATE_AUTO_INSTALL=1 path OK"
 
           # ── Scenario 1b: APPSTRATE_NO_LAUNCH=1 (binary drop, no install) ─
           # Users who want the interactive `appstrate install` flow (once

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
@@ -16,8 +16,13 @@ import {
   removeMember,
   updateMemberRole,
   getOrgSettings,
+  getCachedOrgApiVersion,
+  updateOrgSettings,
   listOrgsWithUnsupportedApiVersion,
+  orgSettingsPatchSchema,
 } from "../../../src/services/organizations.ts";
+import { setCacheClock } from "@appstrate/core/cache";
+import { orgSettingsSchema } from "@appstrate/core/permissions";
 import { toSlug } from "@appstrate/core/naming";
 import { CURRENT_API_VERSION, listSupportedVersions } from "../../../src/lib/api-versions.ts";
 
@@ -76,6 +81,135 @@ describe("organizations service", () => {
 
       const settings = await getOrgSettings(org.id);
       expect(settings.api_version).toBe(CURRENT_API_VERSION);
+    });
+  });
+
+  // ── org settings: which schema actually guards the shape ──
+  //
+  // The rationale on `orgSettingsPatchSchema` claims the base schema in
+  // `@appstrate/core/permissions` is never a parser, so all the closure lives
+  // on the patch schema. Both halves are asserted here, because a future
+  // reader who believes the base is a read-path validator will reach for the
+  // wrong lever.
+  describe("org settings schema boundary", () => {
+    it("the base schema STRIPS unknown keys — it never tolerates them", () => {
+      const parsed = orgSettingsSchema.safeParse({ api_version: "2026-01-01", future_key: 1 });
+
+      expect(parsed.success).toBe(true);
+      expect(parsed.data).toEqual({ api_version: "2026-01-01" });
+      expect(parsed.data).not.toHaveProperty("future_key");
+    });
+
+    it("the patch schema is the one that refuses an unknown key", () => {
+      expect(orgSettingsPatchSchema.safeParse({ dashboard_sso_enabled: true }).success).toBe(true);
+      expect(orgSettingsPatchSchema.safeParse({ future_key: 1 }).success).toBe(false);
+    });
+
+    it("getOrgSettings casts the stored row — it does not parse it", async () => {
+      const org = await createOrganization("Cast Org", "cast-org", userId);
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: CURRENT_API_VERSION, future_key: "kept" } })
+        .where(eq(organizations.id, org.id));
+
+      // A key no schema declares survives the read verbatim. If this ever
+      // starts failing, a parse was introduced on the read path and the
+      // rationale on `orgSettingsPatchSchema` needs revisiting.
+      expect(await getOrgSettings(org.id)).toEqual({
+        api_version: CURRENT_API_VERSION,
+        future_key: "kept",
+      } as never);
+    });
+  });
+
+  // ── getCachedOrgApiVersion ────────────────────────────────
+
+  // The api-version middleware resolves the `api_version` pin on every
+  // strategy-authenticated request (chat `chatloop_` hops, API keys), so the
+  // pin — and ONLY the pin — reads through a 10 s per-org cache
+  // (`services/org-settings-cache.ts`). `getOrgSettings` itself stays
+  // uncached (the oidc SSO gate depends on it reading fresh). These pin the
+  // three properties that make the pin cache safe to rely on: a repeated read
+  // is served from memory, a service-layer write is visible immediately, and
+  // the TTL is the backstop for writes that bypass the service layer.
+  describe("getCachedOrgApiVersion", () => {
+    let clock: number;
+
+    beforeEach(() => {
+      clock = Date.now();
+      setCacheClock(() => clock);
+    });
+
+    afterEach(() => {
+      setCacheClock(null);
+    });
+
+    it("serves a repeated read from memory — a direct pin update is NOT seen until the TTL", async () => {
+      const org = await createOrganization("Cached Org", "cached-org", userId);
+      expect(await getCachedOrgApiVersion(org.id)).toBe(CURRENT_API_VERSION);
+
+      // Write the row directly, bypassing the service writer (so nothing
+      // invalidates). Negative control: without the cache the next read
+      // would return "2020-01-01" and this assertion would fail.
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: "2020-01-01" } })
+        .where(eq(organizations.id, org.id));
+      expect(await getCachedOrgApiVersion(org.id)).toBe(CURRENT_API_VERSION);
+      // The uncached reader sees the row as it is — it is not behind the cache.
+      expect((await getOrgSettings(org.id)).api_version).toBe("2020-01-01");
+
+      // Past the TTL the entry expires and the direct write becomes visible.
+      clock += 10_001;
+      expect(await getCachedOrgApiVersion(org.id)).toBe("2020-01-01");
+    });
+
+    it("updateOrgSettings invalidates — the next cached read sees the fresh row immediately", async () => {
+      const org = await createOrganization("Fresh Org", "fresh-org", userId);
+      // Prime the cache with the creation-time pin, then plant a different pin
+      // directly so the cached and stored values disagree.
+      expect(await getCachedOrgApiVersion(org.id)).toBe(CURRENT_API_VERSION);
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: "2020-01-01" } })
+        .where(eq(organizations.id, org.id));
+      expect(await getCachedOrgApiVersion(org.id)).toBe(CURRENT_API_VERSION);
+
+      // A service-layer write to ANY settings key busts the pin entry: same
+      // clock tick, well inside the TTL — only the invalidation explains
+      // seeing the stored pin here.
+      await updateOrgSettings(org.id, { dashboard_sso_enabled: true });
+      expect(await getCachedOrgApiVersion(org.id)).toBe("2020-01-01");
+    });
+
+    it("caches an unpinned org as null — the null is a hit, not a re-query per read", async () => {
+      const org = await createOrganization("Unpinned Org", "unpinned-org", userId);
+      await db
+        .update(organizations)
+        .set({ orgSettings: { dashboard_sso_enabled: true } })
+        .where(eq(organizations.id, org.id));
+      expect(await getCachedOrgApiVersion(org.id)).toBeNull();
+
+      // A direct pin write after the null was cached is NOT seen — proving
+      // the null itself is a cached value.
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: "2020-01-01" } })
+        .where(eq(organizations.id, org.id));
+      expect(await getCachedOrgApiVersion(org.id)).toBeNull();
+    });
+
+    it("entries are per org — one org's cached pin does not shadow another's", async () => {
+      const a = await createOrganization("Org A", "org-a", userId);
+      const b = await createOrganization("Org B", "org-b", userId);
+      expect(await getCachedOrgApiVersion(a.id)).toBe(CURRENT_API_VERSION);
+
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: "2020-01-01" } })
+        .where(eq(organizations.id, b.id));
+      expect(await getCachedOrgApiVersion(b.id)).toBe("2020-01-01");
+      expect(await getCachedOrgApiVersion(a.id)).toBe(CURRENT_API_VERSION);
     });
   });
 
@@ -279,7 +413,7 @@ describe("organizations service", () => {
     // reverted.
 
     it("removeMember disables the member's enabled schedules in that org (CRIT-13)", async () => {
-      const { org, defaultAppId } = await createTestOrg(userId, { slug: "sched-revoke" });
+      const { org, defaultSpaceId } = await createTestOrg(userId, { slug: "sched-revoke" });
       const member = await createTestUser({ email: "sched-owner@test.com" });
       await addMember(org.id, member.id, "member");
 
@@ -287,7 +421,7 @@ describe("organizations service", () => {
       const memberSchedule = await seedSchedule({
         packageId: pkg.id,
         orgId: org.id,
-        applicationId: defaultAppId,
+        spaceId: defaultSpaceId,
         userId: member.id,
         enabled: true,
         nextRunAt: new Date(Date.now() + 3600_000),
@@ -296,7 +430,7 @@ describe("organizations service", () => {
       const ownerSchedule = await seedSchedule({
         packageId: pkg.id,
         orgId: org.id,
-        applicationId: defaultAppId,
+        spaceId: defaultSpaceId,
         userId,
         enabled: true,
         nextRunAt: new Date(Date.now() + 3600_000),
@@ -324,9 +458,11 @@ describe("organizations service", () => {
     it("removeMember only disables schedules in THAT org — the member's other-org schedules keep firing (CRIT-13)", async () => {
       const member = await createTestUser({ email: "multi-org-sched@test.com" });
 
-      const { org: org1, defaultAppId: app1 } = await createTestOrg(userId, { slug: "rev-org1" });
+      const { org: org1, defaultSpaceId: space1 } = await createTestOrg(userId, {
+        slug: "rev-org1",
+      });
       await addMember(org1.id, member.id, "member");
-      const { org: org2, defaultAppId: app2 } = await createTestOrg(member.id, {
+      const { org: org2, defaultSpaceId: space2 } = await createTestOrg(member.id, {
         slug: "rev-org2",
       });
 
@@ -336,7 +472,7 @@ describe("organizations service", () => {
       const inOrg1 = await seedSchedule({
         packageId: pkg1.id,
         orgId: org1.id,
-        applicationId: app1,
+        spaceId: space1,
         userId: member.id,
         enabled: true,
         nextRunAt: new Date(Date.now() + 3600_000),
@@ -344,7 +480,7 @@ describe("organizations service", () => {
       const inOrg2 = await seedSchedule({
         packageId: pkg2.id,
         orgId: org2.id,
-        applicationId: app2,
+        spaceId: space2,
         userId: member.id,
         enabled: true,
         nextRunAt: new Date(Date.now() + 3600_000),

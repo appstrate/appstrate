@@ -4,20 +4,37 @@ import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { useBilling, useCheckout, usePortal } from "../../hooks/use-billing";
+import { usePermissions } from "../../hooks/use-permissions";
+import { NavigateKeepingState } from "../../components/navigate-keeping-state";
+import type { components } from "../../api/client";
+import {
+  useBilling,
+  useBillingKey,
+  useChangePlan,
+  useCheckout,
+  usePortal,
+  type CheckoutPlanId,
+} from "../../hooks/use-billing";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor } from "../../lib/usage-severity";
 import { PlanGrid } from "../../components/plan-card";
+import { BillingManagersSection } from "../../components/billing-managers-section";
+import { BillingContactSection } from "../../components/billing-contact-section";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 
-const STATUS_I18N: Record<string, string> = {
+// Keyed on the status enum the spec declares, not on `string`: a status added
+// to `EeBillingAccount.status` without an i18n key fails to compile here
+// instead of rendering the raw key.
+const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], string> = {
   past_due: "billing.statusPastDue",
   unpaid: "billing.statusUnpaid",
   paused: "billing.statusPaused",
+  incomplete: "billing.statusIncomplete",
   canceling: "billing.statusCanceling",
   canceled: "billing.statusCanceled",
   active: "billing.statusActive",
@@ -27,27 +44,33 @@ const STATUS_I18N: Record<string, string> = {
 
 export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   const { features } = useAppConfig();
-  // Gate the cloud fetch on the feature flag (mirrors sidebar-billing) so OSS
-  // mode never fires the cloud-only `/billing` request (404). The line-below
-  // <Navigate> still handles the visible redirect.
-  const { data: billing, isLoading, error } = useBilling({ enabled: features.billing });
+  // The route is mounted behind `RequirePermission permission="billing:read"`,
+  // which only `@appstrate/module-ee` contributes, so `/api/billing` answers.
+  const { data: billing, isLoading, error } = useBilling();
   const checkoutMutation = useCheckout();
+  const changePlanMutation = useChangePlan();
   const portalMutation = usePortal();
+  const queryClient = useQueryClient();
+  const billingKey = useBillingKey();
 
-  // Storage entitlement — core data (organizations.documents_bytes_*), shown
-  // next to the credit gauge because the plan drives the storage limit in
-  // cloud mode. Same source (useOrgStorage) as the org-settings/general storage
-  // section. Gated on the billing flag to mirror the credit fetch above.
-  const {
-    storage,
-    limitBytes: storageLimit,
-    percent: storagePercent,
-  } = useOrgStorage({ enabled: features.billing });
+  // Storage entitlement — core data (organizations.files_bytes_*), shown
+  // next to the credit gauge because the plan drives the storage limit when
+  // billing is on. Same source (useOrgStorage) as org-settings/general.
+  const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
 
+  // The two admin sections below are MOUNTED on `billing:manage`, not merely
+  // hidden by it, so their queries never fire for a caller the routes would 403.
+  const canManageBilling = can("billing:manage");
+
+  // Reachable by URL even when the module is absent: redirect rather than
+  // render a page whose API answers 404. Below every hook on purpose — an
+  // early return above them changes the hook order between renders.
   if (!features.billing) return <NavigateKeepingState to="/org-settings/general" />;
+
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
   if (!billing) {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
   }
@@ -60,30 +83,61 @@ export function OrgSettingsBillingPage() {
         : t(STATUS_I18N[billing.status] ?? "billing.noSubscription");
 
   const hasSubscription = billing.status !== "none";
+  const upgradeIds = billing.upgrades.map((u) => u.id);
+  // Every upgrade is a checkout target by type, so the header button just
+  // offers the first one.
+  const firstUpgradeId = upgradeIds[0];
 
-  const handleUpgrade = (planId: string) => {
-    checkoutMutation.mutate(
-      { planId, returnUrl: "/org-settings/billing" },
+  const onMutationError = (err: unknown) => {
+    toast.error(t("error.prefix", { ns: "common", message: getErrorMessage(err) }));
+  };
+
+  const handleManage = () => {
+    portalMutation.mutate(
+      {},
       {
-        onSuccess: (url) => {
+        onSuccess: ({ url }) => {
           window.location.href = url;
         },
-        onError: (err: Error) => {
-          toast.error(t("error.prefix", { ns: "common", message: err.message }));
-        },
+        onError: onMutationError,
       },
     );
   };
 
-  const handleManage = () => {
-    portalMutation.mutate(undefined, {
-      onSuccess: (url) => {
-        window.location.href = url;
-      },
-      onError: (err: Error) => {
-        toast.error(t("error.prefix", { ns: "common", message: err.message }));
-      },
-    });
+  /**
+   * The server reports the door as `plan_action`; the page follows it instead of
+   * re-deriving it (a second Checkout beside a live subscription bills twice).
+   * The plan lands through the Stripe webhook, so the page refetches.
+   */
+  const handleSelectPlan = (planId: CheckoutPlanId) => {
+    switch (billing.plan_action) {
+      case "portal":
+        handleManage();
+        return;
+      case "plan-change":
+        changePlanMutation.mutate(
+          { body: { plan_id: planId } },
+          {
+            onSuccess: () => {
+              toast.success(t("billing.planChangeRequested"));
+              void queryClient.invalidateQueries({ queryKey: billingKey });
+            },
+            onError: onMutationError,
+          },
+        );
+        return;
+      case "checkout":
+        checkoutMutation.mutate(
+          { body: { plan_id: planId, return_url: "/org-settings/billing" } },
+          {
+            onSuccess: ({ url }) => {
+              window.location.href = url;
+            },
+            onError: onMutationError,
+          },
+        );
+        return;
+    }
   };
 
   return (
@@ -105,8 +159,8 @@ export function OrgSettingsBillingPage() {
             >
               {t("billing.manage")}
             </Button>
-          ) : billing.upgrades.length > 0 ? (
-            <Button size="sm" onClick={() => handleUpgrade(billing.upgrades[0]!.id)}>
+          ) : firstUpgradeId ? (
+            <Button size="sm" onClick={() => handleSelectPlan(firstUpgradeId)}>
               {t("billing.upgrade")}
             </Button>
           ) : null}
@@ -204,11 +258,18 @@ export function OrgSettingsBillingPage() {
           <PlanGrid
             plans={billing.plans}
             currentPlanId={billing.plan.id}
-            upgradeIds={new Set(billing.upgrades.map((u) => u.id))}
-            disabled={checkoutMutation.isPending}
-            onSelect={handleUpgrade}
+            upgrades={upgradeIds}
+            disabled={checkoutMutation.isPending || changePlanMutation.isPending}
+            onSelect={handleSelectPlan}
           />
         </div>
+      )}
+
+      {canManageBilling && (
+        <>
+          <BillingManagersSection />
+          <BillingContactSection />
+        </>
       )}
     </>
   );

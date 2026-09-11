@@ -13,7 +13,6 @@
  *  - stable compression level (`level: 0` — store only, no deflate)
  */
 
-import { writeFile } from "node:fs/promises";
 import { zipSync } from "fflate";
 import { canonicalJsonStringify } from "./canonical-json.ts";
 import {
@@ -35,10 +34,11 @@ import { parsePackageIdentity } from "./types.ts";
  */
 const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
-export async function writeBundleToFile(bundle: Bundle, path: string): Promise<void> {
-  const buf = writeBundleToBuffer(bundle);
-  await writeFile(path, buf);
-}
+// `writeBundleToFile(bundle, path)` lived here as a two-line
+// `writeFile(path, writeBundleToBuffer(bundle))`. Removed: no production
+// caller ever appeared (the platform writes bundle bytes to S3, not to disk),
+// only a test that had to build the very bundle it then read back. Callers
+// that need a file own the one `writeFile` call.
 
 export function writeBundleToBuffer(bundle: Bundle): Uint8Array {
   if (bundle.bundleFormatVersion !== BUNDLE_FORMAT_VERSION) {

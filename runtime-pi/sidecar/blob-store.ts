@@ -38,7 +38,7 @@
 const ULID_BYTES = 16;
 const ENCODING_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford base32 — ULID standard.
 
-export interface BlobRecord {
+interface BlobRecord {
   /** Stable URI handed back to the agent in `resource_link` blocks. */
   uri: string;
   /** The bytes themselves. */
@@ -51,7 +51,7 @@ export interface BlobRecord {
   source?: string;
 }
 
-export interface PutOptions {
+interface PutOptions {
   mimeType?: string;
   source?: string;
 }
@@ -127,16 +127,21 @@ export class BlobStore {
   private readonly maxTotalBytes: number;
   private totalBytes = 0;
 
+  /**
+   * `maxTotalBytes` is REQUIRED, deliberately. It used to default to
+   * 256 MiB — exactly the sidecar container's cgroup limit
+   * (`SIDECAR_MEMORY_BYTES`) — so a store that filled to its own default
+   * tripped the kernel OOM-killer before the store's guard ever ran,
+   * killing every integration mid-run. Every caller already passed a lower
+   * cap precisely to avoid that; the default was reachable only by
+   * forgetting, and what it did on being reached was kill the process.
+   * A caller that must think about the number cannot forget it.
+   */
   constructor(
     readonly runId: string,
-    options: { maxTotalBytes?: number } = {},
+    options: { maxTotalBytes: number },
   ) {
-    // Default 256 MiB — callers running under a memory cgroup MUST pass
-    // an explicit lower cap: the sidecar container's memory limit is
-    // exactly 256 MiB (SIDECAR_MEMORY_BYTES), so a full store at the
-    // default would trip the kernel OOM-killer before the store's own
-    // guard. Production passes 128 MiB in `buildSidecarRuntimeDeps`.
-    this.maxTotalBytes = options.maxTotalBytes ?? 256 * 1024 * 1024;
+    this.maxTotalBytes = options.maxTotalBytes;
   }
 
   /** Number of blobs currently retained (for tests + observability). */

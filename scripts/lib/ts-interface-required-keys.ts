@@ -9,8 +9,12 @@
  *
  * `getPropertiesOfType` flattens `extends` / intersection types, so a type like
  * `EnrichedRun = RunWireDto & {…}` reports the full merged property set. A
- * property is treated as required iff it does NOT carry the `Optional` symbol
- * flag (i.e. it is not declared with `?`).
+ * property is treated as OPTIONAL when it carries the `Optional` symbol flag
+ * (`x?: T`) or its type admits `undefined` (`x: T | undefined`) — the two
+ * spellings say the same thing to a consumer, and reading only the first made
+ * the reverse comparison depend on which one the author chose. Everything else
+ * is required, `| null` included: that guarantees the key. Both sets are
+ * reported because step 7 compares the two declarations in both directions.
  */
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
@@ -81,11 +85,35 @@ function getProgram(): {
  */
 export interface TypeShape {
   required: Set<string>;
+  /**
+   * Properties the type says may be absent — declared `x?: T`, or typed
+   * `x: T | undefined`. Kept alongside `required` because step 7
+   * compares in both directions, and the two are not complements: a name
+   * absent from BOTH sets is a name the type does not declare at all, which
+   * neither direction may report.
+   */
+  optional: Set<string>;
   nested: Map<string, TypeShape>;
 }
 
+/**
+ * Does this type admit `undefined` as a value?
+ *
+ * `x?: T` and `x: T | undefined` are the same fact to a consumer — both hand it
+ * a value it has to guard — so both count as optional. Reading only the
+ * `Optional` symbol flag made the drift step 7 exists to catch depend on which
+ * spelling the author chose: `generation?: X | null` was reported,
+ * `generation: X | null | undefined` was not, and it is the second spelling that
+ * a `?? fallback` for an impossible case hides behind most comfortably.
+ */
+function admitsUndefined(type: ts.Type): boolean {
+  return type.isUnion()
+    ? type.types.some(admitsUndefined)
+    : (type.flags & ts.TypeFlags.Undefined) !== 0;
+}
+
 /** Strip `null` / `undefined` from a union; return the single remaining type, or null if 0 or >1 remain. */
-function stripNullish(checker: ts.TypeChecker, type: ts.Type): ts.Type | null {
+function stripNullish(type: ts.Type): ts.Type | null {
   if (!type.isUnion()) return type;
   const rest = type.types.filter((t) => !(t.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)));
   return rest.length === 1 ? rest[0]! : null;
@@ -93,7 +121,7 @@ function stripNullish(checker: ts.TypeChecker, type: ts.Type): ts.Type | null {
 
 /** A type we can descend into for structural required-field comparison (a closed object, not a Record/Date/array). */
 function closedObjectType(checker: ts.TypeChecker, type: ts.Type): ts.Type | null {
-  const core = stripNullish(checker, type);
+  const core = stripNullish(type);
   if (!core) return null;
   // Object OR intersection-of-objects (e.g. `SchemaWrapper & { current }`).
   // getPropertiesOfType flattens intersections, so both are descendable.
@@ -108,7 +136,7 @@ function closedObjectType(checker: ts.TypeChecker, type: ts.Type): ts.Type | nul
 
 /** If `type` is an array/readonly-array, return its element type; else null. */
 function arrayElementType(checker: ts.TypeChecker, type: ts.Type): ts.Type | null {
-  const core = stripNullish(checker, type);
+  const core = stripNullish(type);
   if (!core) return null;
   const name = core.getSymbol()?.getName();
   if (name !== "Array" && name !== "ReadonlyArray") return null;
@@ -123,18 +151,22 @@ function buildShape(
   seen: Set<ts.Type>,
 ): TypeShape {
   const required = new Set<string>();
+  const optionalKeys = new Set<string>();
   const nested = new Map<string, TypeShape>();
-  if (depth > 8 || seen.has(type)) return { required, nested };
+  if (depth > 8 || seen.has(type)) return { required, optional: optionalKeys, nested };
   seen.add(type);
 
   for (const prop of checker.getPropertiesOfType(type)) {
     const name = prop.getName();
-    const optional = !!(prop.flags & ts.SymbolFlags.Optional);
-    if (!optional) required.add(name);
-
     const decl = prop.valueDeclaration ?? prop.declarations?.[0];
-    if (!decl) continue;
-    const propType = checker.getTypeOfSymbolAtLocation(prop, decl);
+    const propType = decl ? checker.getTypeOfSymbolAtLocation(prop, decl) : undefined;
+    const optional =
+      (prop.flags & ts.SymbolFlags.Optional) !== 0 ||
+      (propType !== undefined && admitsUndefined(propType));
+    if (optional) optionalKeys.add(name);
+    else required.add(name);
+
+    if (propType === undefined) continue;
 
     // Array-of-object → descend into element shape; closed object → descend.
     const elem = arrayElementType(checker, propType);
@@ -142,7 +174,7 @@ function buildShape(
     if (target) nested.set(name, buildShape(checker, target, depth + 1, seen));
   }
   seen.delete(type);
-  return { required, nested };
+  return { required, optional: optionalKeys, nested };
 }
 
 /**

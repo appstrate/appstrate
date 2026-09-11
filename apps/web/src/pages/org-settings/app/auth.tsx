@@ -3,28 +3,28 @@
 import { lazy, Suspense } from "react";
 import { usePermissions } from "../../../hooks/use-permissions";
 import { useAppConfig } from "../../../hooks/use-app-config";
-import { useCurrentApplicationId } from "../../../hooks/use-current-application";
+import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState } from "../../../components/page-states";
 import { NavigateKeepingState } from "../../../components/navigate-keeping-state";
 
-const AppAuthTab = lazy(() =>
-  import("../../../modules/oidc/components/app-auth-tab").then((m) => ({
-    default: m.AppAuthTab,
+const SpaceAuthTab = lazy(() =>
+  import("../../../modules/oidc/components/space-auth-tab").then((m) => ({
+    default: m.SpaceAuthTab,
   })),
 );
 
 export function OrgSettingsAppAuthPage() {
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const { features } = useAppConfig();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
 
-  if (!isAdmin || !applicationId || !features.oidc) {
+  if (!can("space:update") || !spaceId || !features.oidc) {
     return <NavigateKeepingState to="/workspace-settings/general" />;
   }
 
   return (
     <Suspense fallback={<LoadingState />}>
-      <AppAuthTab />
+      <SpaceAuthTab />
     </Suspense>
   );
 }

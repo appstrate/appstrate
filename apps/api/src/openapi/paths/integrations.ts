@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS } from "../headers.ts";
+
 /**
  * OpenAPI paths for the AFPS integration marketplace.
  *
- * Endpoints are app-scoped — `X-Application-Id` is enforced by the
- * platform-level `requireAppContext()` middleware.
+ * Endpoints are space-scoped — `X-Space-Id` is enforced by the
+ * platform-level `requireSpaceContext()` middleware.
  */
 
 const packageIdParam = {
@@ -47,11 +49,11 @@ const agentPackageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
-// The org default is keyed by (application, integration) ONLY — a single row
+// The org default is keyed by (space, integration) ONLY — a single row
 // per integration, NOT one per (integration, auth_key). The unique index in
 // `integrationOrgDefaults` and the `onConflictDoUpdate` in
 // `integration-org-defaults-service.ts:upsertOrgDefault` both target
-// [applicationId, integrationId], so PUT overwrites the one existing default
+// [spaceId, integrationId], so PUT overwrites the one existing default
 // wholesale. `auth_key` below is a DERIVED read-only projection of the chosen
 // connection's own auth (joined from `integration_connections` at read time) —
 // it does NOT partition the default. Picking a connection of a different auth
@@ -72,7 +74,7 @@ const integrationOrgDefaultSchema = {
     auth_key: {
       type: "string",
       description:
-        "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses.",
+        "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses.",
     },
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
@@ -197,7 +199,7 @@ const oauthClientSchema = {
   type: "object",
   required: [
     "id",
-    "applicationId",
+    "spaceId",
     "integration_package_id",
     "auth_key",
     "client_id",
@@ -214,7 +216,7 @@ const oauthClientSchema = {
       description:
         "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.",
     },
-    applicationId: { type: "string" },
+    spaceId: { type: "string" },
     integration_package_id: { type: "string" },
     auth_key: { type: "string" },
     client_id: { type: "string" },
@@ -355,7 +357,7 @@ const integrationDetailSchema = {
     // the agent editor MAY offer the "all upstream tools" toggle that sets
     // `integrations_configuration.<id>.tools = "*"`. Default `false`.
     allow_undeclared_tools: { type: "boolean" },
-    // Activation state in the current application — resource state shared
+    // Activation state in the current space — resource state shared
     // with the list endpoint, returned by every detail-shaped response
     // (GET detail, POST activate, PATCH settings).
     active: { type: "boolean" },
@@ -371,11 +373,6 @@ const integrationDetailSchema = {
   },
 } as const;
 
-const baseResponseHeaders = {
-  "Request-Id": { $ref: "#/components/headers/RequestId" },
-  "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-} as const;
-
 /**
  * The `503`/`504` pair every connect-run-backed connect operation answers with
  * (the programmatic `connectIntegrationFields` and the hosted form's
@@ -386,9 +383,29 @@ const baseResponseHeaders = {
  *
  * Module-local const, NOT a `#/components/responses/*` $ref: the spread is
  * inlined at serialization time, so the emitted spec stays byte-identical to
- * the hand-written pair it replaces. Same technique as `paths/documents.ts`'s
+ * the hand-written pair it replaces. Same technique as `paths/files.ts`'s
  * `pipelineResponses`.
  */
+/**
+ * The two fields a caller relays verbatim from a readiness `integrations.<id>`
+ * error onto either connect kickoff (`connect/oauth2`, `connect/session`).
+ * Declared once so both surfaces document the relay identically.
+ */
+const connectKickoffRelayProperties = {
+  scopes: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
+  },
+  connection_id: {
+    type: "string",
+    format: "uuid",
+    description:
+      "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.",
+  },
+} as const;
+
 const connectRunResponses = {
   "503": {
     description:
@@ -434,20 +451,16 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current space. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "limit",
           in: "query",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
         },
-        {
-          name: "offset",
-          in: "query",
-          schema: { type: "integer", minimum: 0, default: 0 },
-        },
+        { $ref: "#/components/parameters/Offset" },
         {
           name: "fields",
           in: "query",
@@ -459,7 +472,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Integration list",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -514,7 +527,7 @@ export const integrationsPaths = {
         "200": {
           description:
             "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, code exchange failure, identity mismatch, or persistence failure).",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
       },
     },
@@ -526,13 +539,13 @@ export const integrationsPaths = {
       summary: "Get integration detail + per-auth status",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
         "200": {
           description: "Integration detail",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationDetailSchema } },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -552,10 +565,10 @@ export const integrationsPaths = {
     post: {
       operationId: "activateIntegration",
       tags: ["Integrations"],
-      summary: "Activate an integration in the current application",
+      summary: "Activate an integration in the current space",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       requestBody: {
@@ -572,7 +585,7 @@ export const integrationsPaths = {
           // activation of an already-active integration succeeds (201), it is
           // not a 409.
           description: "Activated — returns the bare integration detail resource",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare integration resource — same serializer as
@@ -599,10 +612,10 @@ export const integrationsPaths = {
     delete: {
       operationId: "deactivateIntegration",
       tags: ["Integrations"],
-      summary: "Deactivate an integration in the current application (non-destructive)",
+      summary: "Deactivate an integration in the current space (non-destructive)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
@@ -614,7 +627,7 @@ export const integrationsPaths = {
           // integration detail stays GET-able afterwards (connections, OAuth
           // clients, pins and org defaults survive) and serves `active: false`.
           description: "Deactivated — empty response. The integration detail remains GET-able.",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -639,10 +652,10 @@ export const integrationsPaths = {
         "org may hold N clients per auth (model-provider pattern). The first " +
         "registered client becomes the default; later ones are non-default until " +
         "promoted via PUT .../default-client. Rejected for auto-provisioned " +
-        "(DCR/CIMD) auths. Admin only.",
+        "(DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -669,6 +682,7 @@ export const integrationsPaths = {
                 },
                 redirect_uri: { type: "string", format: "uri" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -676,7 +690,7 @@ export const integrationsPaths = {
       responses: {
         "201": {
           description: "Created",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -692,10 +706,10 @@ export const integrationsPaths = {
       summary: "Rotate a custom OAuth client's credentials",
       description:
         "Rotates one custom client in place, by its id. Auto-provisioned " +
-        "(DCR/CIMD) clients are machine-managed and rejected. Admin only.",
+        "(DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         clientIdParam,
       ],
@@ -721,6 +735,7 @@ export const integrationsPaths = {
                 },
                 redirect_uri: { type: "string", format: "uri" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -728,7 +743,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Rotated",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: oauthClientSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -742,17 +757,17 @@ export const integrationsPaths = {
       summary: "Delete a custom OAuth client",
       description:
         "Deletes one custom client by id. If it was the default, the cascade " +
-        "falls to the system client (no auto-promotion). Admin only.",
+        "falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         clientIdParam,
       ],
       responses: {
         "204": {
           description: "OAuth client deleted",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -771,14 +786,14 @@ export const integrationsPaths = {
         "always use the default (no per-connect picker).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
       responses: {
         "200": {
           description: "Available OAuth clients",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationClientsListSchema } },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -797,10 +812,10 @@ export const integrationsPaths = {
         "client flags it default; selecting a system client un-flags the custom one " +
         "so the cascade falls to the system client. Existing connections are bound " +
         "to the client that minted them and are unaffected. Returns the refreshed " +
-        "clients list. Admin only.",
+        "clients list. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -817,6 +832,7 @@ export const integrationsPaths = {
                   description: "Client to make default — a `client_ref` from GET .../clients.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -824,7 +840,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Default set; available OAuth clients (re-badged)",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationClientsListSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -842,7 +858,7 @@ export const integrationsPaths = {
         "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -865,6 +881,7 @@ export const integrationsPaths = {
                     "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -872,7 +889,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Connection stored",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationConnectionSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -891,7 +908,7 @@ export const integrationsPaths = {
         "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -902,10 +919,11 @@ export const integrationsPaths = {
             schema: {
               type: "object",
               properties: {
-                scopes: { type: "array", items: { type: "string" } },
+                scopes: connectKickoffRelayProperties.scopes,
                 force_account_select: { type: "boolean" },
-                connection_id: { type: "string", format: "uuid" },
+                connection_id: connectKickoffRelayProperties.connection_id,
               },
+              additionalProperties: false,
             },
           },
         },
@@ -913,7 +931,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Authorize URL",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -942,7 +960,7 @@ export const integrationsPaths = {
         "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -953,14 +971,11 @@ export const integrationsPaths = {
             schema: {
               type: "object",
               properties: {
-                scopes: { type: "array", items: { type: "string" } },
+                scopes: connectKickoffRelayProperties.scopes,
                 force_account_select: { type: "boolean" },
-                connection_id: {
-                  type: "string",
-                  format: "uuid",
-                  description: "Reconnect/upgrade an existing connection in place.",
-                },
+                connection_id: connectKickoffRelayProperties.connection_id,
               },
+              additionalProperties: false,
             },
           },
         },
@@ -968,7 +983,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Connect URL",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1016,13 +1031,21 @@ export const integrationsPaths = {
         // returns c.html(popupHtmlError(...), 400|410)), so each condition now
         // maps to exactly one status.
         "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
-        "400": { description: "Missing token (HTML error page)." },
+        "400": {
+          description:
+            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable.",
+        },
+        "403": {
+          description:
+            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page names the action to take (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint.",
+        },
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
         "500": {
           description: "Integration cannot be connected / unexpected failure (HTML error page).",
         },
         "502": {
-          description: "Upstream provider failed to start the connection (HTML error page).",
+          description:
+            "Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry.",
         },
       },
     },
@@ -1037,7 +1060,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Hosted connect context",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1086,6 +1109,7 @@ export const integrationsPaths = {
               properties: {
                 credentials: { type: "object", additionalProperties: true },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1093,7 +1117,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Connection stored",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1119,16 +1143,16 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the caller's own connections **plus** every connection in the application opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
+        "Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
         "200": {
           description: "Connection list",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1154,7 +1178,7 @@ export const integrationsPaths = {
       summary: "Update an integration connection's label and/or shared_with_org flag",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         connectionIdParam,
       ],
@@ -1168,6 +1192,7 @@ export const integrationsPaths = {
                 label: { type: ["string", "null"], maxLength: 80 },
                 shared_with_org: { type: "boolean" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1175,7 +1200,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Updated — returns the bare connection resource",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare connection resource — same serializer as the
@@ -1190,7 +1215,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Connection is pinned and cannot be unshared",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1204,10 +1229,10 @@ export const integrationsPaths = {
     patch: {
       operationId: "updateIntegrationSettings",
       tags: ["Integrations"],
-      summary: "Toggle the per-(app, integration) block_user_connections gate (admin)",
+      summary: "Toggle the per-(space, integration) block_user_connections gate (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       requestBody: {
@@ -1218,6 +1243,7 @@ export const integrationsPaths = {
               type: "object",
               required: ["block_user_connections"],
               properties: { block_user_connections: { type: "boolean" } },
+              additionalProperties: false,
             },
           },
         },
@@ -1225,7 +1251,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Updated — returns the bare integration detail resource",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare integration resource — same serializer as
@@ -1245,16 +1271,16 @@ export const integrationsPaths = {
     get: {
       operationId: "listIntegrationPins",
       tags: ["Integrations"],
-      summary: "List admin pins for this integration in this application",
+      summary: "List admin pins for this integration in this space",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
         "200": {
           description: "Pin list",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1286,13 +1312,13 @@ export const integrationsPaths = {
         "(R2): admins pick an installed-agent target without leaving the integration view.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
         "200": {
           description: "Consuming agents",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1328,7 +1354,7 @@ export const integrationsPaths = {
       summary: "Pin an admin-shared connection to an agent for all members (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         agentPackageIdParam,
       ],
@@ -1340,6 +1366,7 @@ export const integrationsPaths = {
               type: "object",
               required: ["connection_id"],
               properties: { connection_id: { type: "string", format: "uuid" } },
+              additionalProperties: false,
             },
           },
         },
@@ -1347,7 +1374,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Pinned",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": { schema: { $ref: "#/components/schemas/IntegrationPin" } },
           },
@@ -1363,14 +1390,14 @@ export const integrationsPaths = {
       summary: "Remove an admin pin (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         agentPackageIdParam,
       ],
       responses: {
         "204": {
           description: "Pin removed (idempotent — 204 whether the pin existed or not)",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1382,18 +1409,18 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Get the org-wide default connection for this integration",
       description:
-        "The cross-agent governance baseline: one default connection per (application, " +
+        "The cross-agent governance baseline: one default connection per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
         "`enforce: false` is overridable by a member pin. Returns 204 when unset.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
         "200": {
           description: "Org default (bare resource — same shape as PUT)",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: integrationOrgDefaultSchema,
@@ -1402,7 +1429,7 @@ export const integrationsPaths = {
         },
         "204": {
           description: "No org default is set for this integration",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1412,14 +1439,14 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Set the org-wide default connection for this integration (admin)",
       description:
-        "Upsert the single (application, integration) default. Keyed per-integration, " +
+        "Upsert the single (space, integration) default. Keyed per-integration, " +
         "NOT per-auth: this overwrites the one existing default wholesale (atomic " +
-        "onConflictDoUpdate on [applicationId, integrationId]). Selecting a connection " +
+        "onConflictDoUpdate on [spaceId, integrationId]). Selecting a connection " +
         "of a different auth type replaces the current default rather than adding a " +
         "second one. The response `auth_key` reflects the chosen connection's auth (derived).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       requestBody: {
@@ -1428,11 +1455,14 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["connection_id", "enforce"],
+              // `enforce` carries a server-side default (`false`), so it is
+              // optional on the wire — the `default` beside it said as much.
+              required: ["connection_id"],
               properties: {
                 connection_id: { type: "string", format: "uuid" },
                 enforce: { type: "boolean", default: false },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1440,7 +1470,7 @@ export const integrationsPaths = {
       responses: {
         "200": {
           description: "Default set",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationOrgDefaultSchema } },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -1454,13 +1484,13 @@ export const integrationsPaths = {
       summary: "Remove the org-wide default connection (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
         "204": {
           description: "Default removed (idempotent — 204 whether a default existed or not)",
-          headers: baseResponseHeaders,
+          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

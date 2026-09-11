@@ -81,7 +81,7 @@ async function seedConnection(ctx: TestContext, fields: Record<string, string>) 
     integrationId: INTEG,
     authKey: "primary",
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
@@ -127,7 +127,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({ mode: "0600" }),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, {
       client_cert: "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
@@ -136,7 +136,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -168,7 +168,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({}), // no mode → default
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, {
       client_cert: "cert-bytes",
@@ -177,7 +177,7 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -195,13 +195,13 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
       source: "local",
       draftManifest: manifestWithFiles({ withUnsafePath: true }),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, { client_cert: "c", client_key: "k" });
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -234,13 +234,13 @@ describe("resolveIntegrationSpawns — delivery.files (CC-5)", () => {
         tools_policy: { call: {} },
       }),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedServer(ctx);
     await seedConnection(ctx, { api_key: "k-1" });
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });

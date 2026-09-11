@@ -15,7 +15,7 @@ import {
   useEndUsers,
   type EndUserInfo,
 } from "../hooks/use-end-users";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
@@ -35,17 +35,17 @@ import {
 } from "./end-user-route";
 
 export function EndUsersPage() {
-  // Remount on application switch so cursor + loadedPages (and the rest of the
-  // page state) reset — otherwise app A's accumulated "Load more" pages would
-  // bleed into app B's list.
-  const applicationId = useCurrentApplicationId();
-  return <EndUsersPageContent key={applicationId ?? "none"} />;
+  // Remount on space switch so cursor + loadedPages (and the rest of the
+  // page state) reset — otherwise space A's accumulated "Load more" pages would
+  // bleed into space B's list.
+  const spaceId = useCurrentSpaceId();
+  return <EndUsersPageContent key={spaceId ?? "none"} />;
 }
 
 function EndUsersPageContent() {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
-  const applicationId = useCurrentApplicationId();
+  const { can } = usePermissions();
+  const spaceId = useCurrentSpaceId();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -141,8 +141,8 @@ function EndUsersPageContent() {
   const visibility = useColumnVisibility("end-users");
   const columns = visibleColumns(allColumns, visibility.hidden);
 
-  if (!isAdmin) return null;
-  if (!applicationId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
+  if (!can("end-users:write")) return null;
+  if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
 
   return (
     <div>

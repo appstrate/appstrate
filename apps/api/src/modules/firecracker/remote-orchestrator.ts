@@ -78,7 +78,6 @@ const CONSOLE_FETCH_TIMEOUT_MS = 5_000;
  * reporting or the sink closes). Re-exported so this module's public type
  * surface (RemoteOrchestratorDeps) is unchanged.
  */
-export type { BootHeartbeatOutcome };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -103,7 +102,7 @@ function parseLogLine(raw: string): string | undefined {
   }
 }
 
-export interface RemoteOrchestratorDeps {
+interface RemoteOrchestratorDeps {
   /**
    * Injected by tests — canned Response objects, no network. The init is
    * widened with Bun's `unix` extension: over a UDS runner URL every call
@@ -174,6 +173,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           `for a co-located daemon over a Unix socket) and FIRECRACKER_RUNNER_TOKEN ` +
           `(shared bearer secret, at least 16 chars). See ` +
           `apps/api/src/modules/firecracker/README.md. (${getErrorMessage(err)})`,
+        { cause: err },
       );
     }
   }
@@ -221,6 +221,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
       throw new Error(
         `appstrate-runner ${route}: request to ${env.FIRECRACKER_RUNNER_URL} failed ` +
           `(${getErrorMessage(err)}) — is appstrate-runner running and reachable?`,
+        { cause: err },
       );
     }
     if (!res.ok) {
@@ -342,8 +343,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     await this.call(RUNNER_ROUTES.startWorkload, { body: { handle } });
   }
 
-  async stopWorkload(handle: WorkloadHandle, timeoutSeconds?: number): Promise<void> {
-    await this.call(RUNNER_ROUTES.stopWorkload, { body: { handle, timeoutSeconds } });
+  async stopWorkload(handle: WorkloadHandle): Promise<void> {
+    await this.call(RUNNER_ROUTES.stopWorkload, { body: { handle } });
   }
 
   async removeWorkload(handle: WorkloadHandle): Promise<void> {
@@ -529,6 +530,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           throw new Error(
             `appstrate-runner ${RUNNER_ROUTES.streamLogs}: log stream failed after ` +
               `${MAX_STREAM_RECONNECTS} reconnect attempts: ${getErrorMessage(err)}`,
+            { cause: err },
           );
         }
         logger.warn("firecracker: log stream interrupted — reconnecting", {
@@ -543,8 +545,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     }
   }
 
-  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
-    const res = await this.call(RUNNER_ROUTES.stopRun, { body: { runId, timeoutSeconds } });
+  async stopByRunId(runId: string): Promise<StopResult> {
+    const res = await this.call(RUNNER_ROUTES.stopRun, { body: { runId } });
     return stopResultResponseSchema.parse(await res.json()).result;
   }
 

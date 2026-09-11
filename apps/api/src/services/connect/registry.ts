@@ -39,7 +39,7 @@ import type { IntegrationConnectStrategy } from "./strategy.ts";
 
 type IntegrationAuthDef = NonNullable<IntegrationManifest["auths"]>[string];
 
-export interface ResolveStrategyOptions {
+interface ResolveStrategyOptions {
   /** Connect-run substrate, required to resolve a `custom` + `connect.tool` auth. */
   connectToolExecutor?: ConnectToolExecutor;
 }

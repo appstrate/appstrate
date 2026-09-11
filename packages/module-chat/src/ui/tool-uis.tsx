@@ -28,7 +28,6 @@ import {
   PlusIcon,
   SearchIcon,
   Trash2Icon,
-  UserIcon,
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -39,13 +38,13 @@ import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import {
   buildRunPageHref,
   extractAgentLabel,
-  extractRunDocuments,
+  extractRunFiles,
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
   isRunLaunchOp,
 } from "./run-events.ts";
-import { extractAuthOffer } from "./auth-offer.ts";
+import { extractAuthOffers } from "./auth-offer.ts";
 import {
   asRecord,
   definedEntries,
@@ -166,7 +165,6 @@ export function ToolCallCard({
   result,
   isError,
   toolCallId,
-  artifact,
   timing,
 }: {
   phase: ToolPhase;
@@ -177,11 +175,13 @@ export function ToolCallCard({
   result: unknown;
   isError?: boolean;
   toolCallId: string;
-  artifact?: unknown;
   timing?: unknown;
 }) {
   const [open, setOpen] = React.useState(false);
-  const unwrapped = unwrapResult(result);
+  // `unwrapResult` JSON-parses the tool payload. Unmemoized it re-parsed on
+  // every render of this card — and during a stream the thread re-renders per
+  // chunk, so a tool-heavy conversation paid it once per card per frame.
+  const unwrapped = React.useMemo(() => unwrapResult(result), [result]);
   const status = httpStatusOf(unwrapped);
   const durationMs = readDurationMs(timing);
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
@@ -190,7 +190,6 @@ export function ToolCallCard({
     is_error: isError,
     http_status: status,
     duration_ms: durationMs,
-    artifact,
   });
 
   const border = phase === "error" ? "border-destructive/40" : "";
@@ -239,15 +238,31 @@ export function ToolCallCard({
 
 type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 
-/** Render run-launch tool calls as in-chat run progress while launch/run state is available. */
-function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.ReactNode {
-  const unwrapped = unwrapResult(props.result);
+/**
+ * Render run-launch tool calls as in-chat run progress while launch/run state is
+ * available.
+ *
+ * A real component, not a `build…()` helper called inline: `ChatRunProgressCard`
+ * memoizes its file set on the `initialFiles` prop, and this is where that array
+ * is derived. Computed inline it was a fresh array every time THIS component
+ * rendered — which assistant-ui does once per stream chunk while the tool part
+ * is live — so the memo missed on each of those, the auto-present candidate was
+ * a new object, and the effect that opens it re-ran (only a ref kept the result
+ * correct). Note the card's own 500 ms log ticker is NOT the trigger: it is
+ * state inside the child, and a child's re-render never re-invokes this
+ * extraction. Hooks need a component, and `InvokeOperationToolUI` reaches this
+ * branch conditionally, so the `useMemo` cannot live in its `render`.
+ */
+function RunLaunchCard(props: AnyToolProps): React.ReactNode {
+  const runId = extractRunId(props.result);
+  const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
+  // Same reason as `ToolCallCard` — see the note there.
+  const unwrapped = React.useMemo(() => unwrapResult(props.result), [props.result]);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
     is_error: props.isError,
     http_status: httpStatusOf(unwrapped),
     duration_ms: readDurationMs(props.timing),
-    artifact: props.artifact,
   });
   const agentLabel = extractAgentLabel(props.args);
   const phase = deriveToolPhase(props);
@@ -276,7 +291,7 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
       agentLabel={agentLabel}
       runHref={runId ? buildRunPageHref(packageId, runId) : undefined}
       initialPackageId={packageId}
-      initialDocuments={extractRunDocuments(props.result)}
+      initialFiles={initialFiles}
       phase={phase}
       errorText={phase === "error" ? extractErrorMessage(unwrapped) : undefined}
       modalTitle={modalTitle}
@@ -302,13 +317,17 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     // place (same geometry). Only the anomalous success-without-offer shape
     // falls through to the generic row.
     if (opId === INITIATE_CONNECT_OP) {
-      const offer = extractAuthOffer(result);
+      // One card: the route behind this operation mints a single `connect_url`.
+      const offer = extractAuthOffers(result)[0];
       if (offer || phase !== "success") {
         return (
           <OAuthConnectCard
             authUrl={offer?.authUrl}
             state={offer?.state}
+            // The session route returns no `package_id`; the call's own path
+            // param is the integration this card connects.
             packageId={args?.path_params?.packageId}
+            toolCallId={props.toolCallId}
             errorText={
               phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
             }
@@ -322,7 +341,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     // the error renders inside the panel). Never falls back to the generic card:
     // a component swap would change the block's height mid-stream.
     if (isRunLaunchOp(opId)) {
-      return buildRunLaunch(props, extractRunId(result));
+      return <RunLaunchCard {...props} />;
     }
 
     const rule = OP_RULES.find((r) => r.re.test(opId)) ?? { Icon: ZapIcon, label: "Opération" };
@@ -336,7 +355,6 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         result={result}
         isError={props.isError}
         toolCallId={props.toolCallId}
-        artifact={props.artifact}
         timing={props.timing}
       />
     );
@@ -360,7 +378,6 @@ export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown
       result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      artifact={props.artifact}
       timing={props.timing}
     />
   ),
@@ -378,41 +395,38 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
       result={props.result}
       isError={props.isError}
       toolCallId={props.toolCallId}
-      artifact={props.artifact}
       timing={props.timing}
     />
   ),
 });
-
-export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "get_me",
-  render: (props: AnyToolProps) => (
-    <ToolCallCard
-      phase={deriveToolPhase(props)}
-      Icon={UserIcon}
-      label="Contexte utilisateur"
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
-      toolCallId={props.toolCallId}
-      artifact={props.artifact}
-      timing={props.timing}
-    />
-  ),
-});
-
-/**
- * Render `run_and_wait` like other run launch tools. Chat emits the run id as a
- * preliminary result. The progress panel is mounted for the call's whole life
- * (launch failures render inside it) — no generic-card fallback swap.
- */
-function RunAndWaitCard(props: AnyToolProps): React.ReactNode {
-  return buildRunLaunch(props, extractRunId(props.result));
-}
 
 // `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own
-// UI — a component (not a plain render fn) to keep the render path consistent.
+// UI — the same component the invoke-operation run-launch branch renders. Chat
+// emits the run id as a preliminary result; the progress panel is mounted for
+// the call's whole life (launch failures render inside it) — no generic-card
+// fallback swap.
+//
+// A launch refused for a missing connection (412) carries a ready-to-open
+// `connect_url` per actionable integration (#1207), so the connect cards render
+// UNDER the run panel and the user clicks straight through — the model is never
+// asked to kick a connect flow off, and never sees the link. Zero offers (every
+// other outcome, including a successful run) adds nothing: unlike the
+// invoke_operation connect branch there is no placeholder card here, because the
+// run panel already holds the block's geometry.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
-  render: (props: AnyToolProps) => <RunAndWaitCard {...props} />,
+  render: (props: AnyToolProps) => (
+    <>
+      <RunLaunchCard {...props} />
+      {extractAuthOffers(props.result).map((offer) => (
+        <OAuthConnectCard
+          key={offer.authUrl}
+          authUrl={offer.authUrl}
+          state={offer.state}
+          packageId={offer.packageId}
+          toolCallId={props.toolCallId}
+        />
+      ))}
+    </>
+  ),
 });

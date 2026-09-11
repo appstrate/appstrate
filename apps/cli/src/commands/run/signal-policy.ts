@@ -30,7 +30,7 @@
 
 export type SignalPolicy = "cancel" | "detach";
 
-export interface SignalPolicyInputs {
+interface SignalPolicyInputs {
   /**
    * Tri-state `--cancel-on-exit` / `--no-cancel-on-exit`: `undefined`
    * when the user passed neither (auto), otherwise the explicit choice.

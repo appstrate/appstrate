@@ -9,12 +9,11 @@
  * can consume the same result without each rebuilding readiness rules.
  */
 
-import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
-import { getPackageConfig } from "./application-packages.ts";
+import { getInstalledPackageSettings } from "./space-packages.ts";
 import { collectAgentReadinessErrors } from "./agent-readiness.ts";
 import { resolveAgentRunVersion, VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { resolveAgentConnectionReadiness } from "./integration-pins-service.ts";
@@ -137,7 +136,7 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
 }
 
 export async function getAgentDiagnostics(args: {
-  scope: AppScope;
+  scope: SpaceScope;
   agent: LoadedPackage;
   actor: Actor;
   isAdmin: boolean;
@@ -146,11 +145,7 @@ export async function getAgentDiagnostics(args: {
   const { scope, actor, isAdmin } = args;
   const versionRef = args.version?.trim() || VERSION_SELECTOR_DRAFT;
   const { agent } = await resolveAgentRunVersion(args.agent, versionRef);
-  const packageConfig = await getPackageConfig(scope.applicationId, agent.id);
-  const configSchema = asJSONSchemaObject(
-    agent.manifest.config?.schema ?? { type: "object", properties: {} },
-  );
-  const effectiveConfig = mergeWithDefaults(configSchema, packageConfig.config);
+  const packageConfig = await getInstalledPackageSettings(scope.spaceId, agent.id);
 
   // Connections are resolved once through their dedicated bulk service. The
   // core readiness pass therefore runs without an actor to avoid duplicating
@@ -159,19 +154,18 @@ export async function getAgentDiagnostics(args: {
     collectAgentReadinessErrors({
       agent,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       actor: null,
-      config: effectiveConfig,
     }),
     resolveAgentConnectionReadiness({
       scope,
       agentPackageId: agent.id,
       actor,
-      isAdmin,
+      canConfigureIntegrations: isAdmin,
       version: versionRef,
     }),
     resolveModel(scope.orgId, agent.id, packageConfig.modelId),
-    listPackageSchedules(scope, agent.id, actor),
+    listPackageSchedules(scope, agent.id, actor, undefined),
   ]);
 
   const readinessFields = new Set(readinessErrors.map((error) => error.field));

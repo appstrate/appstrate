@@ -22,7 +22,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
@@ -30,7 +30,6 @@ import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
-  IntegrationCredentialRevokedError,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
 
 const INTEGRATION_ID = "@official/gmail";
@@ -117,11 +116,11 @@ describe("credential-proxy integration-resolver", () => {
       source: "local",
       draftManifest: gmailManifest(token.url),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
     const [oauthClient] = await db
       .insert(integrationOauthClients)
       .values({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         clientId: "cid",
@@ -135,13 +134,17 @@ describe("credential-proxy integration-resolver", () => {
     token.stop();
   });
 
-  async function seedConnection(opts: { userId?: string; endUserId?: string }): Promise<string> {
+  async function seedConnection(opts: {
+    userId?: string;
+    endUserId?: string;
+    /** `false` seeds the "IdP never issued one" shape (no `access_type=offline`). */
+    withRefreshToken?: boolean;
+  }): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
         access_token: "live-access",
         accessToken: "live-access",
-        refresh_token: "rt-1",
-        refreshToken: "rt-1",
+        ...(opts.withRefreshToken === false ? {} : { refresh_token: "rt-1", refreshToken: "rt-1" }),
       },
     });
     const [row] = await db
@@ -150,12 +153,12 @@ describe("credential-proxy integration-resolver", () => {
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: ["read"],
-        // oauth2 connection → pins the org's custom per-app client by id (seeded above).
+        // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
       })
       .returning({ id: integrationConnections.id });
@@ -165,7 +168,7 @@ describe("credential-proxy integration-resolver", () => {
   function input(actorId = ctx.user.id) {
     return {
       integrationId: INTEGRATION_ID,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       actor: { type: "user" as const, id: actorId },
     };
@@ -217,20 +220,44 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, NO_AUTH);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, NO_AUTH);
 
     await expect(
       resolveIntegrationProxyCredentials({ ...input(), integrationId: NO_AUTH }),
     ).rejects.toBeInstanceOf(IntegrationCredentialNotFoundError);
   });
 
-  it("throws IntegrationCredentialRevokedError on a revoked refresh token (force-refresh path)", async () => {
-    await seedConnection({ userId: ctx.user.id });
+  it("returns null and flags needsReconnection on a revoked refresh token (force-refresh path)", async () => {
+    const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ error: "invalid_grant", error_description: "revoked" }, 400);
 
-    await expect(forceRefreshIntegrationProxyCredentials(input())).rejects.toBeInstanceOf(
-      IntegrationCredentialRevokedError,
-    );
+    // Not-refreshed, like the other terminal shape: the caller (inside
+    // `catch {}` either way) relays the upstream 401, and the persisted flag
+    // is what makes the failure legible.
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(true);
+  });
+
+  it("returns null (never the dead token) when the connection has no refresh_token", async () => {
+    // The row is already flagged in this shape — what was wrong is that the
+    // refresh reported SUCCESS carrying the very access_token that just 401'd,
+    // so the proxy rebuilt a payload from it and retried with an identical
+    // credential. Terminal in, terminal out.
+    const connId = await seedConnection({ userId: ctx.user.id, withRefreshToken: false });
+    // A working token endpoint: the refusal must come from the missing
+    // refresh_token, not from an upstream failure.
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(true);
   });
 
   it("returns null (keeps the original 401) on a transient token-endpoint discovery failure", async () => {
@@ -259,10 +286,21 @@ describe("credential-proxy integration-resolver", () => {
       .update(packages)
       .set({ draftManifest: issuerOnly })
       .where(eq(packages.id, INTEGRATION_ID));
-    await seedConnection({ userId: ctx.user.id });
+    const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
     expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    // `null` alone no longer discriminates transient from terminal: both
+    // shapes return it since `IntegrationCredentialRevokedError` was removed,
+    // so the PERSISTED flag is the only thing left that tells them apart. The
+    // comment above claims "the connection row is untouched" — assert it, or a
+    // regression that flags a healthy connection on a transient discovery
+    // outage (forcing a needless user reconnect) passes silently.
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(false);
   });
 
   it("flags needsReconnection when the minting OAuth client is gone (terminal, not transient)", async () => {

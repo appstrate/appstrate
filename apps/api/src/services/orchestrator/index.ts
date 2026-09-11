@@ -6,22 +6,18 @@ import type { RunOrchestrator } from "@appstrate/core/platform-types";
 
 export {
   orchestratorIsolatesWorkloads,
-  orchestratorAgentResources,
   orchestratorSupportsSidecarOnly,
+  orchestratorAppliesWorkspaceTmpfsCap,
   isolatingOrchestratorIds,
 } from "./registry.ts";
 
 export type {
   RunOrchestrator,
   WorkloadHandle,
-  WorkloadResources,
   WorkloadSpec,
   IsolationBoundary,
-  SidecarEndpoints,
   CleanupReport,
   StopResult,
-  SidecarConfig,
-  LlmProxyConfig,
 } from "@appstrate/core/platform-types";
 
 let instance: RunOrchestrator | undefined;

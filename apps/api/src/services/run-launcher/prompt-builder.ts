@@ -4,7 +4,7 @@
  * Appstrate platform system prompt — thin shim over the runtime's
  * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Derivation of
  * every section (System / Environment / Tools / Skills / Input /
- * Documents / Config / Checkpoint / Memory / Output Format) happens in
+ * Files / Config / Checkpoint / Memory / Output Format) happens in
  * the runtime from the parsed Bundle; this function only adds the
  * overrides that are platform-specific:
  *
@@ -36,19 +36,23 @@ import {
 import { getEnv } from "@appstrate/env";
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
 import { fetchIntegrationPromptDocs } from "../integration-service.ts";
+import { orchestratorAppliesWorkspaceTmpfsCap } from "../orchestrator/index.ts";
 
 /**
  * Workspace tmpfs cap (MB) to state in the prompt, or 0 to stay silent.
  *
- * `WORKSPACE_TMPFS_SIZE_MB` configures a real mount only on the docker
- * backend (docker-orchestrator.ts, `createIsolationBoundary`). The
- * process backend gives the run a plain directory under `os.tmpdir()`
- * without applying this setting, and a module-contributed backend's
- * workspace is opaque to core. Fail closed on anything but docker:
- * stating a cap that the selected backend does not use would be misleading.
+ * `WORKSPACE_TMPFS_SIZE_MB` only configures a real mount on a backend that
+ * declares `appliesWorkspaceTmpfsCap`. The process backend gives the run a
+ * plain directory under `os.tmpdir()` without applying the setting, and a
+ * module-contributed backend's workspace is opaque to core. The question is
+ * asked of the orchestrator REGISTRY rather than by naming a backend id: the
+ * registry is what a module-contributed backend can answer, and the microVM
+ * equivalent of the same fact (`writableRootTmpfsPercent`, used 40 lines
+ * below) already comes from there. Fail-closed — an undeclared backend stays
+ * silent, because stating a cap the backend does not apply is misinformation.
  */
 function promptWorkspaceTmpfsSizeMb(executionMode: ExecutionMode): number {
-  return executionMode === "docker" ? getEnv().WORKSPACE_TMPFS_SIZE_MB : 0;
+  return orchestratorAppliesWorkspaceTmpfsCap(executionMode) ? getEnv().WORKSPACE_TMPFS_SIZE_MB : 0;
 }
 
 export async function buildPlatformSystemPrompt(
@@ -56,9 +60,17 @@ export async function buildPlatformSystemPrompt(
   plan: AppstrateRunPlan,
 ): Promise<string> {
   const executionMode = getExecutionMode();
+  // `./files/` — the ONE directory `runtime-pi/provision.ts` streams the run's
+  // input files into, since #1177. This announcement and that layout must stay
+  // spelled the same: a divergence is a prompt-level miss, not an error — the
+  // bytes are provisioned either way, the agent is simply pointed at a
+  // directory that is not there and nothing reports a fault. It is kept true by
+  // the env schema, which fails boot unless `PI_IMAGE` carries the platform's
+  // own version, so the image reading this prompt is never a different #1177
+  // side than the platform writing it.
   const uploads = plan.files?.map((f) => ({
     name: f.name,
-    path: `./documents/${f.workspaceName}`,
+    path: `./files/${f.workspaceName}`,
     size: f.size,
     ...(f.type ? { type: f.type } : {}),
   }));
@@ -98,7 +110,7 @@ export async function buildPlatformSystemPrompt(
         }
       : {}),
     // Deliverables convention (Phase 2): files the agent writes under
-    // `./outputs/` are swept and published as durable run documents at
+    // `./outputs/` are swept and published as durable run files at
     // finalize. Rendered as a platform-managed section BEFORE the raw prompt
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
     deliverables: true,

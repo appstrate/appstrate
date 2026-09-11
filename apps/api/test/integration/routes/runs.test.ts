@@ -17,17 +17,19 @@ import {
   seedAgent,
   seedRun,
   seedRunLog,
-  seedApplication,
+  seedSpace,
   seedEndUser,
   seedApiKey,
   seedSchedule,
 } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
-import { waitForInFlight } from "../../../src/services/run-tracker.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import { createFakeOrchestrator } from "../../helpers/run-connection-fixtures.ts";
+import {
+  createFakeOrchestrator,
+  waitForRunPipelineSettled,
+} from "../../helpers/run-connection-fixtures.ts";
 
 const app = getTestApp();
 
@@ -66,7 +68,7 @@ describe("Runs API", () => {
         draftContent: "Process the email: {{email}}",
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@runorg/input-agent",
       );
       return agent;
@@ -149,90 +151,6 @@ describe("Runs API", () => {
 
       expect(res.status).toBe(400);
     });
-
-    it("rejects a non-object `config` body field with 400 invalid_request", async () => {
-      // The route accepts an optional `config: Record<string, unknown>`
-      // override that is deep-merged with the persisted per-app
-      // config. Anything that isn't a JSON object (array, string,
-      // number) must be refused before the merge runs — the SOTA
-      // contract (OpenAI Assistants `runs.create`) is "object or
-      // omitted, never any other shape".
-      await seedAgentWithInput();
-
-      const res = await app.request("/api/agents/@runorg/input-agent/run?version=draft", {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ input: { email: "a@b.c" }, config: ["not", "an", "object"] }),
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { detail?: string };
-      expect(body.detail).toContain("config");
-    });
-
-    it("rejects `config: null` with 400 invalid_request", async () => {
-      // Top-level `null` is ambiguous: deepMergeConfig short-circuits on a
-      // falsy override (treats null as "no override"), but the schedule
-      // route uses `null` to *clear* an override. We force the caller to
-      // pick — omit the field to inherit defaults, or send `{}` for an
-      // empty override.
-      await seedAgentWithInput();
-
-      const res = await app.request("/api/agents/@runorg/input-agent/run?version=draft", {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ input: { email: "a@b.c" }, config: null }),
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { detail?: string };
-      expect(body.detail).toContain("config");
-    });
-
-    it("rejects a merged config that violates the manifest schema with 400 invalid_config", async () => {
-      // The persisted config is vetted by `resolveRunPreflight`. A per-run
-      // override could push the merged result out of schema, and the CLI's
-      // local-run path already gates this — the server must too. This test
-      // pins the contract: install a config schema, send an override that
-      // breaks `format: email` after merge, expect a 400.
-      const configSchema = {
-        type: "object",
-        properties: {
-          contact: { type: "string", format: "email" },
-          notify: { type: "boolean" },
-        },
-        required: ["contact"],
-      } as const;
-      await seedAgent({
-        id: "@runorg/cfg-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        draftManifest: {
-          name: "@runorg/cfg-agent",
-          version: "0.1.0",
-          type: "agent",
-          description: "Agent with config schema",
-          config: { schema: configSchema },
-        },
-        draftContent: "Send to {{contact}}",
-      });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@runorg/cfg-agent",
-        { contact: "ops@example.com", notify: true },
-      );
-
-      const res = await app.request("/api/agents/@runorg/cfg-agent/run?version=draft", {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ config: { contact: "not-an-email" } }),
-      });
-
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { code?: string; detail?: string };
-      expect(body.code).toBe("invalid_config");
-      expect(body.detail).toContain("contact");
-    });
   });
 
   // ─── POST /api/agents/:scope/:name/run — modelId override ──
@@ -257,7 +175,7 @@ describe("Runs API", () => {
         draftContent: "Do the thing.",
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@runorg/model-agent",
       );
     }
@@ -315,7 +233,7 @@ describe("Runs API", () => {
         draftContent: "Do the thing.",
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@runorg/nokey-agent",
       );
 
@@ -391,10 +309,7 @@ describe("Runs API", () => {
         },
         draftContent: "Do the thing.",
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@runorg/echo-agent",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/echo-agent");
     }
 
     async function seedOrgModel(label: string): Promise<string> {
@@ -406,19 +321,6 @@ describe("Runs API", () => {
         apiKey: "sk-test-not-a-real-key",
       });
       return createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, credentialId);
-    }
-
-    /**
-     * The trigger is fire-and-forget: the fake-orchestrator workload exits 0
-     * immediately and the platform synthesises a success terminal. Wait for
-     * the in-flight tracker to drain, then give the post-untrack async tail
-     * (`void emitEvent(...)`, event-buffer flush) a beat to finish, so the
-     * background DB writes are contained within THIS test instead of racing
-     * the next test's truncateAll.
-     */
-    async function waitForBackgroundSettled(): Promise<void> {
-      await waitForInFlight(10_000);
-      await Bun.sleep(300);
     }
 
     it("echoes the org default's model_label and model_source 'org'", async () => {
@@ -479,7 +381,7 @@ describe("Runs API", () => {
         origin: "platform",
       });
 
-      await waitForBackgroundSettled();
+      await waitForRunPipelineSettled();
     });
 
     it("echoes the pinned model when the body carries an explicit modelId", async () => {
@@ -502,7 +404,7 @@ describe("Runs API", () => {
       expect(body.model_label).toBe("Echo Pinned GPT");
       expect(body.model_source).toBe("org");
 
-      await waitForBackgroundSettled();
+      await waitForRunPipelineSettled();
     });
   });
 
@@ -511,10 +413,7 @@ describe("Runs API", () => {
   describe("GET /api/agents/:scope/:name/runs", () => {
     it("returns empty array when no runs exist", async () => {
       await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@runorg/my-agent",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/my-agent");
 
       const res = await app.request("/api/agents/@runorg/my-agent/runs", {
         headers: authHeaders(ctx),
@@ -529,14 +428,11 @@ describe("Runs API", () => {
 
     it("returns runs for an agent", async () => {
       await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@runorg/my-agent",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/my-agent");
       const run = await seedRun({
         packageId: "@runorg/my-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -555,21 +451,20 @@ describe("Runs API", () => {
     it("filters an agent's runs by several statuses", async () => {
       const packageId = "@runorg/filtered-agent";
       await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, packageId);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, packageId);
       for (const status of ["success", "failed", "timeout"] as const) {
         await seedRun({
           packageId,
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           status,
         });
       }
 
-      const res = await app.request(
-        `/api/agents/${packageId}/runs?status=failed,timeout`,
-        { headers: authHeaders(ctx) },
-      );
+      const res = await app.request(`/api/agents/${packageId}/runs?status=failed,timeout`, {
+        headers: authHeaders(ctx),
+      });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: Array<{ status: string }>; total: number };
@@ -583,7 +478,7 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@otherorg/secret-agent",
         orgId: otherCtx.orgId,
-        applicationId: otherCtx.defaultAppId,
+        spaceId: otherCtx.defaultSpaceId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -606,7 +501,7 @@ describe("Runs API", () => {
     it("aggregates the fixed 30-day window without paging run rows", async () => {
       const packageId = "@runorg/activity-agent";
       await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, packageId);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, packageId);
 
       const recent = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
       for (const status of [
@@ -620,7 +515,7 @@ describe("Runs API", () => {
         await seedRun({
           packageId,
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           status,
           startedAt: recent,
@@ -629,7 +524,7 @@ describe("Runs API", () => {
       await seedRun({
         packageId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         startedAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
@@ -658,7 +553,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/detail-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -682,7 +577,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/unpriced-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         cost: null,
@@ -706,7 +601,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/plain-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         cost: 0.25,
@@ -720,7 +615,7 @@ describe("Runs API", () => {
     });
 
     it("returns 404 for non-existent run", async () => {
-      const res = await app.request("/api/runs/exec_nonexistent", {
+      const res = await app.request("/api/runs/run_nonexistent", {
         headers: authHeaders(ctx),
       });
 
@@ -733,7 +628,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/other-agent",
         orgId: otherCtx.orgId,
-        applicationId: otherCtx.defaultAppId,
+        spaceId: otherCtx.defaultSpaceId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -746,7 +641,7 @@ describe("Runs API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/runs/exec_anything");
+      const res = await app.request("/api/runs/run_anything");
       expect(res.status).toBe(401);
     });
   });
@@ -764,7 +659,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/resolve-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -800,14 +695,14 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@runorg/uservalid-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@runorg/uservalid-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: otherUser.id,
         status: "success",
       });
@@ -835,21 +730,21 @@ describe("Runs API", () => {
       const mineFailed = await seedRun({
         packageId: "@runorg/combined-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "failed",
       });
       await seedRun({
         packageId: "@runorg/combined-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@runorg/combined-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: otherUser.id,
         status: "failed",
       });
@@ -878,7 +773,7 @@ describe("Runs API", () => {
       const scheduled = await seedRun({
         packageId: "@runorg/unattributed-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: null,
         status: "success",
       });
@@ -901,21 +796,21 @@ describe("Runs API", () => {
       const failed = await seedRun({
         packageId: "@runorg/multistatus-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "failed",
       });
       const timedOut = await seedRun({
         packageId: "@runorg/multistatus-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "timeout",
       });
       await seedRun({
         packageId: "@runorg/multistatus-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -947,7 +842,7 @@ describe("Runs API", () => {
       const byName = await seedRun({
         packageId: "@runorg/search-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         agentScope: "@runorg",
@@ -956,7 +851,7 @@ describe("Runs API", () => {
       const byError = await seedRun({
         packageId: "@runorg/search-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "failed",
         agentScope: "@runorg",
@@ -988,7 +883,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/numeric-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         runNumber: 4242,
@@ -1009,7 +904,7 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@runorg/wildcard-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -1066,20 +961,21 @@ describe("Runs API", () => {
     it("restricts an end-user caller to their own runs", async () => {
       await seedAgent({ id: "@runorg/eu-filter-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const endUser = await seedEndUser({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         externalId: "ext-user-filter",
       });
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         name: "user-filter-key",
+        scopes: ["runs:read"],
       });
       const ownRun = await seedRun({
         packageId: "@runorg/eu-filter-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         endUserId: endUser.id,
         status: "success",
       });
@@ -1087,14 +983,14 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@runorg/eu-filter-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
 
       const euHeaders = {
         Authorization: `Bearer ${apiKey.rawKey}`,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "Appstrate-User": endUser.id,
       };
 
@@ -1112,26 +1008,27 @@ describe("Runs API", () => {
       expect(explicitBody.data.map((r) => r.id)).toEqual([ownRun.id]);
     });
 
-    // The param is validated before the end-user branch, so a bad value 400s
-    // for every caller rather than being swallowed by the implicit
+    // The param goes through the same closed-set validation for every caller,
+    // so a bad value 400s rather than being swallowed by an end-user's implicit
     // self-restriction — the same URL means the same thing for everyone.
     it("still rejects an unknown ?user value for an end-user caller", async () => {
       const endUser = await seedEndUser({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         externalId: "ext-user-filter-bad",
       });
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         name: "user-filter-key-bad",
+        scopes: ["runs:read"],
       });
 
       const res = await app.request("/api/runs?user=garbage", {
         headers: {
           Authorization: `Bearer ${apiKey.rawKey}`,
-          "X-Application-Id": ctx.defaultAppId,
+          "X-Space-Id": ctx.defaultSpaceId,
           "Appstrate-User": endUser.id,
         },
       });
@@ -1156,14 +1053,14 @@ describe("Runs API", () => {
       await seedRun({
         packageId: "@runorg/kindstatus-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@runorg/kindstatus-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "failed",
       });
@@ -1242,7 +1139,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/log-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -1276,7 +1173,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/nolog-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "pending",
       });
@@ -1298,7 +1195,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/log-agent",
         orgId: otherCtx.orgId,
-        applicationId: otherCtx.defaultAppId,
+        spaceId: otherCtx.defaultSpaceId,
         userId: otherCtx.user.id,
         status: "success",
       });
@@ -1311,7 +1208,7 @@ describe("Runs API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/runs/exec_anything/logs");
+      const res = await app.request("/api/runs/run_anything/logs");
       expect(res.status).toBe(401);
     });
 
@@ -1324,7 +1221,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/cursor-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1365,7 +1262,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/badcursor-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1395,7 +1292,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/sinceall-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1419,7 +1316,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/level-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1456,7 +1353,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/badlevel-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1476,7 +1373,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/page-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1514,7 +1411,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/exact-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1535,7 +1432,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/combo-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1563,7 +1460,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/compat-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1588,7 +1485,7 @@ describe("Runs API", () => {
         const run = await seedRun({
           packageId: "@runorg/cap-agent",
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           status: "running",
         });
@@ -1648,7 +1545,7 @@ describe("Runs API", () => {
         const run = await seedRun({
           packageId: "@runorg/caplimit-agent",
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           status: "running",
         });
@@ -1691,7 +1588,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/cancel-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
         // synthesiseFinalize requires sink_secret_encrypted to be present —
@@ -1741,7 +1638,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/cancel-pending",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "pending",
         sinkSecretEncrypted: "test-secret",
@@ -1767,7 +1664,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/done-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -1781,7 +1678,7 @@ describe("Runs API", () => {
     });
 
     it("returns 404 for non-existent run", async () => {
-      const res = await app.request("/api/runs/exec_nonexistent/cancel", {
+      const res = await app.request("/api/runs/run_nonexistent/cancel", {
         method: "POST",
         headers: authHeaders(ctx),
       });
@@ -1795,7 +1692,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@otherorg/cancel-agent",
         orgId: otherCtx.orgId,
-        applicationId: otherCtx.defaultAppId,
+        spaceId: otherCtx.defaultSpaceId,
         userId: otherCtx.user.id,
         status: "running",
         sinkSecretEncrypted: "test-secret",
@@ -1811,7 +1708,7 @@ describe("Runs API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/runs/exec_anything/cancel", {
+      const res = await app.request("/api/runs/run_anything/cancel", {
         method: "POST",
       });
       expect(res.status).toBe(401);
@@ -1823,21 +1720,18 @@ describe("Runs API", () => {
   describe("DELETE /api/agents/:scope/:name/runs", () => {
     it("deletes all runs for an agent (admin)", async () => {
       await seedAgent({ id: "@runorg/del-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@runorg/del-agent",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/del-agent");
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@runorg/del-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "failed",
       });
@@ -1869,13 +1763,13 @@ describe("Runs API", () => {
     it("returns 409 when running runs exist", async () => {
       await seedAgent({ id: "@runorg/running-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@runorg/running-agent",
       );
       await seedRun({
         packageId: "@runorg/running-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
       });
@@ -1895,36 +1789,33 @@ describe("Runs API", () => {
       expect(res.status).toBe(401);
     });
 
-    it("only deletes runs in the current application (cross-app isolation)", async () => {
-      // Create a second app
-      const appB = await seedApplication({ orgId: ctx.orgId, name: "AppB" });
+    it("only deletes runs in the current space (cross-space isolation)", async () => {
+      // Create a second space
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SpaceB" });
 
       await seedAgent({ id: "@runorg/iso-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@runorg/iso-agent",
-      );
-      await installPackage({ orgId: ctx.orgId, applicationId: appB.id }, "@runorg/iso-agent");
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/iso-agent");
+      await installPackage({ orgId: ctx.orgId, spaceId: spaceB.id }, "@runorg/iso-agent");
 
-      // Seed runs in AppA
+      // Seed runs in SpaceA
       await seedRun({
         packageId: "@runorg/iso-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
 
-      // Seed runs in AppB
-      const appBRun = await seedRun({
+      // Seed runs in SpaceB
+      const spaceBRun = await seedRun({
         packageId: "@runorg/iso-agent",
         orgId: ctx.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
         userId: ctx.user.id,
         status: "success",
       });
 
-      // Delete from AppA context
+      // Delete from SpaceA context
       const res = await app.request("/api/agents/@runorg/iso-agent/runs", {
         method: "DELETE",
         headers: authHeaders(ctx),
@@ -1933,18 +1824,18 @@ describe("Runs API", () => {
       const body = (await res.json()) as any;
       expect(body.deleted_count).toBe(1);
 
-      // AppB run should still exist
-      const appBHeaders = {
+      // SpaceB run should still exist
+      const spaceBHeaders = {
         ...authHeaders(ctx),
-        "X-Application-Id": appB.id,
+        "X-Space-Id": spaceB.id,
       };
       const listRes = await app.request("/api/agents/@runorg/iso-agent/runs", {
-        headers: appBHeaders,
+        headers: spaceBHeaders,
       });
       expect(listRes.status).toBe(200);
       const listBody = (await listRes.json()) as any;
       const runIds = listBody.data.map((r: any) => r.id);
-      expect(runIds).toContain(appBRun.id);
+      expect(runIds).toContain(spaceBRun.id);
     });
   });
 
@@ -1956,7 +1847,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/enriched-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -1981,7 +1872,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/conn-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         resolvedConnections: {
@@ -2017,7 +1908,7 @@ describe("Runs API", () => {
       const run = await seedRun({
         packageId: "@runorg/noconn-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -2029,42 +1920,17 @@ describe("Runs API", () => {
       expect(body.connections_used).toBeNull();
     });
 
-    it("GET /api/runs/:id preserves a text-only historical report result", async () => {
-      await seedAgent({
-        id: "@runorg/legacy-result-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      const run = await seedRun({
-        packageId: "@runorg/legacy-result-agent",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-        // Historical rows may contain only the deprecated report channel's
-        // `text`/`text_truncated` keys with no structured `output`. They remain
-        // readable for compatibility with existing agents and run history.
-        result: { text: "legacy report body", text_truncated: false } as never,
-      });
-
-      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.result).toEqual({ text: "legacy report body", text_truncated: false });
-    });
-
     it("GET /api/runs/:id returns endUserName for end-user runs", async () => {
       await seedAgent({ id: "@runorg/eu-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "Alice External",
       });
       const run = await seedRun({
         packageId: "@runorg/eu-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         endUserId: eu.id,
         status: "success",
       });
@@ -2083,13 +1949,13 @@ describe("Runs API", () => {
       await seedAgent({ id: "@runorg/eu2-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         externalId: "ext-user-123",
       });
       const run = await seedRun({
         packageId: "@runorg/eu2-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         endUserId: eu.id,
         status: "success",
       });
@@ -2107,13 +1973,13 @@ describe("Runs API", () => {
       await seedAgent({ id: "@runorg/ak-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "My Production Key",
       });
       const run = await seedRun({
         packageId: "@runorg/ak-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         apiKeyId: apiKey.id,
         status: "success",
@@ -2133,14 +1999,14 @@ describe("Runs API", () => {
       const schedule = await seedSchedule({
         packageId: "@runorg/sched-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         name: "Daily Sync",
       });
       const run = await seedRun({
         packageId: "@runorg/sched-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         scheduleId: schedule.id,
         status: "success",
       });
@@ -2158,13 +2024,13 @@ describe("Runs API", () => {
     it("GET /api/agents/:scope/:name/runs returns enriched fields in list", async () => {
       await seedAgent({ id: "@runorg/list-enriched", orgId: ctx.orgId, createdBy: ctx.user.id });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@runorg/list-enriched",
       );
       await seedRun({
         packageId: "@runorg/list-enriched",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });

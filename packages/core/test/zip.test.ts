@@ -8,6 +8,7 @@ import {
   unzipArtifact,
   stripWrapperPrefix,
 } from "../src/zip.ts";
+import { formatErrorChain } from "../src/errors.ts";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -135,9 +136,9 @@ describe("parsePackageZip", () => {
 
   it("ZIP too large", () => {
     const zip = makeZip({ "manifest.json": validAgentManifest(), "prompt.md": "x" });
-    expect(() => parsePackageZip(zip, 1)).toThrow(PackageZipError);
+    expect(() => parsePackageZip(zip, { maxSize: 1 })).toThrow(PackageZipError);
     try {
-      parsePackageZip(zip, 1);
+      parsePackageZip(zip, { maxSize: 1 });
     } catch (e) {
       expect((e as PackageZipError).code).toBe("FILE_TOO_LARGE");
     }
@@ -194,6 +195,19 @@ describe("parsePackageZip", () => {
     } catch (e) {
       expect((e as PackageZipError).code).toBe("MISSING_CONTENT");
     }
+  });
+
+  // The loader-side check stays lenient: a published skill whose SKILL.md
+  // declares only a `name` must keep parsing. The strict producer rule is
+  // `checkSkillMarkdown`, exercised by the API's write paths.
+  it("accepts a skill whose SKILL.md declares only a frontmatter name", () => {
+    const zip = makeZip({
+      "manifest.json": validSkillManifest(),
+      "SKILL.md": "---\nname: triage\n---\nbody",
+    });
+    const parsed = parsePackageZip(zip);
+    expect(parsed.type).toBe("skill");
+    expect(parsed.content).toContain("name: triage");
   });
 
   it("parsePackageZip returns raw manifest without Zod defaults", () => {
@@ -282,19 +296,20 @@ describe("parsePackageZip", () => {
     expect(parsePackageZip(zip).droppedRuntimeTools).toEqual([]);
   });
 
-  // The second positional parameter used to be a bare `maxSize: number`, and
-  // `@appstrate/core` is published — the number form must keep working
-  // alongside the options object.
-  it("still honours the legacy bare-number maxSize argument", () => {
+  // Both limits are derived from the fixture's own compressed size, so NEITHER
+  // is `PACKAGE_ZIP_MAX_COMPRESSED_BYTES` (10 MB). That matters: a limit equal
+  // to the default is passed identically by a build that never reads
+  // `opts.maxSize` at all, since the value it falls back to is the same number.
+  // One byte under the archive must reject it — that line goes red the moment
+  // the option stops being read — and exactly the archive's size must accept
+  // it, pinning the comparison as `>` rather than `>=`.
+  it("enforces the exact maxSize the caller passes", () => {
     const zip = makeZip({
       "manifest.json": validAgentManifest(),
       "prompt.md": "# Test prompt",
     });
-    expect(() => parsePackageZip(zip, 1)).toThrow(PackageZipError);
-    expect(parsePackageZip(zip, 10 * 1024 * 1024).packageId).toBe("@test/my-agent");
-    // …and the object form expresses the same limit.
-    expect(() => parsePackageZip(zip, { maxSize: 1 })).toThrow(PackageZipError);
-    expect(parsePackageZip(zip, { maxSize: 10 * 1024 * 1024 }).packageId).toBe("@test/my-agent");
+    expect(() => parsePackageZip(zip, { maxSize: zip.length - 1 })).toThrow(PackageZipError);
+    expect(parsePackageZip(zip, { maxSize: zip.length }).packageId).toBe("@test/my-agent");
   });
 });
 
@@ -466,9 +481,9 @@ describe("zip bomb protection", () => {
     };
     const zipped = zipArtifact(entries);
 
-    expect(() => parsePackageZip(zipped, 100 * 1024 * 1024)).toThrow(PackageZipError);
+    expect(() => parsePackageZip(zipped, { maxSize: 100 * 1024 * 1024 })).toThrow(PackageZipError);
     try {
-      parsePackageZip(zipped, 100 * 1024 * 1024);
+      parsePackageZip(zipped, { maxSize: 100 * 1024 * 1024 });
     } catch (e) {
       expect((e as PackageZipError).code).toBe("ZIP_BOMB");
     }
@@ -652,5 +667,97 @@ describe("stripWrapperPrefix", () => {
     ]);
     const result = stripWrapperPrefix(files);
     expect(result).toBe(files);
+  });
+});
+
+describe("PackageZipError carries what actually failed", () => {
+  it("attaches the JSON SyntaxError as the cause of INVALID_MANIFEST", () => {
+    // Delete-to-fail: drop the `{ cause: err }` in `parsePackageZip` and a
+    // truncated manifest, a stray BOM and a trailing comma all report the same
+    // sentence — "manifest.json is not valid JSON" — with nothing saying where.
+    const zip = makeZip({ "manifest.json": '{ "name": "@test/a", ' });
+    try {
+      parsePackageZip(zip);
+      throw new Error("expected parsePackageZip to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(PackageZipError);
+      const err = e as PackageZipError;
+      expect(err.code).toBe("INVALID_MANIFEST");
+      expect(err.cause).toBeInstanceOf(SyntaxError);
+      // Reachable, not merely stored: this is what a log line renders.
+      expect(formatErrorChain(err).length).toBeGreaterThan(err.message.length);
+    }
+  });
+});
+
+describe("ZIP_INVALID names what was wrong with the bytes", () => {
+  // `routes/packages.ts` renders `PackageZipError.message` into the 400 the
+  // uploader sees and nothing renders a `cause` there, so the message is the
+  // whole report. The corrupt-archive branch used to throw a fixed
+  // "Failed to decompress ZIP artifact", which is the one branch that means
+  // "your archive is structurally broken" — precisely the case an uploader can
+  // act on — and it discarded the only sentence that said HOW.
+  //
+  // Two inputs that must NOT report the same thing:
+  it("distinguishes a non-ZIP payload from a corrupted deflate stream", () => {
+    const notAZip = new TextEncoder().encode("this is not a zip at all, it is prose");
+    const corrupted = new Uint8Array(
+      makeZip({ "manifest.json": "a".repeat(5000) + "b".repeat(5000) }),
+    );
+    // Flip bytes inside the deflate payload — the header stays a valid `PK`
+    // signature, so this fails mid-inflate rather than on the magic check.
+    for (let i = 60; i < 80; i++) corrupted[i] = corrupted[i]! ^ 0xff;
+
+    const messages: string[] = [];
+    for (const bytes of [notAZip, corrupted]) {
+      try {
+        parsePackageZip(bytes);
+        throw new Error("expected parsePackageZip to throw");
+      } catch (e) {
+        expect(e).toBeInstanceOf(PackageZipError);
+        const err = e as PackageZipError;
+        expect(err.code).toBe("ZIP_INVALID");
+        messages.push(err.message);
+      }
+    }
+
+    expect(messages[0]).toContain("not a ZIP archive");
+    expect(messages[1]).toContain("invalid distance");
+    // The discriminating half: a fixed string would make these equal.
+    expect(messages[0]).not.toBe(messages[1]);
+  });
+
+  it("still attaches the DecompressionLimitError as the cause", () => {
+    try {
+      parsePackageZip(new TextEncoder().encode("this is not a zip at all"));
+      throw new Error("expected parsePackageZip to throw");
+    } catch (e) {
+      const err = e as PackageZipError;
+      expect((err.cause as Error | undefined)?.name).toBe("DecompressionLimitError");
+    }
+  });
+
+  // Negative control for the sibling branch: ZIP_BOMB stays deliberately
+  // opaque. Its `DecompressionLimitError` detail can be an archive ENTRY NAME
+  // (`file-too-large` passes `file.name`), which is uploader-controlled text,
+  // and "decompressed size exceeds limit" is already a complete, actionable
+  // report — there is nothing a decoder sentence would add.
+  it("leaves the ZIP_BOMB message fixed", () => {
+    // 51 MB of a single repeated byte deflates to a few dozen KB, so it clears
+    // the 10 MB compressed ceiling and blows the 50 MB decompressed budget.
+    const payload = new Uint8Array(51 * 1024 * 1024);
+    payload.fill(65);
+    const bomb = zipArtifact({
+      "manifest.json": new TextEncoder().encode(validAgentManifest()),
+      "big.bin": payload,
+    });
+    try {
+      parsePackageZip(bomb);
+      throw new Error("expected parsePackageZip to throw");
+    } catch (e) {
+      const err = e as PackageZipError;
+      expect(err.code).toBe("ZIP_BOMB");
+      expect(err.message).toBe("Decompressed size exceeds limit");
+    }
   });
 });

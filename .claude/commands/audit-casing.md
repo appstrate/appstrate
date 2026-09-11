@@ -45,10 +45,10 @@ When invoked, this skill:
 3. Dispatches **6 opus sub-agents in parallel**, each scanning a specific surface:
    - **Agent A — Schema layer**: AFPS Zod + JSON Schema + appstrate validation/integration/mcp-server. Confirms canonical snake_case is intact.
    - **Agent B — Wire DTO layer**: shared-types + OpenAPI components + path examples + route projection sites. Verifies every wire field matches the canonical catalog (snake_case domain, camelCase universal DB conv).
-   - **Agent C — Drizzle TS schema**: every `pgTable()` in `packages/db/src/schema/*.ts` + module schemas. Confirms TS field property names are camelCase, SQL aliases are snake_case.
+   - **Agent C — Drizzle TS schema**: every `pgTable()` in `packages/db/src/schema/*.ts`. Confirms TS field property names are camelCase, SQL aliases are snake_case. There is no module-owned schema to scan — modules own no tables (`apps/api/src/modules/README.md`).
    - **Agent D — Frontend consumers**: `apps/web/src/` reads of wire DTOs. Confirms no camelCase reads on snake_case fields (would return undefined at runtime).
    - **Agent E — Carve-outs**: Better Auth tables, OIDC plugin tables, ModelProviderDefinition, profile reads, module hook contracts, CloudEvents, Webhooks, BullMQ, audit logs, SSE transform, JSONB internals.
-   - **Agent F — Cross-repo + tests**: cloud, docs, website, connect-helper, afps-spec + test fixtures + e2e helpers. Confirms no drift introduced by parallel work.
+   - **Agent F — Cross-repo + tests**: docs, website, connect-helper, afps-spec + test fixtures + e2e helpers. Confirms no drift introduced by parallel work.
 
 Each sub-agent produces a structured report classified by severity:
 
@@ -115,7 +115,7 @@ The sub-agents are **read-only**. They never modify files. After consolidation, 
 - **Every** Drizzle pgTable in `packages/db/src/schema/` is read
 - **Every** OpenAPI component in `apps/api/src/openapi/` is verified
 - **Every** module under `apps/api/src/modules/` is included
-- Cross-repo: cloud, docs, website, connect-helper, afps-spec (skip `_dev/`)
+- Cross-repo: docs, website, connect-helper, afps-spec (skip `_dev/`)
 
 ### Performance
 
@@ -156,7 +156,7 @@ Parallelized to ~3-5 min wall-clock total. Each opus agent: 5-15 min. Six agents
 | Repo | Bugs | Drift | Verdict |
 |------|------|-------|---------|
 | appstrate | 0 | 0 | ✅ |
-| cloud | 0 | 0 | ✅ |
+| connect-helper | 0 | 0 | ✅ |
 | ... | | | |
 
 ## Summary
@@ -189,7 +189,7 @@ Mission: verify canonical AFPS schemas are 100% snake_case. Read `docs/CASING_CO
 
 Verify files:
 - afps-spec/packages/schema/src/schemas.ts (Zod source)
-- afps-spec/packages/schema/v2/*.schema.json (generated JSON Schema)
+- afps-spec/packages/schema/v0/*.schema.json (generated JSON Schema)
 - appstrate/packages/core/src/validation.ts
 - appstrate/packages/core/src/integration.ts
 - appstrate/packages/core/src/mcp-server.ts
@@ -229,9 +229,9 @@ Output: per-interface/component table, the discovered field set (so coverage is 
 Mission: verify every Drizzle pgTable uses camelCase TS / snake_case SQL pattern. Read `docs/CASING_CONVENTIONS.md` Zone 2 + Carve-out 4a first.
 
 Scope:
-- packages/db/src/schema/*.ts (every schema file)
-- apps/api/src/modules/*/schema.ts (module-owned tables)
-- cloud/src/schema.ts or drizzle/schema.ts
+- packages/db/src/schema/*.ts (every schema file — this is the WHOLE platform schema;
+  modules own no tables, so there is no `apps/api/src/modules/*/schema.ts` to scan)
+- packages/module-ee/drizzle/schema.ts (the one module with a Drizzle schema of its own)
 
 For each pgTable:
 - Every TS field property name MUST be camelCase
@@ -291,9 +291,9 @@ Output: per-carve-out ✅/🔴 verdict + any violation found.
 ```
 Mission: verify cross-repo coherence (skip _dev/) + test fixtures.
 
-Repos: cloud, docs, website, connect-helper, afps-spec
+Repos: docs, website, connect-helper, afps-spec
 
-Not in this list, and do not add them back: `module-claude-code` (PR #460 moved it in-tree as `packages/module-claude-code` — already covered by the in-tree `packages/` scope), `registry` and `portal` (retired products, same reason they left the core lockstep gate in #1033).
+Not in this list, and do not add them back: `module-claude-code` and `cloud` (moved in-tree as `packages/module-claude-code` and `packages/module-ee` — already covered by the in-tree `packages/` scope), `registry` and `portal` (retired products, same reason they left the core lockstep gate in #1033).
 
 For each:
 - Grep for any 1.x manifest residue (displayName, schemaVersion, fileConstraints, etc.)

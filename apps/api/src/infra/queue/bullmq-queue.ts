@@ -133,6 +133,14 @@ export class BullMQQueue<T> implements JobQueue<T> {
     return (counts.waiting ?? 0) + (counts.delayed ?? 0) + (counts.active ?? 0);
   }
 
+  /**
+   * Takes no `graceMs` (the interface makes it optional, and a narrower
+   * signature still implements it): there is nothing here for a budget to
+   * govern. A backing-off job is a DELAYED job in Redis, not an in-process
+   * timer — it outlives the process and is picked up by whichever worker is
+   * running when it comes due, so shutdown neither drains nor abandons it.
+   * `worker.close()` already waits for genuinely active handlers.
+   */
   async shutdown(): Promise<void> {
     // Wait for the blocking client's init sequence (CLIENT SETNAME, INFO, …)
     // to complete BEFORE close. BullMQ's `RedisConnection.close()` calls

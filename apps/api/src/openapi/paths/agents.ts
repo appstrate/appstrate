@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { AGENT_INPUT_SETTINGS_PROPERTIES } from "../schemas.ts";
+
 /**
  * Agents paths — includes both agents.ts and user-agents.ts endpoints
  * since they share base paths (e.g. /api/agents/{scope}/{name}).
@@ -11,18 +14,15 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List all agents",
       description:
-        "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth.",
+        "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
         "200": {
           description: "Agent list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -83,18 +83,20 @@ export const agentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
-  "/api/agents/{scope}/{name}/config": {
+  "/api/agents/{scope}/{name}/input-settings": {
     put: {
-      operationId: "saveAgentConfig",
+      operationId: "saveAgentInputSettings",
       tags: ["Agents"],
-      summary: "Save agent configuration",
-      description: "Save agent configuration values. Validated against manifest config schema.",
+      summary: "Save agent input settings",
+      description:
+        "Save the agent's stored input values and field locks for this space. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -102,23 +104,31 @@ export const agentsPaths = {
         required: true,
         content: {
           "application/json": {
-            schema: { type: "object", additionalProperties: true },
+            // Spelled out rather than `$ref: AgentInputSettings`, and CLOSED:
+            // `agentInputSettingsSchema` (`routes/agents.ts`) is `.strict()`,
+            // so an unknown field is a 400. The component cannot carry the
+            // closure — `AgentDetail.input` composes it with three more members
+            // through `allOf`, and `additionalProperties` does not compose.
+            schema: {
+              type: "object",
+              required: ["values", "locked_fields"],
+              description:
+                "The input settings to store for this space. Both members are full replacements — an omitted key means cleared, never unchanged.",
+              properties: AGENT_INPUT_SETTINGS_PROPERTIES,
+              additionalProperties: false,
+            },
           },
         },
       },
       responses: {
         "200": {
-          description: "Configuration saved — returns the bare persisted configuration document",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          description: "Saved — returns the bare persisted input-settings resource",
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              // Bare persisted configuration document (request body merged
-              // with schema defaults) — no `validation` echo (#657):
+              // Bare persisted resource — no `validation` echo (#657):
               // validation failures are 400s.
-              schema: { type: "object", additionalProperties: true },
+              schema: { $ref: "#/components/schemas/AgentInputSettings" },
             },
           },
         },
@@ -138,17 +148,14 @@ export const agentsPaths = {
         "Returns the proxy configuration for an agent (override ID and resolution status).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Agent proxy config",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -162,6 +169,7 @@ export const agentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -173,7 +181,7 @@ export const agentsPaths = {
         'Set a proxy override for this agent. Pass a proxy ID, "none" to disable proxying, or null to use org default.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -190,6 +198,7 @@ export const agentsPaths = {
                   description: 'Proxy ID, "none" to opt out, or null for org default',
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -197,10 +206,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Agent proxy updated — returns the bare proxy-setting resource",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare proxy-setting resource — same shape as GET …/proxy,
@@ -232,7 +238,7 @@ export const agentsPaths = {
         "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict (identical to the run-kickoff 412 — run semantics, includeInert false + required-auth carve-out). `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -247,10 +253,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Connection readiness",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/AgentConnectionReadiness" },
@@ -272,7 +275,7 @@ export const agentsPaths = {
         "Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview, the launch header and the visual map. Diagnostics are ordered with blockers first and carry stable semantic targets plus correction destinations.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -312,7 +315,7 @@ export const agentsPaths = {
         "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actor_type` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -347,10 +350,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Persistence rows",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -416,7 +416,7 @@ export const agentsPaths = {
         "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -441,10 +441,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Counts of deleted rows",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -475,10 +472,10 @@ export const agentsPaths = {
       operationId: "deleteAgentPersistenceMemory",
       tags: ["Agents"],
       summary: "Delete a single memory by id",
-      description: "Admin-only. The id must belong to the targeted agent in the current app.",
+      description: "Admin-only. The id must belong to the targeted agent in the current space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "id", in: "path", required: true, schema: { type: "integer" } },
@@ -486,10 +483,7 @@ export const agentsPaths = {
       responses: {
         "204": {
           description: "Memory deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -503,10 +497,10 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Delete a single pinned slot by id",
       description:
-        "Admin-only. Deletes any named pinned slot (`checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.",
+        "Admin-only. Deletes any named pinned slot (`checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "id", in: "path", required: true, schema: { type: "integer" } },
@@ -514,10 +508,7 @@ export const agentsPaths = {
       responses: {
         "204": {
           description: "Pinned slot deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -531,20 +522,17 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Get agent model configuration",
       description:
-        "Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).",
+        "Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults). Readable with `agents:read` or `agents:run`: the launch form resolves the model a run will use from it, and the body carries no manifest and no prompt.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
         "200": {
           description: "Agent model config",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -564,6 +552,7 @@ export const agentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -575,7 +564,7 @@ export const agentsPaths = {
         "Set a model override and optional generation defaults for this agent. Pass a model ID or null to revert to org default; null generation settings inherit runtime defaults. The model ID must name a system model preset or an org model owned by the organization — unknown or cross-org IDs are rejected with 404.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -598,6 +587,7 @@ export const agentsPaths = {
                   ],
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -605,10 +595,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Agent model updated — returns the bare model-setting resource",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // Bare model-setting resource — same shape as GET …/model,
@@ -644,7 +631,7 @@ export const agentsPaths = {
       description: "Set the skill references for a user agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -664,6 +651,7 @@ export const agentsPaths = {
                   },
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -671,10 +659,7 @@ export const agentsPaths = {
       responses: {
         "200": {
           description: "Skills updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -708,10 +693,10 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Export an agent as an .afps-bundle",
       description:
-        "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this application (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.",
+        "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this space (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -719,7 +704,7 @@ export const agentsPaths = {
           name: "version",
           required: false,
           description:
-            "Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this application (falls back to the `latest` dist-tag). Mutually exclusive with `?source=draft`.",
+            "Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this space (falls back to the `latest` dist-tag). Mutually exclusive with `?source=draft`.",
           schema: { type: "string" },
         },
         {
@@ -735,8 +720,7 @@ export const agentsPaths = {
         "200": {
           description: "The .afps-bundle archive",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             "Content-Disposition": {
               description: "Attachment filename for the downloaded archive",
               schema: { type: "string" },
@@ -765,9 +749,7 @@ export const agentsPaths = {
         "422": {
           description:
             "The bundle cannot be assembled from stored artifacts. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

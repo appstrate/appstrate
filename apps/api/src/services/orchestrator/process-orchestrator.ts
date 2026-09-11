@@ -36,8 +36,31 @@ import type {
 } from "@appstrate/core/platform-types";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
 import { drainStream, tailFileLines } from "./subprocess-util.ts";
+import { SIGTERM_GRACE_SECONDS } from "./constants.ts";
 
-const DATA_DIR = resolve("./data/runs");
+/**
+ * Where per-run pidfiles live. Cwd-relative, and the cwd for anything in
+ * `apps/api` is the repo root — so this is the REAL `./data/runs` a
+ * `bun run dev` session writes into.
+ *
+ * Mutable only so a test can point it at a scratch directory.
+ * `apps/api/test/unit/process-orchestrator.test.ts` resolved the same
+ * `./data/runs` and `rm -rf`'d it in `beforeEach`, which meant running the unit
+ * suite beside a live dev server destroyed that server's pidfiles, and two
+ * concurrent test sessions wiped each other. There is no other way for the test
+ * to isolate itself: the module-level functions below (`ownerIsAlive`,
+ * `reapOrphanWorkspaceDirs`) read this directly and take no orchestrator
+ * instance.
+ */
+let dataDir = resolve("./data/runs");
+
+/**
+ * @internal Test-only. Point the run-data directory at a scratch path so a test
+ * never touches the live one. Pass no argument to restore the default.
+ */
+export function _setDataDirForTesting(dir?: string): void {
+  dataDir = resolve(dir ?? "./data/runs");
+}
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
 const AGENT_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/entrypoint.ts");
 
@@ -55,11 +78,64 @@ function workspaceDirFor(runId: string): string {
 }
 
 /**
+ * Name of the ownership marker written into every run workspace.
+ *
+ * Holds the pid of the platform process that created the run. It is the
+ * ONLY thing that lets a boot-time sweep tell "residue of my own crashed
+ * self" apart from "a live sibling instance's run" — the `appstrate-ws-*`
+ * naming convention and the uid say nothing about which instance owns a
+ * directory, and two `bun run dev` sessions on one host share both (#1130).
+ *
+ * A pid is deliberately enough: pids are global, so `kill(pid, 0)` answers
+ * the ownership question from any working directory, which matters because
+ * dataDir is cwd-relative and a sibling worktree's pidfiles are invisible
+ * from here. Pid reuse can only make a dead owner look alive — it defers a
+ * reclaim, it never causes a wrongful kill.
+ */
+const OWNER_MARKER_FILE = ".appstrate-owner";
+
+/** Absolute path of a run's ownership marker. */
+function ownerMarkerPathFor(runId: string): string {
+  return join(workspaceDirFor(runId), OWNER_MARKER_FILE);
+}
+
+/**
+ * Is this run owned by a platform process that is still alive?
+ *
+ * `false` means the run is reclaimable: the marker is missing (a workspace
+ * from before this mechanism existed, or one whose run already finished and
+ * had its workspace removed), unparsable, or names a dead process.
+ *
+ * A marker naming THIS process is also reclaimable. Every caller runs during
+ * boot, before this instance has created a single run, so our own pid on a
+ * pre-existing marker can only be a recycled pid from a previous life.
+ */
+async function ownerIsAlive(runId: string): Promise<boolean> {
+  const text = await Bun.file(ownerMarkerPathFor(runId))
+    .text()
+    .catch(() => "");
+  const pid = Number(text.trim());
+  if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Scan `os.tmpdir()` for orphaned per-run workspace directories
  * (`appstrate-ws-*`) owned by THIS process's uid and remove them.
- * Boot-time recovery only — runs marked failed by `lib/boot.ts` are by
- * definition not holding any of these dirs, so removing them is safe.
- * Returns the count of dirs reclaimed for the {@link CleanupReport}.
+ * Boot-time recovery only. Returns the count of dirs reclaimed for the
+ * {@link CleanupReport}.
+ *
+ * A workspace whose {@link OWNER_MARKER_FILE} names a live platform process
+ * is preserved: `os.tmpdir()` is shared by every instance on the host
+ * regardless of working directory, so this sweep sees the live runs of
+ * sibling instances — including ones started from another worktree, which
+ * the cwd-relative dataDir sweep cannot even see. Deleting those wiped a
+ * running agent's `/workspace` mid-run (#1130).
  *
  * The uid filter avoids two problems on shared hosts:
  *   - Reaping a workspace owned by another platform instance (running
@@ -85,6 +161,10 @@ async function reapOrphanWorkspaceDirs(): Promise<number> {
       if (myUid >= 0) {
         const st = await stat(path);
         if (st.uid !== myUid) continue;
+      }
+      if (await ownerIsAlive(name.slice(WORKSPACE_DIR_PREFIX.length))) {
+        logger.info("Preserved workspace of a live sibling instance", { workspace: name });
+        continue;
       }
       await rm(path, { recursive: true, force: true });
       count++;
@@ -182,7 +262,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
   private pendingSpecs = new Map<string, PendingSpec>();
 
   async initialize(): Promise<void> {
-    await mkdir(DATA_DIR, { recursive: true });
+    await mkdir(dataDir, { recursive: true });
     logger.warn(
       "Running in PROCESS mode — agents execute without container isolation. " +
         "Use only with trusted agents in development or self-hosted environments.",
@@ -222,7 +302,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
    *
    * Mode `process` has no Docker label to scan, so every spawn writes a pidfile
    * inside its boundary directory (`./data/runs/<runId>/<role>.pid`). At boot,
-   * every subdirectory of `DATA_DIR` is by definition orphaned — boot.ts has
+   * every subdirectory of `dataDir` is by definition orphaned — boot.ts has
    * already marked any in-progress runs as failed before we run, and the new
    * platform process holds no in-memory handles yet. We SIGKILL each pid that
    * is still alive and rm -rf the boundary directory.
@@ -237,18 +317,29 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     let entries: string[];
     try {
-      entries = (await readdir(DATA_DIR)) as unknown as string[];
+      entries = (await readdir(dataDir)) as unknown as string[];
     } catch {
-      // Even when DATA_DIR is missing entirely, sweep tmpdir for
+      // Even when dataDir is missing entirely, sweep tmpdir for
       // orphan workspace dirs from crashed runs — they live outside
-      // DATA_DIR so the absence of DATA_DIR doesn't imply absence of
+      // dataDir so the absence of dataDir doesn't imply absence of
       // leaked workspaces.
       const workspaces = await reapOrphanWorkspaceDirs();
       return { workloads: 0, isolationBoundaries: 0, workspaces };
     }
 
     for (const name of entries) {
-      const dir = join(DATA_DIR, name);
+      const dir = join(dataDir, name);
+      // `name` is the runId — see createIsolationBoundary. A boundary whose
+      // owning platform process is still alive belongs to a sibling instance
+      // started from this same working directory (two `bun run dev`, or a
+      // redeploy overlapping the old process). SIGKILLing its workloads and
+      // deleting its boundary killed live runs at every sibling boot (#1130).
+      // Our own residue always fails this check: a crashed platform's pid is
+      // dead, which is exactly what makes its runs reclaimable.
+      if (await ownerIsAlive(name)) {
+        logger.info("Preserved run boundary of a live sibling instance", { runId: name });
+        continue;
+      }
       const files = ((await readdir(dir).catch(() => [])) as unknown as string[]) ?? [];
       for (const f of files) {
         if (!f.endsWith(".pid")) continue;
@@ -265,6 +356,10 @@ export class ProcessOrchestrator implements RunOrchestrator {
           continue;
         }
         try {
+          // The owner is gone but its workload outlived it: a `kill -9` of the
+          // platform orphans the agent subprocess, which keeps running (and
+          // burning tokens) with nobody supervising it. This sweep is its only
+          // reaper — the DB pass finds no in-memory handle after a restart.
           process.kill(pid, "SIGKILL");
           workloads++;
         } catch {
@@ -283,11 +378,11 @@ export class ProcessOrchestrator implements RunOrchestrator {
     runId: string,
     opts?: IsolationBoundaryOptions,
   ): Promise<IsolationBoundary> {
-    const dir = join(DATA_DIR, runId);
+    const dir = join(dataDir, runId);
     // Create both the pidfile boundary dir and the shared workspace
     // dir in parallel — independent fs operations, no ordering
     // constraint. Workspace lives under os.tmpdir() rather than
-    // DATA_DIR so a host-side `rm -rf data/` doesn't accidentally
+    // dataDir so a host-side `rm -rf data/` doesn't accidentally
     // wipe the workspace for an active run.
     //
     // The sidecar port pair is allocated HERE (not in createSidecar) so
@@ -308,7 +403,13 @@ export class ProcessOrchestrator implements RunOrchestrator {
       // 0o700: the workspace sits under the shared `os.tmpdir()` and
       // holds the agent's run inputs/outputs — keep it readable only by
       // the platform uid, not world-readable to other local users.
-      mkdir(workspacePath, { recursive: true, mode: 0o700 }),
+      //
+      // The ownership marker is written immediately after the mkdir, not
+      // raced against it: a boundary that exists without a marker reads as
+      // reclaimable residue to every sibling's boot sweep.
+      mkdir(workspacePath, { recursive: true, mode: 0o700 }).then(() =>
+        Bun.write(ownerMarkerPathFor(runId), String(process.pid)),
+      ),
     ]);
     if (!opts?.skipSidecar) this.sidecarPorts.set(runId, port);
     return {
@@ -407,12 +508,22 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // The agent's workspace is the per-run shared directory created by
     // createIsolationBoundary so spawned mcp-server runner subprocesses
     // (which receive WORKSPACE_DIR via the sidecar) read and write the
-    // exact same filesystem surface as the agent. Non-agent roles keep
-    // the legacy per-boundary subdirectory.
-    const workDir =
-      spec.role === "agent" && boundary.workspace.kind === "directory"
-        ? boundary.workspace.path
-        : join(boundary.id, "workspace");
+    // exact same filesystem surface as the agent.
+    //
+    // This used to fall back to a "legacy per-boundary subdirectory" for
+    // non-agent roles. No non-agent role reaches this method: sidecars come
+    // from `createSidecar` (which hardcodes `role: "sidecar"`), and the sole
+    // production caller passes the literal `"agent"`. The fallback only ever
+    // meant "agent and runners disagree about where the workspace is", so it
+    // is gone — a non-directory workspace now fails loudly instead. (`kind`
+    // is a discriminant of the shape this backend itself created, so a
+    // mismatch means the boundary came from a different orchestrator.)
+    if (boundary.workspace.kind !== "directory") {
+      throw new Error(
+        `ProcessOrchestrator requires a directory workspace, got "${boundary.workspace.kind}"`,
+      );
+    }
+    const workDir = boundary.workspace.path;
     await mkdir(workDir, { recursive: true });
 
     const id = `workload-${spec.runId}-${spec.role}`;
@@ -438,7 +549,24 @@ export class ProcessOrchestrator implements RunOrchestrator {
   async startWorkload(handle: WorkloadHandle): Promise<void> {
     const pending = this.pendingSpecs.get(handle.id);
     const ph = this.processes.get(handle.id);
-    if (!pending || !ph) return;
+    if (!pending || !ph) {
+      // The one legitimate miss: `createSidecar` spawns eagerly in this
+      // topology (there is no container to start later), so it registers a
+      // process entry and NO pending spec. The Docker path defers its sidecar
+      // start, which is why callers issue this call at all — here it is a no-op.
+      if (ph?.role === "sidecar") return;
+      // Anything else is a caller/lifecycle bug, and the silent `return` this
+      // replaces hid it: the caller went on to `waitForExit` a process that
+      // would never be spawned. Name WHICH half is missing — both gone means an
+      // id this orchestrator never created (or already removed), exactly one
+      // gone means a half-torn-down record.
+      const missing: string[] = [];
+      if (!pending) missing.push("pending spec");
+      if (!ph) missing.push("process entry");
+      throw new Error(
+        `Process orchestrator: cannot start workload "${handle.id}" — missing ${missing.join(" + ")}`,
+      );
+    }
 
     const stdoutPath = join(pending.workDir, ".stdout.jsonl");
 
@@ -462,8 +590,9 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // stdout, drained stderr arriving after the platform's
     // "exited non-zero" log) still surfaces a reason in the same place
     // operators look first. Fire-and-forget — this is a diagnostic-only
-    // observer; the actual exit handling stays in pi.ts.
-    proc.exited.then(async (code) => {
+    // observer; the actual exit handling stays in pi.ts. `void` is safe here:
+    // `Bun.Subprocess.exited` never rejects and the handler only sleeps and logs.
+    void proc.exited.then(async (code) => {
       if (code === 0) return;
       // Give the stderr drain a moment to flush remaining buffered lines
       // (the reader sees `done: true` only after the kernel closes the pipe).
@@ -478,14 +607,14 @@ export class ProcessOrchestrator implements RunOrchestrator {
     });
   }
 
-  async stopWorkload(handle: WorkloadHandle, timeoutSeconds = 5): Promise<void> {
+  async stopWorkload(handle: WorkloadHandle): Promise<void> {
     const ph = this.processes.get(handle.id);
     if (!ph?.proc) return;
 
     ph.proc.kill("SIGTERM");
     const killed = await Promise.race([
       ph.proc.exited.then(() => true),
-      new Promise<false>((r) => setTimeout(() => r(false), timeoutSeconds * 1000)),
+      new Promise<false>((r) => setTimeout(() => r(false), SIGTERM_GRACE_SECONDS * 1000)),
     ]);
     if (!killed) ph.proc.kill("SIGKILL");
   }
@@ -499,6 +628,12 @@ export class ProcessOrchestrator implements RunOrchestrator {
       // Already dead
     }
     this.processes.delete(handle.id);
+    // The pending spec goes with it. `startWorkload` consumes it on the happy
+    // path, but a workload removed BEFORE it ever started (every sidecar- or
+    // upload-failure teardown in `run-launcher/pi.ts`) never reaches that
+    // delete — and the spec holds the agent's full env: RUN_TOKEN, sink secret,
+    // model credentials. Nothing else ever evicts this map short of `shutdown`.
+    this.pendingSpecs.delete(handle.id);
     if (ph.role === "sidecar") this.sidecarPorts.delete(ph.runId);
     await this.removePidfile(ph.runId, ph.role);
   }
@@ -515,18 +650,20 @@ export class ProcessOrchestrator implements RunOrchestrator {
     if (!ph?.stdoutPath || !ph?.proc) return;
 
     let exited = false;
-    ph.proc.exited.then(() => {
+    // Fire-and-forget flag flip read by the tail loop below; `exited` never
+    // rejects and the handler cannot throw.
+    void ph.proc.exited.then(() => {
       exited = true;
     });
     yield* tailFileLines(ph.stdoutPath, () => exited, signal);
   }
 
-  async stopByRunId(runId: string, timeoutSeconds?: number): Promise<StopResult> {
+  async stopByRunId(runId: string): Promise<StopResult> {
     let found = false;
     for (const [id, ph] of this.processes) {
       if (ph.runId === runId) {
         found = true;
-        await this.stopWorkload({ id, runId, role: ph.role }, timeoutSeconds);
+        await this.stopWorkload({ id, runId, role: ph.role });
       }
     }
     return found ? "stopped" : "not_found";
@@ -554,7 +691,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
    */
   private async writePidfile(runId: string, role: string, pid: number): Promise<void> {
     try {
-      await Bun.write(join(DATA_DIR, runId, `${role}.pid`), String(pid));
+      await Bun.write(join(dataDir, runId, `${role}.pid`), String(pid));
     } catch (err) {
       logger.warn("Failed to write sidecar/workload pidfile", {
         runId,
@@ -565,7 +702,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
   }
 
   private async removePidfile(runId: string, role: string): Promise<void> {
-    await rm(join(DATA_DIR, runId, `${role}.pid`), { force: true }).catch(() => {});
+    await rm(join(dataDir, runId, `${role}.pid`), { force: true }).catch(() => {});
   }
 
   private async findAvailablePort(retries = 5): Promise<number> {
@@ -582,12 +719,16 @@ export class ProcessOrchestrator implements RunOrchestrator {
     for (let attempt = 0; attempt < retries; attempt++) {
       const s1 = Bun.serve({ port: 0, fetch: () => new Response() });
       const port = s1.port ?? 0;
-      s1.stop(true);
+      // AWAITED: `Server.stop()` returns a promise that settles once the socket
+      // is actually released. Returning a port whose probe server is still
+      // bound is exactly the EADDRINUSE-at-sidecar-boot this function exists to
+      // avoid.
+      await s1.stop(true);
       if (!port) continue;
       if (reserved.has(port) || reserved.has(port + 1)) continue;
       try {
         const s2 = Bun.serve({ port: port + 1, fetch: () => new Response() });
-        s2.stop(true);
+        await s2.stop(true);
         return port;
       } catch {
         continue;

@@ -1,0 +1,201 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import type { Context, Next } from "hono";
+import type { AppEnv } from "../types/index.ts";
+import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { assertSpaceId } from "../lib/ids.ts";
+import {
+  defaultSpaceForOrg,
+  validateSpaceInOrg,
+  type SpaceContextRow,
+} from "../lib/space-lookup.ts";
+import { isInternalDispatch } from "../lib/internal-dispatch.ts";
+import { setSpaceContextApplier } from "@appstrate/core/permissions";
+import { callerOrgRole, callerSpaceMember, effectiveInSpace } from "../lib/view-as.ts";
+import { resolveSpaceRole } from "../lib/space-role.ts";
+
+/**
+ * Core route prefixes that require a space context (`X-Space-Id`,
+ * or the API key's own `spaceId`).
+ *
+ * Core-only by design: modules own space-scoping for their own routes (the
+ * webhooks module, for instance, gates on an explicit `spaceId` body /
+ * query field), so a module never adds a row here.
+ *
+ * This list is read by the space-context middleware wiring in BOTH
+ * `apps/api/src/index.ts` and the test harness `apps/api/test/helpers/app.ts`.
+ * It lived as two hand-kept copies until they were reconciled here — a route
+ * family added to one and not the other gives a test app whose space-scoping
+ * differs from production, which is exactly the kind of gap tests exist to
+ * close.
+ *
+ * Deliberately NOT exported: `isSpaceScopedPath` below is the only reader, and
+ * it is what both call sites import. Handing out the array would let a caller
+ * re-derive the predicate (`.some(startsWith)`) its own way, which is the
+ * shape the drift took the first time.
+ */
+const SPACE_SCOPED_PREFIXES = [
+  "/api/agents",
+  "/api/runs",
+  "/api/schedules",
+  "/api/end-users",
+  "/api/api-keys",
+  "/api/notifications",
+  "/api/packages",
+  "/api/integrations",
+  "/api/uploads",
+  "/api/files",
+] as const;
+
+/** True when `path` belongs to a core space-scoped route family. */
+export function isSpaceScopedPath(path: string): boolean {
+  return SPACE_SCOPED_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+/**
+ * Resolve the caller's role in `space` and rewrite `permissions` to the
+ * effective set there (RBAC spec §4.2). Exported so routers outside
+ * `SPACE_SCOPED_PREFIXES` (the spaces router, module routes) reach the same
+ * path. The principal is `c.get("user")`: the API key's CREATOR under key auth
+ * and end-user impersonation, the subject otherwise (§7.1). A caller with no
+ * `orgRole` (OIDC end-user token) keeps its strategy's fixed allowlist (§7.2).
+ *
+ * @throws ApiError 403 `not_a_space_member` for `open`/`closed`, 404 for
+ *   `private` — a private space does not exist for someone who is not in it.
+ */
+export async function applySpacePermissions(
+  c: Context<AppEnv>,
+  space: SpaceContextRow,
+): Promise<void> {
+  if (!c.get("orgRole")) return;
+
+  // Under a preview both halves are the persona's.
+  const ref = resolveSpaceRole(
+    callerOrgRole(c, space.orgId),
+    space,
+    await callerSpaceMember(c, space.orgId, space.id),
+  );
+  if (!ref) {
+    if (space.visibility === "private") {
+      throw notFound(`Space '${space.id}' not found in this organization`);
+    }
+    throw new ApiError({
+      status: 403,
+      code: "not_a_space_member",
+      title: "Not a Space Member",
+      detail: `You are not a member of space '${space.id}'`,
+    });
+  }
+
+  c.set("spaceRole", ref);
+  c.set("permissions", effectiveInSpace(c, ref));
+}
+
+/**
+ * Middleware: resolve space context for space-scoped routes.
+ *
+ * Resolution order (transport-agnostic, symmetric with `requireOrgContext`):
+ * 1. spaceId already pinned by an auth strategy (API key, OIDC JWT, …)
+ * 2. X-Space-Id header (session auth — dashboard users)
+ * 3. the org's default space
+ *
+ * If a strategy already pinned a space and the request also carries
+ * an `X-Space-Id` header, the header MUST match the pinned value. Otherwise
+ * a holder of a Bearer token scoped to Space A could spoof `X-Space-Id: Space B`
+ * (same org) and reach a second space's data. Session callers never
+ * pin a space, so their header is still honoured as the primary
+ * signal.
+ *
+ * The default-space fallback exists SOLELY for the in-process MCP sub-dispatch: a
+ * per-org MCP Bearer token pins the org but reaches a space-scoped route via an
+ * in-process re-entry carrying NO `X-Space-Id`, so it resolves to the
+ * org's default space. That re-entry is identified by the trusted
+ * internal-dispatch marker (an unguessable per-process secret, stripped from
+ * any client-supplied copy), so the fallback is gated on it. A direct caller —
+ * session/SPA or CLI — that omits `X-Space-Id` still gets a 400, NOT a
+ * silent fallback to the default space (which would weaken space isolation and is
+ * exactly the contract `org-isolation` asserts).
+ * Validates that the space belongs to the current org. Sets
+ * c.set("spaceId") + c.set("space") on success.
+ */
+export function requireSpaceContext() {
+  return async (c: Context<AppEnv>, next: Next) => {
+    const pinned = c.get("spaceId");
+    const headerSpace = c.req.header("X-Space-Id");
+
+    if (pinned && headerSpace && headerSpace !== pinned) {
+      throw forbidden("X-Space-Id does not match authenticated space");
+    }
+
+    const orgId = c.get("orgId");
+    const explicitSpace = pinned ?? headerSpace;
+
+    if (explicitSpace) {
+      const space = await validateSpaceInOrg(explicitSpace, orgId);
+      if (!space) {
+        throw notFound(`Space '${explicitSpace}' not found in this organization`);
+      }
+      c.set("spaceId", explicitSpace);
+      c.set("space", space);
+      await applySpacePermissions(c, space);
+      return next();
+    }
+
+    // Header-less caller. The org's default-space fallback is reserved
+    // for the trusted in-process MCP re-entry (marker present); every other
+    // header-less caller must supply an explicit space.
+    if (isInternalDispatch(c.req.raw.headers)) {
+      const active = await defaultSpaceForOrg(orgId);
+      if (active) {
+        // One of the three paths that never pass through `validateSpaceInOrg`
+        // (the others: the MCP router's default-space fallback and the SSE
+        // API-key branch — see the note on `validateSpaceInOrg`). The id comes
+        // straight off the row, so this is where an un-migrated `spaces` table
+        // would otherwise slip in unnoticed.
+        assertSpaceId(active.id);
+        c.set("spaceId", active.id);
+        c.set("space", active);
+        // The token subject's membership in the default space decides what it
+        // reaches — a `guest` without a row is refused (spec §7.3).
+        await applySpacePermissions(c, active);
+        return next();
+      }
+    }
+
+    throw invalidRequest(
+      "Space context required. Provide X-Space-Id header or use an API key.",
+      "X-Space-Id",
+    );
+  };
+}
+
+/**
+ * Wire the core seam a module route uses to enter a space (`enterSpaceContext`).
+ * Registered at MODULE EVALUATION so production wiring and the test harness,
+ * which both import `requireSpaceContext` from here, cannot drift.
+ */
+setSpaceContextApplier(async (c, spaceId) => {
+  const ctx = c as Context<AppEnv>;
+  const orgId = ctx.get("orgId");
+  const explicit = spaceId ?? ctx.get("spaceId") ?? ctx.req.header("X-Space-Id");
+  // Same rule as `requireSpaceContext`: the default space answers a header-less
+  // caller ONLY for the trusted in-process MCP re-entry; a module route is not
+  // a weaker door than a core one (`SPACES.md` §Resolving).
+  if (!explicit && !isInternalDispatch(ctx.req.raw.headers)) {
+    throw invalidRequest(
+      "Space context required. Provide X-Space-Id header or use an API key.",
+      "X-Space-Id",
+    );
+  }
+  const space = explicit
+    ? await validateSpaceInOrg(explicit, orgId)
+    : await defaultSpaceForOrg(orgId);
+  if (!space) {
+    throw notFound(`Space '${explicit ?? "(default)"}' not found in this organization`);
+  }
+  // Deliberately does NOT write `spaceId`: that key is the CREDENTIAL's space
+  // for an API key and a module must not be able to rewrite it (the webhooks
+  // module compares the two to refuse a key reaching a sibling space).
+  ctx.set("space", space);
+  await applySpacePermissions(ctx, space);
+});

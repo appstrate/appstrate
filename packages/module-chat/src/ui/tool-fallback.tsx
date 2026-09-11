@@ -20,7 +20,6 @@ export const ToolFallback: ToolCallMessagePartComponent = (props) => (
     result={props.result}
     isError={props.isError}
     toolCallId={props.toolCallId}
-    artifact={props.artifact}
     timing={props.timing}
   />
 );

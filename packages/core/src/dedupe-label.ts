@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Dedupe a label against a set of existing labels. Returns `base` when it is
  * not already taken, otherwise appends ` (2)`, ` (3)`, … until a free name is

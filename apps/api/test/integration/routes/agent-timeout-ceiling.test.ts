@@ -16,7 +16,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { _setRunLimitsForTesting } from "../../../src/services/run-limits.ts";
 
 const app = getTestApp();
@@ -105,7 +105,9 @@ describe("platform timeout ceiling — author-time visibility", () => {
             timeout: 10800,
           }),
         ),
-        "SKILL.md": enc("---\nname: @ceilingorg/ceiling-skill\n---\n\nSkill body."),
+        "SKILL.md": enc(
+          "---\nname: ceiling-skill\ndescription: A ceiling skill.\n---\n\nSkill body.",
+        ),
       });
       const formData = new FormData();
       formData.append("file", new File([new Uint8Array(afps)], "skill.afps"));
@@ -123,7 +125,7 @@ describe("platform timeout ceiling — author-time visibility", () => {
 
   describe("GET /api/packages/agents/{scope}/{name}", () => {
     async function detailFor(id: string): Promise<any> {
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
       const res = await app.request(`/api/packages/agents/${id}`, {
         headers: authHeaders(ctx),
       });

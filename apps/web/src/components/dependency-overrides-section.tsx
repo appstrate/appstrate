@@ -13,7 +13,7 @@ interface SkillDep {
   name?: string;
 }
 
-export interface DependencyOverridesSectionProps {
+interface DependencyOverridesSectionProps {
   /** Agent's declared skill dependencies (`agent.dependencies.skills`). */
   skills: SkillDep[];
   /** Controlled value — flat `{ "@scope/skill": "draft" | "<version>" }`. */

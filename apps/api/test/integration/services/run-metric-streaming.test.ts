@@ -4,10 +4,10 @@
  * End-to-end integration: ingesting an `appstrate.metric` event drives
  * a `run_metric` SSE delivery to a matching subscriber.
  *
- * Combines `PersistingEventSink` (the ingestion hot path) with the
+ * Combines `persistRunEvent` (the ingestion hot path) with the
  * realtime LISTEN service to verify the whole pipeline:
  *
- *   PersistingEventSink.persist(metric)
+ *   persistRunEvent(metric, { writeLedger: true })
  *     → upsert llm_usage
  *     → scheduleRunMetricBroadcast
  *     → pg_notify('run_metric', ...)
@@ -23,8 +23,8 @@ import { truncateAll } from "../../helpers/db.ts";
 import { eventData } from "../../helpers/sse.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
-import { PersistingEventSink } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
+import { persistRunEvent } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import {
   addSubscriber,
   removeSubscriber,
@@ -33,10 +33,11 @@ import {
 } from "../../../src/services/realtime.ts";
 import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-metric-broadcaster.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
+import { db } from "@appstrate/db/client";
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-describe("run_metric end-to-end (event sink → SSE)", () => {
+describe("run_metric end-to-end (event write-through → SSE)", () => {
   let ctx: TestContext;
   const agentId = "@testorg/streaming-agent";
   let runId: string;
@@ -51,11 +52,11 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
     _resetRunMetricBroadcasterForTests();
     ctx = await createTestContext();
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const run = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -78,23 +79,30 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
     } as RunEvent;
   }
 
+  /** Drive one metric through the ingestion write-through (ledger on). */
+  function persistMetric(e: RunEvent) {
+    return persistRunEvent(db, { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, runId, e, {
+      writeLedger: true,
+    });
+  }
+
   it("a single metric event arrives at a subscribed run-scoped SSE", async () => {
     const send = mock((_e: RealtimeEvent) => {});
     const id = "stream-sub-1";
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
-    const sink = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-      writeLedger: true,
-    });
-
-    await sink.handle(metricEvent({ input_tokens: 100, output_tokens: 50 }, 0.005));
+    await persistMetric(metricEvent({ input_tokens: 100, output_tokens: 50 }, 0.005));
     await wait(80);
 
     expect(send).toHaveBeenCalledTimes(1);
@@ -103,7 +111,7 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
     expect(frame.data).toMatchObject({
       runId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       packageId: agentId,
       tokenUsage: { input_tokens: 100, output_tokens: 50 },
     });
@@ -116,26 +124,26 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
-    });
-
-    const sink = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-      writeLedger: true,
     });
 
     // Three events with monotonically increasing cumulative totals.
     // The throttle window is 250 ms — wait between emits so each one
     // fires (no coalescing of trailing).
-    await sink.handle(metricEvent({ input_tokens: 100, output_tokens: 0 }, 0.001));
+    await persistMetric(metricEvent({ input_tokens: 100, output_tokens: 0 }, 0.001));
     await wait(80);
     await wait(300);
-    await sink.handle(metricEvent({ input_tokens: 200, output_tokens: 50 }, 0.005));
+    await persistMetric(metricEvent({ input_tokens: 200, output_tokens: 50 }, 0.005));
     await wait(80);
     await wait(300);
-    await sink.handle(metricEvent({ input_tokens: 350, output_tokens: 120 }, 0.012));
+    await persistMetric(metricEvent({ input_tokens: 350, output_tokens: 120 }, 0.012));
     await wait(80);
 
     expect(send).toHaveBeenCalledTimes(3);
@@ -150,20 +158,20 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send,
     });
 
-    const sink = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-      writeLedger: true,
-    });
-
-    await sink.handle(metricEvent({ input_tokens: 200, output_tokens: 50 }, 0.01));
+    await persistMetric(metricEvent({ input_tokens: 200, output_tokens: 50 }, 0.01));
     await wait(80);
     await wait(300);
-    await sink.handle(metricEvent({ input_tokens: 50, output_tokens: 10 }, 0.003));
+    await persistMetric(metricEvent({ input_tokens: 50, output_tokens: 10 }, 0.003));
     await wait(80);
 
     expect(send).toHaveBeenCalledTimes(2);
@@ -180,21 +188,22 @@ describe("run_metric end-to-end (event sink → SSE)", () => {
 
     addSubscriber({
       id: "ours",
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: {
+        readAll: true,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId,
+        isAdmin: true,
+      },
       send: sendOurs,
     });
     addSubscriber({
       id: "other",
-      filter: { orgId: "alien-org", applicationId: "alien-app", isAdmin: true },
+      filter: { readAll: true, orgId: "alien-org", spaceId: "alien-space", isAdmin: true },
       send: sendOther,
     });
 
-    const sink = new PersistingEventSink({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-      writeLedger: true,
-    });
-    await sink.handle(metricEvent({ input_tokens: 1, output_tokens: 1 }, 0.0001));
+    await persistMetric(metricEvent({ input_tokens: 1, output_tokens: 1 }, 0.0001));
     await wait(80);
 
     expect(sendOurs).toHaveBeenCalledTimes(1);

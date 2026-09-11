@@ -24,13 +24,13 @@ export const OIDC_IDENTITY_SCOPE_SET: ReadonlySet<string> = new Set(OIDC_IDENTIT
 /**
  * Permissions that can be granted to end-user OIDC JWTs.
  *
- * End-users are NOT org members — they impersonate through an application
+ * End-users are NOT org members — they impersonate through a space
  * via a JWT minted by the OIDC module's oauth-provider. This allowlist is
  * the intersection of (a) safe-for-end-user permissions and (b) permissions
  * whose routes are compatible with the strict end-user run-filter.
  *
  * Destructive and admin-scoped permissions (`agents:write`, `agents:delete`,
- * `runs:delete`, `api-keys:*`, `webhooks:*`, `applications:*`, `end-users:*`,
+ * `runs:delete`, `api-keys:*`, `webhooks:*`, `spaces:*`, `end-users:*`,
  * `model-provider-credentials:*`, etc.) are excluded — they are admin work, not
  * end-user work, and granting them through a user-consented OAuth flow would
  * let an embedding app silently escalate.
@@ -44,15 +44,15 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
   "agents:run",
   "runs:read",
   "runs:cancel",
-  // Documents — the deliverables a run produced. Requestable for the same
+  // Files — the deliverables a run produced. Requestable for the same
   // reason `runs:read` is: an embedding app that may read a run must be able
-  // to read what that run published, and `run_and_wait`'s document enrichment
-  // (`fetchRunDocuments`) is best-effort, so without this scope the list
+  // to read what that run published, and `run_and_wait`'s file enrichment
+  // (`fetchRunFiles`) is best-effort, so without this scope the list
   // silently comes back EMPTY rather than erroring. Read-only and still
   // narrowed per row by the container ACL (an end-user only ever resolves its
-  // own runs' documents), so it carries no more reach than `runs:read`.
-  // Deleting stays out: `documents:delete` is admin/creator work.
-  "documents:read",
+  // own runs' files), so it carries no more reach than `runs:read`.
+  // Deleting stays out: `files:delete` is admin/creator work.
+  "files:read",
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",
@@ -85,6 +85,14 @@ export const APPSTRATE_BUILTIN_SCOPES: readonly string[] = [
   ...OIDC_IDENTITY_SCOPES,
   ...OIDC_ALLOWED_SCOPES,
 ];
+
+/**
+ * Scope ceiling for self-service (DCR / CIMD) clients: identity scopes plus
+ * every module end-user-grantable scope. Evaluated per call, fresh array.
+ */
+export function getSelfServiceScopes(): string[] {
+  return [...OIDC_IDENTITY_SCOPES, ...getModuleEndUserAllowedScopes()];
+}
 
 /**
  * Full scope vocabulary served by the OIDC module — core built-ins plus any

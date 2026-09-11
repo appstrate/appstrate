@@ -28,7 +28,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getPublicAppOrigin } from "./public-url.ts";
 
-export interface AuthChallengeArgs {
+interface AuthChallengeArgs {
   /** Canonical public app origin, e.g. `https://instance.example`. */
   origin: string;
   /**
@@ -41,8 +41,11 @@ export interface AuthChallengeArgs {
   status: 401 | 403;
 }
 
-/** Builds the `WWW-Authenticate` header value for a matched resource. */
-export type AuthChallengeBuilder = (args: AuthChallengeArgs) => string;
+/**
+ * Builds the `WWW-Authenticate` header value for a matched resource, or
+ * `undefined` to decline — the request then takes the generic fallback below.
+ */
+type AuthChallengeBuilder = (args: AuthChallengeArgs) => string | undefined;
 
 interface Entry {
   prefix: string;
@@ -101,12 +104,13 @@ export function resolveAuthChallenge(path: string): AuthChallengeBuilder | undef
  *   1. A handler-set `WWW-Authenticate` is left untouched.
  *   2. A registered (RFC 9728) challenge on a matching path prefix —
  *      e.g. the MCP resource-metadata challenge — wins next.
- *   3. Otherwise every 401 falls back to the generic RFC 6750 §3 Bearer
- *      challenge: `Bearer error="invalid_token"` when the request carried
- *      an `Authorization` header that failed validation, bare `Bearer`
- *      when no credential was presented at all (§3.1 says the error code
- *      SHOULD be omitted in that case). 403s get no generic fallback —
- *      an `insufficient_scope` challenge needs scope knowledge only a
+ *   3. Otherwise — no builder matched, or the one that did declined — every
+ *      401 falls back to the generic RFC 6750 §3 Bearer challenge:
+ *      `Bearer error="invalid_token"` when the request carried an
+ *      `Authorization` header that failed validation, bare `Bearer` when no
+ *      credential was presented at all (§3.1 says the error code SHOULD be
+ *      omitted in that case). 403s get no generic fallback — an
+ *      `insufficient_scope` challenge needs scope knowledge only a
  *      registered resource has.
  */
 export function authChallengeResponder(): MiddlewareHandler<AppEnv> {
@@ -116,12 +120,10 @@ export function authChallengeResponder(): MiddlewareHandler<AppEnv> {
     if (status !== 401 && status !== 403) return;
     if (c.res.headers.has("WWW-Authenticate")) return;
     const build = resolveAuthChallenge(c.req.path);
-    let challenge: string | undefined;
-    if (build) {
-      challenge = build({ origin: getPublicAppOrigin(), path: c.req.path, status });
-    } else if (status === 401) {
-      challenge = c.req.header("Authorization") ? 'Bearer error="invalid_token"' : "Bearer";
-    }
+    const generic = c.req.header("Authorization") ? 'Bearer error="invalid_token"' : "Bearer";
+    const challenge =
+      build?.({ origin: getPublicAppOrigin(), path: c.req.path, status }) ??
+      (status === 401 ? generic : undefined);
     if (!challenge) return;
 
     const headers = new Headers(c.res.headers);

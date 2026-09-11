@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { bodyLimit as honoBodyLimit } from "hono/body-limit";
 import type { MiddlewareHandler } from "hono";
 import { payloadTooLarge } from "../lib/errors.ts";

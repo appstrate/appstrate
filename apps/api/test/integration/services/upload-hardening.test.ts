@@ -31,6 +31,7 @@ import {
   downloadStream as storageDownload,
 } from "@appstrate/db/storage";
 import type { Actor } from "@appstrate/connect";
+import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
 
 const UPLOAD_BUCKET = "uploads";
 const PDF_BYTES = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]); // %PDF-1.4\n
@@ -54,7 +55,7 @@ const hashingSink: UploadStreamSink = async (stream) => {
 };
 
 async function seedUpload(
-  ctx: { orgId: string; applicationId: string },
+  ctx: { orgId: string; spaceId: string },
   opts: {
     id: string;
     createdBy?: string | null;
@@ -65,12 +66,12 @@ async function seedUpload(
   },
 ): Promise<string> {
   const bytes = opts.bytes ?? PDF_BYTES;
-  const storagePath = `${ctx.applicationId}/${opts.id}/file.pdf`;
+  const storagePath = `${ctx.spaceId}/${opts.id}/file.pdf`;
   await storagePut(UPLOAD_BUCKET, storagePath, bytes);
   await db.insert(uploads).values({
     id: opts.id,
     orgId: ctx.orgId,
-    applicationId: ctx.applicationId,
+    spaceId: ctx.spaceId,
     createdBy: opts.createdBy ?? null,
     endUserId: opts.endUserId ?? null,
     sha256: opts.sha256 ?? null,
@@ -109,7 +110,7 @@ describe("upload ownership gate (peek + consume)", () => {
   });
 
   it("a non-creator same-org actor is rejected as not-found; the creator succeeds", async () => {
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const creator: Actor = { type: "user", id: ctx.user.id };
     const stranger: Actor = { type: "user", id: "u_stranger" };
     await seedUpload(scope, { id: "upl_own_1", createdBy: ctx.user.id });
@@ -134,9 +135,9 @@ describe("upload ownership gate (peek + consume)", () => {
   });
 
   it("an end-user creator is matched by endUserId, not createdBy", async () => {
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
-    const aliceEu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
-    const bobEu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const aliceEu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const bobEu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     await seedUpload(scope, { id: "upl_eu_1", endUserId: aliceEu.id });
     const alice: Actor = { type: "end_user", id: aliceEu.id };
     const bob: Actor = { type: "end_user", id: bobEu.id };
@@ -157,7 +158,7 @@ describe("upload SHA-256 integrity", () => {
 
   it("proxy sink accepts matching bytes and rejects a mismatch (no visible object)", async () => {
     const good = new Uint8Array([1, 2, 3, 4, 5]);
-    const path = `${ctx.defaultAppId}/upl_sha_ok/blob`;
+    const path = `${ctx.defaultSpaceId}/upl_sha_ok/blob`;
     const key = `${UPLOAD_BUCKET}/${path}`;
     await writeProxyUploadContent(
       key,
@@ -169,7 +170,7 @@ describe("upload SHA-256 integrity", () => {
     expect(await storageExists(UPLOAD_BUCKET, path)).toBe(true);
 
     // Mismatched: declare the hash of `good` but stream different bytes.
-    const badPath = `${ctx.defaultAppId}/upl_sha_bad/blob`;
+    const badPath = `${ctx.defaultSpaceId}/upl_sha_bad/blob`;
     const badKey = `${UPLOAD_BUCKET}/${badPath}`;
     const bad = new Uint8Array([9, 9, 9, 9, 9]);
     await expect(
@@ -180,7 +181,7 @@ describe("upload SHA-256 integrity", () => {
   });
 
   it("consume rejects when the streamed hash disagrees with the row's declared sha256", async () => {
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const actor: Actor = { type: "user", id: ctx.user.id };
     // Row claims a sha256 that does NOT match the stored PDF bytes.
     await seedUpload(scope, {
@@ -192,13 +193,13 @@ describe("upload SHA-256 integrity", () => {
       consumeUploadStream("upl_sha_consume", { ...scope, actor }, hashingSink),
     ).rejects.toMatchObject({ status: 400, code: "checksum_mismatch" });
     // First-consume rollback: the object was dropped so a re-PUT is possible.
-    expect(await storageExists(UPLOAD_BUCKET, `${ctx.defaultAppId}/upl_sha_consume/file.pdf`)).toBe(
-      false,
-    );
+    expect(
+      await storageExists(UPLOAD_BUCKET, `${ctx.defaultSpaceId}/upl_sha_consume/file.pdf`),
+    ).toBe(false);
   });
 
   it("consume passes when the declared sha256 matches the bytes", async () => {
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const actor: Actor = { type: "user", id: ctx.user.id };
     await seedUpload(scope, {
       id: "upl_sha_match",
@@ -209,7 +210,7 @@ describe("upload SHA-256 integrity", () => {
     expect(meta.sha256).toBe(sha256Hex(PDF_BYTES));
     // Streamed bytes readable (retained for reuse).
     expect(
-      await storageDownload(UPLOAD_BUCKET, `${ctx.defaultAppId}/upl_sha_match/file.pdf`),
+      await storageDownload(UPLOAD_BUCKET, `${ctx.defaultSpaceId}/upl_sha_match/file.pdf`),
     ).not.toBeNull();
   });
 });
@@ -225,7 +226,7 @@ describe("createUpload staging budget", () => {
     await withEnv({ UPLOAD_MAX_ACTIVE_PER_ACTOR: "2" }, async () => {
       const base = {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         mime: "application/pdf",
         size: 10,
@@ -239,23 +240,95 @@ describe("createUpload staging budget", () => {
     });
   });
 
-  it("a consumed upload frees the per-actor budget", async () => {
+  it("a consumed upload frees the per-actor budget immediately", async () => {
+    // UPLOAD_MAX_ACTIVE_PER_ACTOR bounds OPEN staging slots — how many uploads
+    // one principal may have awaiting bytes at once — not disk. Counting a
+    // consumed upload's retained object here would turn "N concurrent" into "N
+    // per ~25h" and make the gate's own advice ("consume … before staging
+    // more") impossible to follow. Disk is the BYTE ceiling's job, asserted by
+    // the next test.
     await withEnv({ UPLOAD_MAX_ACTIVE_PER_ACTOR: "1" }, async () => {
       const base = {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         mime: "application/pdf",
         size: 10,
       };
       const first = await createUpload({ ...base, name: "a.pdf" });
-      // Mark it consumed → it leaves the active set.
+      // Mark it consumed → the slot it held is released, even though its bytes
+      // stay on disk for the reuse window.
       await db.update(uploads).set({ consumedAt: new Date() }).where(eq(uploads.id, first.id));
-      // A new create now fits within the budget of 1.
       await expect(createUpload({ ...base, name: "b.pdf" })).resolves.toMatchObject({
         object: "upload",
       });
     });
+  });
+
+  it("an expired unconsumed upload frees the per-actor budget", async () => {
+    // The other half of "open slot": a staged upload whose PUT window elapsed
+    // is not holding a slot either — nothing will ever arrive for it.
+    await withEnv({ UPLOAD_MAX_ACTIVE_PER_ACTOR: "1" }, async () => {
+      const base = {
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        mime: "application/pdf",
+        size: 10,
+      };
+      const first = await createUpload({ ...base, name: "a.pdf" });
+      await expect(createUpload({ ...base, name: "b.pdf" })).rejects.toMatchObject({
+        status: 429,
+        code: "upload_staging_limit_exceeded",
+      });
+
+      await db
+        .update(uploads)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(uploads.id, first.id));
+      await expect(createUpload({ ...base, name: "c.pdf" })).resolves.toMatchObject({
+        object: "upload",
+      });
+    });
+  });
+
+  it("counts a consumed upload's retained bytes against the org staging ceiling", async () => {
+    // The escape the byte ceiling had: stage to the limit, attach everything
+    // (the ceiling filtered `consumed_at IS NULL`, so the total dropped to zero
+    // while the objects stayed on disk for ~25h), delete the materialised files
+    // as their creator so `files_bytes_used` returns to baseline — a clean slate
+    // against every gate, with the bytes still there. Repeating that loop is
+    // unbounded growth in a bucket `ORG_STORAGE_QUOTA_BYTES` does not cover: it
+    // is checked only against `organizations.files_bytes_used`, which the
+    // `files` table alone maintains.
+    await withEnv(
+      { UPLOAD_STAGING_MAX_BYTES_PER_ORG: "100", UPLOAD_MAX_ACTIVE_PER_ACTOR: "999" },
+      async () => {
+        const base = {
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          mime: "application/pdf",
+        };
+        const first = await createUpload({ ...base, name: "a.pdf", size: 80 });
+        await db.update(uploads).set({ consumedAt: new Date() }).where(eq(uploads.id, first.id));
+
+        await expect(createUpload({ ...base, name: "b.pdf", size: 40 })).rejects.toMatchObject({
+          status: 403,
+          code: "storage_limit_exceeded",
+        });
+
+        // Once the bytes are reclaimable the budget returns — the ceiling
+        // tracks what is on disk, it does not become a permanent debt.
+        await db
+          .update(uploads)
+          .set({ consumedAt: new Date(Date.now() - 26 * 60 * 60 * 1000) })
+          .where(eq(uploads.id, first.id));
+        await expect(createUpload({ ...base, name: "c.pdf", size: 40 })).resolves.toMatchObject({
+          object: "upload",
+        });
+      },
+    );
   });
 
   it("rejects when the org active-bytes sum would be exceeded (403)", async () => {
@@ -264,7 +337,7 @@ describe("createUpload staging budget", () => {
       async () => {
         const base = {
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           createdBy: ctx.user.id,
           mime: "application/pdf",
         };
@@ -275,5 +348,33 @@ describe("createUpload staging budget", () => {
         });
       },
     );
+  });
+});
+
+describe("createUpload signed size", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "signedsize" });
+  });
+
+  it("always signs the declared byte count — never an unbounded 0", async () => {
+    // The sink binds `s` as both the mid-stream ceiling AND the exact size on
+    // completion, so a token signed with 0 would be unusable rather than
+    // unbounded. `createUpload` rejects `size <= 0` up front and signs
+    // `min(size, max)`, which is the single reason the sink can drop the
+    // `s > 0` special case entirely.
+    const created = await createUpload({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      name: "sized.pdf",
+      mime: "application/pdf",
+      size: 42,
+    });
+    const token = new URL(created.url).searchParams.get("token");
+    expect(token).toBeTruthy();
+    const payload = verifyFsUploadToken(token!, process.env.UPLOAD_SIGNING_SECRET!);
+    expect(payload?.s).toBe(42);
   });
 });

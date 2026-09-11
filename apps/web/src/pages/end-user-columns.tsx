@@ -7,7 +7,7 @@ import type { DataColumn } from "../components/data-table";
 import { TableRowActions } from "../components/table-row-actions";
 import { EndUserAvatar } from "../components/end-user-avatar";
 import type { EndUserInfo } from "../hooks/use-end-users";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 export function endUserDisplayName(user: EndUserInfo, anonymousLabel: string): string {
   return user.name || user.email || user.externalId || anonymousLabel;

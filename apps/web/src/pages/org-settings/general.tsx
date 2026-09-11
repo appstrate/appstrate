@@ -9,12 +9,15 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatBytes } from "@appstrate/core/format";
 import { $api } from "../../api/client";
+import { Switch } from "@appstrate/ui/components/switch";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
+import { useAppConfig } from "../../hooks/use-app-config";
+import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
@@ -59,12 +62,16 @@ export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
   const { currentOrg } = useOrg();
-  const { isOwner, isAdmin } = usePermissions();
+  const { can } = usePermissions();
+  const canUpdateOrg = can("org:update");
+  const { features } = useAppConfig();
+  const { data: orgSettings } = useOrgSettings();
+  const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
   // Single source of truth for the storage gauge (shared with billing +
-  // documents). `limitBytes` null = unlimited (per-org override ?? global quota).
+  // files). `limitBytes` null = unlimited (per-org override ?? global quota).
   const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
   // The heads-up banner fires at the shared WARN threshold — the same point the
   // bar turns yellow — so the user is warned well before uploads get rejected.
@@ -142,7 +149,7 @@ export function OrgSettingsGeneralPage() {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={!isAdmin || updateNameMutation.isPending || processingLogo}
+                disabled={!canUpdateOrg || updateNameMutation.isPending || processingLogo}
                 onClick={() => logoInputRef.current?.click()}
               >
                 <Upload />
@@ -154,7 +161,7 @@ export function OrgSettingsGeneralPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!isAdmin || updateNameMutation.isPending || processingLogo}
+                    disabled={!canUpdateOrg || updateNameMutation.isPending || processingLogo}
                   >
                     <Smile />
                     {t("orgSettings.logoEmoji")}
@@ -189,7 +196,7 @@ export function OrgSettingsGeneralPage() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={!isAdmin || updateNameMutation.isPending || processingLogo}
+                  disabled={!canUpdateOrg || updateNameMutation.isPending || processingLogo}
                   onClick={() => {
                     if (!orgId) return;
                     updateNameMutation.mutate({
@@ -213,7 +220,7 @@ export function OrgSettingsGeneralPage() {
         >
           <InlineTextSetting
             value={currentOrg.name}
-            disabled={!isAdmin || updateNameMutation.isPending}
+            disabled={!canUpdateOrg || updateNameMutation.isPending}
             aria-label={t("orgSettings.nameLabel")}
             onCommit={(name) => {
               if (!orgId) return;
@@ -222,6 +229,44 @@ export function OrgSettingsGeneralPage() {
           />
         </SettingRow>
       </SettingsGroup>
+
+      {/* Dashboard SSO — who may sign in to the dashboard through the org's own
+          identity provider. Behind `org:settings` (not `org:update`): an admin
+          administers the org without being able to re-slug it. */}
+      {can("org:settings") && features.oidc && (
+        <SettingsGroup title={t("orgSettings.advancedSection")}>
+          <SettingRow
+            variant="toggle"
+            label={t("orgSettings.dashboardSsoTitle")}
+            description={t("orgSettings.dashboardSsoDesc")}
+            status={updateSettingsMutation.isPending && <Spinner />}
+          >
+            <Switch
+              checked={Boolean(orgSettings?.dashboard_sso_enabled)}
+              disabled={updateSettingsMutation.isPending}
+              aria-label={t("orgSettings.dashboardSsoTitle")}
+              onCheckedChange={(next) =>
+                updateSettingsMutation.mutate(
+                  {
+                    params: { path: { orgId: currentOrg.id } },
+                    body: { dashboard_sso_enabled: next },
+                  },
+                  {
+                    onSuccess: (data) =>
+                      toast.success(
+                        data.dashboard_sso_enabled
+                          ? t("orgSettings.dashboardSsoEnabled")
+                          : t("orgSettings.dashboardSsoDisabled"),
+                      ),
+                    onError: (err) =>
+                      toast.error(t("error.prefix", { message: getErrorMessage(err) })),
+                  },
+                )
+              }
+            />
+          </SettingRow>
+        </SettingsGroup>
+      )}
 
       {storage && (
         <>
@@ -274,7 +319,7 @@ export function OrgSettingsGeneralPage() {
         </>
       )}
 
-      {isOwner && (
+      {can("org:delete") && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("orgSettings.dangerZone")}

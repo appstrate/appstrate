@@ -20,16 +20,10 @@
  *   5. Transient refresh failures (network, 5xx) preserve local state.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  loadTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { saveTokens, loadTokens } from "../src/lib/keyring.ts";
+// Imported directly for the one test that needs a profile with NO stored
+// tokens — the shared seed always writes a pair.
 import { setProfile } from "../src/lib/config.ts";
 import {
   apiFetchRaw,
@@ -37,24 +31,16 @@ import {
   _awaitRefreshQuiesce,
   _inFlightRefreshSizeForTesting,
 } from "../src/lib/api.ts";
-
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 type FetchCall = { url: string; auth: string | null; body: string | null };
-let tmpDir: string;
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-api-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
 
@@ -69,44 +55,33 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-api-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
 
+/** TTLs here are relative offsets — every test in this file is about expiry. */
 async function seedProfile(
   name: string,
   tokens: { access: string; accessExpiresIn: number; refresh?: string; refreshExpiresIn?: number },
 ): Promise<void> {
-  await setProfile(name, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "a@example.com",
-  });
   const now = Date.now();
-  await saveTokens(name, {
-    accessToken: tokens.access,
-    expiresAt: now + tokens.accessExpiresIn,
-    refreshToken: tokens.refresh ?? "rt-default",
-    refreshExpiresAt:
-      tokens.refreshExpiresIn !== undefined
-        ? now + tokens.refreshExpiresIn
-        : now + 30 * 24 * 60 * 60 * 1000,
+  await seedLoggedInProfile(name, {
+    tokens: {
+      accessToken: tokens.access,
+      expiresAt: now + tokens.accessExpiresIn,
+      refreshToken: tokens.refresh ?? "rt-default",
+      refreshExpiresAt:
+        tokens.refreshExpiresIn !== undefined
+          ? now + tokens.refreshExpiresIn
+          : now + 30 * 24 * 60 * 60 * 1000,
+    },
   });
 }
 
@@ -348,17 +323,9 @@ describe("apiFetchRaw — missing credentials", () => {
 
 describe("apiFetchRaw — X-Org-Id header injection", () => {
   it("forwards profile.orgId as X-Org-Id when set", async () => {
-    await setProfile("default", {
-      instance: "https://app.example.com",
-      userId: "u_1",
-      email: "a@example.com",
+    await seedLoggedInProfile("default", {
       orgId: "org_42",
-    });
-    await saveTokens("default", {
-      accessToken: "tok",
-      expiresAt: Date.now() + 5 * 60 * 1000,
-      refreshToken: "r",
-      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      tokens: { accessToken: "tok", expiresAt: Date.now() + 5 * 60 * 1000, refreshToken: "r" },
     });
     let capturedOrg: string | undefined;
     installFetch(async (_url, init) => {
@@ -370,56 +337,40 @@ describe("apiFetchRaw — X-Org-Id header injection", () => {
   });
 });
 
-describe("apiFetchRaw — X-Application-Id header injection", () => {
-  it("forwards profile.applicationId as X-Application-Id when set", async () => {
-    await setProfile("default", {
-      instance: "https://app.example.com",
-      userId: "u_1",
-      email: "a@example.com",
+describe("apiFetchRaw — X-Space-Id header injection", () => {
+  it("forwards profile.spaceId as X-Space-Id when set", async () => {
+    await seedLoggedInProfile("default", {
       orgId: "org_42",
-      applicationId: "app_7",
+      spaceId: "spc_7",
+      tokens: { accessToken: "tok", expiresAt: Date.now() + 5 * 60 * 1000, refreshToken: "r" },
     });
-    await saveTokens("default", {
-      accessToken: "tok",
-      expiresAt: Date.now() + 5 * 60 * 1000,
-      refreshToken: "r",
-      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-    });
-    let capturedApp: string | undefined;
+    let capturedSpace: string | undefined;
     let capturedOrg: string | undefined;
     installFetch(async (_url, init) => {
       const h = init?.headers as Record<string, string>;
-      capturedApp = h["X-Application-Id"];
+      capturedSpace = h["X-Space-Id"];
       capturedOrg = h["X-Org-Id"];
       return jsonResponse(200, {});
     });
     await apiFetchRaw("default", "/api/data");
     // Both headers sent when both are pinned — the common agent recipe path.
-    expect(capturedApp).toBe("app_7");
+    expect(capturedSpace).toBe("spc_7");
     expect(capturedOrg).toBe("org_42");
   });
 
-  it("does NOT send X-Application-Id when profile.applicationId is unset", async () => {
-    await setProfile("default", {
-      instance: "https://app.example.com",
-      userId: "u_1",
-      email: "a@example.com",
+  it("does NOT send X-Space-Id when profile.spaceId is unset", async () => {
+    await seedLoggedInProfile("default", {
       orgId: "org_42",
+      tokens: { accessToken: "tok", expiresAt: Date.now() + 5 * 60 * 1000, refreshToken: "r" },
     });
-    await saveTokens("default", {
-      accessToken: "tok",
-      expiresAt: Date.now() + 5 * 60 * 1000,
-      refreshToken: "r",
-      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-    });
-    let sawAppHeader = true;
+    let sawSpaceHeader = true;
     installFetch(async (_url, init) => {
       const h = init?.headers as Record<string, string>;
-      sawAppHeader = "X-Application-Id" in h;
+      sawSpaceHeader = "X-Space-Id" in h;
       return jsonResponse(200, {});
     });
     await apiFetchRaw("default", "/api/data");
-    expect(sawAppHeader).toBe(false);
+    expect(sawSpaceHeader).toBe(false);
   });
 });
 

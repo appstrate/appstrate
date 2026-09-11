@@ -18,12 +18,12 @@
  */
 
 import { db } from "./db.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, runs, TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { seedPackage, seedPackageVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";
 import type { TestContext } from "./auth.ts";
-import { installPackage } from "../../src/services/application-packages.ts";
+import { installPackage } from "../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../src/services/org-models.ts";
 import { waitForInFlight } from "../../src/services/run-tracker.ts";
@@ -114,7 +114,7 @@ export function inlineAgentManifest(integrations: string[] = []): Record<string,
 }
 
 /** AFPS integration manifest with a single api_key auth exposing a `search` tool. */
-export function connectionTestIntegrationManifest(id: string) {
+function connectionTestIntegrationManifest(id: string) {
   return localIntegrationManifest({
     name: id,
     serverName: `${id}-server`,
@@ -137,7 +137,7 @@ export function connectionTestIntegrationManifest(id: string) {
 
 /**
  * Seed the integration package + a PUBLISHED 1.0.0 version + install it in the
- * context's default application. The published version is what the run's
+ * context's default space. The published version is what the run's
  * dependency freeze resolves the agent's `^1.0.0` pin against — without it
  * kickoff aborts with 422 `dependency_unresolved` long before the connection
  * snapshot.
@@ -155,7 +155,7 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
     version: "1.0.0",
     manifest: connectionTestIntegrationManifest(id) as unknown as Record<string, unknown>,
   });
-  await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
 }
 
 /** Add one connection on the integration's `primary` auth, owned by the ctx user. */
@@ -169,7 +169,7 @@ export async function seedIntegrationConnection(
       integrationId,
       authKey: "primary",
       accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
@@ -198,13 +198,39 @@ export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
   await setDefaultModel(ctx.orgId, modelDbId);
 }
 
+/** Poll `check` until it holds; fail loudly rather than hang forever. */
+async function waitUntil(what: string, check: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    if (await check()) return;
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${what}`);
+    await Bun.sleep(25);
+  }
+}
+
 /**
  * The trigger is fire-and-forget: the fake orchestrator exits 0 immediately and
- * the platform synthesises a terminal. Drain the in-flight tracker (plus a beat
- * for the post-untrack async tail) so the background DB writes stay inside the
- * CURRENT test instead of racing the next `truncateAll()`.
+ * the platform synthesises a terminal. Wait for the background writes to land
+ * inside the CURRENT test instead of racing the next `truncateAll()`.
+ *
+ * The wait is stated positively — every run row sits at a terminal status —
+ * because the in-flight tracker cannot state it. Draining the tracker is a wait
+ * for an *absence*: `waitForInFlight` returns `true` the instant the tracker is
+ * empty, which is equally what it returns when called before the launch ever
+ * reached `trackRun`. The terminal status is the last write
+ * `executeAgentInBackground` awaits, and `untrackRun` runs in the `finally`
+ * after it, so the row reaching terminal is the event the drain was standing in
+ * for. The drain still follows, to cover that `finally`.
+ *
+ * Reading the whole `runs` table is deliberate and is what lets this be shared:
+ * every caller resets it in `beforeEach`, so whatever is on it belongs to the
+ * test that is settling. An empty table settles immediately — a launch refused
+ * before run creation (the 412 cases) has nothing to wait for.
  */
 export async function waitForRunPipelineSettled(): Promise<void> {
+  await waitUntil("every run of this test to reach a terminal status", async () => {
+    const rows = await db.select({ status: runs.status }).from(runs);
+    return rows.every((row) => TERMINAL_RUN_STATUSES.has(row.status));
+  });
   await waitForInFlight(10_000);
-  await Bun.sleep(300);
 }

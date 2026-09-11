@@ -8,9 +8,10 @@
  * SPA's own i18n singleton so the locale under test is the locale the
  * assertions use.
  *
- * `document_storage_bytes` is optional on the wire: a billing module older than
- * the release that added it omits the field, and the card must then show
- * nothing rather than a "0 B" that misrepresents the plan.
+ * The storage entitlement is always on the wire: `@appstrate/module-ee` declares
+ * `file_storage_bytes` required on `EeBillingPlan` and sets it on every plan
+ * definition, so the card renders the line unconditionally — including for a
+ * plan that grants zero, which is a real entitlement and not a missing one.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -36,13 +37,13 @@ function render(plans: BillingPlanDetail[]): string {
 describe("PlanGrid storage entitlement", () => {
   it("prices storage under the credits of every plan", () => {
     const html = render([
-      { id: "free", name: "Free", price: 0, credit_quota: 5000, document_storage_bytes: GIB },
+      { id: "free", name: "Free", price: 0, credit_quota: 5000, file_storage_bytes: GIB },
       {
         id: "pro",
         name: "Pro",
         price: 99,
         credit_quota: 80_000,
-        document_storage_bytes: 100 * GIB,
+        file_storage_bytes: 100 * GIB,
       },
     ]);
 
@@ -50,12 +51,11 @@ describe("PlanGrid storage entitlement", () => {
     expect(html).toContain("100 GB de stockage");
   });
 
-  it("omits the line entirely when the plan reports no storage entitlement", () => {
-    const html = render([{ id: "free", name: "Free", price: 0, credit_quota: 5000 }]);
+  it("still prices a zero entitlement rather than treating it as absent", () => {
+    const html = render([
+      { id: "free", name: "Free", price: 0, credit_quota: 5000, file_storage_bytes: 0 },
+    ]);
 
-    expect(html).toContain("5,000");
-    expect(html).not.toContain("de stockage");
-    // Specifically NOT the misleading zero.
-    expect(html).not.toContain("0 B");
+    expect(html).toContain("0 B de stockage");
   });
 });

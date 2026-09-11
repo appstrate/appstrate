@@ -17,17 +17,18 @@
  * Event delivery mirrors the MCP path: the tool handler returns its
  * canonical events under the `_meta` key; this wrapper re-emits them into
  * the run's event sink via {@link reEmitRuntimeToolEvents}. The default
- * emitter writes the legacy stdout-JSONL line so the existing
- * `attachStdoutBridge` harvesting keeps working unchanged; callers that own
- * a sink can pass an explicit `emit` to route events directly.
+ * emitter writes the stdout-JSONL line that `attachStdoutBridge` harvests --
+ * the current wire contract, and the default precisely because it needs no
+ * sink; callers that own one can pass an explicit `emit` to route events
+ * directly.
  */
 
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolDefs,
-  buildPublishDocumentDef,
+  buildPublishFileDef,
   reEmitRuntimeToolEvents,
-  type DocumentUploader,
+  type FileUploader,
   type RuntimeToolDef,
   type RuntimeToolEvent,
 } from "@appstrate/core/runtime-tool-defs";
@@ -39,9 +40,8 @@ export interface BuildRuntimeToolExtensionsOptions {
   outputSchema?: Record<string, unknown> | null;
   /**
    * Sink for the canonical events each tool call produces. Defaults to the
-   * legacy stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested
-   * by `attachStdoutBridge` — same wire contract the former built-in tools
-   * used, so no-sidecar callers need no extra wiring.
+   * stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested by
+   * `attachStdoutBridge`, so no-sidecar callers need no extra wiring.
    */
   emit?: (event: RuntimeToolEvent) => void;
 }
@@ -94,23 +94,23 @@ function runtimeToolExtension(
   };
 }
 
-export interface BuildPublishDocumentExtensionOptions {
-  /** Uploads a workspace file to the platform, returning its document metadata. */
-  uploader: DocumentUploader;
-  /** Sink for the `document.published` event the tool emits (defaults to stdout-JSONL). */
+export interface BuildPublishFileExtensionOptions {
+  /** Uploads a workspace file to the platform, returning its file metadata. */
+  uploader: FileUploader;
+  /** Sink for the `file.published` event the tool emits (defaults to stdout-JSONL). */
   emit?: (event: RuntimeToolEvent) => void;
 }
 
 /**
- * Build the `publish_document` Pi extension around an injected uploader. The
+ * Build the `publish_file` Pi extension around an injected uploader. The
  * uploader (holding the run's HMAC sink signer) is wired in the runtime
  * entrypoint, so this tool is registered in-process even when the sidecar
  * hosts the other runtime tools over MCP — the sidecar has no path back to the
- * platform documents route.
+ * platform files route.
  */
-export function buildPublishDocumentExtension(
-  opts: BuildPublishDocumentExtensionOptions,
+export function buildPublishFileExtension(
+  opts: BuildPublishFileExtensionOptions,
 ): ExtensionFactory {
   const emit = opts.emit ?? defaultStdoutEmit;
-  return runtimeToolExtension(buildPublishDocumentDef(opts.uploader), emit);
+  return runtimeToolExtension(buildPublishFileDef(opts.uploader), emit);
 }

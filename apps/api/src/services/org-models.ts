@@ -8,18 +8,14 @@ import { lookupCatalogModel } from "./pricing-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import type { ModelCost } from "@appstrate/core/module";
 import { logger } from "../lib/logger.ts";
-import { conflict, notFound } from "../lib/errors.ts";
+import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { checkEgressUrl, egressGuardedFetch } from "../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import { loadInferenceCredentials, loadCredentialMetadata } from "./model-providers/credentials.ts";
+import { loadInferenceCredentials, loadCredentialRow } from "./model-providers/credentials.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
-import {
-  getResolvedModel,
-  setResolvedModel,
-  invalidateResolvedModel,
-} from "./resolved-model-cache.ts";
+import { invalidateResolvedModel, resolveModelCached } from "./resolved-model-cache.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
   mergeSystemAndDb,
@@ -33,8 +29,11 @@ import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import {
   applyModelGenerationCapabilitiesOverride,
+  ModelGenerationError,
+  resolveModelGenerationSettings,
   UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   type ModelGenerationCapabilities,
+  type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 
 // --- Metadata projection ---
@@ -237,9 +236,14 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         });
         return;
       }
-      const meta = await loadCredentialMetadata(r.credentialId, orgId);
-      if (!meta) return;
-      credByRow.set(r.id, { ...meta, needsReconnection: true });
+      const raw = await loadCredentialRow(r.credentialId, orgId);
+      if (!raw) return;
+      credByRow.set(r.id, {
+        providerId: raw.providerId,
+        apiShape: raw.apiShape,
+        baseUrl: raw.baseUrl,
+        needsReconnection: true,
+      });
     }),
   );
   // "renderable", not "reachable": a dead-credential row is kept (flagged) —
@@ -500,13 +504,13 @@ export async function deleteOrgModel(orgId: string, modelDbId: string): Promise<
  * `apiShape` and `baseUrl` are resolved from the registry by the credential's
  * `providerId` at read time — no need to pass them through here.
  */
-export interface SeedModelsResult {
+interface SeedModelsResult {
   created: number;
   ids: string[];
   promotedDefault: boolean;
 }
 
-export interface SeedModelsInput {
+interface SeedModelsInput {
   models: ReadonlyArray<CatalogModelEntry & { id: string }>;
 }
 
@@ -826,10 +830,13 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
 
   // Short-TTL cache (see resolved-model-cache.ts). Only the successful (non-null)
   // DB result is cached; system models are already in-memory. Invalidated
-  // eagerly by model + credential mutators, so the TTL is a backstop.
-  const cached = getResolvedModel(orgId, modelDbId);
-  if (cached) return cached;
+  // eagerly by model + credential mutators, so the TTL is a backstop. Concurrent
+  // resolves of one preset (the llm-proxy resolves it on every inference call
+  // of a turn) share ONE load instead of each reading + decrypting.
+  return resolveModelCached(orgId, modelDbId, () => loadModelFromDb(orgId, modelDbId));
+}
 
+async function loadModelFromDb(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
   // Check DB. `orgModels.id` is a `uuid` column — a `modelDbId` that isn't a
   // valid UUID (e.g. a human-readable model name like `gpt-5.5`) makes Postgres
   // raise `invalid input syntax for type uuid` rather than returning no rows.
@@ -867,9 +874,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
   const creds = await loadInferenceCredentials(orgId, row.credentialId);
   if (!creds) return null;
 
-  const resolved = buildDbResolvedModel(row, creds);
-  setResolvedModel(orgId, modelDbId, resolved);
-  return resolved;
+  return buildDbResolvedModel(row, creds);
 }
 
 /**
@@ -884,7 +889,7 @@ export async function loadModel(orgId: string, modelDbId: string): Promise<Resol
  * Scope, precisely — `true` requires ALL of: an existing DB row (system models
  * and non-UUID ids answer `false`), that is `enabled`, whose credential fails
  * {@link loadInferenceCredentials} AND still resolves through
- * {@link loadCredentialMetadata}. That last conjunct is what keeps this aligned
+ * {@link loadCredentialRow}. That last conjunct is what keeps this aligned
  * with what {@link listOrgModels} actually RENDERS as dead: a row whose
  * credential row is gone, or whose `providerId` has no registry entry (its
  * provider module was dropped from `MODULES`), is not listed at all — and its
@@ -917,7 +922,7 @@ export async function modelNeedsReconnection(orgId: string, modelDbId: string): 
   // The list's two tests, in its order: dead for inference, but still
   // renderable. See the doc block for why the second one is not redundant.
   if ((await loadInferenceCredentials(orgId, row.credentialId)) !== null) return false;
-  return (await loadCredentialMetadata(row.credentialId, orgId)) !== null;
+  return (await loadCredentialRow(row.credentialId, orgId)) !== null;
 }
 
 /**
@@ -945,9 +950,67 @@ export async function assertExplicitModelExists(
   return model;
 }
 
+/**
+ * Validate a caller-supplied generation-settings override against the model it
+ * will actually run on, and answer the two ways it can be refused.
+ *
+ * One implementation, three routes: `PUT /agents/{scope}/{name}/model`,
+ * `PUT /spaces/{spaceId}/packages/{scope}/{name}` and the two schedule
+ * handlers each ran their own copy of this — same two refusals, same literal
+ * message spelled out four times, and only the `param` legitimately differed
+ * (it names the wire field the override arrived on, which is `generation`,
+ * `generationConfig` and `generation_config_override` respectively).
+ *
+ * `selectedModel` is the resolved model this layer will run on, or `null` when
+ * NOTHING resolves — no override, no agent pin, no org default. Generation
+ * settings are per-model request controls, so there is nothing to validate them
+ * against and nothing to clamp them to; storing them would mean persisting a
+ * value the next resolution could contradict.
+ *
+ * RESPONSE-SHAPE CHANGE, DELIBERATE. All four route-local copies threw the
+ * `!selectedModel` refusal with NO `param` — only their `ModelGenerationError`
+ * sibling carried one. Hoisting them here gives BOTH refusals the same `param`,
+ * so the 400 on `PUT /agents/{scope}/{name}/model`, `PUT /spaces/{spaceId}/
+ * packages/{scope}/{name}` and both schedule surfaces now carries a `param` it
+ * did not carry before. Kept rather than reverted: the two refusals come from
+ * one body field and now describe it identically, `param` is optional in the
+ * `ProblemDetail` schema (`openapi/schemas.ts`), and no consumer branches on
+ * its ABSENCE — `apps/web` reads `param` only for the two `locked_*_field`
+ * codes (`hooks/use-mutations.ts`), and `api/client.ts` passes it through
+ * untouched. Each of the four surfaces pins its own `param` in the integration
+ * tests, so a silent revert fails.
+ */
+export function validateGenerationOverride(
+  override: ModelGenerationSettings,
+  selectedModel: Pick<ResolvedModel, "generation"> | null,
+  param: string,
+): ModelGenerationSettings {
+  if (!selectedModel) {
+    throw invalidRequest(
+      "A model must be configured before generation settings can be saved",
+      param,
+    );
+  }
+  try {
+    return resolveModelGenerationSettings({
+      capabilities: selectedModel.generation,
+      override,
+    });
+  } catch (error) {
+    if (error instanceof ModelGenerationError) {
+      throw invalidRequest(error.message, param);
+    }
+    throw error;
+  }
+}
+
 // --- Connection test ---
 
-/** Build the discovery URL + headers used to probe a model provider. Pure for unit testing. */
+/**
+ * Build the URL + headers of a model provider's model listing. Pure for unit
+ * testing. Takes no model id: a `GET <baseUrl>/models` identifies the
+ * CREDENTIAL, never one model.
+ */
 export function buildModelTestRequest(config: {
   apiShape: string;
   baseUrl: string;
@@ -996,6 +1059,78 @@ export function buildModelTestRequest(config: {
   return { url, headers };
 }
 
+/** A delivered response, or the structured failure that stopped it from being one. */
+type ModelListingFetchResult =
+  { ok: true; res: Response; latency: number } | (TestResult & { ok: false });
+
+/**
+ * The guarded `GET <baseUrl>/models` request, shared by {@link testModelConfig}
+ * (reads the status) and `listServedModels` (parses the body): the SSRF
+ * pre-flight, the pinned transport and the pre-response failure mapping exist once.
+ */
+export async function fetchModelListing(config: {
+  apiShape: string;
+  baseUrl: string;
+  apiKey: string;
+  providerId?: string;
+}): Promise<ModelListingFetchResult> {
+  // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
+  // DNS-rebind host gate) before the fetch: a public hostname resolving to a
+  // private/loopback/link-local address is refused, fail-closed, with the same
+  // BLOCKED_URL result (the resolution reason is never surfaced).
+  const egress = await checkEgressUrl(config.baseUrl);
+  if (!egress.ok) {
+    return {
+      ok: false,
+      latency: 0,
+      error: "BLOCKED_URL",
+      message: "URL targets a blocked network",
+    };
+  }
+
+  const { url, headers } = buildModelTestRequest(config);
+
+  const start = performance.now();
+  try {
+    // SSRF-guarded transport (per-hop DNS + blocklist, connection pinned to
+    // the validated address) — the pre-flight `checkEgressUrl` above cannot by
+    // itself stop a DNS-rebind between check and connect, so the wire call
+    // must own the pin. `maxRedirects: 0`: the request carries the provider
+    // API key and a model endpoint has no legitimate reason to redirect — a
+    // 3xx here is either a misconfigured baseUrl or an attempt to replay the
+    // key elsewhere, so refuse to follow rather than follow-and-strip.
+    const res = await egressGuardedFetch(
+      url,
+      {
+        headers,
+        signal: AbortSignal.timeout(10_000),
+      },
+      { maxRedirects: 0, logger },
+    );
+    return { ok: true, res, latency: Math.round(performance.now() - start) };
+  } catch (err) {
+    const latency = Math.round(performance.now() - start);
+    // Guard verdicts map to the same structured results the routes already
+    // return — never the resolved host/address (`checkEgressUrl` above sets
+    // the precedent: the block reason stays server-side).
+    if (err instanceof SsrfBlockedError) {
+      if (err.reason === "too-many-redirects") {
+        // `maxRedirects: 0` — the endpoint answered with a 3xx we refuse to
+        // follow (the request carries the API key). Surface it as a provider
+        // problem, not a blocked network.
+        return {
+          ok: false,
+          latency,
+          error: "PROVIDER_ERROR",
+          message: "Provider endpoint redirected; use the final URL as base URL",
+        };
+      }
+      return { ok: false, latency, error: "BLOCKED_URL", message: "URL targets a blocked network" };
+    }
+    return { ...mapFetchErrorToTestResult(err, latency), ok: false };
+  }
+}
+
 /** Test a model config directly (no DB lookup). */
 export async function testModelConfig(config: {
   apiShape: string;
@@ -1026,84 +1161,27 @@ export async function testModelConfig(config: {
       : { ok: false, latency: 0, error: result.error, message: result.message };
   }
 
-  // Canonical egress guard (parse + scheme floor + allowlist-aware literal +
-  // DNS-rebind host gate) before the test fetch: a public hostname resolving to
-  // a private/loopback/link-local address is refused, fail-closed, with the
-  // same BLOCKED_URL result (the resolution reason is never surfaced).
-  const egress = await checkEgressUrl(config.baseUrl);
-  if (!egress.ok) {
-    return {
-      ok: false,
-      latency: 0,
-      error: "BLOCKED_URL",
-      message: "URL targets a blocked network",
-    };
-  }
+  const listing = await fetchModelListing(config);
+  if (!listing.ok) return listing;
 
-  const { url, headers } = buildModelTestRequest(config);
-
-  const start = performance.now();
-  try {
-    // SSRF-guarded transport (per-hop DNS + blocklist, connection pinned to
-    // the validated address) — the pre-flight `checkEgressUrl` above cannot by
-    // itself stop a DNS-rebind between check and connect, so the wire call
-    // must own the pin. `maxRedirects: 0`: the request carries the provider
-    // API key and a model endpoint has no legitimate reason to redirect — a
-    // 3xx here is either a misconfigured baseUrl or an attempt to replay the
-    // key elsewhere, so refuse to follow rather than follow-and-strip.
-    const res = await egressGuardedFetch(
-      url,
-      {
-        headers,
-        signal: AbortSignal.timeout(10_000),
-      },
-      { maxRedirects: 0, logger },
-    );
-    const latency = Math.round(performance.now() - start);
-
-    if (res.ok) return { ok: true, latency, status: res.status };
-    if (res.status === 401 || res.status === 403) {
-      return {
-        ok: false,
-        latency,
-        error: "AUTH_FAILED",
-        message: "Authentication failed",
-        status: res.status,
-      };
-    }
+  const { res, latency } = listing;
+  if (res.ok) return { ok: true, latency, status: res.status };
+  if (res.status === 401 || res.status === 403) {
     return {
       ok: false,
       latency,
-      error: "PROVIDER_ERROR",
-      message: `Provider returned ${res.status}`,
+      error: "AUTH_FAILED",
+      message: "Authentication failed",
       status: res.status,
     };
-  } catch (err) {
-    const latency = Math.round(performance.now() - start);
-    // Guard verdicts map to the same structured results the route already
-    // returns — never the resolved host/address (`checkEgressUrl` above sets
-    // the precedent: the block reason stays server-side).
-    if (err instanceof SsrfBlockedError) {
-      if (err.reason === "too-many-redirects") {
-        // `maxRedirects: 0` — the endpoint answered with a 3xx we refuse to
-        // follow (the request carries the API key). Surface it as a provider
-        // problem, not a blocked network.
-        return {
-          ok: false,
-          latency,
-          error: "PROVIDER_ERROR",
-          message: "Provider endpoint redirected; use the final URL as base URL",
-        };
-      }
-      return {
-        ok: false,
-        latency,
-        error: "BLOCKED_URL",
-        message: "URL targets a blocked network",
-      };
-    }
-    return mapFetchErrorToTestResult(err, latency);
   }
+  return {
+    ok: false,
+    latency,
+    error: "PROVIDER_ERROR",
+    message: `Provider returned ${res.status}`,
+    status: res.status,
+  };
 }
 
 /** Test a saved model by ID (loads from DB/system registry then delegates to testModelConfig). */

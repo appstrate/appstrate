@@ -208,7 +208,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth.
+         * @description Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -228,30 +228,10 @@ export interface paths {
         };
         /**
          * Export an agent as an .afps-bundle
-         * @description Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this application (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.
+         * @description Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this space (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.
          */
         get: operations["exportAgentBundle"];
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{scope}/{name}/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Save agent configuration
-         * @description Save agent configuration values. Validated against manifest config schema.
-         */
-        put: operations["saveAgentConfig"];
         post?: never;
         delete?: never;
         options?: never;
@@ -299,6 +279,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{scope}/{name}/input-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save agent input settings
+         * @description Save the agent's stored input values and field locks for this space. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.
+         */
+        put: operations["saveAgentInputSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{scope}/{name}/map": {
         parameters: {
             query?: never;
@@ -328,7 +328,7 @@ export interface paths {
         };
         /**
          * Get agent model configuration
-         * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults).
+         * @description Returns the LLM model override and persisted generation defaults for an agent (null values inherit organization/runtime defaults). Readable with `agents:read` or `agents:run`: the launch form resolves the model a run will use from it, and the body carries no manifest and no prompt.
          */
         get: operations["getAgentModel"];
         /**
@@ -379,7 +379,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a single memory by id
-         * @description Admin-only. The id must belong to the targeted agent in the current app.
+         * @description Admin-only. The id must belong to the targeted agent in the current space.
          */
         delete: operations["deleteAgentPersistenceMemory"];
         options?: never;
@@ -399,7 +399,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a single pinned slot by id
-         * @description Admin-only. Deletes any named pinned slot (`checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.
+         * @description Admin-only. Deletes any named pinned slot (`checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current space.
          */
         delete: operations["deleteAgentPersistencePinnedSlot"];
         options?: never;
@@ -442,7 +442,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an agent
-         * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a document and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same documents, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases.
+         * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a file and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same files, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.
          */
         post: operations["runAgent"];
         delete?: never;
@@ -487,7 +487,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all runs for an agent
-         * @description Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).
+         * @description Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).
          */
         delete: operations["deleteAgentRuns"];
         options?: never;
@@ -548,7 +548,7 @@ export interface paths {
         };
         /**
          * List API keys
-         * @description List active (non-revoked) API keys for the current application (scoped by X-Application-Id).
+         * @description List active (non-revoked) API keys for the current space (scoped by X-Space-Id).
          */
         get: operations["listApiKeys"];
         put?: never;
@@ -595,203 +595,9 @@ export interface paths {
         post?: never;
         /**
          * Revoke an API key
-         * @description Revoke (soft-delete) an API key. The key will immediately stop working.
+         * @description Revoke (soft-delete) an API key. The key will immediately stop working. `api-keys:revoke` is required in the KEY's own space, not in the space the request carries. A caller who cannot reach that space gets the space's own wall: 404 when it is `private` (its existence must not leak through the id of a key inside it), 403 `not_a_space_member` when it is `open` or `closed`. An API-key caller reaching for a key of another space always answers 404 — a key delegates authority in exactly one space.
          */
         delete: operations["revokeApiKey"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/applications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List applications
-         * @description List all applications for the organization.
-         */
-        get: operations["listApplications"];
-        put?: never;
-        /**
-         * Create an application
-         * @description Create a new application for the organization. Applications scope end-users and their sessions.
-         */
-        post: operations["createApplication"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/applications/{applicationId}/packages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List installed packages
-         * @description List all packages installed in this application, with their config and version.
-         */
-        get: operations["listInstalledPackages"];
-        put?: never;
-        /**
-         * Install a package
-         * @description Install a package from the organization catalog into this application.
-         */
-        post: operations["installPackage"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/applications/{applicationId}/packages/{scope}/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get installed package
-         * @description Get an installed package detail with its config.
-         */
-        get: operations["getInstalledPackage"];
-        /**
-         * Update installed package config
-         * @description Update configuration, model/proxy overrides, or version pinning for an installed package.
-         */
-        put: operations["updateInstalledPackage"];
-        post?: never;
-        /**
-         * Uninstall a package
-         * @description Remove a package from this application.
-         */
-        delete: operations["uninstallPackage"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/applications/{applicationId}/packages/{scope}/{name}/run-config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get the resolved per-app run configuration
-         * @description Returns the configuration applied when this application runs the given package: agent config, model override, proxy override, and pinned version label. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.
-         */
-        get: operations["getApplicationPackageRunConfig"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/applications/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get an application
-         * @description Get a single application by ID.
-         */
-        get: operations["getApplication"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete an application
-         * @description Delete an application and all associated end-users. The default application cannot be deleted.
-         */
-        delete: operations["deleteApplication"];
-        options?: never;
-        head?: never;
-        /**
-         * Update an application
-         * @description Update application name or settings.
-         */
-        patch: operations["updateApplication"];
-        trace?: never;
-    };
-    "/api/applications/{id}/smtp-config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get per-application SMTP configuration
-         * @description Returns the SMTP configuration for an application. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: application` scoped to this app.
-         */
-        get: operations["getApplicationSmtpConfig"];
-        /**
-         * Upsert per-application SMTP configuration
-         * @description Creates or replaces the SMTP configuration for an application. The `pass` field is encrypted at rest and never returned in any response.
-         */
-        put: operations["upsertApplicationSmtpConfig"];
-        post?: never;
-        /** Delete per-application SMTP configuration */
-        delete: operations["deleteApplicationSmtpConfig"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/applications/{id}/smtp-config/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Send a test email using the stored per-app SMTP configuration
-         * @description Rate-limited. Uses the persisted config — upsert first, then test. SMTP server errors are surfaced verbatim so DKIM/SPF/auth issues reach the operator.
-         */
-        post: operations["testApplicationSmtpConfig"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/applications/{id}/social-providers/{provider}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get per-application social auth provider configuration
-         * @description Returns the stored OAuth App credentials for a given provider on this application. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: application` OAuth clients — no fallback to the instance env OAuth App.
-         */
-        get: operations["getApplicationSocialProvider"];
-        /**
-         * Upsert per-application social auth provider configuration
-         * @description Creates or replaces the OAuth App credentials for a given provider on this application. The `clientSecret` field is encrypted at rest and never returned in any response.
-         */
-        put: operations["upsertApplicationSocialProvider"];
-        post?: never;
-        /** Delete per-application social auth provider configuration */
-        delete: operations["deleteApplicationSocialProvider"];
         options?: never;
         head?: never;
         patch?: never;
@@ -808,7 +614,7 @@ export interface paths {
         put?: never;
         /**
          * Claim ownership of an unattended install
-         * @description Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default application, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.
+         * @description Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.
          */
         post: operations["redeemBootstrapToken"];
         delete?: never;
@@ -1131,6 +937,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the current org's billing account
+         * @description Returns the org's current plan, credit usage, subscription status, and available upgrade tiers. Requires `billing:read` (granted to every org member).
+         */
+        get: operations["getEeBillingAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a Stripe Checkout session
+         * @description Returns a one-time Stripe Checkout URL the dashboard redirects to. Admin-only (`billing:manage`). Rate-limited to 5/min per org.
+         */
+        post: operations["createEeBillingCheckoutSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/contact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the billing contact
+         * @description The address invoices, receipts and payment alerts are sent to, plus the CC list. Requires `billing:manage`.
+         */
+        get: operations["getEeBillingContact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the billing contact
+         * @description Sets `billing_email` and/or `billing_cc`; omitted fields are left as they are, and `billing_email: null` clears the contact so it falls back to the organization's owners. The primary address is pushed to the Stripe customer so Stripe addresses its own receipts. Requires `billing:manage`.
+         */
+        patch: operations["updateEeBillingContact"];
+        trace?: never;
+    };
+    "/api/billing/managers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's billing managers
+         * @description Org users granted `billing:read` + `billing:manage` without being owners or admins. Requires `billing:manage`.
+         */
+        get: operations["listEeBillingManagers"];
+        /**
+         * Replace the organization's billing managers
+         * @description Replaces the whole set with `user_ids`. Every id must be a member of the organization, and none may be an owner or admin — those already hold `billing:*` through their org role, so listing them would grant nothing while making the list read as if they were the only ones who could. Requires `billing:manage`.
+         */
+        put: operations["replaceEeBillingManagers"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the plan of the existing subscription
+         * @description Moves the organization's EXISTING Stripe subscription onto another plan, in place, with proration — the door for an org that already subscribes, where `POST /api/billing/checkout` would create a second subscription and bill it twice. Admin-only (`billing:manage`). Rate-limited to 5/min per org. Returns the billing snapshot; the new plan itself is applied when Stripe's `customer.subscription.updated` arrives, so the returned `plan` may still name the previous one.
+         */
+        post: operations["changeEeBillingPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/portal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a Stripe Customer Portal session
+         * @description Returns a one-time Stripe Customer Portal URL the dashboard redirects to (manage payment method, cancel subscription, view invoices). Admin-only (`billing:manage`). Rate-limited to 5/min per org.
+         */
+        post: operations["createEeBillingPortalSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/billing/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stripe webhook receiver
+         * @description Stripe-signed webhook receiver. Public path (no platform auth) — verified by `Stripe-Signature` header against `STRIPE_WEBHOOK_SECRET`. Idempotent via `ee_stripe_events`.
+         */
+        post: operations["receiveEeBillingStripeWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat": {
         parameters: {
             query?: never;
@@ -1142,7 +1096,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
         delete?: never;
@@ -1337,90 +1291,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/documents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List documents
-         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; search names with `q`, and paginate with `startingAfter` + `limit`.
-         */
-        get: operations["listDocuments"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/documents/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get document metadata
-         * @description Fetch a document's metadata, including the derived `downloadable` flag and — for a previewable document — a freshly minted `preview_url`. Requires the `documents:read` permission; on top of it access is inherited from the document's container, so an id the caller cannot read returns 404.
-         */
-        get: operations["getDocument"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete a document
-         * @description Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. A document referenced by a run cannot be deleted until those consumer runs are removed.
-         */
-        delete: operations["deleteDocument"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/documents/{id}/content": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Download document content
-         * @description Download the document bytes with `Content-Disposition: attachment`. Requires the `documents:read` permission. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-document `downloadable` flag — a user upload is served only to its creator (403 otherwise).
-         */
-        get: operations["getDocumentContent"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/documents/{id}/keep": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Keep a document (clear its expiry)
-         * @description Pin a document so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. Idempotent — keeping an already-permanent document is a no-op that returns 200 with the unchanged document. An id the caller cannot read returns 404.
-         */
-        post: operations["keepDocument"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/end-users": {
         parameters: {
             query?: never;
@@ -1430,7 +1300,7 @@ export interface paths {
         };
         /**
          * List end-users
-         * @description List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.
+         * @description List end-users with cursor-based pagination. Filter by spaceId, externalId, or email.
          *
          *     **Pagination**: `startingAfter` and `endingBefore` are mutually exclusive — pass at most one. Encoded via the `x-mutually-exclusive` extension below for client generators that honour it; the server enforces the constraint at runtime regardless.
          */
@@ -1438,7 +1308,7 @@ export interface paths {
         put?: never;
         /**
          * Create an end-user
-         * @description Create a new end-user within an application. At least one of name, email, or externalId should be provided for identification.
+         * @description Create a new end-user within a space. At least one of name, email, or externalId should be provided for identification.
          */
         post: operations["createEndUser"];
         delete?: never;
@@ -1475,6 +1345,90 @@ export interface paths {
         patch: operations["updateEndUser"];
         trace?: never;
     };
+    "/api/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List files
+         * @description List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own files (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; search names with `q`, and paginate with `startingAfter` + `limit`.
+         */
+        get: operations["listFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get file metadata
+         * @description Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. Requires the `files:read` permission; on top of it access is inherited from the file's container, so an id the caller cannot read returns 404.
+         */
+        get: operations["getFile"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a file
+         * @description Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. A file referenced by a run cannot be deleted until those consumer runs are removed.
+         */
+        delete: operations["deleteFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download file content
+         * @description Download the file bytes with `Content-Disposition: attachment`. Requires the `files:read` permission. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).
+         */
+        get: operations["getFileContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/{id}/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep a file (clear its expiry)
+         * @description Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.
+         */
+        post: operations["keepFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations": {
         parameters: {
             query?: never;
@@ -1484,7 +1438,7 @@ export interface paths {
         };
         /**
          * List available integrations
-         * @description List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.
+         * @description List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current space. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.
          */
         get: operations["listIntegrations"];
         put?: never;
@@ -1601,7 +1555,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Activate an integration in the current application */
+        /** Activate an integration in the current space */
         post: operations["activateIntegration"];
         delete?: never;
         options?: never;
@@ -1699,7 +1653,7 @@ export interface paths {
         get?: never;
         /**
          * Set the default OAuth client for an integration auth
-         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Admin only.
+         * @description Choose which client mints NEW connections when none is picked explicitly (the model-provider `setDefaultModel` analogue). Selecting the org's custom client flags it default; selecting a system client un-flags the custom one so the cascade falls to the system client. Existing connections are bound to the client that minted them and are unaffected. Returns the refreshed clients list. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["setDefaultIntegrationClient"];
         post?: never;
@@ -1720,7 +1674,7 @@ export interface paths {
         put?: never;
         /**
          * Register a custom OAuth client for an integration auth
-         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Admin only.
+         * @description Registers a NEW custom (BYO-app) client for this auth. Repeatable — an org may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.
          */
         post: operations["createIntegrationOAuthClient"];
         delete?: never;
@@ -1738,7 +1692,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can use for an integration
-         * @description Returns the caller's own connections **plus** every connection in the application opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.
+         * @description Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.
          */
         get: operations["listIntegrationConnections"];
         put?: never;
@@ -1796,7 +1750,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Deactivate an integration in the current application (non-destructive) */
+        /** Deactivate an integration in the current space (non-destructive) */
         delete: operations["deactivateIntegration"];
         options?: never;
         head?: never;
@@ -1812,12 +1766,12 @@ export interface paths {
         };
         /**
          * Get the org-wide default connection for this integration
-         * @description The cross-agent governance baseline: one default connection per (application, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
+         * @description The cross-agent governance baseline: one default connection per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.
          */
         get: operations["getIntegrationOrgDefault"];
         /**
          * Set the org-wide default connection for this integration (admin)
-         * @description Upsert the single (application, integration) default. Keyed per-integration, NOT per-auth: this overwrites the one existing default wholesale (atomic onConflictDoUpdate on [applicationId, integrationId]). Selecting a connection of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the chosen connection's auth (derived).
+         * @description Upsert the single (space, integration) default. Keyed per-integration, NOT per-auth: this overwrites the one existing default wholesale (atomic onConflictDoUpdate on [spaceId, integrationId]). Selecting a connection of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the chosen connection's auth (derived).
          */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
@@ -1838,13 +1792,13 @@ export interface paths {
         get?: never;
         /**
          * Rotate a custom OAuth client's credentials
-         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Admin only.
+         * @description Rotates one custom client in place, by its id. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
          */
         put: operations["rotateIntegrationOAuthClient"];
         post?: never;
         /**
          * Delete a custom OAuth client
-         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Admin only.
+         * @description Deletes one custom client by id. If it was the default, the cascade falls to the system client (no auto-promotion). Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
@@ -1859,7 +1813,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List admin pins for this integration in this application */
+        /** List admin pins for this integration in this space */
         get: operations["listIntegrationPins"];
         put?: never;
         post?: never;
@@ -1900,7 +1854,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Toggle the per-(app, integration) block_user_connections gate (admin) */
+        /** Toggle the per-(space, integration) block_user_connections gate (admin) */
         patch: operations["updateIntegrationSettings"];
         trace?: never;
     };
@@ -1912,10 +1866,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List all packages visible to the org with per-app install state
-         * @description Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an `installed_in` array of application ids — the applications belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.
-         *
-         *     The response also includes the org's applications (id, name, isDefault) so the UI can render a single grid keyed by app without an additional `/api/applications` call.
+         * List readable packages with accessible-space install state
+         * @description Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -2028,8 +1980,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the caller's connections across every org/app
-         * @description Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For interactive user credentials (cookie session, dashboard/instance JWT) it crosses orgs/applications by design — does NOT require `X-Org-Id`. For an API key the list is scoped to the key's bound organization and application only.
+         * List the caller's connections across every org/space
+         * @description Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For interactive user credentials (cookie session, dashboard/instance JWT) it crosses orgs/spaces by design — does NOT require `X-Org-Id`. For an API key the list is scoped to the key's bound organization and space only.
          */
         get: operations["listMyConnections"];
         put?: never;
@@ -2052,7 +2004,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With an API key, only connections inside the key's bound organization and application can be deleted (204 with no effect otherwise).
+         * @description Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With an API key, only connections inside the key's bound organization and space can be deleted (204 with no effect otherwise).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
@@ -2069,7 +2021,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current application (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). App context resolves from `X-Application-Id`, the API key's application, or the org default.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). Space context resolves from `X-Space-Id`, the API key's space, or the org default.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -2089,7 +2041,7 @@ export interface paths {
         };
         /**
          * List the caller's member-scope integration pins for an agent
-         * @description Returns the caller's own (integration, authKey) → connectionId pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Application-Id`.
+         * @description Returns the caller's own (integration, authKey) → connectionId pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Space-Id`.
          */
         get: operations["listMyIntegrationPins"];
         /**
@@ -2117,7 +2069,7 @@ export interface paths {
         };
         /**
          * List orgs the authenticated caller belongs to
-         * @description Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see every org the user is a member of. API keys see only their bound org. OIDC end-user JWTs see the single org owning their application. **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.
+         * @description Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see every org the user is a member of. API keys see only their bound org. OIDC end-user JWTs see the single org owning their space. **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.
          */
         get: operations["listMyOrgs"];
         put?: never;
@@ -2146,6 +2098,26 @@ export interface paths {
          * @description Create a new LLM model provider credential for the organization. The plaintext API key is encrypted at rest under a versioned envelope.
          */
         post: operations["createModelProviderCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model-provider-credentials/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enumerate the models an endpoint serves
+         * @description Asks an endpoint once for its model listing (`GET <base_url>/models`) and returns the ids it serves, each described with a context window, max output tokens, input modalities and reasoning support. Those come from the listing body itself when the server publishes them per entry (vLLM `max_model_len`, Mistral `capabilities`, OpenRouter `context_length` / `architecture` / `supported_parameters`, LM Studio `max_context_length`) — read from the response already in hand, nothing else is requested — and from the vendored pricing catalog otherwise; `source` says which described a given model. `label` always comes from the catalog. Unlike `POST /{id}/refresh-models` this works BEFORE a credential exists — the operator supplies `provider_id` + `api_key` inline — and it **persists nothing**: no credential is created, no `available_model_ids` is written. Per-token cost is deliberately never returned: an endpoint serving a vendor's model id is not billed at the vendor's rate. Only providers with `authMode: api_key` are accepted — a subscription (OAuth) token is never read or spent to enumerate models. Rate limited to 6 requests per minute.
+         */
+        post: operations["discoverModelProviderCredentialModels"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2227,7 +2199,7 @@ export interface paths {
         put?: never;
         /**
          * Discover the models this credential serves
-         * @description Discovers the models a credential serves. For `probe`-validation (API-key) providers this is empirical: each discovery candidate is probed against the live credential (1-token inference requests on the account's own quota) and the ids that answered are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read — `probed_count` is 0 and the response carries the freshly derived list. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the probe path an auth failure or an all-failure round leaves the previously persisted list untouched.
+         * @description Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked once for its model listing (`GET <base_url>/models`) and the discovery candidates present in that listing are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing or an empty intersection leaves the previously persisted list untouched.
          */
         post: operations["refreshModelProviderCredentialModels"];
         delete?: never;
@@ -2287,7 +2259,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a one-shot pairing token for the connect helper
-         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).
+         * @description Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).
          */
         post: operations["createOAuthModelProviderPairing"];
         delete?: never;
@@ -2459,7 +2431,7 @@ export interface paths {
         put?: never;
         /**
          * Test model connection
-         * @description Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.
+         * @description Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.
          */
         post: operations["testModel"];
         delete?: never;
@@ -2597,13 +2569,13 @@ export interface paths {
         };
         /**
          * List OAuth clients
-         * @description List every OAuth client visible to the current organization — both org-level clients pinned to the org and application-level clients pinned to any application the org owns.
+         * @description List every OAuth client visible to the current organization — both org-level clients pinned to the org and space-level clients pinned to any space the org owns.
          */
         get: operations["listOAuthClients"];
         put?: never;
         /**
          * Register an OAuth client
-         * @description Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `application` (app-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once.
+         * @description Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `space` (space-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once.
          */
         post: operations["createOAuthClient"];
         delete?: never;
@@ -2697,7 +2669,7 @@ export interface paths {
         };
         /**
          * OpenAPI specification
-         * @description Returns the OpenAPI 3.1 specification as JSON. The response carries a strong `ETag` that is stable for the lifetime of the deployment — send it back as `If-None-Match` to revalidate a cached copy and get a `304 Not Modified` instead of the full document.
+         * @description Returns the OpenAPI 3.1 specification as JSON. The response carries a strong `ETag` that is stable for the lifetime of the deployment — send it back as `If-None-Match` to revalidate a cached copy and get a `304 Not Modified` instead of the full file.
          */
         get: operations["getOpenApiSpec"];
         put?: never;
@@ -2771,7 +2743,7 @@ export interface paths {
          * List CLI sessions for org members (admin)
          * @description Admin oversight of every active CLI session belonging to a member of `orgId`. Returns the same per-device shape as the personal `/api/auth/cli/sessions` endpoint, plus the owning member's id/email/name. Visibility scoped to the org's CURRENT roster — a member who left no longer surfaces here. Owner/admin only.
          *
-         *     CLI sessions are user-scoped, NOT application-scoped: a session is created by `appstrate login` against a user account, and is reusable across every application the user can reach. This endpoint therefore returns every active session held by a member of the org, regardless of which application(s) that member operates in — an admin auditing one application surface still sees CLI sessions that the same human is using to drive a different application in the same org.
+         *     CLI sessions are user-scoped, NOT space-scoped: a session is created by `appstrate login` against a user account, and is reusable across every space the user can reach. This endpoint therefore returns every active session held by a member of the org, regardless of which space(s) that member operates in — an admin auditing one space surface still sees CLI sessions that the same human is using to drive a different space in the same org.
          */
         get: operations["listOrgCliSessions"];
         put?: never;
@@ -2812,7 +2784,7 @@ export interface paths {
         get?: never;
         /**
          * Change invitation role
-         * @description Change the role assigned to a pending invitation. Admin or owner required.
+         * @description Change the role and/or the space assignments of a pending invitation. Admin or owner required. Omitting `space_assignments` keeps the ones already stored, and the role rules are re-checked against them.
          */
         put: operations["changeInvitationRole"];
         post?: never;
@@ -2856,7 +2828,7 @@ export interface paths {
         get?: never;
         /**
          * Change member role
-         * @description Change a member's role. Owners can manage any non-owner; admins can manage viewers and members.
+         * @description Change a member's role. Owners can manage any non-owner; admins can manage guests and members.
          */
         put: operations["changeMemberRole"];
         post?: never;
@@ -2903,7 +2875,7 @@ export interface paths {
         };
         /**
          * List agent packages
-         * @description List the agent packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
+         * @description List the agent packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.
          */
         get: operations["listAgentPackages"];
         put?: never;
@@ -2918,34 +2890,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/packages/agents/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get agent detail by ID
-         * @description Returns agent detail including integrations, config, state, and skills by unscoped package ID.
-         */
-        get: operations["getAgentPackageById"];
-        /**
-         * Update a user agent by ID
-         * @description Update manifest and content of a user agent with optimistic locking by unscoped package ID.
-         */
-        put: operations["updateAgentById"];
-        post?: never;
-        /**
-         * Delete a user agent by ID
-         * @description Delete a user agent by unscoped package ID. Built-in agents cannot be deleted.
-         */
-        delete: operations["deleteAgentById"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/packages/agents/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -2955,7 +2899,7 @@ export interface paths {
         };
         /**
          * Get agent detail
-         * @description Returns agent detail including integrations, config, state, and skills.
+         * @description Returns agent detail including `input`, `output`, and the `dependencies` group (skills, mcp_servers, integrations). Two tiers of read: `agents:read` returns the whole resource, while `agents:run` alone returns a summary — `input` (schema, stored values, locked fields), `output`, `effective_timeout_seconds`, `running_runs`, `last_run` and `dependencies.integrations` — omitting `manifest`, `prompt`, `updatedAt`, `lock_version`, `version_count`, `has_unarchived_changes`, `forked_from` and the skills and MCP servers the agent is built from (`dependencies.skills`, `dependencies.mcp_servers`).
          */
         get: operations["getAgentPackage"];
         /**
@@ -3093,7 +3037,7 @@ export interface paths {
         put?: never;
         /**
          * Import a multi-package .afps-bundle
-         * @description Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current application. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).
+         * @description Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current space. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).
          */
         post: operations["importBundle"];
         delete?: never;
@@ -3131,7 +3075,7 @@ export interface paths {
         };
         /**
          * List integration packages
-         * @description List the integration packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
+         * @description List the integration packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.
          */
         get: operations["listIntegrationPackages"];
         put?: never;
@@ -3141,34 +3085,6 @@ export interface paths {
          */
         post: operations["createIntegrationPackage"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/integrations/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get integration package detail by ID
-         * @description Get an integration package's full details by unscoped package ID.
-         */
-        get: operations["getIntegrationPackageById"];
-        /**
-         * Update an integration package by ID
-         * @description Update an integration package by unscoped package ID. Built-in integration packages cannot be modified.
-         */
-        put: operations["updateIntegrationPackageById"];
-        post?: never;
-        /**
-         * Delete an integration package by ID
-         * @description Delete an integration package by unscoped package ID. Built-in integration packages cannot be deleted.
-         */
-        delete: operations["deleteIntegrationPackageById"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3299,7 +3215,7 @@ export interface paths {
         };
         /**
          * List MCP-server packages
-         * @description List the MCP-server packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
+         * @description List the MCP-server packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.
          */
         get: operations["listMcpServerPackages"];
         put?: never;
@@ -3309,34 +3225,6 @@ export interface paths {
          */
         post: operations["createMcpServerPackage"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/mcp-servers/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get MCP-server package detail by ID
-         * @description Get an MCP-server package's full details by unscoped package ID.
-         */
-        get: operations["getMcpServerPackageById"];
-        /**
-         * Update an MCP-server package by ID
-         * @description Update an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be modified.
-         */
-        put: operations["updateMcpServerPackageById"];
-        post?: never;
-        /**
-         * Delete an MCP-server package by ID
-         * @description Delete an MCP-server package by unscoped package ID. Built-in MCP-server packages cannot be deleted.
-         */
-        delete: operations["deleteMcpServerPackageById"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3467,7 +3355,7 @@ export interface paths {
         };
         /**
          * List skills
-         * @description List the skills available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.
+         * @description List the skills available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.
          */
         get: operations["listSkills"];
         put?: never;
@@ -3477,34 +3365,6 @@ export interface paths {
          */
         post: operations["createSkill"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/packages/skills/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get skill detail by ID
-         * @description Get a skill's full details by unscoped package ID.
-         */
-        get: operations["getSkillById"];
-        /**
-         * Update a skill by ID
-         * @description Update a skill by unscoped package ID. Built-in skills cannot be modified.
-         */
-        put: operations["updateSkillById"];
-        post?: never;
-        /**
-         * Delete a skill by ID
-         * @description Delete a skill by unscoped package ID. Built-in skills cannot be deleted.
-         */
-        delete: operations["deleteSkillById"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3677,7 +3537,7 @@ export interface paths {
         put?: never;
         /**
          * Fork a package to your organization
-         * @description Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.
+         * @description Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. Reading a source in another organization requires a session caller with live membership and package read access in that source organization; space-pinned credentials cannot cross organizations. Published versions alone do not grant visibility. The caller also needs the source package type's write permission in the destination space. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.
          */
         post: operations["forkPackage"];
         delete?: never;
@@ -3874,6 +3734,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamAgentRuns"];
         put?: never;
@@ -3902,6 +3764,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamAllRuns"];
         put?: never;
@@ -3928,6 +3792,8 @@ export interface paths {
          *     Each SSE frame carries an `id:` field of the form `${subscriberId}:${monotonic}`. Ids are globally unique across reconnects (each new EventSource gets a fresh subscriberId). Client-side dedup on `id` is safe. Server-side replay via `Last-Event-ID` is NOT implemented — reconnect lands on the live tail; missed events are not replayed.
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
+         *
+         *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
         get: operations["streamRun"];
         put?: never;
@@ -3938,6 +3804,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List space roles
+         * @description Every role assignable in a space of this organization: the four platform presets (`kind: "preset"`, read-only, `id: null`) followed by the organization's own bundles (`kind: "custom"`).
+         */
+        get: operations["listRoles"];
+        put?: never;
+        /**
+         * Create a custom space role
+         * @description Define an organization-scoped bundle of space-level permissions. Requires the `custom_roles` feature. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop.
+         */
+        post: operations["createRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/roles/vocabulary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the permissions a custom role may hold
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`.
+         */
+        get: operations["listRoleVocabulary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/roles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a custom space role
+         * @description Requires the `custom_roles` feature. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
+         */
+        delete: operations["deleteRole"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a custom space role
+         * @description Rename, re-describe or re-scope a bundle. Requires the `custom_roles` feature. The `srl_` id never changes, so assignments follow the edit.
+         */
+        patch: operations["updateRole"];
+        trace?: never;
+    };
     "/api/runs": {
         parameters: {
             query?: never;
@@ -3946,8 +3880,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List runs across the application (global view)
-         * @description Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Every filter combines: `user=me` narrows to the caller's own runs (plus the unattributed schedule and system ones, for a member) and still honours `kind`, `status`, `q`, the date range and `chat_session_id`.
+         * List runs across the space (global view)
+         * @description Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.
          */
         get: operations["listRuns"];
         put?: never;
@@ -3969,7 +3903,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an inline agent (no persisted package)
-         * @description Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`.
+         * @description Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
         post: operations["runInline"];
         delete?: never;
@@ -3989,9 +3923,9 @@ export interface paths {
         put?: never;
         /**
          * Validate an inline manifest without firing a run
-         * @description Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, config + input against manifest schemas, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.
+         * @description Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.
          *
-         *     **Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.
+         *     **Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
         post: operations["validateInlineRun"];
         delete?: never;
@@ -4011,7 +3945,7 @@ export interface paths {
         put?: never;
         /**
          * Create a remote-backed run (caller executes the agent)
-         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. See `docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md`.
+         * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
         post: operations["createRemoteRun"];
         delete?: never;
@@ -4084,50 +4018,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/{runId}/documents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the run's input documents (HMAC)
-         * @description Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{workspace_name}` and writes it to `workspace/documents/<workspace_name>`. Each entry carries `name` (the document's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two documents never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault. A 400 `duplicate_document_name` means the stored manifest is malformed (two identical workspace names).
-         */
-        get: operations["fetchRunDocumentsManifest"];
-        put?: never;
-        /**
-         * Publish an agent-produced document (HMAC, streaming)
-         * @description Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name`, optional `X-Document-Presentation`, and `Content-Type` headers. `X-Document-Presentation: primary` atomically makes this the run's featured deliverable; the last successful primary publication wins, while an ordinary publication never changes the selection. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice, and can still promote that existing document. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
-         */
-        post: operations["publishRunDocument"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/{runId}/documents/{name}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Fetch a single run input document (HMAC)
-         * @description Fetched by the agent runtime for each entry in the documents manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole document; the agent streams the response body to `documents/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a document the manifest listed is a fatal provisioning fault.
-         */
-        get: operations["fetchRunDocument"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/runs/{runId}/events": {
         parameters: {
             query?: never;
@@ -4188,6 +4078,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{runId}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the run's input files (HMAC)
+         * @description Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{runId}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).
+         */
+        get: operations["fetchRunFilesManifest"];
+        put?: never;
+        /**
+         * Publish an agent-produced file (HMAC, streaming)
+         * @description Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         */
+        post: operations["publishRunFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{runId}/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch a single run input file (HMAC)
+         * @description Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.
+         */
+        get: operations["fetchRunFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{runId}/sink/extend": {
         parameters: {
             query?: never;
@@ -4217,7 +4151,7 @@ export interface paths {
         };
         /**
          * Fetch the run bundle archive (HMAC)
-         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input documents are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/documents`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
+         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
          */
         get: operations["fetchRunWorkspace"];
         put?: never;
@@ -4296,6 +4230,268 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/spaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List spaces
+         * @description List all spaces for the organization.
+         */
+        get: operations["listSpaces"];
+        put?: never;
+        /**
+         * Create a space
+         * @description Create a new space for the organization. Spaces scope end-users and their sessions.
+         */
+        post: operations["createSpace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a space
+         * @description Get a single space by ID.
+         */
+        get: operations["getSpace"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a space
+         * @description Delete a space and all associated end-users. The default space cannot be deleted.
+         */
+        delete: operations["deleteSpace"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a space
+         * @description Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.
+         */
+        patch: operations["updateSpace"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List space members
+         * @description Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: "org_role"`) and — in an `open` space — every org member (`source: "open_space"`).
+         */
+        get: operations["listSpaceMembers"];
+        put?: never;
+        /**
+         * Add a space member
+         * @description Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space.
+         */
+        post: operations["addSpaceMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/members/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a space member
+         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if removing the row would grant implicit permissions the caller does not hold.
+         */
+        delete: operations["removeSpaceMember"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a space member's role
+         * @description Change the role of an EXISTING explicit membership row (404 when there is none). The new role may only grant permissions held by the caller, including when changing their own role.
+         */
+        patch: operations["updateSpaceMember"];
+        trace?: never;
+    };
+    "/api/spaces/{id}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List assignable space roles
+         * @description Returns presets and organization roles whose permissions are held by the caller in this space. Requires space-members:invite, space-members:change-role, or space-settings:write.
+         */
+        get: operations["listAssignableSpaceRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/smtp-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get per-space SMTP configuration
+         * @description Returns the SMTP configuration for a space. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: space` scoped to this space.
+         */
+        get: operations["getSpaceSmtpConfig"];
+        /**
+         * Upsert per-space SMTP configuration
+         * @description Creates or replaces the SMTP configuration for a space. The `pass` field is encrypted at rest and never returned in any response.
+         */
+        put: operations["upsertSpaceSmtpConfig"];
+        post?: never;
+        /** Delete per-space SMTP configuration */
+        delete: operations["deleteSpaceSmtpConfig"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/smtp-config/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test email using the stored per-space SMTP configuration
+         * @description Rate-limited. Uses the persisted config — upsert first, then test. SMTP server errors are surfaced verbatim so DKIM/SPF/auth issues reach the operator.
+         */
+        post: operations["testSpaceSmtpConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{id}/social-providers/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get per-space social auth provider configuration
+         * @description Returns the stored OAuth App credentials for a given provider on this space. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: space` OAuth clients — no fallback to the instance env OAuth App.
+         */
+        get: operations["getSpaceSocialProvider"];
+        /**
+         * Upsert per-space social auth provider configuration
+         * @description Creates or replaces the OAuth App credentials for a given provider on this space. The `clientSecret` field is encrypted at rest and never returned in any response.
+         */
+        put: operations["upsertSpaceSocialProvider"];
+        post?: never;
+        /** Delete per-space social auth provider configuration */
+        delete: operations["deleteSpaceSocialProvider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{spaceId}/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List installed packages
+         * @description List packages installed in this space, with their model/proxy/version overrides. Returns only package types the caller has permission to read, within the credential scope ceiling.
+         */
+        get: operations["listInstalledPackages"];
+        put?: never;
+        /**
+         * Install a package
+         * @description Install a package from the organization catalog into this space.
+         */
+        post: operations["installPackage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{spaceId}/packages/{scope}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get installed package
+         * @description Get an installed package detail with its model/proxy/version overrides.
+         */
+        get: operations["getInstalledPackage"];
+        /**
+         * Update installed package overrides
+         * @description Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.
+         */
+        put: operations["updateInstalledPackage"];
+        post?: never;
+        /**
+         * Uninstall a package
+         * @description Remove a package from this space.
+         */
+        delete: operations["uninstallPackage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the resolved per-space run configuration
+         * @description Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.
+         */
+        get: operations["getSpacePackageRunConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/uploads": {
         parameters: {
             query?: never;
@@ -4345,13 +4541,13 @@ export interface paths {
         };
         /**
          * List webhooks
-         * @description List webhooks visible to the current organization. When `applicationId` is passed, returns org-level + application-level webhooks pinned to that app. When `all=true`, returns every webhook in the org regardless of level.
+         * @description List webhooks the caller may read. Every page is filtered by level: `webhooks:read` reveals space-level rows, `org-webhooks:read` org-level ones, so holding one half yields a shorter page rather than a 403. The default filter returns the org-level rows; `spaceId` adds the rows pinned to that space (and takes its permission from that space); `all=true` spans every space in the org and therefore requires `org-webhooks:read`.
          */
         get: operations["listWebhooks"];
         put?: never;
         /**
          * Create a webhook
-         * @description Create a webhook endpoint. The secret is returned once in the response. Max 20 webhooks per org.
+         * @description Create a webhook endpoint. Requires `webhooks:write` in the space named by `X-Space-Id` or `org-webhooks:write`, checked before the body is read; the body's `level` then decides which of the two applies. The secret is returned once in the response. Max 20 webhooks per org.
          */
         post: operations["createWebhook"];
         delete?: never;
@@ -4497,7 +4693,7 @@ export interface paths {
         };
         /**
          * Fetch live credentials + HTTP delivery plans for an installed integration
-         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed.
+         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: "link"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.
          */
         get: operations["getIntegrationCredentials"];
         put?: never;
@@ -4519,7 +4715,7 @@ export interface paths {
         put?: never;
         /**
          * Force-refresh OAuth2 credentials for an installed integration
-         * @description Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged.
+         * @description Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
          */
         post: operations["refreshIntegrationCredentials"];
         delete?: never;
@@ -4537,7 +4733,7 @@ export interface paths {
         };
         /**
          * Fetch the AFPS bundle bytes for a referenced mcp-server package
-         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read; absent, the latest non-yanked version is served (back-compat).
+         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).
          */
         get: operations["getMcpServerBundle"];
         put?: never;
@@ -4710,21 +4906,10 @@ export interface components {
             updatedAt?: string;
             /** @description Optimistic lock version (user agents only) */
             lock_version?: number;
-            /** @description AFPS schema wrapper for agent configuration (set once, reused across runs). */
-            config: {
+            /** @description AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`. */
+            input: components["schemas"]["AgentInputSettings"] & {
                 /** @description Pure JSON Schema 2020-12 object */
                 schema: Record<string, never>;
-                /** @description Current configuration values */
-                current: Record<string, never>;
-                file_constraints?: components["schemas"]["FileConstraintsMap"];
-                ui_hints?: components["schemas"]["UIHintsMap"];
-                /** @description Presentation order for schema properties */
-                property_order?: string[];
-            };
-            /** @description AFPS schema wrapper for per-run input. */
-            input?: {
-                /** @description Pure JSON Schema 2020-12 object */
-                schema?: Record<string, never>;
                 file_constraints?: components["schemas"]["FileConstraintsMap"];
                 ui_hints?: components["schemas"]["UIHintsMap"];
                 /** @description Presentation order for schema properties */
@@ -4738,9 +4923,10 @@ export interface components {
                 property_order?: string[];
             };
             dependencies: {
-                skills: components["schemas"]["AgentSkillRef"][];
-                /** @description AFPS §4.1 mcp_servers dependency group */
-                mcp_servers: {
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
+                skills?: components["schemas"]["AgentSkillRef"][];
+                /** @description AFPS §4.1 mcp_servers dependency group. Withheld from a summary read (`agents:run` without `agents:read`). */
+                mcp_servers?: {
                     id: string;
                     version: string;
                 }[];
@@ -4765,7 +4951,7 @@ export interface components {
             /** @description Number of published versions (0 for built-in agents) */
             version_count?: number;
             /** @description Source package ID if forked */
-            forked_from: string | null;
+            forked_from?: string | null;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
@@ -4802,6 +4988,15 @@ export interface components {
                 recoverable_on_launch: boolean;
             }[];
         };
+        /** @description The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged. */
+        AgentInputSettings: {
+            /** @description Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch. */
+            values: {
+                [key: string]: unknown;
+            };
+            /** @description Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`. */
+            locked_fields: string[];
+        };
         AgentListItem: {
             id: string;
             /** @description AFPS manifest icon used for the Agent identity tile. */
@@ -4826,13 +5021,15 @@ export interface components {
             type: "agent" | "skill" | "mcp-server" | "integration";
             running_runs: number;
             dependencies: {
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: {
                     [key: string]: string;
                 };
+                /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 mcp_servers?: {
                     [key: string]: string;
                 };
-                integrations?: {
+                integrations: {
                     [key: string]: string;
                 };
             };
@@ -4974,41 +5171,12 @@ export interface components {
                     };
                 };
             };
-            config?: {
-                schema: {
-                    [key: string]: unknown;
-                } & {
-                    /** @constant */
-                    type: "object";
-                };
-                file_constraints?: {
-                    [key: string]: {
-                        accept?: string;
-                        max_size?: number;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                ui_hints?: {
-                    [key: string]: {
-                        placeholder?: string;
-                    } & {
-                        [key: string]: unknown;
-                    };
-                };
-                property_order?: string[];
-                _meta?: {
-                    [key: string]: {
-                        [key: string]: unknown;
-                    };
-                };
-            };
             timeout?: number;
         } & {
             [key: string]: unknown;
         }) & {
-            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
+            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. An id outside this enum is rejected on author input and dropped (with the drop reported) when read back from a stored manifest. */
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_file")[];
         };
         /** @description Read-only visual map of an agent: its manifest projected as positioned nodes and edges, crossed with the installation state (resolved versions, connection status, admin pins, active schedules) and annotated with readiness diagnostics. The node set is FIXED — every card is emitted even when empty, because the card inventory is what an agent manifest can hold and an empty one is where the renderer offers to add the missing piece. */
         AgentMap: {
@@ -5099,64 +5267,9 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
-        ApplicationObject: {
-            /** @description Application ID (app_ prefix) */
-            id: string;
-            /**
-             * @description Object type
-             * @enum {string}
-             */
-            object: "application";
-            /** @description Organization ID */
-            orgId: string;
-            /** @description Human-readable application name */
-            name: string;
-            /** @description Whether this is the default application */
-            isDefault: boolean;
-            settings: {
-                /** @description Domains allowed for OAuth redirect callbacks */
-                allowedRedirectDomains?: string[];
-            };
-            /** @description ID of the user who created the application */
-            created_by: string | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        /** @description A package installed in an application with its config and overrides. */
-        ApplicationPackage: {
-            /** @enum {string} */
-            object?: "application_package";
-            /** @description Package ID from org catalog */
-            packageId: string;
-            /** @description Application-specific configuration */
-            config: Record<string, never>;
-            generationConfig: components["schemas"]["ModelGenerationSettings"] | null;
-            /** @description Model override for this app */
-            modelId: string | null;
-            /** @description Proxy override for this app */
-            proxyId: string | null;
-            /** @description Pinned version (null = latest) */
-            version_id: number | null;
-            enabled: boolean;
-            /** Format: date-time */
-            installed_at: string;
-            /** Format: date-time */
-            updatedAt: string;
-            /** @enum {string} */
-            package_type: "agent" | "skill" | "mcp-server" | "integration";
-            /** @enum {string} */
-            package_source: "system" | "local";
-            /** @description Raw draft manifest JSONB for the installed package. */
-            draft_manifest: Record<string, never> | null;
-        };
         ChatMessage: {
             /** @description Server-generated message id */
             id: string;
-            parent_id: string | null;
-            /** @description Storage format adapter id (e.g. ai-sdk/v6) */
-            format: string;
             /** @description Opaque encoded message */
             content: unknown;
         };
@@ -5175,6 +5288,71 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        EeBillingAccount: {
+            plan: {
+                id: string;
+                name: string;
+            };
+            plans: components["schemas"]["EeBillingPlan"][];
+            usage_percent: number;
+            credits_used: number;
+            credit_quota: number;
+            /** Format: date-time */
+            period_end: string | null;
+            /**
+             * @description Effective billing status. `none` when no Stripe subscription is attached, `canceling` while a subscription Stripe still collects on is set to end at the period boundary, otherwise mirrors Stripe's `subscription.status`.
+             * @enum {string}
+             */
+            status: "none" | "active" | "trialing" | "past_due" | "unpaid" | "paused" | "incomplete" | "canceled" | "canceling";
+            /**
+             * @description Which endpoint a plan selection goes to: `plan-change` for `POST /api/billing/plan`, `portal` for `POST /api/billing/portal` when Stripe holds the subscription but has stopped collecting on it, `checkout` for `POST /api/billing/checkout`. Checkout only creates, so an org Stripe holds a subscription for never re-enters it — a second one would bill the customer twice.
+             * @enum {string}
+             */
+            plan_action: "plan-change" | "portal" | "checkout";
+            /** @description Plans the org can upgrade into — empty when on the highest plan. */
+            upgrades: components["schemas"]["EeBillingUpgradePlan"][];
+        };
+        EeBillingContact: {
+            /**
+             * Format: email
+             * @description Primary billing address. `null` falls back to the organization's owners, resolved at send time.
+             */
+            billing_email: string | null;
+            /** @description Addresses copied on every billing email. */
+            billing_cc: string[];
+        };
+        EeBillingManager: {
+            /** @description Platform user id granted `billing:read` + `billing:manage`. */
+            user_id: string;
+            /** @description User id that granted it. */
+            added_by: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        EeBillingManagerList: {
+            managers: components["schemas"]["EeBillingManager"][];
+        };
+        EeBillingPlan: {
+            /** @enum {string} */
+            id: "free" | "starter" | "pro";
+            /** @description Display name (e.g. "Free", "Starter") */
+            name: string;
+            /** @description Monthly price in dollars */
+            price: number;
+            /** @description Credits granted per billing cycle */
+            credit_quota: number;
+            /** @description Durable-file storage the plan grants, in bytes — the value projected onto the org's platform storage limit. */
+            file_storage_bytes: number;
+        };
+        /** @description A catalog plan the org can upgrade into — an `EeBillingPlan` whose `id` is narrowed to a checkout target. */
+        EeBillingUpgradePlan: components["schemas"]["EeBillingPlan"] & {
+            id: components["schemas"]["EeCheckoutPlanId"];
+        };
+        /**
+         * @description A plan `POST /api/billing/checkout` accepts. Strictly narrower than a catalog `EeBillingPlan.id`: `free` has no Stripe price, so it is not a checkout target.
+         * @enum {string}
+         */
+        EeCheckoutPlanId: "starter" | "pro";
         EndUserObject: {
             /** @description End-user ID (eu_ prefix) */
             id: string;
@@ -5183,8 +5361,8 @@ export interface components {
              * @enum {string}
              */
             object: "end_user";
-            /** @description ID of the parent application */
-            applicationId: string;
+            /** @description ID of the parent space */
+            spaceId: string;
             /** @description Display name */
             name: string | null;
             /**
@@ -5278,7 +5456,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description Packages of a single type visible to the org. Each entry carries an `installed_in` array listing the caller-org applications where the package is currently installed (empty array = not installed in any of the caller's apps). */
+        /** @description Packages of a single type visible to the org. Each entry carries an `installed_in` array listing the caller-org spaces where the package is currently installed (empty array = not installed in any of the caller's spaces). */
         LibraryPackageList: {
             /** @description Package id (`pkg_…`). */
             id: string;
@@ -5290,7 +5468,7 @@ export interface components {
             name: string;
             /** @description Description from the package draft manifest; empty string when not provided. */
             description: string;
-            /** @description Application ids (`app_…`) belonging to the caller's org where this package is installed. */
+            /** @description Space ids (`spc_…`) belonging to the caller's org where this package is installed. */
             installed_in: string[];
         }[];
         /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
@@ -5336,11 +5514,11 @@ export interface components {
             source: "built-in" | "custom";
             /** @enum {string} */
             authMode: "api_key" | "oauth2";
-            /** @description Canonical providerId backing the credential. Set when `authMode === 'oauth2'`. */
+            /** @description Canonical providerId backing the credential. Always set for a `custom` credential (the model form matches a custom endpoint's saved keys on it); `null` for a `built-in` one, whose backing is hidden. */
             providerId?: string | null;
             oauth_email?: string | null;
             needs_reconnection?: boolean;
-            /** @description Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For `probe`-validation (API-key) providers these are empirically verified against the live credential and persisted by model discovery (POST /:id/refresh-models); empty when discovery never ran, and per-credential because availability depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write. */
+            /** @description Model ids this credential is authorized to seed — the server-side authorization record gating model seeding. For API-key providers these are the discovery candidates present in the provider's `GET <base_url>/models` listing, persisted by model discovery (POST /:id/refresh-models); nothing is inference-probed. Empty when discovery never ran, and per-credential because the listing depends on the account's plan. For `offline`-validation providers (subscription: codex, claude-code) nothing is ever persisted: the list is derived on every read from the provider definition and the pricing catalog, so a catalog refresh carries a new model generation through without any write. */
             available_model_ids?: string[] | null;
             created_by: string | null;
             /** Format: date-time */
@@ -5353,9 +5531,9 @@ export interface components {
             clientId: string;
             name: string | null;
             /** @enum {string} */
-            level: "instance" | "org" | "application";
+            level: "instance" | "org" | "space";
             referencedOrgId: string | null;
-            referencedApplicationId: string | null;
+            referencedSpaceId: string | null;
             redirectUris: string[];
             postLogoutRedirectUris: string[];
             scopes: string[];
@@ -5363,7 +5541,8 @@ export interface components {
             isFirstParty: boolean;
             allowSignup: boolean;
             /** @enum {string} */
-            signupRole: "admin" | "member" | "viewer";
+            signupRole: "guest" | "member" | "admin";
+            signupSpaceAssignments: components["schemas"]["SpaceAssignment"][];
             createdAt: string | null;
             updatedAt: string | null;
         };
@@ -5372,9 +5551,9 @@ export interface components {
             clientId: string;
             name: string | null;
             /** @enum {string} */
-            level: "instance" | "org" | "application";
+            level: "instance" | "org" | "space";
             referencedOrgId: string | null;
-            referencedApplicationId: string | null;
+            referencedSpaceId: string | null;
             redirectUris: string[];
             postLogoutRedirectUris: string[];
             scopes: string[];
@@ -5382,7 +5561,8 @@ export interface components {
             isFirstParty: boolean;
             allowSignup: boolean;
             /** @enum {string} */
-            signupRole: "admin" | "member" | "viewer";
+            signupRole: "guest" | "member" | "admin";
+            signupSpaceAssignments: components["schemas"]["SpaceAssignment"][];
             createdAt: string | null;
             updatedAt: string | null;
             clientSecret: string;
@@ -5403,23 +5583,32 @@ export interface components {
             logo?: string | null;
             /** Format: date-time */
             createdAt?: string;
-            /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
+            /**
+             * Format: date-time
+             * @description When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.
+             */
+            deleting_at?: string | null;
+            /** @description Durable-file storage consumption for this organization. `used_bytes` is the running total of stored file bytes; `limit_bytes` is the raw per-org limit override (`files_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
             storage?: {
-                /** @description Bytes of durable documents stored. */
+                /** @description Bytes of durable files stored. */
                 used_bytes: number;
                 /** @description Per-org limit override in bytes, or null when no override is set (falls back to the global quota). */
                 limit_bytes: number | null;
                 /** @description Effective limit in bytes the write path enforces (override ?? global quota), or null when unlimited. */
                 effective_limit_bytes: number | null;
             };
+            /** @description Empty unless the caller holds members:read. */
             members?: components["schemas"]["OrgMember"][];
+            /** @description Empty unless the caller holds members:invite, including any credential scope ceiling. */
             invitations?: components["schemas"]["OrgInvitationInfo"][];
         };
         OrgInvitationInfo: {
             id: string;
             email: string;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
+            /** @description Space memberships applied when the invitation is accepted. */
+            space_assignments: components["schemas"]["SpaceAssignment"][];
             token: string;
             /** Format: date-time */
             expiresAt: string;
@@ -5431,7 +5620,7 @@ export interface components {
             displayName?: string;
             email?: string;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
             /** Format: date-time */
             joinedAt: string;
         };
@@ -5556,7 +5745,7 @@ export interface components {
         OrgSettings: {
             /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
             api_version?: string;
-            /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need application-level SSO for their end-users. */
+            /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
             dashboard_sso_enabled?: boolean;
         };
         Organization: {
@@ -5566,12 +5755,19 @@ export interface components {
             /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial. */
             logo: string | null;
             /** @enum {string} */
-            role: "owner" | "admin" | "member" | "viewer";
+            role: "owner" | "admin" | "member" | "guest";
+            /** @description The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces. */
+            permissions: string[];
             /**
              * Format: date-time
              * @description Creation timestamp
              */
             createdAt: string;
+            /**
+             * Format: date-time
+             * @description When this organization's deletion was reserved, or null. Non-null on an organization that still exists means a DELETE was interrupted after the reservation; repeating the DELETE is the recovery.
+             */
+            deleting_at: string | null;
         };
         PackageFileEntry: {
             /** @description Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`) */
@@ -5654,12 +5850,53 @@ export interface components {
             connection_id?: string;
             /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
             missing_scopes?: string[];
-            /** @description Populated on `insufficient_scopes`. True when the under-scoped connection belongs to the calling actor (UI offers an upgrade) vs. a foreign shared row (read-only error). */
+            /** @description Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error). */
             owned_by_actor?: boolean;
+            /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them. */
+            required_scopes?: string[];
+            /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`). */
+            auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. The agent dep's pinned `auth_key` per AFPS §4.1. */
             required_auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
             available_auth_keys?: string[];
+            /**
+             * Format: uri
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 412 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             */
+            connect_url?: string;
+            /** @description Absolute expiry of `connect_url`, epoch ms. */
+            expires_at?: number;
+            /** @description Integration package id `connect_url` connects (`@scope/name`). */
+            package_id?: string;
+        };
+        /** @description A space role: one of the four platform presets (read-only, `id: null`) or an organization-defined bundle. */
+        RoleObject: {
+            /** @enum {string} */
+            object: "role";
+            /** @enum {string} */
+            kind: "preset" | "custom";
+            /** @description `srl_` id for a custom bundle; null for a preset, which has no row. */
+            id: string | null;
+            key: string;
+            name: string;
+            description: string | null;
+            /** @description Space-level permission strings the role grants, sorted. */
+            permissions: string[];
+            /** Format: date-time */
+            createdAt: string | null;
+            /** Format: date-time */
+            updatedAt: string | null;
+        };
+        /** @description Space-level permissions of one resource, with their delegation facts. */
+        RoleVocabularyGroup: {
+            resource: string;
+            permissions: {
+                permission: string;
+                action: string;
+                /** @description Can also be carried by an API key. */
+                api_key_grantable: boolean;
+            }[];
         };
         Run: {
             id: string;
@@ -5673,20 +5910,10 @@ export interface components {
             input: {
                 [key: string]: unknown;
             } | null;
-            /** @description What the run produced: the structured output, and nothing else. Human-facing deliverables are documents (see the run's documents), not fields here. `null` while the run is in flight or when no output was emitted. */
+            /** @description What the run produced: the structured output, and nothing else. Human-facing deliverables are files (see the run's files), not fields here. `null` while the run is in flight or when no output was emitted. */
             result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
-                /**
-                 * @deprecated
-                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`).
-                 */
-                text?: string;
-                /**
-                 * @deprecated
-                 * @description HISTORICAL ONLY. Present and true when a pre-removal `text` exceeded the 256 KiB storage cap.
-                 */
-                text_truncated?: boolean;
             } | null;
             /** @description Terminal summary of the run's end-of-run `outputs/` sweep. `status: "partial"` means at least one deliverable was LOST (upload abandoned after retries, or a file over the per-file cap); `failed` lists each lost file's name + a stable code (`file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`). Independent of the run `status` — a successful run can still be `partial`. Null on older runs / containers that never reported it. */
             artifacts: {
@@ -5743,18 +5970,10 @@ export interface components {
             endUserId: string | null;
             /** @description API key ID that triggered the run (null for dashboard/schedule runs) */
             apiKeyId: string | null;
-            /** @description Application ID (app_ prefix) that owns this run */
-            applicationId: string;
+            /** @description Space ID (spc_ prefix) that owns this run */
+            spaceId: string;
             /** @description Additional module-supplied metadata (e.g. usage-metering fields written by an optional module). Free-form; core does not define billing-specific keys. */
             metadata: {
-                [key: string]: unknown;
-            } | null;
-            /** @description Snapshot of the effective agent config (merged overrides) at run creation */
-            config: {
-                [key: string]: unknown;
-            } | null;
-            /** @description Per-run config delta — the raw object the caller sent in the request body. `config` is the resolved (deep-merged) snapshot; `config_override` is the raw delta that the dashboard uses to badge 'default vs override'. Null when the run used persisted defaults verbatim. */
-            config_override: {
                 [key: string]: unknown;
             } | null;
             /** @description Effective generation controls resolved and frozen when the run was created. */
@@ -5779,15 +5998,13 @@ export interface components {
             agent_name: string | null;
             /** @description Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline). */
             package_ephemeral: boolean;
-            /** @description Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced. */
-            document_counts: {
-                /** @description Distinct documents referenced as input by the run. */
+            /** @description Per-run file counts, always present on enriched list responses. Computed server-side: `input` from the distinct `appfile://` references in the run's persisted input, `output` from the count of files the run produced. */
+            file_counts: {
+                /** @description Distinct files referenced as input by the run. */
                 input: number;
-                /** @description Documents produced by the run. */
+                /** @description Files produced by the run. */
                 output: number;
             };
-            /** @description Document id of the run's explicitly selected primary deliverable, or null. The referenced document remains part of the ordinary run document list. */
-            primary_document_id: string | null;
             /** @description Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days). */
             inline_manifest?: {
                 [key: string]: unknown;
@@ -5849,16 +6066,13 @@ export interface components {
             /** @description End-user actor the schedule runs as */
             endUserId: string | null;
             orgId: string;
-            /** @description Application ID (app_ prefix) that owns this schedule */
-            applicationId: string;
+            /** @description Space ID (spc_ prefix) that owns this schedule */
+            spaceId: string;
             name: string | null;
             enabled: boolean;
             cron_expression: string;
             timezone: string | null;
             input: {
-                [key: string]: unknown;
-            } | null;
-            config_override: {
                 [key: string]: unknown;
             } | null;
             generation_config_override: components["schemas"]["ModelGenerationSettings"] | null;
@@ -5893,7 +6107,7 @@ export interface components {
             last_run_number: number;
         };
         SmtpConfigView: {
-            applicationId: string;
+            spaceId: string;
             host: string;
             port: number;
             username: string;
@@ -5908,7 +6122,7 @@ export interface components {
             updatedAt: string;
         };
         SocialProviderView: {
-            applicationId: string;
+            spaceId: string;
             /** @enum {string} */
             provider: "google" | "github";
             clientId: string;
@@ -5917,6 +6131,127 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        /** @description A space membership the invitation applies when it is accepted. Exactly one of `preset_role` / `custom_role_id` is set. */
+        SpaceAssignment: {
+            space_id: string;
+            /** @enum {string} */
+            preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+            custom_role_id?: string;
+        } & (unknown | unknown);
+        SpaceMemberAssignment: {
+            /** @enum {string} */
+            object: "space_member";
+            userId: string;
+            /** @enum {string} */
+            preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+            custom_role_id?: string;
+        };
+        SpaceMemberObject: {
+            /** @enum {string} */
+            object: "space_member";
+            userId: string;
+            name: string | null;
+            email: string | null;
+            /** @enum {string} */
+            org_role: "owner" | "admin" | "member" | "guest";
+            /**
+             * @description How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.
+             * @enum {string}
+             */
+            source: "explicit" | "org_role" | "open_space";
+            role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
+            /**
+             * Format: date-time
+             * @description When the explicit row was written; null for an implicit member
+             */
+            createdAt: string | null;
+        };
+        SpaceMemberRemoval: {
+            /**
+             * @description Whether the removed member keeps implicit access (open space) or loses the space entirely.
+             * @enum {string}
+             */
+            access_after: "implicit" | "none";
+        };
+        SpaceObject: {
+            /** @description Space ID (spc_ prefix) */
+            id: string;
+            /**
+             * @description Object type
+             * @enum {string}
+             */
+            object: "space";
+            /** @description Organization ID */
+            orgId: string;
+            /** @description Human-readable space name */
+            name: string;
+            /** @description Whether this is the default space */
+            isDefault: boolean;
+            settings: {
+                /** @description Domains allowed for OAuth redirect callbacks */
+                allowedRedirectDomains?: string[];
+            };
+            /**
+             * @description Who reaches the space without an explicit membership row: `open` (every org member), `closed` (listed, not enterable), `private` (not listed).
+             * @enum {string}
+             */
+            visibility: "open" | "closed" | "private";
+            /**
+             * @description Preset the implicit members of an `open` space hold
+             * @enum {string}
+             */
+            default_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            /**
+             * @description Whether the caller may enter this space
+             * @enum {string}
+             */
+            access: "member" | "none";
+            /** @description The caller's role in this space, or null when they have none */
+            role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
+            /** @description The caller's effective permission set in this space, ceiling applied */
+            permissions: string[];
+            /** @description ID of the user who created the space */
+            created_by: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /** @description A package installed in a space with its model/proxy/version overrides. */
+        SpacePackage: {
+            /** @enum {string} */
+            object?: "space_package";
+            /** @description Package ID from org catalog */
+            packageId: string;
+            generationConfig: components["schemas"]["ModelGenerationSettings"] | null;
+            /** @description Model override for this space */
+            modelId: string | null;
+            /** @description Proxy override for this space */
+            proxyId: string | null;
+            /** @description Pinned version (null = latest) */
+            version_id: number | null;
+            enabled: boolean;
+            /** Format: date-time */
+            installed_at: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @enum {string} */
+            package_type: "agent" | "skill" | "mcp-server" | "integration";
+            /** @enum {string} */
+            package_source: "system" | "local";
+            /** @description Raw draft manifest JSONB for the installed package. */
+            draft_manifest: Record<string, never> | null;
         };
         TestResult: {
             ok: boolean;
@@ -5960,12 +6295,12 @@ export interface components {
             /** @enum {string} */
             object: "webhook";
             /**
-             * @description Scoping level. `org` webhooks fire for any application in the org; `application` webhooks are pinned via `applicationId`.
+             * @description Scoping level. `org` webhooks fire for any space in the org; `space` webhooks are pinned via `spaceId`.
              * @enum {string}
              */
-            level: "org" | "application";
-            /** @description Application ID (app_ prefix) when `level = 'application'`, otherwise null. */
-            applicationId: string | null;
+            level: "org" | "space";
+            /** @description Space ID (spc_ prefix) when `level = 'space'`, otherwise null. */
+            spaceId: string | null;
             /** Format: uri */
             url: string;
             events: string[];
@@ -6110,6 +6445,16 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. */
+        RunAdmissionConflict: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Unexpected server error */
         InternalServerError: {
             headers: {
@@ -6149,6 +6494,34 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself does not exist (or belongs to another space) — that check runs first. Both writes also answer 404 when the target agent does not exist, or has no published version (`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or `version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway. */
+        NoPublishedVersion: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/not-found",
+                 *       "title": "Not Found",
+                 *       "status": 404,
+                 *       "detail": "Agent '@acme/reporter' has no published version",
+                 *       "code": "no_published_version",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse (bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential cannot carry a persona: only a cookie session and the CLI/instance token authenticate the user themselves; every other credential carries a ceiling of its own and no session to narrow. The other refusals reuse the statuses already documented on this operation: `403 view_as_forbidden` when the real org role is not owner/admin, the role is not grantable by the caller in that space, or a custom role is previewed where the `custom_roles` feature is off, and `404 view_as_not_found` when the space is not in the organization, the custom role does not exist, or the organization named alongside the persona is not the caller's. Those four codes are the complete set that means "drop the preview" — a plain `not_found` under an active persona is the previewed role's own wall, not a refusal of the persona. A refused preview is never answered with the caller's real permissions. */
+        ViewAsRefused: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Same Idempotency-Key used with a different request body */
         IdempotencyConflict: {
             headers: {
@@ -6171,6 +6544,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Number of items to skip before the first returned item. */
+        Offset: number;
         /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
         XOrgId: string;
         /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
@@ -6183,19 +6558,43 @@ export interface components {
         AppstrateUser: string;
         /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
         AppstrateVersion: string;
-        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
-        /** @description Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key). */
-        SseAppId: string;
+        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+        ConnectOffers: "1";
+        /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
+        SseSpaceId: string;
+        /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+        SseViewAs: string;
         /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
         SseToken: string;
-        /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-        XAppId: string;
+        /**
+         * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+         *
+         *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+         *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+         *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+         *
+         *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+         *
+         *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+         *
+         *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+         *
+         *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+         *
+         *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+         *
+         *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+         */
+        XViewAs: string;
+        /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+        XSpaceId: string;
         /** @description Package scope (e.g. @myorg) */
         PackageScope: string;
         /** @description Package name */
         PackageName: string;
-        /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+        /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
         PackageActiveFilter: "true";
     };
     requestBodies: never;
@@ -6485,14 +6884,14 @@ export interface operations {
                         data: {
                             /** @example sdj_0c9f… */
                             id: string;
-                            /** @example documents */
+                            /** @example files */
                             bucket: string;
                             /**
                              * @description In-bucket object key (no bucket prefix).
-                             * @example app_abc/doc_def/report.pdf
+                             * @example spc_abc/file_def/report.pdf
                              */
                             storage_key: string;
-                            /** @description Why the object is being purged (document_deleted | document_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | materialization_failed). */
+                            /** @description Why the object is being purged (file_deleted | file_expired | org_deleted | space_deleted | end_user_deleted | run_workspace_deleted | version_deleted | upload_expired | materialization_failed). Free text, not a constrained enum. */
                             reason: string;
                             /** @description Delete attempts made so far. */
                             attempts: number;
@@ -6551,8 +6950,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -6633,12 +7032,13 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     exportAgentBundle: {
         parameters: {
             query?: {
-                /** @description Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this application (falls back to the `latest` dist-tag). Mutually exclusive with `?source=draft`. */
+                /** @description Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this space (falls back to the `latest` dist-tag). Mutually exclusive with `?source=draft`. */
                 version?: string;
                 /** @description Bundle source. `published` (default) exports a published version archive — reproducible and signable. `draft` bundles the agent's live draft state and resolves dependencies via the draft catalog — mirrors the dashboard Run button so the CLI can run never-published agents. */
                 source?: "draft" | "published";
@@ -6646,8 +7046,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -6702,50 +7102,6 @@ export interface operations {
             };
         };
     };
-    saveAgentConfig: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Configuration saved — returns the bare persisted configuration document */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     getAgentConnectionReadiness: {
         parameters: {
             query?: {
@@ -6755,8 +7111,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -6793,8 +7149,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -6822,6 +7178,53 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    saveAgentInputSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch. */
+                    values: {
+                        [key: string]: unknown;
+                    };
+                    /** @description Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`. */
+                    locked_fields: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Saved — returns the bare persisted input-settings resource */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInputSettings"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getAgentMap: {
         parameters: {
             query?: {
@@ -6831,8 +7234,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -6866,8 +7269,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -6894,6 +7297,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -6903,8 +7307,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -6959,8 +7363,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7023,8 +7427,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7063,8 +7467,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7097,8 +7501,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7131,8 +7535,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7159,6 +7563,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -7168,8 +7573,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7217,14 +7622,16 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
                 /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7241,18 +7648,15 @@ export interface operations {
                  *       "input": {
                  *         "message": "Summarize my latest emails"
                  *       },
-                 *       "config": {
-                 *         "dryRun": true
-                 *       },
                  *       "dependency_overrides": {
                  *         "@test/test-skill": "draft"
                  *       }
                  *     }
                  */
                 "application/json": {
-                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references (an existing document the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
+                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` references (an existing file the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
                     input?: Record<string, never>;
-                    /** @description Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `document://` references, so later reruns reuse the same documents without depending on upload retention. Existing `document://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable. */
+                    /** @description Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + space scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable. */
                     rerun_from?: string;
                     /** @description Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses. */
                     modelId?: string;
@@ -7260,11 +7664,7 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-run config override. Deep-merged with the per-application persisted config (`application_packages.config`): override leaves replace, plain-object children merge recursively, arrays are replaced wholesale, `null` at a leaf sets the value to null (validated as missing for required string fields), missing keys fall through. Re-validated against the manifest config schema after the merge — a 400 `invalid_config` is returned if the merged result violates the schema. Top-level `null` is rejected (returns 400) — omit the field to inherit persisted defaults, send `{}` for an explicit empty override. Mirrors the OpenAPI Assistants `runs.create { instructions, model, tools }` and Argo Workflows `submitOptions.parameters` SOTA — every client (UI, CLI, SDK) reaches the same resolved config for the same `(persisted, override)` pair. */
-                    config?: {
-                        [key: string]: unknown;
-                    };
-                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
+                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
                         [key: string]: string;
                     };
@@ -7295,7 +7695,7 @@ export interface operations {
                      *       "endUserId": null,
                      *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "applicationId": "app_m4n5o6p7",
+                     *       "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                      *       "scheduleId": null,
                      *       "status": "pending",
                      *       "input": {
@@ -7306,12 +7706,6 @@ export interface operations {
                      *       "checkpoint": {},
                      *       "error": null,
                      *       "metadata": null,
-                     *       "config": {
-                     *         "dryRun": true
-                     *       },
-                     *       "config_override": {
-                     *         "dryRun": true
-                     *       },
                      *       "generation": {
                      *         "temperature": 0.2,
                      *         "reasoningLevel": "high"
@@ -7348,17 +7742,16 @@ export interface operations {
                      *       "schedule_name": null,
                      *       "connections_used": null,
                      *       "package_ephemeral": false,
-                     *       "document_counts": {
+                     *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       },
-                     *       "primary_document_id": null
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
                 };
             };
-            /** @description Agent readiness validation failed (empty prompt, missing skill, or incomplete config) */
+            /** @description Agent readiness validation failed (empty prompt, missing skill, or inactive integration) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7368,7 +7761,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -7379,7 +7772,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Concurrent request with the same Idempotency-Key still in flight, the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
+            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -7407,7 +7800,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input documents together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
+            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -7445,8 +7838,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7487,15 +7880,16 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
                 /** @description One run status or a comma-separated set, for example failed,timeout. */
                 status?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7536,8 +7930,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7593,8 +7987,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7623,6 +8017,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createSchedule: {
@@ -7631,8 +8026,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7651,8 +8046,6 @@ export interface operations {
                     /** @default UTC */
                     timezone?: string;
                     input?: Record<string, never>;
-                    /** @description Per-schedule config delta. Deep-merged with the application's persisted `config` every time the schedule fires. */
-                    config_override?: Record<string, never>;
                     /** @description Temperature/reasoning overrides applied to every run fired by this schedule. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Override the persisted model on every run triggered by this schedule. */
@@ -7661,15 +8054,15 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). The pinned definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is pinned. */
                     version_override?: string;
-                    /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. */
+                    /** @description Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Values must be non-empty: an empty id is falsy at the connection resolver, so it would skip the pin in silence on every fire instead of failing here. */
                     connection_overrides?: {
                         [key: string]: string;
                     };
-                    /** @description Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. */
+                    /** @description Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. */
                     dependency_overrides?: {
                         [key: string]: string;
                     };
-                    /** @description Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to default to the calling identity. Requires `schedules:write`. */
+                    /** @description Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`. */
                     actor?: {
                         user_id?: string;
                         end_user_id?: string;
@@ -7693,7 +8086,7 @@ export interface operations {
                      *       "userId": "usr_r3t5w8y1z6",
                      *       "endUserId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "applicationId": "app_r3t5w8y1z6",
+                     *       "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                      *       "name": "Weekday morning sort",
                      *       "enabled": true,
                      *       "cron_expression": "0 9 * * 1-5",
@@ -7702,7 +8095,6 @@ export interface operations {
                      *         "folder": "inbox",
                      *         "maxEmails": 50
                      *       },
-                     *       "config_override": null,
                      *       "generation_config_override": null,
                      *       "model_id_override": null,
                      *       "proxy_id_override": null,
@@ -7714,13 +8106,16 @@ export interface operations {
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z",
                      *       "actor_name": "Pierre",
-                     *       "actor_type": "user"
+                     *       "actor_type": "user",
+                     *       "running_runs": 0,
+                     *       "unread_count": 0,
+                     *       "last_run_number": 0
                      *     }
                      */
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression, invalid input, or agent has file inputs (cannot be scheduled). */
+            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or agent has file inputs (cannot be scheduled). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7731,6 +8126,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NoPublishedVersion"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -7740,8 +8136,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -7791,8 +8187,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -7848,8 +8244,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -7864,7 +8260,7 @@ export interface operations {
                      * @description ISO 8601 datetime. Must be in the future if provided.
                      */
                     expiresAt?: string | null;
-                    /** @description Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass empty array for full role access. Invalid or unauthorized scopes are silently filtered. */
+                    /** @description Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass an empty array for full role access. A scope no API key can carry — unknown, or session-only such as `org:delete` — is rejected with a 400 naming it; a scope the creator's own role does not hold is dropped, since a key cannot be granted more than its creator has. `GET /api/api-keys/available-scopes` lists what the caller can grant. */
                     scopes?: string[];
                 };
             };
@@ -7912,8 +8308,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -7960,8 +8356,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -7982,743 +8378,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
-        };
-    };
-    listApplications: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Application list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "object": "list",
-                     *       "data": [
-                     *         {
-                     *           "id": "app_default001",
-                     *           "object": "application",
-                     *           "orgId": "550e8400-e29b-41d4-a716-446655440000",
-                     *           "name": "Default",
-                     *           "isDefault": true,
-                     *           "settings": {
-                     *             "allowedRedirectDomains": []
-                     *           },
-                     *           "created_by": null,
-                     *           "createdAt": "2026-01-10T08:00:00Z",
-                     *           "updatedAt": "2026-01-10T08:00:00Z"
-                     *         },
-                     *         {
-                     *           "id": "app_cm1xyz789ghi012",
-                     *           "object": "application",
-                     *           "orgId": "550e8400-e29b-41d4-a716-446655440000",
-                     *           "name": "My SaaS App",
-                     *           "isDefault": false,
-                     *           "settings": {
-                     *             "allowedRedirectDomains": [
-                     *               "myapp.com"
-                     *             ]
-                     *           },
-                     *           "created_by": "usr_k7x9m2p4q1",
-                     *           "createdAt": "2026-01-15T10:30:00Z",
-                     *           "updatedAt": "2026-01-15T10:30:00Z"
-                     *         }
-                     *       ],
-                     *       "hasMore": false
-                     *     }
-                     */
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["ApplicationObject"][];
-                        /** @description Whether more results exist beyond this page */
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    createApplication: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Human-readable application name */
-                    name: string;
-                    /** @description Application settings */
-                    settings?: {
-                        /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
-                        allowedRedirectDomains?: string[];
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description Application created */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "id": "app_cm1xyz789ghi012",
-                     *       "object": "application",
-                     *       "orgId": "550e8400-e29b-41d4-a716-446655440000",
-                     *       "name": "My SaaS App",
-                     *       "isDefault": false,
-                     *       "settings": {
-                     *         "allowedRedirectDomains": [
-                     *           "myapp.com",
-                     *           "staging.myapp.com"
-                     *         ]
-                     *       },
-                     *       "created_by": "usr_k7x9m2p4q1",
-                     *       "createdAt": "2026-01-15T10:30:00Z",
-                     *       "updatedAt": "2026-01-15T10:30:00Z"
-                     *     }
-                     */
-                    "application/json": components["schemas"]["ApplicationObject"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    listInstalledPackages: {
-        parameters: {
-            query?: {
-                /** @description Filter by package type */
-                type?: "agent" | "skill" | "mcp-server" | "integration";
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                applicationId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Installed packages list */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: components["schemas"]["ApplicationPackage"][];
-                        /** @description Whether more results exist beyond this page */
-                        hasMore: boolean;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    installPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                applicationId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package ID from org catalog */
-                    packageId: string;
-                    /** @description Initial configuration */
-                    config?: Record<string, never>;
-                };
-            };
-        };
-        responses: {
-            /** @description Package installed */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApplicationPackage"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Package already installed in this application */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    getInstalledPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                applicationId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Installed package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApplicationPackage"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateInstalledPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                applicationId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    config?: Record<string, never>;
-                    generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
-                    modelId?: string | null;
-                    proxyId?: string | null;
-                    version_id?: number | null;
-                    enabled?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Updated package config */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApplicationPackage"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    uninstallPackage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                applicationId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Package uninstalled */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getApplicationPackageRunConfig: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                applicationId: string;
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Resolved run configuration */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "config": {
-                     *         "dryRun": true
-                     *       },
-                     *       "generation": {
-                     *         "temperature": 0.2,
-                     *         "reasoningLevel": "high"
-                     *       },
-                     *       "modelId": "claude-sonnet-4-6",
-                     *       "proxyId": null,
-                     *       "version_pin": "1.2.3"
-                     *     }
-                     */
-                    "application/json": {
-                        config: Record<string, never>;
-                        generation: components["schemas"]["ModelGenerationSettings"] | null;
-                        modelId: string | null;
-                        proxyId: string | null;
-                        version_pin: string | null;
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getApplication: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Application detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApplicationObject"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteApplication: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Application deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateApplication: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    /** @description Human-readable application name */
-                    name?: string;
-                    /** @description Application settings */
-                    settings?: {
-                        /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
-                        allowedRedirectDomains?: string[];
-                    };
-                };
-            };
-        };
-        responses: {
-            /** @description Application updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApplicationObject"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getApplicationSmtpConfig: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description SMTP configuration */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmtpConfigView"];
-                };
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Application or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    upsertApplicationSmtpConfig: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    host: string;
-                    port: number;
-                    username: string;
-                    pass: string;
-                    /** Format: email */
-                    fromAddress: string;
-                    /** @description Rejects quotes and CRLF to prevent email-header injection at send time. */
-                    fromName?: string;
-                    /** @enum {string} */
-                    secureMode?: "auto" | "tls" | "starttls" | "none";
-                };
-            };
-        };
-        responses: {
-            /** @description SMTP configuration saved */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmtpConfigView"];
-                };
-            };
-            /** @description Validation error (invalid host / SSRF block) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Application or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    deleteApplicationSmtpConfig: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Application or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    testApplicationSmtpConfig: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** Format: email */
-                    to: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Test email sent */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        ok: boolean;
-                        messageId: string;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-            /** @description Application or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    getApplicationSocialProvider: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-                provider: "google" | "github";
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Social provider configuration */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SocialProviderView"];
-                };
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Application or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    upsertApplicationSocialProvider: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-                provider: "google" | "github";
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    clientId: string;
-                    clientSecret: string;
-                    scopes?: string[];
-                };
-            };
-        };
-        responses: {
-            /** @description Social provider configuration saved */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SocialProviderView"];
-                };
-            };
-            /** @description Validation error */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Application or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    deleteApplicationSocialProvider: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-                provider: "google" | "github";
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            /** @description Application or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
         };
     };
     redeemBootstrapToken: {
@@ -8754,7 +8413,7 @@ export interface operations {
                         bootstrap?: {
                             orgId?: string;
                             orgSlug?: string;
-                            /** @description Optional advisory codes — e.g. `default_app_provisioning_failed` when the post-bootstrap default-app/agent hook failed. The owner+org are still committed; the operator can self-heal via /api/applications. */
+                            /** @description Optional advisory codes — e.g. `default_space_provisioning_failed` when the post-bootstrap default-space/agent hook failed. The owner+org are still committed; the operator can self-heal via /api/spaces. */
                             warnings?: string[];
                         };
                     };
@@ -9149,6 +8808,22 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Answered in place, never redirected: the client cannot be resolved (`invalid_client` — unknown `client_id`, or a CIMD `client_id` URL the server's fetch policy refuses) or its `redirect_uri` does not match. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too many requests — Better Auth's per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current window resets. */
+                    "X-Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     oauth2Introspect: {
@@ -9250,7 +8925,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @description ES256-signed JWT carrying `sub`, `endUserId`, `applicationId`, `orgId`. */
+                        /** @description ES256-signed JWT carrying `sub`, `endUserId`, `spaceId`, `orgId`. */
                         access_token: string;
                         /** @enum {string} */
                         token_type: "Bearer";
@@ -9284,9 +8959,11 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Rate limit exceeded. */
+            /** @description Too many requests — Better Auth's per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation. */
             429: {
                 headers: {
+                    /** @description Seconds until the current window resets. */
+                    "X-Retry-After"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -9447,14 +9124,507 @@ export interface operations {
             };
         };
     };
+    getEeBillingAccount: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Billing snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingAccount"];
+                };
+            };
+            /** @description Caller lacks `billing:read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    createEeBillingCheckoutSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    plan_id: components["schemas"]["EeCheckoutPlanId"];
+                    /** @description Path-relative redirect target (must start with `/`). Defaults to `/org-settings/billing`. */
+                    return_url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Checkout session URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        url: string;
+                    };
+                };
+            };
+            /** @description Validation error or invalid Stripe plan configuration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The organization already has a subscription (`subscription_exists`) — change its plan with `POST /api/billing/plan` instead of starting a second one. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate-limited (5/min per org) or Stripe-side rate limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Stripe unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    getEeBillingContact: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Billing contact */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingContact"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    updateEeBillingContact: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    billing_email?: string | null;
+                    billing_cc?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The resulting billing contact */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingContact"];
+                };
+            };
+            /** @description Invalid email address, or more than 5 CC addresses */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listEeBillingManagers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The billing managers, oldest grant first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingManagerList"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    replaceEeBillingManagers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The complete set of billing managers. An empty array clears it. */
+                    user_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The resulting billing managers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingManagerList"];
+                };
+            };
+            /** @description A user id is not an org member, or is an owner/admin */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    changeEeBillingPlan: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    plan_id: components["schemas"]["EeCheckoutPlanId"];
+                };
+            };
+        };
+        responses: {
+            /** @description Billing snapshot after the change was sent to Stripe */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EeBillingAccount"];
+                };
+            };
+            /** @description Validation error or invalid Stripe plan configuration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No billing account exists for this org */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The organization has no subscription to change (`no_active_subscription`) — start a checkout instead. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate-limited (5/min per org) or Stripe-side rate limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Stripe unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    createEeBillingPortalSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Customer portal URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        url: string;
+                    };
+                };
+            };
+            /** @description Caller lacks `billing:manage` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Rate-limited (5/min per org) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Stripe unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    receiveEeBillingStripeWebhook: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description HMAC signature emitted by Stripe with each webhook delivery. */
+                "Stripe-Signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Webhook accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        received: boolean;
+                    };
+                };
+            };
+            /** @description Missing or invalid Stripe signature */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Webhook processing error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
     streamChat: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
                 /** @description Org model (preset id) override; defaults to the org default model. */
                 "X-Model-Id"?: string;
             };
@@ -9498,7 +9668,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -9507,6 +9677,13 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Rate limited (20/min per caller) */
             429: {
                 headers: {
@@ -9522,6 +9699,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -9553,6 +9732,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -9593,6 +9774,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -9624,6 +9807,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -9649,6 +9834,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -9681,6 +9868,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -9713,6 +9902,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -9745,6 +9936,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -9785,8 +9978,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Application id (app_…) the API key is scoped to. */
-                "X-Application-Id": string;
+                /** @description Space id (spc_…) the API key is scoped to. */
+                "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
                 /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
@@ -9805,7 +9998,7 @@ export interface operations {
                 "X-Max-Response-Size"?: string;
                 /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -9867,8 +10060,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Application id (app_…) the API key is scoped to. */
-                "X-Application-Id": string;
+                /** @description Space id (spc_…) the API key is scoped to. */
+                "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
                 /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
@@ -9887,7 +10080,7 @@ export interface operations {
                 "X-Max-Response-Size"?: string;
                 /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -9954,8 +10147,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Application id (app_…) the API key is scoped to. */
-                "X-Application-Id": string;
+                /** @description Space id (spc_…) the API key is scoped to. */
+                "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
                 /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
@@ -9974,7 +10167,7 @@ export interface operations {
                 "X-Max-Response-Size"?: string;
                 /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10041,8 +10234,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Application id (app_…) the API key is scoped to. */
-                "X-Application-Id": string;
+                /** @description Space id (spc_…) the API key is scoped to. */
+                "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
                 /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
@@ -10061,7 +10254,7 @@ export interface operations {
                 "X-Max-Response-Size"?: string;
                 /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10123,8 +10316,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description Application id (app_…) the API key is scoped to. */
-                "X-Application-Id": string;
+                /** @description Space id (spc_…) the API key is scoped to. */
+                "X-Space-Id": string;
                 /** @description Scoped integration package name (e.g. `@afps/gmail`). */
                 "X-Integration-Id": string;
                 /** @description Absolute URL of the upstream endpoint. Must match the integration manifest auth's `authorized_uris` unless `allow_all_uris: true`. */
@@ -10143,7 +10336,7 @@ export interface operations {
                 "X-Max-Response-Size"?: string;
                 /** @description Optional run id (`run_…`) used for per-run attribution in `credential_proxy_usage`. Not validated against the principal — a mismatched runId is a reporting oddity, not a security boundary. */
                 "X-Run-Id"?: string;
-                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
+                /** @description Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path. */
                 "X-Connection-Id"?: string;
             };
             path?: never;
@@ -10226,413 +10419,6 @@ export interface operations {
             };
         };
     };
-    listDocuments: {
-        parameters: {
-            query?: {
-                /** @description Filter by document purpose. */
-                purpose?: "user_upload" | "agent_output";
-                /** @description Filter to documents anchored to this run. */
-                run_id?: string;
-                /** @description Filter to documents produced by this agent package. */
-                packageId?: string;
-                /** @description Filter to documents anchored to this chat session. */
-                chat_session_id?: string;
-                /** @description Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session. */
-                context_chat_session_id?: string;
-                /** @description Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`. */
-                q?: string;
-                /** @description Keyset cursor — document id to page after (newest-first order). */
-                startingAfter?: string;
-                /** @description Page size (1–100, default 20). */
-                limit?: number;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description A page of documents. */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: {
-                            /** @enum {string} */
-                            object: "document";
-                            /** @description Opaque document id (`doc_…`). */
-                            id: string;
-                            /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
-                            uri: string;
-                            /** @enum {string} */
-                            purpose: "user_upload" | "agent_output";
-                            /**
-                             * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
-                             * @enum {string|null}
-                             */
-                            presentation: "primary" | null;
-                            applicationId: string;
-                            /** @description Run container, or null. */
-                            run_id: string | null;
-                            /** @description Chat-session container, or null. */
-                            chat_session_id: string | null;
-                            /** @description Producing agent package id, or null. */
-                            packageId: string | null;
-                            /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
-                            name: string;
-                            /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
-                            mime: string;
-                            /** @description Size in bytes. */
-                            size: number;
-                            /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
-                            sha256?: string;
-                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
-                            downloadable: boolean;
-                            /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
-                            capabilities: {
-                                /** @description The caller can resolve this document at all (container ACL). */
-                                visible: boolean;
-                                /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
-                                metadata: boolean;
-                                /** @description The caller may fetch the bytes (`/content`). */
-                                download: boolean;
-                                /** @description The caller may render an in-browser preview (download + a previewable mime). */
-                                preview: boolean;
-                                /** @description The caller may pin/clear the retention deadline. */
-                                keep: boolean;
-                                /** @description The caller may delete the document. */
-                                delete: boolean;
-                            };
-                            /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
-                            previewable: boolean;
-                            /**
-                             * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
-                             * @enum {string|null}
-                             */
-                            preview_kind: "html" | "image" | "pdf" | "text" | null;
-                            /**
-                             * Format: date-time
-                             * @description Retention deadline, or null when permanent.
-                             */
-                            expiresAt: string | null;
-                            /** Format: date-time */
-                            createdAt: string;
-                        }[];
-                        hasMore: boolean;
-                        limit?: number;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    getDocument: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The document. */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "document";
-                        /** @description Opaque document id (`doc_…`). */
-                        id: string;
-                        /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
-                        uri: string;
-                        /** @enum {string} */
-                        purpose: "user_upload" | "agent_output";
-                        /**
-                         * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
-                         * @enum {string|null}
-                         */
-                        presentation: "primary" | null;
-                        applicationId: string;
-                        /** @description Run container, or null. */
-                        run_id: string | null;
-                        /** @description Chat-session container, or null. */
-                        chat_session_id: string | null;
-                        /** @description Producing agent package id, or null. */
-                        packageId: string | null;
-                        /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
-                        name: string;
-                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
-                        mime: string;
-                        /** @description Size in bytes. */
-                        size: number;
-                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
-                        sha256?: string;
-                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
-                        downloadable: boolean;
-                        /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
-                        capabilities: {
-                            /** @description The caller can resolve this document at all (container ACL). */
-                            visible: boolean;
-                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
-                            metadata: boolean;
-                            /** @description The caller may fetch the bytes (`/content`). */
-                            download: boolean;
-                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
-                            preview: boolean;
-                            /** @description The caller may pin/clear the retention deadline. */
-                            keep: boolean;
-                            /** @description The caller may delete the document. */
-                            delete: boolean;
-                        };
-                        /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
-                        previewable: boolean;
-                        /**
-                         * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
-                         * @enum {string|null}
-                         */
-                        preview_kind: "html" | "image" | "pdf" | "text" | null;
-                        /**
-                         * Format: date-time
-                         * @description Retention deadline, or null when permanent.
-                         */
-                        expiresAt: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                        /**
-                         * Format: uri
-                         * @description Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe: for an `html` document that iframe is the ONLY context in which the markup is served as active HTML, whether or not the instance configures a separate `USERCONTENT_URL` preview origin. Any other loading context — a top-level navigation to the same URL above all — is served as inert `text/plain` source, because a top-level agent document can navigate itself and so cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
-                         */
-                        preview_url?: string | null;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    deleteDocument: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deleted. */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Document is still referenced by one or more consumer runs. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "type": "about:blank",
-                     *       "title": "Conflict",
-                     *       "status": 409,
-                     *       "detail": "This document is referenced by one or more runs and cannot be deleted",
-                     *       "code": "document_in_use",
-                     *       "requestId": "req_abc123"
-                     *     }
-                     */
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    getDocumentContent: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The document bytes (proxy-stream mode). `Content-Type` is the document's own stored MIME (never rewritten), served with `X-Content-Type-Options: nosniff` and an `attachment` disposition — hence the `*\/*` media type here rather than a fixed `application/octet-stream`. */
-            200: {
-                headers: {
-                    /** @description attachment; filename=… */
-                    "Content-Disposition"?: string;
-                    /** @description Always `nosniff` — the stored MIME is uploader-controlled, so the browser must never re-interpret the body as active content. */
-                    "X-Content-Type-Options"?: "nosniff";
-                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only when the caller has the document's `metadata` capability. */
-                    "Repr-Digest"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": Blob;
-                };
-            };
-            /** @description Redirect to a presigned GET URL (public-endpoint S3 mode). */
-            307: {
-                headers: {
-                    /** @description Presigned URL. */
-                    Location?: string;
-                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:` (carried on the redirect; present only when the caller has the `metadata` capability). */
-                    "Repr-Digest"?: string;
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    keepDocument: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The document, with `expiresAt` now null. No `preview_url` is minted on this response — re-read `GET /api/documents/{id}` for a fresh one. */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "document";
-                        /** @description Opaque document id (`doc_…`). */
-                        id: string;
-                        /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
-                        uri: string;
-                        /** @enum {string} */
-                        purpose: "user_upload" | "agent_output";
-                        /**
-                         * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
-                         * @enum {string|null}
-                         */
-                        presentation: "primary" | null;
-                        applicationId: string;
-                        /** @description Run container, or null. */
-                        run_id: string | null;
-                        /** @description Chat-session container, or null. */
-                        chat_session_id: string | null;
-                        /** @description Producing agent package id, or null. */
-                        packageId: string | null;
-                        /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
-                        name: string;
-                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
-                        mime: string;
-                        /** @description Size in bytes. */
-                        size: number;
-                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
-                        sha256?: string;
-                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
-                        downloadable: boolean;
-                        /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
-                        capabilities: {
-                            /** @description The caller can resolve this document at all (container ACL). */
-                            visible: boolean;
-                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
-                            metadata: boolean;
-                            /** @description The caller may fetch the bytes (`/content`). */
-                            download: boolean;
-                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
-                            preview: boolean;
-                            /** @description The caller may pin/clear the retention deadline. */
-                            keep: boolean;
-                            /** @description The caller may delete the document. */
-                            delete: boolean;
-                        };
-                        /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
-                        previewable: boolean;
-                        /**
-                         * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
-                         * @enum {string|null}
-                         */
-                        preview_kind: "html" | "image" | "pdf" | "text" | null;
-                        /**
-                         * Format: date-time
-                         * @description Retention deadline, or null when permanent.
-                         */
-                        expiresAt: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
     listEndUsers: {
         parameters: {
             query?: {
@@ -10652,8 +10438,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -10677,7 +10463,7 @@ export interface operations {
                      *         {
                      *           "id": "eu_cm4jkl012",
                      *           "object": "end_user",
-                     *           "applicationId": "app_cm4jkl013",
+                     *           "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                      *           "name": "Alice Martin",
                      *           "email": "alice@example.com",
                      *           "externalId": "usr_12345",
@@ -10715,9 +10501,9 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -10769,7 +10555,7 @@ export interface operations {
                      * @example {
                      *       "id": "eu_cm4jkl012",
                      *       "object": "end_user",
-                     *       "applicationId": "app_cm4jkl013",
+                     *       "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                      *       "name": "Alice Martin",
                      *       "email": "alice@example.com",
                      *       "externalId": "usr_12345",
@@ -10788,7 +10574,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the application (external_id_taken) */
+            /** @description Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the space (external_id_taken) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10807,8 +10593,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -10829,7 +10615,7 @@ export interface operations {
                      * @example {
                      *       "id": "eu_cm4jkl012",
                      *       "object": "end_user",
-                     *       "applicationId": "app_cm4jkl013",
+                     *       "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                      *       "name": "Alice Martin",
                      *       "email": "alice@example.com",
                      *       "externalId": "usr_12345",
@@ -10856,8 +10642,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -10886,8 +10672,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -10926,7 +10712,7 @@ export interface operations {
                      * @example {
                      *       "id": "eu_cm4jkl012",
                      *       "object": "end_user",
-                     *       "applicationId": "app_cm4jkl013",
+                     *       "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                      *       "name": "Alice Martin Updated",
                      *       "email": "alice@example.com",
                      *       "externalId": "usr_12345",
@@ -10945,7 +10731,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The externalId is already in use by another end-user in the application */
+            /** @description The externalId is already in use by another end-user in the space */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10956,7 +10742,7 @@ export interface operations {
                      *       "type": "https://docs.appstrate.dev/errors/external-id-taken",
                      *       "title": "Conflict",
                      *       "status": 409,
-                     *       "detail": "An end-user with this externalId already exists in the application.",
+                     *       "detail": "An end-user with this externalId already exists in the space.",
                      *       "code": "external_id_taken",
                      *       "requestId": "req_abc123"
                      *     }
@@ -10967,19 +10753,412 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    listFiles: {
+        parameters: {
+            query?: {
+                /** @description Filter by file purpose. */
+                purpose?: "user_upload" | "agent_output";
+                /** @description Filter to files anchored to this run. */
+                run_id?: string;
+                /** @description Filter to files produced by this agent package. */
+                packageId?: string;
+                /** @description Filter to files anchored to this chat session. */
+                chat_session_id?: string;
+                /** @description Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session. */
+                context_chat_session_id?: string;
+                /** @description Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`. */
+                q?: string;
+                /** @description Keyset cursor — file id to page after (newest-first order). */
+                startingAfter?: string;
+                /** @description Page size (1–100, default 20). */
+                limit?: number;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of files. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @enum {string} */
+                            object: "file";
+                            /** @description Opaque file id (`file_…`). */
+                            id: string;
+                            /** @description Stable `appfile://file_…` reference — pass in a run's file input field. */
+                            uri: string;
+                            /** @enum {string} */
+                            purpose: "user_upload" | "agent_output";
+                            spaceId: string;
+                            /** @description Run container, or null. */
+                            run_id: string | null;
+                            /** @description Chat-session container, or null. */
+                            chat_session_id: string | null;
+                            /** @description Producing agent package id, or null. */
+                            packageId: string | null;
+                            /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                            name: string;
+                            /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
+                            mime: string;
+                            /** @description Size in bytes. */
+                            size: number;
+                            /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                            sha256?: string;
+                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
+                            downloadable: boolean;
+                            /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
+                            capabilities: {
+                                /** @description The caller can resolve this file at all (container ACL). */
+                                visible: boolean;
+                                /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                                metadata: boolean;
+                                /** @description The caller may fetch the bytes (`/content`). */
+                                download: boolean;
+                                /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                                preview: boolean;
+                                /** @description The caller may pin/clear the retention deadline. */
+                                keep: boolean;
+                                /** @description The caller may delete the file. */
+                                delete: boolean;
+                            };
+                            /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
+                            previewable: boolean;
+                            /**
+                             * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                             * @enum {string|null}
+                             */
+                            preview_kind: "html" | "image" | "pdf" | "text" | null;
+                            /**
+                             * Format: date-time
+                             * @description Retention deadline, or null when permanent.
+                             */
+                            expiresAt: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        }[];
+                        hasMore: boolean;
+                        limit?: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "file";
+                        /** @description Opaque file id (`file_…`). */
+                        id: string;
+                        /** @description Stable `appfile://file_…` reference — pass in a run's file input field. */
+                        uri: string;
+                        /** @enum {string} */
+                        purpose: "user_upload" | "agent_output";
+                        spaceId: string;
+                        /** @description Run container, or null. */
+                        run_id: string | null;
+                        /** @description Chat-session container, or null. */
+                        chat_session_id: string | null;
+                        /** @description Producing agent package id, or null. */
+                        packageId: string | null;
+                        /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                        name: string;
+                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
+                        mime: string;
+                        /** @description Size in bytes. */
+                        size: number;
+                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                        sha256?: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
+                        downloadable: boolean;
+                        /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        capabilities: {
+                            /** @description The caller can resolve this file at all (container ACL). */
+                            visible: boolean;
+                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                            metadata: boolean;
+                            /** @description The caller may fetch the bytes (`/content`). */
+                            download: boolean;
+                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                            preview: boolean;
+                            /** @description The caller may pin/clear the retention deadline. */
+                            keep: boolean;
+                            /** @description The caller may delete the file. */
+                            delete: boolean;
+                        };
+                        /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
+                        previewable: boolean;
+                        /**
+                         * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @enum {string|null}
+                         */
+                        preview_kind: "html" | "image" | "pdf" | "text" | null;
+                        /**
+                         * Format: date-time
+                         * @description Retention deadline, or null when permanent.
+                         */
+                        expiresAt: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /**
+                         * Format: uri
+                         * @description Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-file GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable file. Load in a `sandbox="allow-scripts"` iframe: for an `html` file that iframe is the ONLY context in which the markup is served as active HTML, whether or not the instance configures a separate `USERCONTENT_URL` preview origin. Any other loading context — a top-level navigation to the same URL above all — is served as inert `text/plain` source, because a top-level agent document can navigate itself and so cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         */
+                        preview_url?: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File is still referenced by one or more consumer runs. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "about:blank",
+                     *       "title": "Conflict",
+                     *       "status": 409,
+                     *       "detail": "This file is referenced by one or more runs and cannot be deleted",
+                     *       "code": "file_in_use",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getFileContent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file bytes (proxy-stream mode). `Content-Type` is the file's own stored MIME (never rewritten), served with `X-Content-Type-Options: nosniff` and an `attachment` disposition — hence the `*\/*` media type here rather than a fixed `application/octet-stream`. */
+            200: {
+                headers: {
+                    /** @description attachment; filename=… */
+                    "Content-Disposition"?: string;
+                    /** @description Always `nosniff` — the stored MIME is uploader-controlled, so the browser must never re-interpret the body as active content. */
+                    "X-Content-Type-Options"?: "nosniff";
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only when the caller has the file's `metadata` capability. */
+                    "Repr-Digest"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": Blob;
+                };
+            };
+            /** @description Redirect to a presigned GET URL (public-endpoint S3 mode). */
+            307: {
+                headers: {
+                    /** @description Presigned URL. */
+                    Location?: string;
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:` (carried on the redirect; present only when the caller has the `metadata` capability). */
+                    "Repr-Digest"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    keepFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file, with `expiresAt` now null. No `preview_url` is minted on this response — re-read `GET /api/files/{id}` for a fresh one. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "file";
+                        /** @description Opaque file id (`file_…`). */
+                        id: string;
+                        /** @description Stable `appfile://file_…` reference — pass in a run's file input field. */
+                        uri: string;
+                        /** @enum {string} */
+                        purpose: "user_upload" | "agent_output";
+                        spaceId: string;
+                        /** @description Run container, or null. */
+                        run_id: string | null;
+                        /** @description Chat-session container, or null. */
+                        chat_session_id: string | null;
+                        /** @description Producing agent package id, or null. */
+                        packageId: string | null;
+                        /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                        name: string;
+                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
+                        mime: string;
+                        /** @description Size in bytes. */
+                        size: number;
+                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                        sha256?: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
+                        downloadable: boolean;
+                        /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        capabilities: {
+                            /** @description The caller can resolve this file at all (container ACL). */
+                            visible: boolean;
+                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                            metadata: boolean;
+                            /** @description The caller may fetch the bytes (`/content`). */
+                            download: boolean;
+                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                            preview: boolean;
+                            /** @description The caller may pin/clear the retention deadline. */
+                            keep: boolean;
+                            /** @description The caller may delete the file. */
+                            delete: boolean;
+                        };
+                        /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
+                        previewable: boolean;
+                        /**
+                         * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @enum {string|null}
+                         */
+                        preview_kind: "html" | "image" | "pdf" | "text" | null;
+                        /**
+                         * Format: date-time
+                         * @description Retention deadline, or null when permanent.
+                         */
+                        expiresAt: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     listIntegrations: {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per item (`id` is always included). Allowed: id, manifest, orgId, source, active, block_user_connections. An unknown field is a 400. */
                 fields?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -11096,8 +11275,15 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing token (HTML error page). */
+            /** @description Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable. */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The space has no OAuth client registered for this auth and none could be auto-provisioned; the page names the action to take (HTML error page). The link stays reusable so a retry after the administrator registers a client needs no re-mint. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11117,7 +11303,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Upstream provider failed to start the connection (HTML error page). */
+            /** @description Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -11234,8 +11420,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11360,8 +11546,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11490,8 +11676,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11544,8 +11730,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11656,8 +11842,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11670,9 +11856,13 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    /** @description OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
-                    /** Format: uuid */
+                    /**
+                     * Format: uuid
+                     * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
+                     */
                     connection_id?: string;
                 };
             };
@@ -11704,8 +11894,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11718,11 +11908,12 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    /** @description OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect/upgrade an existing connection in place.
+                     * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
                      */
                     connection_id?: string;
                 };
@@ -11756,8 +11947,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11818,8 +12009,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11860,7 +12051,7 @@ export interface operations {
                          * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
                          */
                         id: string;
-                        applicationId: string;
+                        spaceId: string;
                         integration_package_id: string;
                         auth_key: string;
                         client_id: string;
@@ -11889,8 +12080,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -11951,8 +12142,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12030,8 +12221,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12069,8 +12260,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12108,8 +12299,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12131,7 +12322,7 @@ export interface operations {
                         integration_package_id: string;
                         /** Format: uuid */
                         connection_id: string;
-                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
+                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
                         auth_key: string;
                         enforce: boolean;
                         /** Format: date-time */
@@ -12159,8 +12350,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12174,7 +12365,7 @@ export interface operations {
                     /** Format: uuid */
                     connection_id: string;
                     /** @default false */
-                    enforce: boolean;
+                    enforce?: boolean;
                 };
             };
         };
@@ -12191,7 +12382,7 @@ export interface operations {
                         integration_package_id: string;
                         /** Format: uuid */
                         connection_id: string;
-                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
+                        /** @description Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses. */
                         auth_key: string;
                         enforce: boolean;
                         /** Format: date-time */
@@ -12212,8 +12403,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12241,8 +12432,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12283,7 +12474,7 @@ export interface operations {
                          * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
                          */
                         id: string;
-                        applicationId: string;
+                        spaceId: string;
                         integration_package_id: string;
                         auth_key: string;
                         client_id: string;
@@ -12312,8 +12503,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12344,8 +12535,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12380,8 +12571,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12422,8 +12613,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12453,8 +12644,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Integration package id (e.g. `@official/gmail`). */
@@ -12594,14 +12785,14 @@ export interface operations {
                     /**
                      * @example {
                      *       "object": "library",
-                     *       "applications": [
+                     *       "spaces": [
                      *         {
-                     *           "id": "app_default",
+                     *           "id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "name": "Default",
                      *           "isDefault": true
                      *         },
                      *         {
-                     *           "id": "app_staging",
+                     *           "id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *           "name": "Staging",
                      *           "isDefault": false
                      *         }
@@ -12615,7 +12806,7 @@ export interface operations {
                      *             "name": "Inbox Triage",
                      *             "description": "Sorts incoming Gmail threads into priority buckets.",
                      *             "installed_in": [
-                     *               "app_default"
+                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
                      *             ]
                      *           }
                      *         ],
@@ -12629,8 +12820,8 @@ export interface operations {
                      *             "name": "Gmail",
                      *             "description": "Google Mail OAuth integration.",
                      *             "installed_in": [
-                     *               "app_default",
-                     *               "app_staging"
+                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *               "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
                      *             ]
                      *           }
                      *         ]
@@ -12640,9 +12831,9 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "library";
-                        /** @description Applications belonging to the caller's organization. The default application (if any) is listed first. */
-                        applications: {
-                            /** @description Application id (`app_…`). */
+                        /** @description Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first. */
+                        spaces: {
+                            /** @description Space id (`spc_…`). */
                             id: string;
                             name: string;
                             isDefault: boolean;
@@ -12720,6 +12911,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
@@ -12790,6 +12990,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
@@ -12859,6 +13068,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
@@ -12984,7 +13202,7 @@ export interface operations {
                                     id: string;
                                     name: string;
                                 };
-                                application: {
+                                space: {
                                     id: string;
                                     name: string;
                                 };
@@ -13024,8 +13242,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -13109,7 +13327,7 @@ export interface operations {
                         org: {
                             id: string;
                             /** @enum {string} */
-                            role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                            role: "owner" | "admin" | "member" | "guest" | "end_user";
                             /** @description Human-readable organization name. */
                             name?: string | null;
                             /** @description Organization slug. */
@@ -13136,7 +13354,7 @@ export interface operations {
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
-                        /** @description Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. */
+                        /** @description Agents the caller can run in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. */
                         agents: {
                             /** @description Invokable identifier, e.g. "@appstrate/triage". */
                             package_id: string;
@@ -13153,7 +13371,7 @@ export interface operations {
                         agents_truncated: boolean;
                         /** @description Total runnable agents before the cap. */
                         agents_total: number;
-                        /** @description Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
+                        /** @description Skills the caller could attach to an agent in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
                         skills: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             package_id: string;
@@ -13186,8 +13404,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -13224,8 +13442,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -13271,8 +13489,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -13301,7 +13519,28 @@ export interface operations {
     listMyOrgs: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -13325,6 +13564,11 @@ export interface operations {
                      *           "name": "Acme Corp",
                      *           "slug": "acme",
                      *           "role": "owner",
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "org:update",
+                     *             "members:invite"
+                     *           ],
                      *           "createdAt": "2026-01-10T08:00:00Z"
                      *         }
                      *       ]
@@ -13341,7 +13585,9 @@ export interface operations {
                              * @description Org role for member callers; `end_user` for OIDC end-user JWTs.
                              * @enum {string}
                              */
-                            role: "owner" | "admin" | "member" | "viewer" | "end_user";
+                            role: "owner" | "admin" | "member" | "guest" | "end_user";
+                            /** @description The caller's ORG-LEVEL effective permissions in this org, ceiling-applied. Absent for OIDC end-user JWTs, which hold no org role. */
+                            permissions?: string[];
                             /** Format: date-time */
                             createdAt: string;
                         }[];
@@ -13349,7 +13595,10 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listModelProviderCredentials: {
@@ -13416,7 +13665,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Display name for the model provider credential. Optional — the server derives one from the provider's `displayName` when omitted, deduping against existing org credentials. */
+                    /** @description Display name for the model provider credential. Optional — when omitted the server derives one from the provider's `displayName`, prefixed with the endpoint host (`localhost:11434 · OpenAI-compatible (custom)`) when `baseUrlOverride` is supplied to a `baseUrlOverridable` provider. Either way it is deduped against existing org credentials. */
                     label?: string;
                     /** @description Canonical registry providerId (`openai`, `anthropic`, `openai-compatible`, …). Discovered via `GET /api/model-provider-credentials/registry`. Only providers with `authMode: api_key` are accepted here; OAuth providers go through the pairing flow. */
                     providerId: string;
@@ -13464,11 +13713,101 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
+    discoverModelProviderCredentialModels: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description An existing organization credential to enumerate. Built-in/system credentials are refused (`operation_not_allowed`).
+                     */
+                    credential_id?: string;
+                    /** @description Canonical registry providerId (`openai-compatible`, `openai`, …). Discovered via `GET /api/model-provider-credentials/registry`. */
+                    provider_id?: string;
+                    /** @description API key for the endpoint. Used for this one request and never stored or echoed back. */
+                    api_key?: string;
+                    /**
+                     * Format: uri
+                     * @description Endpoint base URL. Accepted only for providers with `baseUrlOverridable: true`; defaults to the provider's `defaultBaseUrl`.
+                     */
+                    base_url_override?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Listing outcome. `models` is empty unless `outcome` is `ok`; every metadata field is null (and `source` is null) when neither the listing nor a catalog described the id. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description `ok` — the endpoint answered with a readable listing. `auth_failed` — 401/403. `rate_limited` — 429. `blocked_url` — the base URL targets a blocked network (SSRF guard, no request sent). `unreachable` — timeout, DNS/TCP/TLS failure or refused redirect. `bad_response` — the body is not JSON or not a listing. `http_error` — any other non-2xx.
+                         * @enum {string}
+                         */
+                        outcome: "ok" | "auth_failed" | "rate_limited" | "blocked_url" | "unreachable" | "bad_response" | "http_error";
+                        models: {
+                            /** @description Model id exactly as served. */
+                            id: string;
+                            label: string | null;
+                            context_window: number | null;
+                            max_tokens: number | null;
+                            /** @description Accepted input modalities (`text`, `image`). */
+                            input: string[] | null;
+                            reasoning: boolean | null;
+                            /**
+                             * @description Where the description came from: `endpoint` when the listing published at least one of these fields for this model, `catalog` on a pure catalog hit, `null` when neither described it.
+                             * @enum {string|null}
+                             */
+                            source: "endpoint" | "catalog" | null;
+                        }[];
+                        /** @description Human-readable detail for a non-`ok` outcome (e.g. "URL targets a blocked network"); null on `ok`. */
+                        message: string | null;
+                    };
+                };
+            };
+            /** @description Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when both/neither form is supplied, `provider_id` is unknown or OAuth-only, or `base_url_override` is sent to a provider that does not accept one. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `credential_id` refers to a built-in/system credential. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
     listModelProviderRegistry: {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, models. An unknown field is a 400. */
                 fields?: string;
             };
@@ -13694,12 +14033,12 @@ export interface operations {
                 content: {
                     "application/json": {
                         /**
-                         * @description `ok` — list resolved (persisted on the probe path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — every probe failed (network incident or none served), previous list kept. `no_candidates` — provider resolves no discovery candidate.
+                         * @description `ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, or no candidate appeared in it; previous list kept. `no_candidates` — provider resolves no discovery candidate.
                          * @enum {string}
                          */
                         outcome: "ok" | "auth_failed" | "nothing_verified" | "no_candidates";
-                        /** @description Number of models live-probed against the credential. Always 0 for `offline`-validation providers (codex, claude-code): their list is derived, never probed. */
-                        probed_count: number;
+                        /** @description Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path spends one request whatever the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that. */
+                        candidate_count: number;
                         available_model_ids: string[] | null;
                     };
                 };
@@ -14344,7 +14683,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Model updated — the bare updated model resource (same shape as `GET`/`list`). */
+            /** @description Model updated — the bare updated model resource (same shape as `GET`/`list`). For a managed (aliased) model the binding fields are nulled, exactly as on `list`. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -14412,6 +14751,7 @@ export interface operations {
                     "application/json": components["schemas"]["TestResult"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -14430,8 +14770,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -14504,8 +14844,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -14538,8 +14878,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 runId: string;
@@ -14569,8 +14909,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -14608,8 +14948,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -14652,8 +14992,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Notification id */
@@ -14718,7 +15058,7 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -14738,20 +15078,22 @@ export interface operations {
                     isFirstParty?: boolean;
                     /** @description When `true`, users signing in for the first time through this client are auto-joined to `referencedOrgId` with `signupRole`. When `false` (default), non-members are rejected. Only meaningful for org-level clients. */
                     allowSignup?: boolean;
+                    /** @description Org-level only. Explicit space roles applied atomically on first signup. Guest requires at least one; admin requires an empty array. Omitted on update preserves existing assignments. */
+                    signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
                     /**
                      * @description Role assigned on auto-join. `owner` is deliberately excluded to prevent self-promotion via a misconfigured client. Defaults to `member`.
                      * @enum {string}
                      */
-                    signupRole?: "admin" | "member" | "viewer";
+                    signupRole?: "guest" | "member" | "admin";
                 } | {
                     /** @enum {string} */
-                    level: "application";
+                    level: "space";
                     name: string;
                     redirectUris: string[];
                     /** @description URIs allowed for post-logout redirects (OIDC RP-Initiated Logout). */
                     postLogoutRedirectUris?: string[];
                     scopes?: string[];
-                    referencedApplicationId: string;
+                    referencedSpaceId: string;
                     isFirstParty?: boolean;
                     /** @description When `true`, a successful OIDC login creates the `end_users` row on the fly (JIT provisioning). When `false` (default, secure-by-default), unknown end-users are rejected with an OAuth `access_denied` error — admins must pre-create them via `POST /api/end-users` first. */
                     allowSignup?: boolean;
@@ -14870,13 +15212,15 @@ export interface operations {
                     scopes?: string[];
                     disabled?: boolean;
                     isFirstParty?: boolean;
-                    /** @description Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Application: brand-new BA users + JIT `end_users` provisioning. */
+                    /** @description Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Space: brand-new BA users + JIT `end_users` provisioning. */
                     allowSignup?: boolean;
+                    /** @description Org-level only. Explicit space roles applied atomically on first signup. Guest requires at least one; admin requires an empty array. Omitted on update preserves existing assignments. */
+                    signupSpaceAssignments?: components["schemas"]["SpaceAssignment"][];
                     /**
-                     * @description Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/application clients.
+                     * @description Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.
                      * @enum {string}
                      */
-                    signupRole?: "admin" | "member" | "viewer";
+                    signupRole?: "guest" | "member" | "admin";
                 };
             };
         };
@@ -15050,7 +15394,28 @@ export interface operations {
     listOrganizations: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -15074,7 +15439,13 @@ export interface operations {
                      *           "name": "Acme Corp",
                      *           "slug": "acme-corp",
                      *           "role": "owner",
-                     *           "createdAt": "2026-01-10T08:00:00Z"
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "org:update",
+                     *             "members:invite"
+                     *           ],
+                     *           "createdAt": "2026-01-10T08:00:00Z",
+                     *           "deleting_at": null
                      *         }
                      *       ]
                      *     }
@@ -15087,7 +15458,10 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createOrganization: {
@@ -15373,7 +15747,9 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "viewer" | "member" | "admin";
+                    role: "guest" | "member" | "admin";
+                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
         };
@@ -15391,6 +15767,7 @@ export interface operations {
                      *       "id": "inv_abc123",
                      *       "email": "carol@acme.com",
                      *       "role": "admin",
+                     *       "space_assignments": [],
                      *       "token": "tok_xyz789",
                      *       "expiresAt": "2026-02-01T00:00:00Z",
                      *       "createdAt": "2026-01-25T00:00:00Z"
@@ -15449,7 +15826,9 @@ export interface operations {
                      * @default member
                      * @enum {string}
                      */
-                    role: "viewer" | "member" | "admin";
+                    role?: "guest" | "member" | "admin";
+                    /** @description Space memberships applied when the invitation is accepted. Required (non-empty) for `role: guest`, which has no implicit space access; must be empty for `role: admin`, which already runs every space. */
+                    space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
         };
@@ -15467,6 +15846,12 @@ export interface operations {
                      *       "id": "inv_abc123",
                      *       "email": "newuser@example.com",
                      *       "role": "member",
+                     *       "space_assignments": [
+                     *         {
+                     *           "space_id": "spc_...",
+                     *           "preset_role": "operator"
+                     *         }
+                     *       ],
                      *       "token": "inv_abc123def456",
                      *       "expiresAt": "2026-02-01T00:00:00Z",
                      *       "createdAt": "2026-01-25T00:00:00Z"
@@ -15478,6 +15863,19 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description The pending invitation already held by this email. */
+                        invitation_id: string;
+                    };
+                };
+            };
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -15495,7 +15893,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "viewer" | "member" | "admin";
+                    role: "guest" | "member" | "admin";
                 };
             };
         };
@@ -15594,7 +15992,12 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["OrgSettings"];
+                "application/json": {
+                    /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
+                    api_version?: string;
+                    /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
+                    dashboard_sso_enabled?: boolean;
+                };
             };
         };
         responses: {
@@ -15617,14 +16020,14 @@ export interface operations {
     listAgentPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -15657,8 +16060,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -15667,7 +16070,7 @@ export interface operations {
             content: {
                 "application/json": {
                     manifest: components["schemas"]["AgentManifest"];
-                    /** @description Agent prompt (markdown) */
+                    /** @description Agent prompt (markdown). Must not be blank. */
                     content: string;
                 };
             };
@@ -15689,141 +16092,17 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    getAgentPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateAgentById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    manifest: components["schemas"]["AgentManifest"];
-                    content: string;
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Agent updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    deleteAgentById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Agent deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Agent in use. RFC 9457 problem+json with `code` of `agent_in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     getAgentPackage: {
         parameters: {
             query?: {
-                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns config / input / integrations / skills from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
+                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). **Omitting resolves the `draft`** (the editor default). A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
                 version?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -15857,8 +16136,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -15871,8 +16150,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    manifest: components["schemas"]["AgentManifest"];
-                    content: string;
+                    manifest?: components["schemas"]["AgentManifest"];
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -15911,8 +16190,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -15952,8 +16231,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -15989,8 +16268,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16040,8 +16319,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16078,8 +16357,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16114,8 +16393,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16156,8 +16435,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16204,8 +16483,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -16249,7 +16528,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). */
+            /** @description Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16278,8 +16557,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -16289,7 +16568,7 @@ export interface operations {
                 "multipart/form-data": {
                     /**
                      * Format: binary
-                     * @description `.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias.
+                     * @description `.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker.
                      */
                     file: Blob;
                 };
@@ -16318,7 +16597,7 @@ export interface operations {
                             /** @description Package type (agent, skill, mcp-server, integration). Present on `inserted` entries only. */
                             type?: string;
                         }[];
-                        /** @description Whether the root was installed in the calling application (false if it was already installed). */
+                        /** @description Whether the root was installed in the calling space (false if it was already installed). */
                         root_installed: boolean;
                         root_package_id: string;
                         root_version: string;
@@ -16327,7 +16606,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. */
+            /** @description Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16356,8 +16635,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -16391,7 +16670,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`). */
+            /** @description Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16417,14 +16696,14 @@ export interface operations {
     listIntegrationPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -16457,8 +16736,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -16470,7 +16749,7 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    /** @description Primary package file content (manifest document). */
+                    /** @description Primary package file content (manifest file). */
                     content?: string;
                 };
             };
@@ -16492,132 +16771,14 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    getIntegrationPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Integration package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateIntegrationPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest: {
-                        [key: string]: unknown;
-                    };
-                    content?: string;
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Integration package updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteIntegrationPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Integration package deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Integration package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     getIntegrationPackage: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16651,8 +16812,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16666,7 +16827,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description Package manifest */
-                    manifest: {
+                    manifest?: {
                         [key: string]: unknown;
                     };
                     content?: string;
@@ -16699,8 +16860,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16740,8 +16901,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16777,8 +16938,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16828,8 +16989,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16867,8 +17028,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16904,8 +17065,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16937,8 +17098,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -16980,14 +17141,14 @@ export interface operations {
     listMcpServerPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -17020,8 +17181,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -17056,132 +17217,14 @@ export interface operations {
             415: components["responses"]["UnsupportedMediaType"];
         };
     };
-    getMcpServerPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateMcpServerPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest: {
-                        [key: string]: unknown;
-                    };
-                    content: string;
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description MCP-server package updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteMcpServerPackageById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description MCP-server package deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description MCP-server package is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     getMcpServerPackage: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17215,8 +17258,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17230,10 +17273,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description Package manifest */
-                    manifest: {
+                    manifest?: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -17263,8 +17306,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17304,8 +17347,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17341,8 +17384,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17392,8 +17435,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17431,8 +17474,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17468,8 +17511,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17501,8 +17544,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17544,14 +17587,14 @@ export interface operations {
     listSkills: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+                /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -17605,8 +17648,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -17618,8 +17661,8 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    /** @description SKILL.md content (markdown with YAML frontmatter). */
-                    content?: string;
+                    /** @description SKILL.md content (markdown with YAML frontmatter). Must not be blank. */
+                    content: string;
                 };
             };
         };
@@ -17635,127 +17678,10 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-        };
-    };
-    getSkillById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Skill detail */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    updateSkillById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description Package manifest */
-                    manifest: {
-                        [key: string]: unknown;
-                    };
-                    content: string;
-                    /** @description Optimistic lock version */
-                    lock_version: number;
-                };
-            };
-        };
-        responses: {
-            /** @description Skill updated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrgPackageItemDetail"];
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    deleteSkillById: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
-            };
-            path: {
-                /** @description Package ID (unscoped) */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Skill deleted */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Skill is referenced by agents or required by other packages. RFC 9457 problem+json with `code` of `in_use`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
         };
     };
     getSkill: {
@@ -17764,8 +17690,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17799,8 +17725,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17814,10 +17740,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description Package manifest */
-                    manifest: {
+                    manifest?: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -17835,6 +17761,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -17847,8 +17774,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17888,8 +17815,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17925,8 +17852,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -17956,6 +17883,7 @@ export interface operations {
                     "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -17976,8 +17904,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18015,8 +17943,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18052,8 +17980,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18085,8 +18013,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18111,6 +18039,8 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. */
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -18134,8 +18064,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
                 /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
                 "If-None-Match"?: string;
             };
@@ -18156,9 +18086,9 @@ export interface operations {
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     /** @description Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact's integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag. */
                     ETag?: string;
-                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read. */
+                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read. */
                     "Cache-Control"?: string;
-                    /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications. */
+                    /** @description Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse this body across organizations or spaces. */
                     Vary?: string;
                     /** @description Present and set to `true` when the resolved version is yanked. */
                     "X-Yanked"?: string;
@@ -18175,7 +18105,7 @@ export interface operations {
                     ETag?: string;
                     /** @description Always `private, no-cache`, as on the `200`. */
                     "Cache-Control"?: string;
-                    /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
+                    /** @description Always `X-Org-Id, X-Space-Id`, as on the `200`. */
                     Vary?: string;
                     /** @description Present and set to `true` when the resolved version is yanked. */
                     "X-Yanked"?: string;
@@ -18211,8 +18141,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
                 /** @description Entity-tag of a cached copy. A match yields `304 Not Modified`. */
                 "If-None-Match"?: string;
             };
@@ -18233,9 +18163,9 @@ export interface operations {
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     /** @description Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match. */
                     ETag?: string;
-                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. */
+                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space. */
                     "Cache-Control"?: string;
-                    /** @description Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications. */
+                    /** @description Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse these bytes across organizations or spaces. */
                     Vary?: string;
                     /** @description Present and set to `true` when the resolved version is yanked. */
                     "X-Yanked"?: string;
@@ -18260,7 +18190,7 @@ export interface operations {
                     ETag?: string;
                     /** @description Always `private, no-cache`, as on the `200`. */
                     "Cache-Control"?: string;
-                    /** @description Always `X-Org-Id, X-Application-Id`, as on the `200`. */
+                    /** @description Always `X-Org-Id, X-Space-Id`, as on the `200`. */
                     Vary?: string;
                     /** @description Present and set to `true` when the resolved version is yanked. */
                     "X-Yanked"?: string;
@@ -18291,8 +18221,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18352,8 +18282,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 /** @description Package scope (e.g. @myorg) */
@@ -18862,8 +18792,10 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
-                /** @description Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key). */
-                applicationId?: components["parameters"]["SseAppId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
+                /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
+                spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
@@ -18889,8 +18821,10 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     streamAllRuns: {
@@ -18898,8 +18832,10 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
-                /** @description Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key). */
-                applicationId?: components["parameters"]["SseAppId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
+                /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
+                spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
@@ -18922,8 +18858,10 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     streamRun: {
@@ -18931,8 +18869,10 @@ export interface operations {
             query: {
                 /** @description Organization ID. Required for SSE auth (cookies cannot carry X-Org-Id header on EventSource). */
                 orgId: components["parameters"]["SseOrgId"];
-                /** @description Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key). */
-                applicationId?: components["parameters"]["SseAppId"];
+                /** @description Role preview for this stream — the same value, grammar and refusals as the `X-View-As` header (see that parameter). It is a query parameter here because `EventSource` cannot send headers — presenting it as the `X-View-As` header on these routes is `400 invalid_view_as`. Sessions only: with `?token=ask_…` it is `400 view_as_unsupported`. A stream opened under a persona sees what that role would see and stops where that role would stop (`403 not_a_space_member`, or `404` for a private space), and carries `X-View-As-Active: 1`. */
+                view_as?: components["parameters"]["SseViewAs"];
+                /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
+                spaceId?: components["parameters"]["SseSpaceId"];
                 /** @description API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead. */
                 token?: components["parameters"]["SseToken"];
                 /** @description When true, include full payload with `result` and `data` fields. Default (false) strips large user-content fields for safer consumption by external agents. */
@@ -18957,17 +18897,251 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
+            400: components["responses"]["ViewAsRefused"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RoleObject"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Slug, unique per organization. Never one of the preset keys (`admin`, `builder`, `operator`, `viewer`). */
+                    key: string;
+                    name: string;
+                    description?: string | null;
+                    /** @description Space-level permission strings the role grants (at least one). */
+                    permissions: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Role created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleObject"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description A role with this key already exists (`role_key_taken`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listRoleVocabulary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space-level permission vocabulary */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RoleVocabularyGroup"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    deleteRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Custom role id (`srl_` prefix). Presets are not addressable. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role deleted */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The role is still assigned (`role_in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description Space members still holding this role. */
+                        member_count: number;
+                        /** @description Pending invitations whose `space_assignments` name this role. */
+                        pending_invitation_count: number;
+                    };
+                };
+            };
+        };
+    };
+    updateRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Custom role id (`srl_` prefix). Presets are not addressable. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    key?: string;
+                    name?: string;
+                    description?: string | null;
+                    permissions?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Role updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleObject"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the caller does not hold the required `roles:*` permission; or `feature_unavailable` — `custom_roles` is not available on this deployment (the four built-in presets stay usable). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description A role with this key already exists (`role_key_taken`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listRuns: {
         parameters: {
             query?: {
-                /** @description Filter runs by user. `me` is the only accepted value and returns only the current user's runs, combined with any other filter given. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
+                /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
                 /** @description Filter runs by lifecycle status: one member of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, or several separated by commas (`failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the enum is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
@@ -18982,8 +19156,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
                 /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
             };
@@ -19020,6 +19194,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     runInline: {
@@ -19028,14 +19203,16 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
                 /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 412 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path?: never;
             cookie?: never;
@@ -19046,16 +19223,16 @@ export interface operations {
                  * @example {
                  *       "manifest": {
                  *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                 *         "name": "@inline/summarize-attached-document",
-                 *         "display_name": "Summarize attached document",
+                 *         "name": "@inline/summarize-attached-file",
+                 *         "display_name": "Summarize attached file",
                  *         "version": "0.0.0",
                  *         "type": "agent",
                  *         "schema_version": "0.1",
                  *         "dependencies": {}
                  *       },
-                 *       "prompt": "Summarize the attached document in three bullet points.",
+                 *       "prompt": "Summarize the attached file in three bullet points.",
                  *       "input": {
-                 *         "docId": "doc_123"
+                 *         "audience": "engineering"
                  *       }
                  *     }
                  */
@@ -19064,18 +19241,18 @@ export interface operations {
                     manifest: Record<string, never>;
                     /** @description Contents of prompt.md — the agent's system prompt. */
                     prompt: string;
-                    /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
+                    /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
                     input?: Record<string, never>;
-                    /** @description Per-run config overrides validated against manifest.config.schema (AJV). */
-                    config?: Record<string, never>;
-                    /** @description `document://doc_xxx` URIs to mount read-only into the run's `documents/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_documents` input field for them, so they go through the same ACL, byte/count caps and `document_links` chaining as any other document input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_documents` is rejected with a `400` — the name is reserved. */
-                    context_documents?: string[];
-                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
+                    /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
+                    context_files?: string[];
+                    /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
                         [key: string]: string;
                     };
                     modelId?: string | null;
                     proxyId?: string | null;
+                    /** @description Per-run temperature/reasoning override, same contract as `POST /api/agents/{scope}/{name}/run`. Omitted properties inherit the manifest's model settings. */
+                    generation?: components["schemas"]["ModelGenerationSettings"];
                 };
             };
         };
@@ -19099,19 +19276,17 @@ export interface operations {
                      *       "endUserId": null,
                      *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "applicationId": "app_m4n5o6p7",
+                     *       "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                      *       "scheduleId": null,
                      *       "status": "pending",
                      *       "input": {
-                     *         "docId": "doc_123"
+                     *         "audience": "engineering"
                      *       },
                      *       "result": null,
                      *       "artifacts": null,
                      *       "checkpoint": {},
                      *       "error": null,
                      *       "metadata": null,
-                     *       "config": null,
-                     *       "config_override": null,
                      *       "generation": null,
                      *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
@@ -19130,7 +19305,7 @@ export interface operations {
                      *       "runner_name": null,
                      *       "runner_kind": null,
                      *       "agent_scope": "@inline",
-                     *       "agent_name": "Summarize attached document",
+                     *       "agent_name": "Summarize attached file",
                      *       "runOrigin": "platform",
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
@@ -19142,21 +19317,20 @@ export interface operations {
                      *       "schedule_name": null,
                      *       "connections_used": null,
                      *       "package_ephemeral": true,
-                     *       "document_counts": {
+                     *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
                      *       },
-                     *       "primary_document_id": null,
                      *       "inline_manifest": {
                      *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                     *         "name": "@inline/summarize-attached-document",
-                     *         "display_name": "Summarize attached document",
+                     *         "name": "@inline/summarize-attached-file",
+                     *         "display_name": "Summarize attached file",
                      *         "version": "0.0.0",
                      *         "type": "agent",
                      *         "schema_version": "0.1",
                      *         "dependencies": {}
                      *       },
-                     *       "inline_prompt": "Summarize the attached document in three bullet points."
+                     *       "inline_prompt": "Summarize the attached file in three bullet points."
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -19172,7 +19346,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -19182,7 +19356,8 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyInProgress"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["RunAdmissionConflict"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
                 headers: {
@@ -19192,7 +19367,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input documents together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
+            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -19230,8 +19405,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
                 /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
@@ -19247,15 +19422,16 @@ export interface operations {
                     manifest: Record<string, never>;
                     prompt: string;
                     input?: Record<string, never>;
-                    config?: Record<string, never>;
-                    /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_documents` name collision, never mounted. */
-                    context_documents?: string[];
-                    /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. */
+                    /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_files` name collision, never mounted. */
+                    context_files?: string[];
+                    /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. Values must be non-empty, same rule and same reason as on the launch surfaces. */
                     connection_overrides?: {
                         [key: string]: string;
                     };
                     modelId?: string | null;
                     proxyId?: string | null;
+                    /** @description Same field as `POST /api/runs/inline` — validated for shape, never applied; no run is created. */
+                    generation?: components["schemas"]["ModelGenerationSettings"];
                 };
             };
         };
@@ -19295,6 +19471,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
@@ -19307,7 +19484,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -19323,7 +19500,6 @@ export interface operations {
                         /** @description Full AFPS manifest (agent type). All referenced skills/integrations must already exist in the org or system catalog. */
                         manifest: Record<string, never>;
                         prompt: string;
-                        config?: Record<string, never>;
                     } | {
                         /** @constant */
                         kind: "registry";
@@ -19335,14 +19511,13 @@ export interface operations {
                          * @enum {string}
                          */
                         stage?: "draft" | "published";
-                        /** @description Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the application, then to the `latest` dist-tag. */
+                        /** @description Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the space, then to the `latest` dist-tag. */
                         spec?: string;
                         /** @description Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal. */
                         integrity?: string;
-                        config?: Record<string, never>;
                     };
-                    applicationId: string;
-                    /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */
+                    spaceId: string;
+                    /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `appfile://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */
                     input?: Record<string, never>;
                     /** @description Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422). */
                     dependency_overrides?: {
@@ -19394,7 +19569,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module (Cloud only). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -19404,7 +19579,8 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyInProgress"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["RunAdmissionConflict"];
             /** @description Missing integration connection (`missing_integration_connection`) */
             412: {
                 headers: {
@@ -19428,8 +19604,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -19454,7 +19630,7 @@ export interface operations {
                      *       "endUserId": null,
                      *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "applicationId": "app_m4n5o6p7",
+                     *       "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                      *       "scheduleId": "sched_cm1abc456def789",
                      *       "status": "success",
                      *       "input": {
@@ -19465,8 +19641,7 @@ export interface operations {
                      *         "output": {
                      *           "processed": 42,
                      *           "labeled": 38
-                     *         },
-                     *         "text": "## Inbox triage\nProcessed 42 emails, labeled 38."
+                     *         }
                      *       },
                      *       "artifacts": {
                      *         "status": "complete",
@@ -19478,10 +19653,6 @@ export interface operations {
                      *       },
                      *       "error": null,
                      *       "metadata": null,
-                     *       "config": {
-                     *         "folder": "inbox"
-                     *       },
-                     *       "config_override": null,
                      *       "generation": {
                      *         "reasoningLevel": "medium"
                      *       },
@@ -19519,11 +19690,10 @@ export interface operations {
                      *       "schedule_name": "Weekday morning sort",
                      *       "connections_used": null,
                      *       "package_ephemeral": false,
-                     *       "document_counts": {
+                     *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       },
-                     *       "primary_document_id": null
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -19549,6 +19719,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -19558,8 +19729,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -19584,7 +19755,7 @@ export interface operations {
                      *       "endUserId": null,
                      *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "applicationId": "app_m4n5o6p7",
+                     *       "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                      *       "scheduleId": null,
                      *       "status": "cancelled",
                      *       "input": {
@@ -19596,8 +19767,6 @@ export interface operations {
                      *       "checkpoint": {},
                      *       "error": "Cancelled by user",
                      *       "metadata": null,
-                     *       "config": null,
-                     *       "config_override": null,
                      *       "generation": null,
                      *       "generation_override": null,
                      *       "started_at": "2026-01-15T10:30:00Z",
@@ -19628,11 +19797,10 @@ export interface operations {
                      *       "schedule_name": null,
                      *       "connections_used": null,
                      *       "package_ephemeral": false,
-                     *       "document_counts": {
+                     *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       },
-                     *       "primary_document_id": null
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -19675,8 +19843,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -19706,233 +19874,8 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    fetchRunDocumentsManifest: {
-        parameters: {
-            query?: never;
-            header: {
-                "webhook-id": string;
-                "webhook-timestamp": string;
-                "webhook-signature": string;
-            };
-            path: {
-                runId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Documents manifest */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        documents: {
-                            /** @description The document's human display name (may repeat across entries). */
-                            name: string;
-                            /** @description Unique single path segment the agent writes the document to under `workspace/documents/` and fetches its bytes by. */
-                            workspace_name: string;
-                            size: number;
-                        }[];
-                    };
-                };
-            };
-            /** @description duplicate_document_name — the stored manifest has colliding workspace names */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signature verification failed */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description run_not_found | no input documents */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description run_sink_closed | run_sink_expired */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    publishRunDocument: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). */
-                "X-Document-Name": string;
-                /** @description Set to `primary` to feature this document on the run page. The last successful primary publication wins atomically. Omit for an ordinary output. */
-                "X-Document-Presentation"?: "primary";
-                /** @description MIME type of the document bytes. */
-                "Content-Type": string;
-                "webhook-id": string;
-                "webhook-timestamp": string;
-                "webhook-signature": string;
-            };
-            path: {
-                runId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/octet-stream": Blob;
-            };
-        };
-        responses: {
-            /** @description Idempotent replay — an identical (run, sha256, name) document already existed; the existing document is returned. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        id: string;
-                        uri: string;
-                        name: string;
-                        mime: string;
-                        size: number;
-                        sha256: string;
-                        /** @enum {string|null} */
-                        presentation: "primary" | null;
-                    };
-                };
-            };
-            /** @description Document stored */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        id: string;
-                        /** @description `document://<id>` durable URI. */
-                        uri: string;
-                        name: string;
-                        mime: string;
-                        size: number;
-                        sha256: string;
-                        /** @enum {string|null} */
-                        presentation: "primary" | null;
-                    };
-                };
-            };
-            /** @description X-Document-Name missing or not a valid percent-encoded filename / X-Document-Presentation has an unsupported value / Content-Type header missing / empty body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Signature verification failed */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description storage_limit_exceeded */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description run_not_found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description `run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's document budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description run_sink_closed | run_sink_expired */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description `payload_too_large` — the document exceeds the per-file cap (`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `document_count_exceeded` — the run already holds `RUN_MAX_DOCUMENTS` documents. Distinct codes so a client can tell "one file too big" from "too many files". */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    fetchRunDocument: {
-        parameters: {
-            query?: never;
-            header: {
-                "webhook-id": string;
-                "webhook-timestamp": string;
-                "webhook-signature": string;
-            };
-            path: {
-                runId: string;
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Document bytes */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": Blob;
-                };
-            };
-            /** @description Signature verification failed */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description run_not_found | document not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description run_sink_closed | run_sink_expired */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -19965,11 +19908,6 @@ export interface operations {
                     /** @constant */
                     datacontenttype: "application/json";
                     data: Record<string, never>;
-                    /**
-                     * Format: uri
-                     * @description OPTIONAL CloudEvents attribute identifying the JSON Schema the `data` payload adheres to. Emitted for canonical event types (e.g. `https://schemas.afps.dev/v0/events/memory.added.schema.json`); absent for third-party `@scope/tool.verb` events.
-                     */
-                    dataschema?: string;
                     sequence: number;
                 };
             };
@@ -20157,6 +20095,226 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    fetchRunFilesManifest: {
+        parameters: {
+            query?: never;
+            header: {
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Files manifest */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        files: {
+                            /** @description The file's human display name (may repeat across entries). */
+                            name: string;
+                            /** @description Unique single path segment the agent writes the file to under `workspace/files/` and fetches its bytes by. */
+                            workspace_name: string;
+                            size: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description duplicate_file_name — the stored manifest has colliding workspace names */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signature verification failed */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_found | no input files */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_sink_closed | run_sink_expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    publishRunFile: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request without it is a 400. */
+                "X-File-Name": string;
+                /** @description MIME type of the file bytes. */
+                "Content-Type": string;
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": Blob;
+            };
+        };
+        responses: {
+            /** @description Idempotent replay — an identical (run, sha256, name) file already existed; the existing file is returned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        uri: string;
+                        name: string;
+                        mime: string;
+                        size: number;
+                        sha256: string;
+                    };
+                };
+            };
+            /** @description File stored */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @description `appfile://<id>` durable URI. */
+                        uri: string;
+                        name: string;
+                        mime: string;
+                        size: number;
+                        sha256: string;
+                    };
+                };
+            };
+            /** @description X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signature verification failed */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description storage_limit_exceeded */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's file budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_sink_closed | run_sink_expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `payload_too_large` — the file exceeds the per-file cap (`FILE_MAX_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell "one file too big" from "too many files". */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    fetchRunFile: {
+        parameters: {
+            query?: never;
+            header: {
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Signature verification failed */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_found | file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_sink_closed | run_sink_expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
     extendRunSink: {
         parameters: {
             query?: never;
@@ -20252,8 +20410,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -20277,6 +20435,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getSchedule: {
@@ -20285,8 +20444,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20310,7 +20469,7 @@ export interface operations {
                      *       "userId": "usr_r3t5w8y1z6",
                      *       "endUserId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "applicationId": "app_r3t5w8y1z6",
+                     *       "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                      *       "name": "Weekday morning sort",
                      *       "enabled": true,
                      *       "cron_expression": "0 9 * * 1-5",
@@ -20319,7 +20478,6 @@ export interface operations {
                      *         "folder": "inbox",
                      *         "maxEmails": 50
                      *       },
-                     *       "config_override": null,
                      *       "generation_config_override": null,
                      *       "model_id_override": null,
                      *       "proxy_id_override": null,
@@ -20331,13 +20489,17 @@ export interface operations {
                      *       "createdAt": "2026-01-14T14:00:00Z",
                      *       "updatedAt": "2026-01-15T09:00:05Z",
                      *       "actor_name": "Pierre",
-                     *       "actor_type": "user"
+                     *       "actor_type": "user",
+                     *       "running_runs": 0,
+                     *       "unread_count": 2,
+                     *       "last_run_number": 12
                      *     }
                      */
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -20347,8 +20509,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20363,23 +20525,21 @@ export interface operations {
                     timezone?: string;
                     enabled?: boolean;
                     input?: Record<string, never>;
-                    /** @description Per-schedule config delta. Pass `null` to clear the override. */
-                    config_override?: Record<string, never> | null;
                     /** @description Temperature/reasoning overrides for scheduled runs. Pass null to clear. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"] | null;
                     model_id_override?: string | null;
                     proxy_id_override?: string | null;
                     /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only). */
                     version_override?: string | null;
-                    /** @description Per-integration connection picks frozen on the schedule. Pass `null` to clear. */
+                    /** @description Per-integration connection picks frozen on the schedule. Pass `null` to clear. Values must be non-empty — same rule as on create. */
                     connection_overrides?: {
                         [key: string]: string;
                     } | null;
-                    /** @description Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. */
+                    /** @description Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. */
                     dependency_overrides?: {
                         [key: string]: string;
                     } | null;
-                    /** @description Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`. */
+                    /** @description Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`. */
                     actor?: {
                         user_id?: string;
                         end_user_id?: string;
@@ -20399,7 +20559,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression or invalid input. */
+            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), or invalid input. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -20410,7 +20570,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["NoPublishedVersion"];
         };
     };
     deleteSchedule: {
@@ -20419,8 +20579,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20447,7 +20607,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                offset?: number;
+                /** @description Number of items to skip before the first returned item. */
+                offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated lifecycle statuses. */
                 status?: string;
                 /** @description Search agent name, scope, error or run number. */
@@ -20456,8 +20617,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20484,6 +20645,1106 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listSpaces: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "object": "list",
+                     *       "data": [
+                     *         {
+                     *           "id": "spc_0a2b4c6d-8e10-4f32-9a54-b6c8d0e2f416",
+                     *           "object": "space",
+                     *           "orgId": "550e8400-e29b-41d4-a716-446655440000",
+                     *           "name": "Default",
+                     *           "isDefault": true,
+                     *           "settings": {
+                     *             "allowedRedirectDomains": []
+                     *           },
+                     *           "visibility": "open",
+                     *           "default_role": "operator",
+                     *           "access": "member",
+                     *           "role": {
+                     *             "kind": "preset",
+                     *             "key": "operator",
+                     *             "name": "operator"
+                     *           },
+                     *           "permissions": [
+                     *             "agents:read",
+                     *             "agents:run"
+                     *           ],
+                     *           "created_by": null,
+                     *           "createdAt": "2026-01-10T08:00:00Z",
+                     *           "updatedAt": "2026-01-10T08:00:00Z"
+                     *         },
+                     *         {
+                     *           "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                     *           "object": "space",
+                     *           "orgId": "550e8400-e29b-41d4-a716-446655440000",
+                     *           "name": "My SaaS App",
+                     *           "isDefault": false,
+                     *           "settings": {
+                     *             "allowedRedirectDomains": [
+                     *               "myapp.com"
+                     *             ]
+                     *           },
+                     *           "visibility": "closed",
+                     *           "default_role": "operator",
+                     *           "access": "none",
+                     *           "role": null,
+                     *           "permissions": [
+                     *             "org:read",
+                     *             "spaces:read"
+                     *           ],
+                     *           "created_by": "usr_k7x9m2p4q1",
+                     *           "createdAt": "2026-01-15T10:30:00Z",
+                     *           "updatedAt": "2026-01-15T10:30:00Z"
+                     *         }
+                     *       ],
+                     *       "hasMore": false
+                     *     }
+                     */
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["SpaceObject"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ViewAsRefused"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createSpace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Human-readable space name */
+                    name: string;
+                    /** @description Space settings */
+                    settings?: {
+                        /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
+                        allowedRedirectDomains?: string[];
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description Space created */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                     *       "object": "space",
+                     *       "orgId": "550e8400-e29b-41d4-a716-446655440000",
+                     *       "name": "My SaaS App",
+                     *       "isDefault": false,
+                     *       "settings": {
+                     *         "allowedRedirectDomains": [
+                     *           "myapp.com",
+                     *           "staging.myapp.com"
+                     *         ]
+                     *       },
+                     *       "visibility": "open",
+                     *       "default_role": "operator",
+                     *       "access": "member",
+                     *       "role": {
+                     *         "kind": "preset",
+                     *         "key": "admin",
+                     *         "name": "admin"
+                     *       },
+                     *       "permissions": [
+                     *         "agents:read",
+                     *         "agents:run"
+                     *       ],
+                     *       "created_by": "usr_k7x9m2p4q1",
+                     *       "createdAt": "2026-01-15T10:30:00Z",
+                     *       "updatedAt": "2026-01-15T10:30:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["SpaceObject"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getSpace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space detail */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceObject"];
+                };
+            };
+            400: components["responses"]["ViewAsRefused"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteSpace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space deleted */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSpace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Human-readable space name */
+                    name?: string;
+                    /** @description Space settings */
+                    settings?: {
+                        /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
+                        allowedRedirectDomains?: string[];
+                    };
+                    /**
+                     * @description Who reaches the space without an explicit membership row. The default space must stay `open`.
+                     * @enum {string}
+                     */
+                    visibility?: "open" | "closed" | "private";
+                    /**
+                     * @description Preset the implicit members of an `open` space hold
+                     * @enum {string}
+                     */
+                    default_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                };
+            };
+        };
+        responses: {
+            /** @description Space updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceObject"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listSpaceMembers: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space member list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["SpaceMemberObject"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ViewAsRefused"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    addSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    userId?: string;
+                    /** Format: email */
+                    email?: string;
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    custom_role_id?: string;
+                } & ((unknown | unknown) & (unknown | unknown));
+            };
+        };
+        responses: {
+            /** @description Space member added */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberAssignment"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner/admin (`redundant_space_role`) or already has an explicit role (`space_member_exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    removeSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Space member removed */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberRemoval"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSpaceMember: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                id: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    custom_role_id?: string;
+                } & (unknown | unknown);
+            };
+        };
+        responses: {
+            /** @description Space member role changed */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpaceMemberAssignment"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner or admin — an explicit space role would grant nothing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listAssignableSpaceRoles: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assignable space roles */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["RoleObject"][];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ViewAsRefused"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getSpaceSmtpConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SMTP configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmtpConfigView"];
+                };
+            };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Space or configuration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    upsertSpaceSmtpConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    host: string;
+                    port: number;
+                    username: string;
+                    pass: string;
+                    /** Format: email */
+                    fromAddress: string;
+                    /** @description Rejects quotes and CRLF to prevent email-header injection at send time. */
+                    fromName?: string;
+                    /** @enum {string} */
+                    secureMode?: "auto" | "tls" | "starttls" | "none";
+                };
+            };
+        };
+        responses: {
+            /** @description SMTP configuration saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmtpConfigView"];
+                };
+            };
+            /** @description Validation error (invalid host / SSRF block) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Space or configuration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteSpaceSmtpConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Space or configuration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    testSpaceSmtpConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    to: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Test email sent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok: boolean;
+                        messageId: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            /** @description Space or configuration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getSpaceSocialProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                provider: "google" | "github";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Social provider configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialProviderView"];
+                };
+            };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Space or configuration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    upsertSpaceSocialProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                provider: "google" | "github";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    clientId: string;
+                    clientSecret: string;
+                    scopes?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Social provider configuration saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialProviderView"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Space or configuration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteSpaceSocialProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                provider: "google" | "github";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Space or configuration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listInstalledPackages: {
+        parameters: {
+            query?: {
+                /** @description Filter by package type */
+                type?: "agent" | "skill" | "mcp-server" | "integration";
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                spaceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installed packages list */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["SpacePackage"][];
+                        /** @description Whether more results exist beyond this page */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    installPackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                spaceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Package ID from org catalog */
+                    packageId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Package installed */
+            201: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Package already installed in this space */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    getInstalledPackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                spaceId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Installed package detail */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateInstalledPackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                spaceId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
+                    modelId?: string | null;
+                    proxyId?: string | null;
+                    version_id?: number | null;
+                    enabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated installed package */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uninstallPackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                spaceId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Package uninstalled */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getSpacePackageRunConfig: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                spaceId: string;
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolved run configuration */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "generation": {
+                     *         "temperature": 0.2,
+                     *         "reasoningLevel": "high"
+                     *       },
+                     *       "modelId": "claude-sonnet-4-6",
+                     *       "proxyId": null,
+                     *       "version_pin": "1.2.3",
+                     *       "input": {
+                     *         "values": {
+                     *           "dry_run": true
+                     *         },
+                     *         "locked_fields": [
+                     *           "dry_run"
+                     *         ]
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        generation: components["schemas"]["ModelGenerationSettings"] | null;
+                        modelId: string | null;
+                        proxyId: string | null;
+                        version_pin: string | null;
+                        /** @description Stored input layer for this space — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field. */
+                        input: components["schemas"]["AgentInputSettings"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createUpload: {
@@ -20492,8 +21753,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
-                "X-Application-Id"?: components["parameters"]["XAppId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -20651,14 +21912,16 @@ export interface operations {
     listWebhooks: {
         parameters: {
             query?: {
-                /** @description Filter — include webhooks pinned to this application (plus org-level). */
-                applicationId?: string;
-                /** @description When `true`, return all webhooks in the org (org-level + every application-level). Overrides `applicationId`. */
+                /** @description Filter — include webhooks pinned to this space (plus org-level). */
+                spaceId?: string;
+                /** @description When `true`, span every space in the org (org-level + every space-level). Requires `org-webhooks:read`. Overrides `spaceId`. */
                 all?: "true";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path?: never;
             cookie?: never;
@@ -20680,8 +21943,8 @@ export interface operations {
                      *         {
                      *           "id": "wh_cm1abc123",
                      *           "object": "webhook",
-                     *           "level": "application",
-                     *           "applicationId": "app_cm4jkl013",
+                     *           "level": "space",
+                     *           "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                      *           "url": "https://example.com/webhooks/appstrate",
                      *           "events": [
                      *             "run.success",
@@ -20707,6 +21970,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -20716,7 +21980,9 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -20740,9 +22006,9 @@ export interface operations {
                     enabled?: boolean;
                 } | {
                     /** @enum {string} */
-                    level: "application";
-                    /** @description Application ID (app_ prefix) */
-                    applicationId: string;
+                    level: "space";
+                    /** @description Space ID (spc_ prefix) */
+                    spaceId: string;
                     /** Format: uri */
                     url: string;
                     events: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing")[];
@@ -20773,8 +22039,8 @@ export interface operations {
                      * @example {
                      *       "id": "wh_cm1abc123",
                      *       "object": "webhook",
-                     *       "level": "application",
-                     *       "applicationId": "app_cm4jkl013",
+                     *       "level": "space",
+                     *       "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                      *       "url": "https://example.com/webhooks/appstrate",
                      *       "events": [
                      *         "run.success",
@@ -20797,6 +22063,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyInProgress"];
             422: components["responses"]["IdempotencyConflict"];
             429: components["responses"]["RateLimited"];
@@ -20808,6 +22075,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20828,8 +22097,8 @@ export interface operations {
                      * @example {
                      *       "id": "wh_cm1abc123",
                      *       "object": "webhook",
-                     *       "level": "application",
-                     *       "applicationId": "app_cm4jkl013",
+                     *       "level": "space",
+                     *       "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                      *       "url": "https://example.com/webhooks/appstrate",
                      *       "events": [
                      *         "run.success",
@@ -20857,6 +22126,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20889,8 +22160,8 @@ export interface operations {
                      * @example {
                      *       "id": "wh_cm1abc123",
                      *       "object": "webhook",
-                     *       "level": "application",
-                     *       "applicationId": "app_cm4jkl013",
+                     *       "level": "space",
+                     *       "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                      *       "url": "https://example.com/webhooks/appstrate",
                      *       "events": [
                      *         "run.success",
@@ -20919,6 +22190,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -20949,6 +22222,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -21017,6 +22292,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -21073,6 +22350,8 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
             path: {
                 id: string;
@@ -21169,6 +22448,9 @@ export interface operations {
                      *         },
                      *         "agents": {
                      *           "status": "healthy"
+                     *         },
+                     *         "realtime": {
+                     *           "status": "healthy"
                      *         }
                      *       }
                      *     }
@@ -21189,6 +22471,11 @@ export interface operations {
                             };
                             /** @description Agent runtime readiness established during platform boot. */
                             agents?: {
+                                /** @enum {string} */
+                                status?: "healthy" | "degraded";
+                            };
+                            /** @description PG LISTEN fan-out behind the realtime SSE streams. `degraded` when a channel failed to install. Advisory: not part of the top-level `status`. */
+                            realtime?: {
                                 /** @enum {string} */
                                 status?: "healthy" | "degraded";
                             };
@@ -21309,7 +22596,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. */
+            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. A fourth cause is unique to this operation: `connect_run_no_refresh` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21342,7 +22629,7 @@ export interface operations {
     getMcpServerBundle: {
         parameters: {
             query?: {
-                /** @description Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). When omitted, the latest non-yanked version is served. */
+                /** @description Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). Required for every mcp-server the spawn resolver pinned a version for; omitted only for system mcp-servers, which the route short-circuits to the in-memory boot registry by id alone. */
                 version?: string;
             };
             header?: never;
@@ -21365,9 +22652,10 @@ export interface operations {
                     "application/zip": Blob;
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Agent does not reference this mcp-server through an installed integration, or no published version exists. */
+            /** @description Agent does not reference this mcp-server through an installed integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -21585,7 +22873,12 @@ export interface operations {
                      *       "name": "Acme Corp",
                      *       "slug": "acme-corp",
                      *       "role": "member",
-                     *       "createdAt": "2026-01-10T08:00:00Z"
+                     *       "permissions": [
+                     *         "org:read",
+                     *         "spaces:read"
+                     *       ],
+                     *       "createdAt": "2026-01-10T08:00:00Z",
+                     *       "deleting_at": null
                      *     }
                      */
                     "application/json": components["schemas"]["Organization"];
@@ -21676,6 +22969,12 @@ export interface operations {
                      *       "email": "newuser@example.com",
                      *       "org_name": "Acme Corp",
                      *       "role": "member",
+                     *       "space_assignments": [
+                     *         {
+                     *           "space_id": "spc_...",
+                     *           "preset_role": "operator"
+                     *         }
+                     *       ],
                      *       "inviter_name": "Alice Martin",
                      *       "expiresAt": "2026-02-15T10:30:00Z",
                      *       "is_new_user": true
@@ -21685,7 +22984,9 @@ export interface operations {
                         email: string;
                         org_name: string;
                         /** @enum {string} */
-                        role: "owner" | "admin" | "member" | "viewer";
+                        role: "owner" | "admin" | "member" | "guest";
+                        /** @description Space memberships applied when the invitation is accepted. */
+                        space_assignments: components["schemas"]["SpaceAssignment"][];
                         inviter_name: string;
                         expiresAt: string;
                         is_new_user: boolean;

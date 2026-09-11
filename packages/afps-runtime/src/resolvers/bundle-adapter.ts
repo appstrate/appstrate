@@ -32,31 +32,3 @@ export function resolvePackageRef(bundle: Bundle, ref: DependencyRef): BundlePac
   }
   return null;
 }
-
-/**
- * Read a text file from a package, throwing when absent. Convenience
- * over the raw `Map.get` + decode dance that every resolver would
- * otherwise duplicate.
- */
-export function readPackageText(pkg: BundlePackage, relativePath: string): string {
-  const bytes = pkg.files.get(relativePath);
-  if (!bytes) {
-    throw new Error(
-      `package ${pkg.identity}: file ${relativePath} not found (have: ${[...pkg.files.keys()].join(", ")})`,
-    );
-  }
-  return new TextDecoder().decode(bytes);
-}
-
-/**
- * Read raw bytes from a package, throwing when absent.
- */
-export function readPackageBytes(pkg: BundlePackage, relativePath: string): Uint8Array {
-  const bytes = pkg.files.get(relativePath);
-  if (!bytes) {
-    throw new Error(
-      `package ${pkg.identity}: file ${relativePath} not found (have: ${[...pkg.files.keys()].join(", ")})`,
-    );
-  }
-  return bytes;
-}

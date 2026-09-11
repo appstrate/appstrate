@@ -9,7 +9,9 @@
  *   wrappers around the same client, with automatic query keys.
  *
  * Middleware injects platform context and normalizes errors:
- * - `X-Org-Id` / `X-Application-Id` headers injected from the org/app stores
+ * - `X-Org-Id` / `X-Space-Id` headers injected from the org/space stores
+ * - a non-2xx answer to a request that carried a role preview ends the preview
+ *   when the persona itself was refused (`lib/view-as-refusal.ts`)
  * - non-2xx responses throw `ApiError` (RFC 9457 problem details), so React
  *   Query errors are `instanceof ApiError` with `code`/`status`/`requestId`.
  *   Note: because errors are thrown, the `{ error }` branch of direct
@@ -20,6 +22,7 @@ import createReactQueryClient from "openapi-react-query";
 import type { components, paths } from "./schema";
 import { ApiError } from "./errors";
 import { buildScopingHeaders } from "../lib/scoping-headers";
+import { noteViewAsRefusal } from "../lib/view-as-refusal";
 
 type ProblemDetail = components["schemas"]["ProblemDetail"];
 
@@ -80,28 +83,43 @@ const orgContext: Middleware = {
   },
 };
 
+/**
+ * Normalizes a non-2xx response into the error the caller sees. A body with an
+ * RFC 9457 `code` becomes an `ApiError` carrying the problem details; anything
+ * else (an HTML error page, a bare status) degrades to a plain `Error` whose
+ * message is the `detail`, the `statusText`, or the status itself — never an
+ * unhelpful parse failure.
+ */
+export async function toApiError(response: Response): Promise<Error> {
+  const body: Partial<ProblemDetail> = await response
+    .clone()
+    .json()
+    .catch(() => ({ detail: response.statusText }));
+  if (body.code) {
+    return new ApiError(
+      body.code,
+      body.detail || `API Error: ${response.status}`,
+      response.status,
+      // `ApiError.details` is intentionally an open record: the spec models
+      // `errors` as a typed array, but runtime problem bodies are polymorphic
+      // by `code` (validation → array of field errors; conflict codes →
+      // code-specific object), so consumers narrow per `code`. The cast
+      // bridges the spec's array type to that open shape.
+      body.errors as unknown as Record<string, unknown> | undefined,
+      body.requestId,
+      body.param,
+    );
+  }
+  return new Error(body.detail || `API Error: ${response.status}`);
+}
+
 const problemDetailErrors: Middleware = {
-  async onResponse({ response }) {
+  async onResponse({ request, response }) {
     if (response.ok) return response;
-    const body: Partial<ProblemDetail> = await response
-      .clone()
-      .json()
-      .catch(() => ({ detail: response.statusText }));
-    if (body.code) {
-      throw new ApiError(
-        body.code,
-        body.detail || `API Error: ${response.status}`,
-        response.status,
-        // `ApiError.details` is intentionally an open record: the spec models
-        // `errors` as a typed array, but runtime problem bodies are polymorphic
-        // by `code` (validation → array of field errors; conflict codes →
-        // code-specific object), so consumers narrow per `code`. The cast
-        // bridges the spec's array type to that open shape.
-        body.errors as unknown as Record<string, unknown> | undefined,
-        body.requestId,
-      );
-    }
-    throw new Error(body.detail || `API Error: ${response.status}`);
+    // Before the throw, and for every route: a refused role preview must end
+    // the preview wherever it is noticed, not only on the org listing.
+    await noteViewAsRefusal(request.headers, response);
+    throw await toApiError(response);
   },
 };
 

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Turn-budget propagation for `run_and_wait` — ONE implementation shared by both
- * chat engines (`pi-chat/mcp-tools.ts` and `platform-mcp.ts`).
+ * Turn-budget propagation for `run_and_wait`, consumed by
+ * `pi-chat/mcp-tools.ts`.
  *
  * The defect this closes: `RUN_AND_WAIT_MAX_MS` is 30 minutes and the chat
- * ever passed `maxMs`, so a tool call was allowed to wait THREE TIMES longer
+ * never passed `maxMs`, so a tool call was allowed to wait THREE TIMES longer
  * than the 10-minute turn hosting it. Measured consequence: a run launched at
  * T+9:38 of a 10-minute turn, the turn died 22 s later, the run succeeded 2
  * minutes after that and its output was orphaned — 4.68 USD for nothing.
@@ -28,7 +28,7 @@ import {
   formatBudgetDuration,
 } from "@appstrate/core/chat-turn-metadata";
 import {
-  runAndWaitStepsWithDocuments,
+  runAndWaitStepsWithFiles,
   type RunAndWaitClientOptions,
   type RunAndWaitStep,
 } from "@appstrate/core/run-and-wait-client";
@@ -36,7 +36,7 @@ import { logger } from "./logger.ts";
 import { stampChatSessionOnRun } from "./run-reconcile.ts";
 
 /** The turn's time budget, as seen by a tool call inside it. */
-export interface TurnBudgetContext {
+interface TurnBudgetContext {
   /** Absolute wall-clock instant the turn ends (`turnStart + CHAT_TURN_DEADLINE_MS`). */
   turnDeadlineAt: number;
   /**
@@ -57,7 +57,7 @@ export interface BudgetLogger {
   warn(message: string, fields?: Record<string, unknown>): void;
 }
 
-export type RunBudgetDecision =
+type RunBudgetDecision =
   { launch: true; maxMs: number } | { launch: false; payload: Record<string, unknown> };
 
 /**
@@ -109,7 +109,7 @@ export function decideRunAndWaitBudget(
 }
 
 /**
- * {@link runAndWaitStepsWithDocuments}, bounded by the hosting turn's deadline.
+ * {@link runAndWaitStepsWithFiles}, bounded by the hosting turn's deadline.
  * The chat's `run_and_wait` calls THIS — the gate, the `maxMs` derivation and the
  * launching-session link exist once.
  *
@@ -125,7 +125,7 @@ export function decideRunAndWaitBudget(
 export async function* runAndWaitStepsWithinTurnBudget(
   rawArgs: unknown,
   opts: Omit<RunAndWaitClientOptions, "maxMs"> & { budget: TurnBudgetContext },
-  steps: typeof runAndWaitStepsWithDocuments = runAndWaitStepsWithDocuments,
+  steps: typeof runAndWaitStepsWithFiles = runAndWaitStepsWithFiles,
   linkRun: typeof stampChatSessionOnRun = stampChatSessionOnRun,
 ): AsyncGenerator<RunAndWaitStep> {
   const { budget, ...clientOpts } = opts;

@@ -44,7 +44,7 @@ describe("pickModel liveness", () => {
     // credential is gone, and that is the fix to name.
     expect(() =>
       pickModel([model("preset_dead", { needs_reconnection: true })], "preset_dead"),
-    ).toThrow(/reconnexion|rétablie/i);
+    ).toThrow(/re-established/i);
   });
 
   it("fails clearly when every model is dead", () => {
@@ -55,13 +55,13 @@ describe("pickModel liveness", () => {
         model("preset_a", { is_default: true, needs_reconnection: true }),
         model("preset_b", { needs_reconnection: true }),
       ]),
-    ).toThrow(/rétablie/i);
+    ).toThrow(/re-established/i);
   });
 
   it("keeps the family fallback for a configured but unusable family", () => {
     // Unchanged path: nothing chat-usable at all is a different diagnosis.
     expect(() => pickModel([model("preset_1", { apiShape: "google-generative-ai" })])).toThrow(
-      /Aucun modèle utilisable/,
+      /No chat-usable model is configured/,
     );
   });
 });

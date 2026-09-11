@@ -54,12 +54,41 @@ export interface ResolutionFieldError extends ValidationFieldError {
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
-  /** `insufficient_scopes` — true when the under-scoped connection belongs to the calling actor. */
+  /**
+   * `insufficient_scopes` / `not_connected` / `needs_reconnection` — OAuth
+   * scopes the run's selected tools require on `auth_key`. Forward as `scopes`
+   * when starting the connect flow so the consent covers them.
+   */
+  required_scopes?: string[];
+  /**
+   * `insufficient_scopes` / `not_connected` / `needs_reconnection` — auth key
+   * of the integration manifest the connect flow must target
+   * (`/auths/{authKey}/connect/...`).
+   */
+  auth_key?: string;
+  /**
+   * `insufficient_scopes` / `needs_reconnection` — true when the connection to
+   * repair belongs to the calling actor. Both remedies re-consent that row, so
+   * a foreign-owned one is a read-only error.
+   */
   owned_by_actor?: boolean;
   /** `auth_key_mismatch` — the agent dep's pinned `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
+  /**
+   * Ready-to-open hosted-connect link for THIS item. Present only on a
+   * run-kickoff 412 whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
+   * docblock states who may), and only on the items an oauth2 connect flow can
+   * clear for the calling actor. Single-use and short-lived (`expires_at`):
+   * open it — never store it, and never call the connect kickoff as well,
+   * which would mint a second link.
+   */
+  connect_url?: string;
+  /** Absolute expiry (epoch ms) of `connect_url`. */
+  expires_at?: number;
+  /** Integration package id `connect_url` connects (`@scope/name`). */
+  package_id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +102,23 @@ function codeToType(code: string): string {
 }
 
 /**
+ * Keys `ProblemDetail` owns. An extension member may never take one of these,
+ * present in this instance or not — see `toProblemDetail`.
+ */
+const RESERVED_PROBLEM_KEYS: ReadonlySet<string> = new Set<string>([
+  "type",
+  "title",
+  "status",
+  "detail",
+  "instance",
+  "code",
+  "requestId",
+  "param",
+  "retryAfter",
+  "errors",
+]);
+
+/**
  * Throwable API error that serialises to RFC 9457 Problem Details.
  * Middleware catches it and sends the response automatically.
  */
@@ -84,6 +130,7 @@ export class ApiError extends Error {
   readonly retryAfter?: number;
   readonly fieldErrors?: ValidationFieldError[];
   readonly headers?: Record<string, string>;
+  readonly extensions?: Readonly<Record<string, unknown>>;
 
   constructor(opts: {
     status: number;
@@ -94,8 +141,32 @@ export class ApiError extends Error {
     retryAfter?: number;
     errors?: ValidationFieldError[];
     headers?: Record<string, string>;
+    /**
+     * RFC 9457 §3.2 extension members merged into the problem body. Use for
+     * the machine-readable half of an error the client must act on — never for
+     * internal detail, which belongs in `cause` (log-only).
+     */
+    extensions?: Readonly<Record<string, unknown>>;
+    /**
+     * The underlying failure, when this error is raised from a `catch`.
+     *
+     * ESLint's `preserve-caught-error` only inspects `throw new <builtin
+     * Error>`, so it cannot see a custom class — this parameter is what makes
+     * the obligation expressible for the one thrown ~20 times inside a catch.
+     * Same treatment `PackageZipError` got, adapted to this class's
+     * single-options-object shape.
+     *
+     * It is LOG-ONLY. {@link ApiError.toProblemDetail} reads `message` and
+     * never `cause`, because a cause routinely holds internal detail (SQL
+     * constraint names, upstream URLs) and the problem body is a public
+     * contract. The API error handler is what renders it, into the log.
+     */
+    cause?: unknown;
   }) {
-    super(opts.detail);
+    // Only pass ErrorOptions when there IS a cause, so an ApiError raised
+    // outside a catch carries no `cause` own property at all rather than one
+    // set to `undefined`.
+    super(opts.detail, opts.cause === undefined ? undefined : { cause: opts.cause });
     this.name = "ApiError";
     this.status = opts.status;
     this.code = opts.code;
@@ -104,6 +175,7 @@ export class ApiError extends Error {
     this.retryAfter = opts.retryAfter;
     this.fieldErrors = opts.errors;
     this.headers = opts.headers;
+    this.extensions = opts.extensions;
   }
 
   /** Serialise to RFC 9457 Problem Details body. */
@@ -120,6 +192,19 @@ export class ApiError extends Error {
     if (this.param !== undefined) body.param = this.param;
     if (this.retryAfter !== undefined) body.retryAfter = this.retryAfter;
     if (this.fieldErrors?.length) body.errors = this.fieldErrors;
+    // RFC 9457 §3.2 extension members, written last and only into keys the
+    // standard fields do not own. The guard is the RESERVED SET, not
+    // `key in body`: an optional standard field that happens to be absent from
+    // this particular problem (`param`, `errors`) would otherwise be
+    // overwritable by an extension, and a client branching on `errors` cannot
+    // tell a real validation list from an extension that took the name. The
+    // cast is deliberate — `ProblemDetail` stays a closed shape so a typo in a
+    // standard field is still a compile error.
+    const extensible = body as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(this.extensions ?? {})) {
+      if (RESERVED_PROBLEM_KEYS.has(key)) continue;
+      extensible[key] = value;
+    }
     return body;
   }
 }
@@ -204,12 +289,17 @@ export function notFound(detail: string): ApiError {
   });
 }
 
-export function conflict(code: string, detail: string): ApiError {
+export function conflict(
+  code: string,
+  detail: string,
+  extensions?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError({
     status: 409,
     code,
     title: "Conflict",
     detail,
+    extensions,
   });
 }
 
@@ -247,17 +337,17 @@ export function payloadTooLarge(detail: string): ApiError {
 }
 
 /**
- * 413 with a distinct `document_count_exceeded` problem type — the number of
- * documents a run may reference as input or publish as output
- * (`RUN_MAX_DOCUMENTS`) would be exceeded. Mirrors the per-file 413
+ * 413 with a distinct `file_count_exceeded` problem type — the number of
+ * files a run may reference as input or publish as output
+ * (`RUN_MAX_FILES`) would be exceeded. Mirrors the per-file 413
  * ({@link payloadTooLarge}) but branches separately so a client can tell "too
  * many files" from "one file too big".
  */
-export function documentCountExceeded(detail: string): ApiError {
+export function fileCountExceeded(detail: string): ApiError {
   return new ApiError({
     status: 413,
-    code: "document_count_exceeded",
-    title: "Document Count Exceeded",
+    code: "file_count_exceeded",
+    title: "File Count Exceeded",
     detail,
   });
 }
@@ -413,15 +503,37 @@ export function renderFieldPath(path: readonly PropertyKey[]): string {
  * When neither a path nor a fallback is available the field defaults to
  * `"body"` rather than the empty string, so clients always receive a usable
  * pointer.
+ *
+ * `unrecognized_keys` is the one issue that does NOT name its field through
+ * `path`: Zod reports the container's path (EMPTY for a top-level body) and
+ * puts the offending names in `issue.keys`. Routing it through the generic
+ * branch therefore blamed `fallbackField` — so `PUT /agents/{scope}/{name}/
+ * skills` (`param: "skillIds"`) answered `field: "skillIds"` for a body whose
+ * `skillIds` was perfectly valid, naming the one field the client got right.
+ * Each unrecognized key gets its OWN entry, appended to the container path, so
+ * `{ extra, other }` yields two actionable pointers instead of one ambiguous
+ * combined message.
  */
 export function zodIssuesToFieldErrors(
   issues: readonly z.core.$ZodIssue[],
   fallbackField?: string,
 ): ValidationFieldError[] {
-  return issues.map((issue) => {
+  return issues.flatMap((issue) => {
+    if (issue.code === "unrecognized_keys" && issue.keys.length > 0) {
+      const single = issue.keys.length === 1;
+      return issue.keys.map((key) => ({
+        field: renderFieldPath([...issue.path, key]),
+        code: mapZodCode(issue),
+        // One key: Zod's own message already names exactly that key, so it is
+        // reused verbatim. Several: the combined message lists them all, which
+        // would repeat every key on every entry — render the per-key form in
+        // Zod's own spelling instead.
+        message: single ? issue.message : `Unrecognized key: ${JSON.stringify(key)}`,
+      }));
+    }
     const path = renderFieldPath(issue.path);
     const field = path || fallbackField || "body";
-    return { field, code: mapZodCode(issue), message: issue.message };
+    return [{ field, code: mapZodCode(issue), message: issue.message }];
   });
 }
 
@@ -429,7 +541,9 @@ export function zodIssuesToFieldErrors(
  * Parse a request body with a Zod schema. On failure throws a 400 with every
  * issue populated in `errors[]` so clients receive all problems in one call.
  * The optional `param` is a fallback used when Zod reports an empty path —
- * never as a prefix on top of a resolved path.
+ * never as a prefix on top of a resolved path, and never for an
+ * `unrecognized_keys` issue, which names its own field (see
+ * {@link zodIssuesToFieldErrors}).
  */
 export function parseBody<T extends z.ZodType>(
   schema: T,

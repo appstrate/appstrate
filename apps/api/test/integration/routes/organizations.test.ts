@@ -67,6 +67,71 @@ describe("Organizations API", () => {
       const res = await app.request("/api/orgs");
       expect(res.status).toBe(401);
     });
+
+    // RBAC spec §6.5 — each item carries the caller's ORG-LEVEL effective set
+    // in that org, so the SPA never re-derives anything from `role`.
+    describe("permissions", () => {
+      async function permissionsFor(
+        role: "owner" | "admin" | "member" | "guest",
+      ): Promise<string[]> {
+        const ctx = await createTestContext({ orgSlug: `perms-${role}` });
+        let cookie = ctx.cookie;
+        if (role !== "owner") {
+          const other = await createTestUser({ email: `perms-${role}@test.com` });
+          await addOrgMember(ctx.orgId, other.id, role);
+          cookie = other.cookie;
+        }
+        const res = await app.request("/api/orgs", { headers: { Cookie: cookie } });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: { id: string; permissions: string[] }[] };
+        return body.data.find((o) => o.id === ctx.orgId)!.permissions;
+      }
+
+      it("gives an owner the org-level set including org:delete", async () => {
+        const perms = await permissionsFor("owner");
+        expect(perms).toContain("org:delete");
+        expect(perms).toContain("members:invite");
+        // Space-level strings never appear on an org listing item.
+        expect(perms).not.toContain("agents:read");
+      });
+
+      it("gives a member reads but not member administration", async () => {
+        const perms = await permissionsFor("member");
+        expect(perms).toContain("org:read");
+        expect(perms).toContain("members:read");
+        expect(perms).not.toContain("members:invite");
+        expect(perms).not.toContain("org:delete");
+      });
+
+      it("gives a guest no view of the org directory", async () => {
+        const perms = await permissionsFor("guest");
+        expect(perms).toContain("org:read");
+        expect(perms).toContain("spaces:read");
+        expect(perms).not.toContain("members:read");
+      });
+
+      it("narrows an API key's item to the key's own scopes", async () => {
+        const ctx = await createTestContext({ orgSlug: "perms-apikey" });
+        const key = await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          // `agents:read` is space-level and `spaces:read` org-level: only the
+          // second can survive the org half, which is what makes this
+          // assertion discriminate between "ceiling applied" and "role set".
+          scopes: ["agents:read", "spaces:read"],
+        });
+
+        const res = await app.request("/api/orgs", {
+          headers: { Authorization: `Bearer ${key.rawKey}` },
+        });
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { data: { permissions: string[] }[] };
+        expect(body.data).toHaveLength(1);
+        expect(body.data[0]!.permissions).toEqual(["spaces:read"]);
+      });
+    });
   });
 
   describe("POST /api/orgs", () => {
@@ -243,10 +308,10 @@ describe("Organizations API", () => {
 
     it("exposes storage usage with a null limit when no quota is configured (issue #945)", async () => {
       const ctx = await createTestContext();
-      // Simulate stored documents by bumping the transactional byte counter.
+      // Simulate stored files by bumping the transactional byte counter.
       await db
         .update(organizations)
-        .set({ documentsBytesUsed: 2048 })
+        .set({ filesBytesUsed: 2048 })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
@@ -266,7 +331,7 @@ describe("Organizations API", () => {
       const ctx = await createTestContext();
       await db
         .update(organizations)
-        .set({ documentsBytesUsed: 100, documentsBytesLimit: 4096 })
+        .set({ filesBytesUsed: 100, filesBytesLimit: 4096 })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
@@ -287,7 +352,7 @@ describe("Organizations API", () => {
       const ctx = await createTestContext();
       await db
         .update(organizations)
-        .set({ documentsBytesUsed: 500 })
+        .set({ filesBytesUsed: 500 })
         .where(eq(organizations.id, ctx.orgId));
 
       const snapshot = process.env.ORG_STORAGE_QUOTA_BYTES;
@@ -337,34 +402,56 @@ describe("Organizations API", () => {
       expect(body).not.toHaveProperty("updatedAt");
     });
 
-    it("allows an admin to update the organization logo", async () => {
-      const ctx = await createTestContext({ orgSlug: "admin-logo-org" });
-      const admin = await createTestUser({ email: "admin-logo@test.com" });
+    // `logo` travels the same PUT as `name`, so it sits behind `org:update`
+    // too: the owner writes it, an admin no longer can.
+    it("allows an owner to update the organization logo", async () => {
+      const ctx = await createTestContext({ orgSlug: "owner-logo-org" });
+
+      const logoRes = await app.request(`/api/orgs/${ctx.orgId}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ logo: "emoji:🧠" }),
+      });
+
+      expect(logoRes.status).toBe(200);
+      const logoBody = (await logoRes.json()) as { logo?: string };
+      expect(logoBody.logo).toBe("emoji:🧠");
+    });
+
+    it("403s an admin — renaming the org is owner-only (org:update)", async () => {
+      // The route reads `org:update` from the matrix now; before Phase 1 it
+      // compared the role name. `admin` therefore must NOT hold `org:update`,
+      // or the conversion would have widened who can re-slug the org.
+      const ctx = await createTestContext({ orgSlug: "ownerorg" });
+      const admin = await createTestUser();
       await addOrgMember(ctx.orgId, admin.id, "admin");
 
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
         method: "PUT",
         headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
-        body: JSON.stringify({ logo: "emoji:🧠" }),
+        body: JSON.stringify({ name: "Admin Rename" }),
       });
+      expect(res.status).toBe(403);
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.logo).toBe("emoji:🧠");
+      // Discriminating control: the same admin CAN write the settings, so the
+      // 403 is about `org:update`, not about admins being locked out of the
+      // org routes wholesale.
+      const settings = await app.request(`/api/orgs/${ctx.orgId}/settings`, {
+        method: "PUT",
+        headers: { Cookie: admin.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ dashboard_sso_enabled: true }),
+      });
+      expect(settings.status).toBe(200);
     });
 
-    it("rejects a regular member updating the organization", async () => {
-      const ctx = await createTestContext({ orgSlug: "member-logo-org" });
-      const member = await createTestUser({ email: "member-logo@test.com" });
-      await addOrgMember(ctx.orgId, member.id, "member");
-
+    it("200s the owner on the same request", async () => {
+      const ctx = await createTestContext({ orgSlug: "ownerok" });
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
         method: "PUT",
-        headers: { Cookie: member.cookie, "Content-Type": "application/json" },
-        body: JSON.stringify({ logo: "emoji:🧠" }),
+        headers: { Cookie: ctx.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Owner Rename" }),
       });
-
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
     });
   });
 
@@ -500,7 +587,7 @@ describe("Organizations API", () => {
           headers: {
             Cookie: ctx.cookie,
             "X-Org-Id": ctx.orgId,
-            "X-Application-Id": ctx.defaultAppId,
+            "X-Space-Id": ctx.defaultSpaceId,
           },
         });
         expect(runs.status).toBe(400);
@@ -522,7 +609,7 @@ describe("Organizations API", () => {
         const ctx = await createTestContext();
         const key = await seedApiKey({
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           createdBy: ctx.user.id,
           name: "pin-lockout-key",
         });
@@ -715,6 +802,7 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
+        spaceAssignments: [],
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
@@ -735,6 +823,7 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
+        spaceAssignments: [],
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
@@ -757,6 +846,7 @@ describe("Organizations API", () => {
         "expiresAt",
         "id",
         "role",
+        "space_assignments",
         "token",
       ]);
 
@@ -836,6 +926,7 @@ describe("Organizations API", () => {
         orgId: ctx.orgId,
         role: "member",
         invitedBy: ctx.user.id,
+        spaceAssignments: [],
       });
 
       const res = await app.request(`/api/orgs/${ctx.orgId}/invitations/${invitation.id}`, {
@@ -864,9 +955,9 @@ describe("Organizations API", () => {
       const orgB = await createTestOrg(ctxA.user.id, { slug: "org-b-172" });
       const apiKey = await seedApiKey({
         orgId: ctxA.orgId,
-        applicationId: ctxA.defaultAppId,
+        spaceId: ctxA.defaultSpaceId,
         createdBy: ctxA.user.id,
-        scopes: ["agents:read", "applications:read", "applications:write", "applications:delete"],
+        scopes: ["agents:read", "spaces:read", "spaces:write", "spaces:delete"],
       });
       return {
         ctxA,
@@ -1013,15 +1104,15 @@ describe("Organizations API", () => {
 
   // ── CRIT-02 — API keys must not reach org administration ─────────────────
   //
-  // `requireOrgRole` (routes/organizations.ts) used to resolve the CREATOR's
-  // live membership row for API-key callers, so ANY key created by an owner —
-  // whatever its scopes (`runs:read` here) — inherited full org-admin rights.
-  // The fix rejects `authMethod === "api_key"` before the membership lookup.
+  // Org administration is org-level and session-only: `org:*` and `members:*`
+  // are absent from the API-key scope allowlist, so a key never holds them —
+  // whatever its creator's role, and whatever scopes it carries (`runs:read`
+  // here).
   //
   // Unlike the issue-#172 suite above (foreign org → apiKeyOrgScopeGuard),
-  // these requests target the key's OWN org: if the fix is reverted, the
-  // membership lookup finds the creator's owner row and every gated request
-  // below succeeds — each 403 assertion here fails.
+  // these requests target the key's OWN org: drop the session-only rule and
+  // the creator's owner standing flows straight into the key, so every gated
+  // request below succeeds — each 403 assertion here fails.
   describe("API keys cannot administer their OWN org (CRIT-02)", () => {
     async function setupOwnerKeyInOwnOrg() {
       const ctx = await createTestContext({ orgSlug: "crit02-org" });
@@ -1030,7 +1121,7 @@ describe("Organizations API", () => {
       await addOrgMember(ctx.orgId, member.id, "member");
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id, // creator is the org OWNER
         scopes: ["runs:read"], // narrow scope — must NOT inherit owner rights
       });

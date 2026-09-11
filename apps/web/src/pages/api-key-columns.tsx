@@ -7,7 +7,7 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
 import { TableRowActions } from "../components/table-row-actions";
 import type { ApiKeyInfo } from "../hooks/use-api-keys";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 export function isApiKeyExpired(expiresAt: string | null | undefined): boolean {
   return expiresAt ? new Date(expiresAt) < new Date() : false;

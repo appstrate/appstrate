@@ -21,26 +21,26 @@ type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Drizzle table shape required by `scopedWhere`: must expose an `orgId`
- * column, and optionally an `applicationId` column for app-scoped tables.
+ * column, and optionally a `spaceId` column for space-scoped tables.
  */
-export interface OrgScopedTable {
+interface OrgScopedTable {
   orgId: AnyColumn;
-  applicationId?: AnyColumn;
+  spaceId?: AnyColumn;
 }
 
-export interface ScopedWhereOptions {
+interface ScopedWhereOptions {
   orgId: string | undefined;
-  applicationId?: string | undefined;
+  spaceId?: string | undefined;
   /** Additional conditions to AND with the scope (undefined entries are skipped). */
   extra?: (SQL | undefined)[];
 }
 
 /**
  * Build a Drizzle `where` expression that scopes a query to an organization
- * (and optionally an application), plus any extra conditions.
+ * (and optionally a space), plus any extra conditions.
  *
- * Undefined values are silently skipped — callers with optional app-scoping
- * can pass `applicationId` conditionally. Returns `undefined` if no
+ * Undefined values are silently skipped — callers with optional space-scoping
+ * can pass `spaceId` conditionally. Returns `undefined` if no
  * conditions remain (rare, but compatible with `.where(cond)` signatures).
  *
  * Examples:
@@ -48,11 +48,11 @@ export interface ScopedWhereOptions {
  * scopedWhere(runs, { orgId })
  * // → eq(runs.orgId, orgId)
  *
- * scopedWhere(runs, { orgId, applicationId })
- * // → and(eq(runs.orgId, orgId), eq(runs.applicationId, applicationId))
+ * scopedWhere(runs, { orgId, spaceId })
+ * // → and(eq(runs.orgId, orgId), eq(runs.spaceId, spaceId))
  *
- * scopedWhere(runs, { orgId, applicationId, extra: [eq(runs.id, id)] })
- * // → and(eq(runs.orgId, orgId), eq(runs.applicationId, applicationId), eq(runs.id, id))
+ * scopedWhere(runs, { orgId, spaceId, extra: [eq(runs.id, id)] })
+ * // → and(eq(runs.orgId, orgId), eq(runs.spaceId, spaceId), eq(runs.id, id))
  * ```
  */
 export function scopedWhere(table: OrgScopedTable, opts: ScopedWhereOptions): SQL | undefined {
@@ -62,8 +62,8 @@ export function scopedWhere(table: OrgScopedTable, opts: ScopedWhereOptions): SQ
     conditions.push(eq(table.orgId, opts.orgId));
   }
 
-  if (opts.applicationId !== undefined && table.applicationId !== undefined) {
-    conditions.push(eq(table.applicationId, opts.applicationId));
+  if (opts.spaceId !== undefined && table.spaceId !== undefined) {
+    conditions.push(eq(table.spaceId, opts.spaceId));
   }
 
   if (opts.extra) {
@@ -116,9 +116,25 @@ export function isInvalidTextRepresentation(err: unknown): boolean {
   return false;
 }
 
+/**
+ * True when a DB error is Postgres `23505` (unique_violation). Walks the
+ * `cause` chain for the same reason {@link isInvalidTextRepresentation} does:
+ * Drizzle wraps the driver error in a `DrizzleQueryError` whose own `code` is
+ * undefined.
+ */
+export function isUniqueViolation(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; current != null && depth < 5; depth++) {
+    if (typeof current !== "object") break;
+    if ((current as { code?: unknown }).code === "23505") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 // --- System + DB merge ---
 
-export interface MergeSystemAndDbOptions<SystemDef, DbRow extends { id: string }, Out> {
+interface MergeSystemAndDbOptions<SystemDef, DbRow extends { id: string }, Out> {
   /** System registry map (id → definition). */
   system: ReadonlyMap<string, SystemDef>;
   /** Database rows for the current org. */
@@ -173,7 +189,7 @@ export function mergeSystemAndDb<SystemDef, DbRow extends { id: string }, Out>(
  * mandatory so a caller cannot mass-assign tenant/immutable columns by
  * handing the raw request body straight through (e.g. `{ name, orgId }`
  * silently rewriting `orgId` cross-tenant). List exactly the keys of the
- * route's Zod update schema; never include `id`/`orgId`/`applicationId`/
+ * route's Zod update schema; never include `id`/`orgId`/`spaceId`/
  * `createdAt`.
  */
 export function buildUpdateSet(
@@ -192,7 +208,7 @@ export function buildUpdateSet(
 
 // --- One-default invariant ---
 
-export interface SetExactlyOneDefaultOptions {
+interface SetExactlyOneDefaultOptions {
   /** Clear `is_default` across the whole scope. Runs first. */
   clear: (tx: DbTransaction) => Promise<unknown>;
   /**
@@ -228,7 +244,7 @@ export async function setExactlyOneDefault(opts: SetExactlyOneDefaultOptions): P
  * then falls to the system cascade). `org-models` and `org-proxies` store this
  * exact shape; this folds their byte-identical pointer logic into one place.
  */
-export interface DefaultPointer {
+interface DefaultPointer {
   /** Read the pointer (system id, custom UUID, or null). Single read path. */
   getDefaultId(orgId: string): Promise<string | null>;
   /**
@@ -262,7 +278,7 @@ export interface DefaultPointer {
 /** Org `organizations` columns usable as a default pointer (nullable `text`). */
 type OrgPointerField = "defaultModelId" | "defaultProxyId";
 
-export interface CreateDefaultPointerOptions {
+interface CreateDefaultPointerOptions {
   /** Domain table whose rows the pointer can name (needs a `uuid` `id` column). */
   table: PgTable & { id: PgColumn };
   /**

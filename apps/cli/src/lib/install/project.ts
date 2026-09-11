@@ -34,7 +34,7 @@ import { createHash } from "node:crypto";
 export const PROJECT_FILE_RELPATH = ".appstrate/project.json";
 
 /** On-disk shape — versioned so we can evolve the format without a migration. */
-export interface ProjectFile {
+interface ProjectFile {
   /** Bump to 2 if a future change is not backward-readable. */
   version: 1;
   /** Compose project name passed as `--project-name`. */

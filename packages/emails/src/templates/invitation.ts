@@ -1,22 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EmailPropsMap, RenderedEmail, SupportedLocale } from "../types.ts";
-import { escapeHtml } from "./layout.ts";
+import { escapeHtml } from "@appstrate/core/html";
+import type { EmailPropsMap, OrgRole, RenderedEmail, SupportedLocale } from "../types.ts";
 
 const strings = {
   fr: {
     subject: "Invitation à rejoindre {orgName}",
-    body: "{inviterName} vous invite à rejoindre l'organisation {orgName} en tant que {role}.",
+    body: "{inviterName} vous invite à rejoindre l'organisation {orgName} avec le rôle « {role} ».",
     cta: "Accepter l'invitation :",
     footer: "Ce lien expire dans 7 jours.",
   },
   en: {
     subject: "Invitation to join {orgName}",
-    body: "{inviterName} invites you to join {orgName} as {role}.",
+    body: "{inviterName} invites you to join {orgName} with the role {role}.",
     cta: "Accept the invitation:",
     footer: "This link expires in 7 days.",
   },
 } satisfies Record<SupportedLocale, Record<string, string>>;
+
+const roleLabels = {
+  fr: {
+    owner: "propriétaire",
+    admin: "administrateur",
+    member: "utilisateur standard",
+    guest: "invité",
+  },
+  en: {
+    owner: "owner",
+    admin: "administrator",
+    member: "standard user",
+    guest: "guest",
+  },
+} satisfies Record<SupportedLocale, Record<OrgRole, string>>;
 
 function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
@@ -29,7 +44,7 @@ export function renderInvitationEmail(props: EmailPropsMap["invitation"]): Rende
   const vars = {
     orgName: escapeHtml(orgName),
     inviterName: escapeHtml(inviterName),
-    role: escapeHtml(role),
+    role: escapeHtml((roleLabels[locale] ?? roleLabels.fr)[role]),
   };
 
   const subject = interpolate(s.subject, { orgName }).replace(/[\r\n]/g, "");

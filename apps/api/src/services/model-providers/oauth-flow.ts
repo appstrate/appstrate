@@ -36,7 +36,7 @@ import { getModelProvider } from "./registry.ts";
 import { invalidRequest, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 
-export interface ImportOAuthModelProviderResult {
+interface ImportOAuthModelProviderResult {
   /** UUID of the `model_provider_credentials` row. */
   credentialId: string;
   providerId: string;
@@ -50,7 +50,7 @@ export interface ImportOAuthModelProviderResult {
  * function derives one from the provider's `displayName` when the helper
  * doesn't supply it.
  */
-export type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label"> & {
+type ImportOAuthModelProviderInput = Omit<CreateOAuthCredentialInput, "label"> & {
   label?: string;
   /** Existing credential to update in place; omitted for a new connection. */
   credentialId?: string;
@@ -163,13 +163,11 @@ export async function importOAuthModelProviderConnection(
   //     Both OAuth providers registered today (claude-code, codex) are of
   //     this kind — the pairing flow exists for subscription sign-ins, which
   //     `docs/architecture/SUBSCRIPTION_COMPLIANCE.md` forbids probing at all.
-  //   - probe providers — the persisted column, which is necessarily null on
-  //     a row created microseconds ago: the model form (and the manual
-  //     "Refresh models" button) probe the live credential and write it then.
-  //     `[]` is the honest answer ("nothing discovered yet") and is exactly
-  //     what the dashboard shows until discovery runs. No such provider can
-  //     reach this function today, but the contract admits one; probing here
-  //     would double the quota burst on connect for a list re-fetched anyway.
+  //   - listing providers — the persisted column, necessarily null on a row
+  //     created microseconds ago, so `[]` ("nothing discovered yet") is the
+  //     honest answer. Unreachable from here: `registerModelProvider` refuses
+  //     an oauth2 provider that is not `mode: "static"`, and this function is
+  //     the OAuth path.
   return {
     credentialId,
     providerId: input.providerId,

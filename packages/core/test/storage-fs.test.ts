@@ -288,7 +288,7 @@ describe("FS upload token keyring rotation", () => {
   const KEY2 = "old-retired-upload-key-16+";
 
   function payload(): FsUploadTokenPayload {
-    return { k: "uploads/app_x/upl_y/doc.pdf", s: 1024, m: "application/pdf", e: future() };
+    return { k: "uploads/spc_x/upl_y/doc.pdf", s: 1024, m: "application/pdf", e: future() };
   }
 
   function future(): number {
@@ -323,7 +323,7 @@ describe("FS upload token keyring rotation", () => {
   it("throws when signing with an empty keyring", () => {
     // Message comes from the shared keyring codec
     // (`@appstrate/afps-shared/signed-token`), which every capability token
-    // — upload, document preview, connect session — now signs through.
+    // — upload, file preview, connect session — now signs through.
     expect(() => signFsUploadToken(payload(), [])).toThrow(
       "signKeyringToken requires at least one signing key",
     );

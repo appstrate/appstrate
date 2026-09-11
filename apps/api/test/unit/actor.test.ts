@@ -43,7 +43,7 @@ describe("getActor", () => {
       c.set("user", { id: "user-42", email: "u@test.com", name: "User" });
       c.set("endUser", {
         id: "eu_abc",
-        applicationId: "app_default",
+        spaceId: "spc_default",
         name: "End User",
         email: "eu@test.com",
       });
@@ -67,7 +67,7 @@ describe("getActor", () => {
       c.set("user", { id: "user-42", email: "u@test.com", name: "User" });
       c.set("endUser", {
         id: "eu_xyz",
-        applicationId: "app_1",
+        spaceId: "spc_1",
       });
       const actor = getActor(c);
       actorType = actor.type;

@@ -4,7 +4,7 @@ export { renderEmail, registerEmailOverrides, resetEmailRegistry } from "./regis
 export type {
   EmailType,
   EmailPropsMap,
-  RenderedEmail,
   EmailRenderer,
+  RenderedEmail,
   SupportedLocale,
 } from "./types.ts";

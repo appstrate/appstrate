@@ -10,7 +10,7 @@
  *    through the system llm-proxy gets BOTH per-call proxy rows AND the
  *    runner's cumulative side-channel mirror row (`credential_source IS NULL`)
  *    covering the SAME spend. Summing all rows double-counts (display only —
- *    cloud never debits the NULL runner row), so the mirror is dropped when
+ *    billing never debits the NULL runner row), so the mirror is dropped when
  *    proxy rows exist. A platform run's runner row carries a non-NULL
  *    `credential_source` and stays authoritative; a remote run with ONLY a
  *    runner row keeps it.
@@ -42,7 +42,7 @@ describe("computeRunSpend — remote-run mirror exclusion", () => {
     return seedRun({
       packageId: "@runcost/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
   }
@@ -195,7 +195,7 @@ describe("computeRunSpend — worst-of provenance over the same rows as the cost
     return seedRun({
       packageId: "@runstatus/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
   }

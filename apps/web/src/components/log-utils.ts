@@ -12,7 +12,7 @@ interface ExecutionEntryBase {
   createdAt?: Date | string | null;
 }
 
-export interface AgentExecutionEntry extends ExecutionEntryBase {
+interface AgentExecutionEntry extends ExecutionEntryBase {
   kind: "agent";
   message: string;
   level: "debug";
@@ -47,12 +47,12 @@ export interface ToolExecutionEntry extends ExecutionEntryBase {
   completedAt?: Date | string | null;
 }
 
-export interface ExplicitLogExecutionEntry extends ExecutionEntryBase {
+interface ExplicitLogExecutionEntry extends ExecutionEntryBase {
   kind: "log";
   message: string;
 }
 
-export interface RuntimeExecutionEntry extends ExecutionEntryBase {
+interface RuntimeExecutionEntry extends ExecutionEntryBase {
   kind: "runtime";
   message: string;
   sourceType: string;
@@ -105,7 +105,8 @@ function readNumber(value: unknown, fallback: number): number {
 
 /**
  * Project the raw run logs into the per-turn breakdown rendered by the run
- * Info tab. Pure and total: rows that are not turn breadcrumbs, or whose
+ * Exécution pane (`TurnsTable` in `run-execution-tab.tsx`). Pure and total:
+ * rows that are not turn breadcrumbs, or whose
  * payload is malformed/absent, are skipped rather than throwing.
  *
  * Runs that predate the breadcrumb emit no such rows at all — an empty array
@@ -133,12 +134,15 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
 
     rows.push({
       index: d["index"],
-      // The emitter computes `contextTokens`; recompute only as a fallback so a
-      // row written by an older/partial emitter still plots the right bar.
-      contextTokens: readNumber(
-        d["contextTokens"],
-        inputTokens + cacheReadTokens + cacheWriteTokens,
-      ),
+      // The emitter sets `contextTokens` unconditionally (`buildTurnProgress`
+      // in `@appstrate/afps-runtime`), unlike `latencyMs`/`contextWindow`
+      // above, which are conditional spreads. So an absent value means a
+      // malformed payload, not an older emitter — the field and its only
+      // producer landed in the same commit and no release ever wrote a turn
+      // row without it. Read it like the other token counts and let a
+      // malformed row fall to 0; do NOT recompute a plausible-looking total
+      // from the parts, which plots a bar that was never measured.
+      contextTokens: readNumber(d["contextTokens"], 0),
       inputTokens,
       outputTokens,
       cacheReadTokens,
@@ -221,14 +225,17 @@ function rawEntryId(log: RawLog, index: number, suffix = ""): string {
   return `log:${log.id ?? index}${suffix}`;
 }
 
+/**
+ * `assistant_message` is the only marker of model-authored prose. An untagged
+ * `appstrate.progress` row is a runner LIFECYCLE breadcrumb by definition
+ * (`AppstrateProgressEvent`, `@appstrate/afps-runtime`), so it belongs to the
+ * `runtime` kind — attributing it to the model would put words in its mouth.
+ */
 function isAgentText(log: RawLog): boolean {
-  if (log.type !== "progress") return false;
-  if (log.data?.["event"] === ASSISTANT_MESSAGE_EVENT) return true;
-  // Compatibility with runs emitted before `assistant_message` was stamped.
-  return !log.data && log.level === "debug";
+  return log.type === "progress" && log.data?.["event"] === ASSISTANT_MESSAGE_EVENT;
 }
 
-export interface BuildLogEntriesOptions {
+interface BuildLogEntriesOptions {
   /** Marks correlated starts with no result as interrupted instead of spinning forever. */
   isRunTerminal?: boolean;
 }
@@ -256,18 +263,13 @@ export function buildLogEntries(
     if (log.event === "output" && log.data) {
       if (!output) output = {};
       Object.assign(output, log.data);
-    } else if (log.event === "report" && log.type === "result") {
-      // Dead channel: the `report` runtime tool was replaced by durable
-      // `outputs/` documents. Rows written before the removal stay in the DB
-      // but are skipped here — falling through to the generic branch would
-      // render them as a truncated, contextless log line.
     } else if (log.event === "run_completed") {
       continue;
     } else if (isTurnRow(log)) {
       // Per-turn breadcrumbs are a structured series, not narration: a heavy
       // run emits ~108 of them and they would drown the agent's own log lines.
-      // They are rendered as a table in the run Info tab (`buildTurnRows`).
-      // Same precedent as the dead `report` channel above.
+      // They are rendered as a table in the run Exécution pane
+      // (`buildTurnRows` → `TurnsTable` in `run-execution-tab.tsx`).
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";

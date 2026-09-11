@@ -37,25 +37,26 @@
   ],
   "exports": {
     ".": "./src/index.ts",
+    "./model-compat": "./src/model-compat.ts",
+    "./provider-map": "./src/provider-map.ts",
     "./runtime-tools": "./src/runtime-tools/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit",
     "test": "bun test"
   },
   "dependencies": {
     "@appstrate/afps-runtime": "workspace:*",
     "@appstrate/core": "workspace:*",
-    "@appstrate/mcp-transport": "workspace:*",
-    "ajv": "^8.20.0"
+    "@appstrate/mcp-transport": "workspace:*"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@earendil-works/pi-ai": "0.84.2"
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.2",
-    "@earendil-works/pi-ai": "0.84.2"
+    "@appstrate/afps-shared": "workspace:*",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1"
   }
 }

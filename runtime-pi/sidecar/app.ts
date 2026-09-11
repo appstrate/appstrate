@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
 import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
@@ -7,26 +8,28 @@ import { RuntimeEventJournal } from "./runtime-event-journal.ts";
 import type { ApiCallBaseDeps } from "./credential-proxy.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { BlobStore } from "./blob-store.ts";
-import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import { PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import {
   DEFAULT_API_CALL_CONCURRENCY,
-  LLM_PROXY_TIMEOUT_MS,
+  LLM_STREAM_IDLE_TIMEOUT_MS,
   MAX_REQUEST_BODY_SIZE,
   filterHeaders,
+  llmUpstreamAbort,
   readPositiveIntEnv,
   readRequestBodyBounded,
+  withIdleBound,
+  STREAM_IDLE,
   type SidecarConfig,
   type LlmProxyOauthConfig,
-  type ModelSwap,
 } from "./helpers.ts";
 import { isBlockedEgressUrl } from "./ssrf.ts";
 import {
-  swapRequestModel,
-  swapResponseModelJson,
-  createSseModelSwapStream,
   syntheticAliasErrorBody,
+  isAliasInferenceCall,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
+import { handlePiMessagesRequest } from "./pi-messages-backend.ts";
 import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
@@ -36,9 +39,48 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { logger } from "./logger.ts";
-import { filterSensitiveHeaders, scrubBearerMaterial } from "./redact.ts";
+import { filterSensitiveHeaders, scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
+
+/**
+ * The one route the agent-auth middleware below exempts. Kept as a constant so
+ * the exemption is a single named fact rather than a string literal buried in a
+ * conditional.
+ */
+const HEALTH_PATH = "/health";
+
+/**
+ * Headers the agent stamps for the SIDECAR's benefit and that must never ride
+ * on to a vendor: the auth token (a live per-run secret) and the pi-ai build
+ * marker (`pi-messages` compatibility, meaningless upstream). Passed to
+ * `filterHeaders` as its extra skip set on both `/llm/*` forwarding paths.
+ */
+const SIDECAR_ONLY_REQUEST_HEADERS = new Set([SIDECAR_AUTH_HEADER, PI_SDK_VERSION_HEADER]);
+
+/**
+ * Constant-time check of an inbound {@link SIDECAR_AUTH_HEADER} against the
+ * run's configured token.
+ *
+ * Fails closed on BOTH halves: an absent header and an unconfigured sidecar are
+ * each a refusal. A sidecar with no token cannot tell the agent apart from the
+ * integration runners sharing its network, so "no token configured" is exactly
+ * the state in which it must answer nobody.
+ *
+ * The length check short-circuits before `timingSafeEqual` (which throws on
+ * mismatched lengths). That leaks the token's LENGTH, which is a fixed
+ * property of how the launcher mints it, not of its value.
+ */
+function isAuthorizedAgentRequest(
+  presented: string | undefined,
+  expected: string | undefined,
+): boolean {
+  if (!expected || !presented) return false;
+  const a = Buffer.from(presented, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 /**
  * `Bun.serve` idle-timeout (seconds) applied to the sidecar's HTTP
@@ -56,6 +98,15 @@ export interface AppDeps {
   cookieJar: Map<string, string[]>;
   fetchFn?: typeof fetch; // default: global fetch — injectable for tests
   isReady?: () => boolean; // default: () => true — controls /health
+  /**
+   * Inter-chunk idle bound applied to proxied `/llm/*` streams (both the raw
+   * forward and the aliased `pi-messages` re-origination). Defaults to
+   * {@link LLM_STREAM_IDLE_TIMEOUT_MS}, which is where the operator override
+   * (`SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS`) is read; this injection point exists
+   * only because the timeout path is otherwise untestable without a real
+   * two-minute wait.
+   */
+  llmStreamIdleTimeoutMs?: number;
   /**
    * OAuth token cache. Required when the sidecar serves OAuth-mode LLM
    * configs (`config.llm.authMode === "oauth"`). Production server.ts
@@ -147,7 +198,7 @@ interface LlmStreamObservation {
 async function passUpstream(
   upstream: Response,
   observe?: LlmStreamObservation,
-  swap?: ModelSwap,
+  idleTimeoutMs: number = LLM_STREAM_IDLE_TIMEOUT_MS,
 ): Promise<Response> {
   const responseHeaders: Record<string, string> = {};
   // Shared upstream-response header allowlist (content-type, retry/backoff,
@@ -168,55 +219,6 @@ async function passUpstream(
 
   if (!upstream.body) {
     return new Response(null, { status: upstream.status, headers: responseHeaders });
-  }
-
-  const contentType = (upstream.headers.get("content-type") ?? "").toLowerCase();
-
-  // Model-alias ERROR bodies are SYNTHESIZED, never forwarded. Provider error
-  // payloads are free-form prose that can name the backing anywhere (model id,
-  // hostname, provider vocabulary) — and an alias's whole point is the agent
-  // never learns the backing. So the upstream body stays server-side (logged
-  // for the operator, truncated) and the agent gets a neutral JSON envelope;
-  // status + allowlisted headers still flow for retry/backoff. Applies to ANY
-  // content type on a non-2xx, mirroring the platform gateway (`llm-proxy/
-  // core.ts`); errors are tiny, so buffering them costs nothing.
-  if (swap && !upstream.ok) {
-    let bodySample = "";
-    try {
-      bodySample = await upstream.text();
-    } catch {
-      // body unreadable — log what we have
-    }
-    // Scrub before logging — on the oauth path this body flowed AFTER the
-    // bearer-swap, so an upstream/proxy error that echoes request material
-    // could carry the real subscription bearer. Same no-leak posture as
-    // `logOauthLlmResponse`.
-    const scrubbedSample = scrubBearerMaterial(bodySample);
-    logger.warn("llm alias: upstream error body replaced by synthetic envelope", {
-      targetUrl: observe?.targetUrl,
-      status: upstream.status,
-      contentType: upstream.headers.get("content-type"),
-      bodySample: scrubbedSample.length > 200 ? scrubbedSample.slice(0, 200) + "…" : scrubbedSample,
-    });
-    // The synthesized body is JSON even when the upstream error was text/html —
-    // the allowlist copied the upstream's content-type, so override it.
-    responseHeaders["Content-Type"] = "application/json";
-    return new Response(syntheticAliasErrorBody(swap, upstream.status), {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
-  }
-
-  // Model-alias swap (response real→alias). A non-stream JSON body can't be
-  // rewritten chunk-by-chunk — buffer the whole thing, swap, re-serialize. SSE
-  // is rewritten in-stream below (frame-buffered). Other content types and the
-  // no-swap path keep the zero-copy telemetry passthrough.
-  if (swap && contentType.includes("application/json") && !contentType.includes("event-stream")) {
-    const text = await upstream.text();
-    const rewritten = swapResponseModelJson(text, swap);
-    // Length changed by the rewrite — let Response recompute Content-Length
-    // rather than forward a now-wrong upstream value.
-    return new Response(rewritten, { status: upstream.status, headers: responseHeaders });
   }
 
   const reader = upstream.body.getReader();
@@ -245,10 +247,58 @@ async function passUpstream(
   // upstream byte timing, but we intentionally match what the serve
   // layer sees so the metric stays comparable to the idle-timeout
   // threshold.
+  //
+  // READ THE PARAGRAPH ABOVE BEFORE TOUCHING THE IDLE TIMEOUT BELOW. Because
+  // this stream is `pull`-based, `maxIdleMs` is NOT upstream silence — it is
+  // consumer latency. Arming a timeout on that counter, or on any timer that
+  // keeps running while nobody is pulling, would kill a merely SLOW CONSUMER
+  // on a perfectly healthy upstream. The correct instrument is the one used
+  // in `withIdleBound`: race a timer against the PENDING `reader.read()`
+  // promise, inside `pull`. That promise is pending exactly while the upstream
+  // is silent AND the consumer is actually waiting for a chunk — the timer is
+  // created when the read starts and cleared the moment it settles, so no
+  // clock runs across a consumer-side pause. Do not "simplify" this into a
+  // single long-lived timer; that is the bug, not the cleanup.
   const observed = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const { value, done } = await reader.read();
+        const outcome = await withIdleBound(reader.read(), idleTimeoutMs);
+        if (outcome === STREAM_IDLE) {
+          // Four of the ten api shapes this platform maps ignore pi-ai's own
+          // `timeoutMs` (google-generative-ai, google-vertex,
+          // bedrock-converse-stream, pi-messages), so this proxy is the only
+          // provider-agnostic place a stalled stream can be caught. Without it
+          // the run just burns its wall-clock budget and dies with no error.
+          //
+          // THIS MESSAGE IS FOR OUR LOG, not for the agent: `controller.error`
+          // on a response body does not cross the HTTP hop. Over a real socket
+          // the in-container client observes a TRUNCATED stream — `{done:true}`
+          // — and the Error is discarded here. (In-process, as the tests drive
+          // it through Hono's `app.request`, it does surface; that is the test
+          // harness, not production.)
+          //
+          // The agent still gets a RETRYABLE failure, from the truncation
+          // rather than from this text: pi-ai's adapters throw on a premature
+          // end — `openai-completions.js` "Stream ended without finish_reason"
+          // (whenever `compat.supportsFinishReason`, its default),
+          // `google-generative-ai.js` "Google stream ended without a finish
+          // reason", `anthropic-messages.js` "Anthropic stream ended before
+          // message_stop" — and those strings match
+          // `RETRYABLE_PROVIDER_ERROR_PATTERN` (`dist/utils/retry.js`:
+          // `ended without`, `stream ended before message_stop`). So the
+          // wording below is free to change; keep it operator-legible.
+          const err = new Error(
+            `LLM upstream stream timed out: no data received for ${idleTimeoutMs}ms`,
+          );
+          logger.warn("llm.stream.idle_timeout", { ...summary(), idleTimeoutMs });
+          // Release the upstream socket before erroring the consumer branch;
+          // swallow the cancel rejection so teardown can't escape as an
+          // unhandled rejection on the sidecar process.
+          void reader.cancel(err).catch(() => {});
+          controller.error(err);
+          return;
+        }
+        const { value, done } = outcome;
         const now = Date.now();
         const gap = now - lastByteAt;
         if (gap > maxIdleMs) maxIdleMs = gap;
@@ -276,17 +326,35 @@ async function passUpstream(
     },
   });
 
-  // Model-alias swap on a streaming (SSE) body: rewrite `model` real→alias in
-  // each frame as it flows. Frame-buffered, so a chunk boundary mid-frame is
-  // handled. The telemetry passthrough (`observed`) stays in front so stream
-  // metrics still reflect the upstream timing.
-  const body =
-    swap && contentType.includes("event-stream")
-      ? observed.pipeThrough(createSseModelSwapStream(swap))
-      : observed;
-
-  return new Response(body, { status: upstream.status, headers: responseHeaders });
+  return new Response(observed, { status: upstream.status, headers: responseHeaders });
 }
+
+/** Chars of the upstream body kept in the operator log. */
+const BODY_SAMPLE_MAX_CHARS = 200;
+/**
+ * Extra chars handed to the scrubber beyond the preview.
+ *
+ * The slice must happen BEFORE the scrub, not after. The body is
+ * upstream-controlled and unbounded, this sidecar is single-threaded, and
+ * `scrubSecretMaterial` is a pass of ~10 global regexes: scrubbing a 1 MB
+ * error body to produce a 200-char log line blocked the event loop for 2.5 s
+ * (measured, adversarial body) where the slice-first form costs ~0.05 ms.
+ * `scrubStderrLine` in `integrations-boot.ts` is the sibling that already gets
+ * this right.
+ *
+ * The margin covers the rules that match a credential from its START: cutting
+ * at exactly the preview length would still mask the visible prefix of a
+ * straddling token, EXCEPT where a rule carries a minimum length (`AKIA` + 12,
+ * `eyJ` + 10) that the cut takes it below. 64 chars clears every such minimum.
+ *
+ * It does NOT cover the two rules that need a TERMINATOR — the userinfo pair,
+ * which must see the `@`/`%40` before it can match anything. No margin can:
+ * raising it moves the cut, it does not remove one. That case is closed by
+ * `truncateForScrub`, which masks an authority the cut left unterminated; see
+ * its docstring. The margin is therefore sized for the minimum-length rules
+ * alone, which is all it was ever able to promise.
+ */
+const BODY_SAMPLE_SCRUB_MARGIN = 64;
 
 /**
  * On non-2xx upstream responses, clone the body for the operator-facing
@@ -312,8 +380,13 @@ async function logOauthLlmResponse(
   // we still scrub bearer/api-key patterns from the sample so the no-leak
   // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const scrubbed = scrubBearerMaterial(bodySample);
-  const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
+  const scrubbed = scrubSecretMaterial(
+    truncateForScrub(bodySample, BODY_SAMPLE_MAX_CHARS + BODY_SAMPLE_SCRUB_MARGIN),
+  );
+  const truncated =
+    bodySample.length > BODY_SAMPLE_MAX_CHARS
+      ? scrubbed.slice(0, BODY_SAMPLE_MAX_CHARS) + "…"
+      : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
     targetUrl,
@@ -326,22 +399,18 @@ async function logOauthLlmResponse(
   return upstream;
 }
 
-function llmFetchErrorResponse(
-  c: Context,
-  targetUrl: string,
-  err: unknown,
-  swap?: ModelSwap,
-): Response {
+function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   let domain: string | undefined;
   try {
     domain = new URL(targetUrl).hostname;
-  } catch {}
+  } catch {
+    // Not a parseable URL — omit the hostname hint rather than fail.
+  }
   const suffix = code ? `: ${code}` : "";
-  // The hostname identifies the backing provider; with an alias it must never
-  // reach the agent. The error `code` (e.g. ConnectionRefused) is generic and
-  // stays — it's useful and names nothing.
-  const domainHint = domain && !swap ? ` (${domain})` : "";
+  // Only non-aliased requests reach an upstream fetch here, so the hostname
+  // keeps its debugging value.
+  const domainHint = domain ? ` (${domain})` : "";
   return c.json({ error: `LLM request failed${suffix}${domainHint}` }, 502);
 }
 
@@ -397,7 +466,7 @@ async function bufferLlmBodyBytesBounded(
   return bytes;
 }
 
-/** Decode a bounded JSON body for the API-key model-alias rewrite path. */
+/** Decode a bounded JSON body as text. */
 async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<string | Response> {
   const bytes = await bufferLlmBodyBytesBounded(c, maxBytes);
   if (bytes instanceof Response) return bytes;
@@ -409,29 +478,19 @@ async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<strin
  * `/llm` mount prefix, re-append the query string onto the configured base URL,
  * and surface the method. Shared by both `/llm` branches (api_key + oauth);
  * each keeps its own SSRF check (`isBlockedEgressUrl`) and credential handling.
+ *
+ * The stripped `path` is returned alongside the composed URL because the alias
+ * surface check needs exactly that suffix — the same one the in-container SDK
+ * appended to `MODEL_BASE_URL` — and recomputing the slice at the call site
+ * would be a second place for the two to disagree.
  */
-function deriveLlmTarget(c: Context, baseUrl: string): { targetUrl: string; method: string } {
+function deriveLlmTarget(
+  c: Context,
+  baseUrl: string,
+): { targetUrl: string; method: string; path: string } {
   const path = c.req.path.slice("/llm".length) || "/";
   const qs = new URL(c.req.url).search;
-  return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method };
-}
-
-/**
- * Buffer an inbound `/llm` request body under the hard byte cap and apply the
- * model-alias swap when one is configured; otherwise return the buffered text
- * verbatim. Returns a 413 `Response` (the caller returns it verbatim) when the
- * body exceeds the cap, or `undefined` for an empty body. api_key-only: the
- * oauth branch buffers via `bufferLlmBodyBounded` directly (401 replay) and
- * never swaps — its config carries no `modelSwap`.
- */
-async function bufferAndSwapRequestBody(
-  c: Context,
-  modelSwap: ModelSwap | undefined,
-): Promise<string | undefined | Response> {
-  const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
-  if (buffered instanceof Response) return buffered;
-  const text = buffered;
-  return text && modelSwap ? swapRequestModel(text, modelSwap) : text || undefined;
+  return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method, path };
 }
 
 /**
@@ -482,11 +541,12 @@ export interface SidecarRuntimeDeps {
 /**
  * Blob-store cap for production sidecars. MUST stay well below the
  * sidecar container's cgroup memory limit (SIDECAR_MEMORY_BYTES =
- * 256 MiB, `apps/api/src/services/orchestrator/constants.ts`): at the
- * store's 256 MiB class default the kernel OOM-killer fires before the
+ * 256 MiB, `apps/api/src/services/orchestrator/constants.ts`): a cap at
+ * or near the cgroup limit means the kernel OOM-killer fires before the
  * store's own guard, killing every integration mid-run. 128 MiB leaves
  * headroom for the Bun runtime, spawned-runner bookkeeping, and
- * in-flight request buffers.
+ * in-flight request buffers. `BlobStore` takes no default for this
+ * reason — the value is always a deliberate choice by the caller.
  */
 const RUN_BLOB_STORE_MAX_BYTES = 128 * 1024 * 1024;
 
@@ -538,6 +598,42 @@ export function createApp(deps: AppDeps): Hono {
 
   const app = new Hono();
 
+  // ─── Agent authentication for the whole control surface ───
+  //
+  // DENY BY DEFAULT, with `/health` as the single exemption: a route added to
+  // this app later is protected without anyone remembering to say so, which is
+  // the opposite of how `/llm/*`, `/mcp`, `/integrations/boot-report` and
+  // `/runtime-events` each ended up open one at a time.
+  //
+  // `/health` is exempt because it is the container health gate — the
+  // orchestrator probes it before the run exists and it discloses one bit
+  // (ready / not ready) that reveals nothing about the run.
+  //
+  // Registered BEFORE every route below (Hono runs middleware in registration
+  // order and only for routes registered after it) and before the `mountMcp`
+  // call at the bottom of this function, which is why `/mcp` is covered too.
+  //
+  // Nothing runner-facing lives on this app: the per-integration egress / MITM
+  // listeners and the DNS responder are their own `Bun.serve` listeners
+  // (`integration-egress-listener.ts`, `integration-mitm-listener.ts`,
+  // `integration-dns-responder.ts`), and the forward proxy is a separate one
+  // bound on `PORT + 1` (`server.ts`). So there is no exemption to carve for
+  // integration runners — they are not supposed to reach this app at all.
+  app.use("*", async (c, next) => {
+    if (c.req.path === HEALTH_PATH) return next();
+    if (!isAuthorizedAgentRequest(c.req.header(SIDECAR_AUTH_HEADER), config.sidecarAuthToken)) {
+      // No hint about which half failed, and no `WWW-Authenticate` challenge:
+      // the only legitimate caller was handed the token at container start and
+      // has nothing to negotiate.
+      logger.warn("sidecar control surface: unauthenticated request refused", {
+        path: c.req.path,
+        method: c.req.method,
+      });
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    return next();
+  });
+
   // Health check for startup readiness (includes forward proxy readiness)
   app.get("/health", (c) => {
     if (!isReady()) {
@@ -551,11 +647,12 @@ export function createApp(deps: AppDeps): Hono {
   // the run when any declared integration failed to boot (`ok: false`). We
   // await the boot promise so the report is final before answering.
   //
-  // No inbound auth — same posture as `/mcp`. The agent container holds NO
-  // run token (zero-knowledge boundary: only the sidecar can call back to the
-  // platform), so a bearer check would lock the agent out. The security
-  // boundary is the per-run Docker network; the payload carries integration
-  // ids + diagnostic errors but never credentials.
+  // Authenticated like the rest of the control surface, by the
+  // `SIDECAR_AUTH_HEADER` middleware above. The agent container still holds NO
+  // run token — the zero-knowledge boundary is intact — but it does hold a
+  // sidecar-only token, because the per-run Docker network is NOT a boundary:
+  // integration runner containers sit on it too. The payload carries
+  // integration ids + diagnostic errors but never credentials.
   app.get("/integrations/boot-report", async (c) => {
     if (!deps.integrationBootReportProvider) {
       // No integrations were wired into this sidecar — nothing to fail on.
@@ -600,9 +697,69 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const apiKeyConfig = config.llm; // discriminated narrowing
-    const { targetUrl, method } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
+    const { targetUrl, method, path } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
 
-    const filtered = filterHeaders(c.req.header());
+    // ALIASED runs get a narrowed `/llm/*` surface, not a passthrough. The
+    // agent needs the inference endpoint to do its job; everything else the
+    // vendor happens to serve on the same base URL is opacity it was never
+    // promised — `GET /v1/models` alone returns the vendor's catalogue.
+    // Refused HERE, before the header filter swaps the placeholder for the
+    // real key and before any upstream fetch: the credential must not be
+    // spent on a request we are about to reject.
+    //
+    // Non-aliased runs keep the verbatim passthrough — their contract is
+    // reaching the provider, not hiding it.
+    if (apiKeyConfig.modelSwap) {
+      const swap = apiKeyConfig.modelSwap;
+      if (!isAliasInferenceCall(method, path)) {
+        logger.warn("llm alias: non-inference request refused", {
+          method,
+          path,
+          // The CLIENT protocol only. `backingApiShape` narrows the candidate
+          // vendor set and these logs are operator-visible on a surface whose
+          // whole contract is that the backing stays private.
+          clientApiShape: swap.clientApiShape,
+        });
+        // Same neutral envelope as every other alias refusal — a distinct
+        // shape would itself be a signal to probe with. 404 reads as "no such
+        // endpoint here", which is the truth of the narrowed surface.
+        return new Response(syntheticAliasErrorBody(swap, 404), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // An alias is TERMINATED here, never proxied: the container emits pi-ai's
+      // vendor-neutral `pi-messages` so no vendor request shape or response
+      // dialect ever reaches it, and the sidecar re-originates the call against
+      // the real backing through pi-ai (`pi-messages-backend.ts`). Everything
+      // below — the placeholder→key header swap, the body forward, the response
+      // passthrough — serves non-aliased runs only.
+      const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+      if (buffered instanceof Response) return buffered;
+      return handlePiMessagesRequest(
+        {
+          llm: apiKeyConfig,
+          swap,
+          // Token limits the backend needs to size the upstream call.
+          limits: {
+            ...(config.modelContextWindow !== undefined
+              ? { modelContextWindow: config.modelContextWindow }
+              : {}),
+            ...(config.modelMaxTokens !== undefined
+              ? { modelMaxTokens: config.modelMaxTokens }
+              : {}),
+          },
+          ...(deps.llmStreamIdleTimeoutMs !== undefined
+            ? { llmStreamIdleTimeoutMs: deps.llmStreamIdleTimeoutMs }
+            : {}),
+        },
+        c.req.raw,
+        buffered,
+      );
+    }
+
+    const filtered = filterHeaders(c.req.header(), SIDECAR_ONLY_REQUEST_HEADERS);
     const forwardedHeaders: Record<string, string> = {};
     for (const [key, value] of Object.entries(filtered)) {
       forwardedHeaders[key] = value.includes(apiKeyConfig.placeholder)
@@ -610,49 +767,52 @@ export function createApp(deps: AppDeps): Hono {
         : value;
     }
 
-    // Model-alias swap (request alias→real). The body is normally forwarded as
-    // a zero-copy ReadableStream; for an alias we must buffer it to rewrite the
-    // `model` field. Only aliases pay that cost — every other model stays
-    // zero-copy.
-    let body: string | ReadableStream<Uint8Array> | undefined;
+    // Zero-copy body forward — nothing here rewrites the request.
+    let body: ReadableStream<Uint8Array> | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      if (apiKeyConfig.modelSwap) {
-        // Buffer under a hard byte cap (Content-Length precheck + bounded
-        // streaming read → 413) before the model-alias rewrite. A bare
-        // `.text()` here would buffer an unbounded body into memory.
-        const swapped = await bufferAndSwapRequestBody(c, apiKeyConfig.modelSwap);
-        if (swapped instanceof Response) return swapped;
-        body = swapped;
-      } else {
-        body = c.req.raw.body ?? undefined;
-      }
+      body = c.req.raw.body ?? undefined;
     }
 
     let upstream: Response;
+    // THREE deadlines now bound an LLM stream, and the split matters:
+    //   - `LLM_PROXY_TIMEOUT_MS` (30 min) — absolute cap on the whole
+    //     exchange, the right ceiling for a long agentic completion.
+    //   - `LLM_FIRST_RESPONSE_TIMEOUT_MS` (60 s) — TTFB. Disarmed the instant
+    //     the headers land (`abort.firstResponse()` in the `finally`), because
+    //     an abort signal handed to `fetch` tears down the BODY too.
+    //   - `LLM_STREAM_IDLE_TIMEOUT_MS` (120 s) — inter-chunk silence, enforced
+    //     in `passUpstream`, NOT here (a fetch-level signal cannot express
+    //     "silent for 2 min" without also capping the total).
+    // HISTORY, do not re-litigate: this block used to say there was
+    // "deliberately no inter-chunk timeout", because undici's hardcoded 300 s
+    // `bodyTimeout` once motivated a global `globalThis.fetch` → undici swap
+    // that was reverted in #366 (see issue #369). That reasoning stands —
+    // undici is still not the answer, the sidecar runs Bun's native `fetch`
+    // and we are not swapping it back. What changed is that "no body timeout"
+    // stopped being acceptable: pi-ai's per-adapter `timeoutMs` is ignored by
+    // four of the api shapes we map (google-generative-ai, google-vertex,
+    // bedrock-converse-stream, pi-messages), so a stalled stream had NO bound
+    // below 30 min and runs died on their wall-clock watchdog with no error.
+    // The idle bound lives in our own stream wrapper instead — provider
+    // agnostic, and no transport swap.
+    const abort = llmUpstreamAbort();
     try {
-      // `AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS)` is the ONLY deadline on
-      // an LLM stream — an absolute 30 min cap, not an inactivity timer.
-      // There is deliberately no inter-chunk (body) timeout: undici's
-      // hardcoded 300 s `bodyTimeout` (which once motivated a global
-      // `globalThis.fetch` → undici swap, reverted in #366, see issue #369)
-      // does not exist here — the sidecar runs under Bun and `fetch` is
-      // Bun's native implementation, not undici. A long inter-chunk gap on a
-      // streamed completion therefore cannot trip a body timeout; it is only
-      // bounded by the 30 min absolute deadline. Inter-chunk silence is still
-      // observed (`maxIdleMs` in `llm.stream.observed`, #426) so any real
-      // stall surfaces in logs without re-introducing undici.
       upstream = await fetchFn(targetUrl, {
         method,
         headers: forwardedHeaders,
         body,
-        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
+        signal: abort.signal,
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
       });
     } catch (err) {
-      return llmFetchErrorResponse(c, targetUrl, err, apiKeyConfig.modelSwap);
+      return llmFetchErrorResponse(c, targetUrl, err);
+    } finally {
+      // Headers are in (or the call already failed) — the upstream has proven
+      // it is alive, so the TTFB timer must stop before it can abort the body.
+      abort.firstResponse();
     }
 
-    return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
+    return passUpstream(upstream, { targetUrl, authMode: "api_key" }, deps.llmStreamIdleTimeoutMs);
   });
 
   // OAuth: resolve the real subscription bearer and swap it onto the request,
@@ -701,10 +861,15 @@ export function createApp(deps: AppDeps): Hono {
     // drop any x-api-key (bearer-only) and force the real subscription bearer.
     // The SDK's own fingerprint (user-agent, anthropic-beta, chatgpt-account-id)
     // is preserved — the whole point of pass-through. `filterHeaders` first
-    // drops host/content-length/hop-by-hop; wrapping the result in a Headers
-    // normalises casing so the swap needs no manual authorization variant hunt.
+    // drops host/content-length/hop-by-hop plus the container→sidecar-only
+    // headers (the auth token must not travel to the provider); wrapping the
+    // result in a Headers normalises casing so the swap needs no manual
+    // authorization variant hunt.
     const buildHeaders = (accessToken: string): Headers =>
-      applyOauthBearerSwap(new Headers(filterHeaders(c.req.header())), accessToken);
+      applyOauthBearerSwap(
+        new Headers(filterHeaders(c.req.header(), SIDECAR_ONLY_REQUEST_HEADERS)),
+        accessToken,
+      );
 
     // Buffer the request body (inference JSON, bounded by
     // SIDECAR_MAX_REQUEST_BODY_BYTES via the Content-Length precheck +
@@ -719,13 +884,24 @@ export function createApp(deps: AppDeps): Hono {
       body = buffered.byteLength > 0 ? buffered : undefined;
     }
 
-    const doFetch = (headers: Headers): Promise<Response> =>
-      fetchFn(targetUrl, {
-        method,
-        headers,
-        body,
-        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
-      } as RequestInit);
+    // Same deadline split as the api_key path above (absolute cap + TTFB
+    // bound disarmed on headers; inter-chunk silence handled by
+    // `passUpstream`). Armed PER ATTEMPT: the 401 replay below re-enters this
+    // closure and must get its own fresh TTFB window rather than inherit an
+    // already-half-spent one.
+    const doFetch = async (headers: Headers): Promise<Response> => {
+      const abort = llmUpstreamAbort();
+      try {
+        return await fetchFn(targetUrl, {
+          method,
+          headers,
+          body,
+          signal: abort.signal,
+        } as RequestInit);
+      } finally {
+        abort.firstResponse();
+      }
+    };
 
     let upstream: Response;
     try {
@@ -768,11 +944,15 @@ export function createApp(deps: AppDeps): Hono {
 
     // No model-alias swap on the oauth path — the response streams back
     // verbatim (zero-copy telemetry passthrough only).
-    return passUpstream(upstream, {
-      targetUrl,
-      credentialId: llmConfig.credentialId,
-      authMode: "oauth",
-    });
+    return passUpstream(
+      upstream,
+      {
+        targetUrl,
+        credentialId: llmConfig.credentialId,
+        authMode: "oauth",
+      },
+      deps.llmStreamIdleTimeoutMs,
+    );
   }
 
   // MCP exposure — the agent-facing surface for the first-party tools
@@ -784,9 +964,10 @@ export function createApp(deps: AppDeps): Hono {
   // same blob store.
   // Runtime-event drain surface — the Pi runner pulls the
   // canonical events the sidecar journaled while executing runtime tools, and
-  // re-emits them on its single run-event sink. Same `Host: sidecar` posture as
-  // `/mcp` (the per-run Docker network is the boundary; no token). An empty
-  // journal (no runtime tools selected) answers an empty batch.
+  // re-emits them on its single run-event sink. Same posture as `/mcp`: the
+  // agent-auth middleware gates it, and the `Host` check on top is the
+  // DNS-rebinding defence. An empty journal (no runtime tools selected)
+  // answers an empty batch.
   app.get("/runtime-events", (c) => {
     const denied = validateMcpHostHeader(c.req.raw);
     if (denied) return denied;

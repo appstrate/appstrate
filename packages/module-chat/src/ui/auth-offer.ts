@@ -1,81 +1,67 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure helper (no React) that pulls the connect offer out of an
+ * Pure helper (no React) that pulls the connect offers out of an
  * `invoke_operation` tool result.
  *
- * Single channel: the typed `connectOffer` field the engine attaches to the
- * tool output ({@link ../connect-offer.ts}) — the only place the live URL
- * exists in a persisted result. The payload itself is never scraped; in the
+ * Single channel: the typed `connectOffers` field the engine attaches to the
+ * tool output ({@link ../connect-offer.ts}) — the only place the live URLs
+ * exist in a persisted result. The payload itself is never scraped; in the
  * model channel every connect URL is replaced by the redaction placeholder, and
  * scraping it rendered that placeholder as a relative href (issue #906).
  *
  * Kept React-free so it can be unit-tested without a DOM.
  */
 
-import { readConnectOffer } from "../connect-offer.ts";
+import type { IntegrationConnectCompletion } from "@appstrate/core/connect-handshake";
+import { readConnectOffers } from "../connect-offer.ts";
 
 export interface AuthOffer {
   authUrl: string;
   state?: string;
-}
-
-/** Payload the OAuth callback page broadcasts (see `apps/api/src/lib/oauth-popup-html.ts`). */
-export interface CompletionDetail {
-  type?: string;
-  ok?: boolean;
-  state?: string;
+  /** Integration the link connects — drives the card's icon, name and resume claim. */
   packageId?: string;
-  error?: string;
+}
+
+/** Payload the connect surfaces broadcast — defined in `@appstrate/core`. */
+export type CompletionDetail = IntegrationConnectCompletion;
+
+/** What a card is: which integration it connects, and which tool call issued it. */
+interface ResumeClaim {
+  packageId?: string;
+  /** Tool call the card was rendered from — several cards can share one. */
+  toolCallId?: string;
 }
 
 /**
- * Whether a completion broadcast is addressed to the card identified by
- * `{ state, packageId }`. BroadcastChannel/postMessage signals fan out to every
- * mounted card, so correlation lives here:
+ * One resume append per completion burst, across every card in this tab: two
+ * appends close together fork the conversation into two concurrent turns. Cards
+ * fan out on two independent axes, so a card claims only if NEITHER key is held.
  *
- *  - `state` — exact when both sides carry one. The hosted-connect offer
- *    (`connect_url`) carries NO state (its OAuth state is minted later, at
- *    /connect/start click time), so cards from that flow can't rely on it.
- *  - `packageId` — the package-level filter, mirroring the SSE
- *    `connection_update` backstop so all three completion signals share the
- *    same semantics. Without it, one Gmail connect flipped an unrelated card
- *    "connected" and double-resumed the conversation (forked thread).
+ *  - PACKAGE. One completion signal reaches every mounted card, so two cards
+ *    awaiting the same package (a retry after an abandoned attempt) would both
+ *    append on the one broadcast.
+ *  - TOOL CALL. A run-kickoff 412 renders one card per integration (#1207);
+ *    those are different packages, so only this key covers them.
  *
- * Completions without a packageId (context-less error pages such as "Missing
- * connect token") stay accepted: they only surface an error, never an append.
- */
-export function completionMatches(
-  detail: CompletionDetail | undefined,
-  card: { messageType: string; state?: string; packageId?: string },
-): boolean {
-  if (!detail || detail.type !== card.messageType) return false;
-  if (card.state && detail.state && detail.state !== card.state) return false;
-  if (card.packageId && detail.packageId && detail.packageId !== card.packageId) return false;
-  return true;
-}
-
-/**
- * One resume append per (package, completion) across every card in this tab.
- *
- * A single completion signal reaches ALL mounted cards, so two cards awaiting
- * the same package — e.g. a retry card issued after an abandoned first
- * attempt — would BOTH append a resume message, forking the conversation into
- * two concurrent turns (each user turn chains onto the last message, but each
- * assistant turn chains onto its own trigger). The first card to complete
- * claims the append; siblings settle for the connected visual. The short TTL
- * only needs to outlive the fan-out burst (all cards fire within ms of one
- * broadcast) while staying well under any legitimate later reconnect in the
- * same conversation.
+ * The TTL only needs to outlive one burst while staying well under any
+ * legitimate later reconnect in the same conversation.
  */
 const RESUME_CLAIM_TTL_MS = 30_000;
 const resumeClaims = new Map<string, number>();
 
-export function claimResume(packageId: string | undefined, now = Date.now()): boolean {
-  if (!packageId) return true;
-  const prev = resumeClaims.get(packageId);
-  if (prev !== undefined && now - prev < RESUME_CLAIM_TTL_MS) return false;
-  resumeClaims.set(packageId, now);
+export function claimResume(card: ResumeClaim, now = Date.now()): boolean {
+  const keys: string[] = [];
+  if (card.packageId) keys.push(`pkg:${card.packageId}`);
+  if (card.toolCallId) keys.push(`call:${card.toolCallId}`);
+  // A card that can identify itself on neither axis takes no completion it
+  // could confuse with another card's, so there is nothing to arbitrate.
+  if (keys.length === 0) return true;
+  for (const key of keys) {
+    const prev = resumeClaims.get(key);
+    if (prev !== undefined && now - prev < RESUME_CLAIM_TTL_MS) return false;
+  }
+  for (const key of keys) resumeClaims.set(key, now);
   return true;
 }
 
@@ -124,8 +110,11 @@ export function parseResume(text: string): ResumeMeta | null {
   return { packageId: "" };
 }
 
-export function extractAuthOffer(result: unknown): AuthOffer | null {
-  const offer = readConnectOffer(result);
-  if (!offer) return null;
-  return { authUrl: offer.connect_url, ...(offer.state ? { state: offer.state } : {}) };
+/** Every offer the result carries, in walk order — one connect card each. */
+export function extractAuthOffers(result: unknown): AuthOffer[] {
+  return readConnectOffers(result).map((offer) => ({
+    authUrl: offer.connect_url,
+    ...(offer.state ? { state: offer.state } : {}),
+    ...(offer.package_id ? { packageId: offer.package_id } : {}),
+  }));
 }

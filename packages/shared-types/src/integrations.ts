@@ -7,11 +7,7 @@
  * side can drift the other.
  */
 
-import type {
-  IntegrationManifest,
-  IntegrationToolCatalogEntry,
-  IntegrationToolInspection,
-} from "@appstrate/core/integration";
+import type { IntegrationManifest, IntegrationToolCatalogEntry } from "@appstrate/core/integration";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
@@ -33,9 +29,9 @@ export interface IntegrationSummary {
   manifest: IntegrationManifestView;
   orgId: string | null;
   source: "local" | "system";
-  /** True when an application_packages row exists for this (app, integration). */
+  /** True when a space_packages row exists for this (space, integration). */
   active?: boolean;
-  /** Admin-only per-(app, integration) lock; defaults to false when inactive. */
+  /** Admin-only per-(space, integration) lock; defaults to false when inactive. */
   block_user_connections?: boolean;
 }
 
@@ -66,7 +62,7 @@ export interface IntegrationConnection {
    * user-editable. The UI renders it verbatim.
    */
   label?: string | null;
-  /** Opt-in: makes this connection selectable by other members of the same app. */
+  /** Opt-in: makes this connection selectable by other members of the same space. */
   shared_with_org?: boolean;
   /**
    * The registered OAuth client that minted this connection — a flat client id
@@ -136,38 +132,10 @@ export interface IntegrationAuthStatus {
  */
 export type { IntegrationToolCatalogEntry };
 
-export interface IntegrationDetail {
-  manifest: IntegrationManifestView;
-  auths: IntegrationAuthStatus[];
-  /** Effective agent-facing tool catalog — the picker's source of truth. */
-  tool_catalog: IntegrationToolCatalogEntry[];
-  /** Explanatory inventory, including tools excluded from tool_catalog. */
-  tool_catalog_inspection?: IntegrationToolInspection;
-  /**
-   * AFPS §7.8 opt-in surfaced verbatim from the integration manifest.
-   * When `true`, the agent editor's tool picker MAY offer the
-   * "Include all upstream tools (advanced)" toggle that sets
-   * `integrations_configuration.<id>.tools = "*"`.
-   */
-  allow_undeclared_tools: boolean;
-  /**
-   * Activation state in the current application — `true` when an enabled
-   * application_packages row exists. Resource state shared with the list
-   * endpoint; returned by every detail-shaped response (GET detail,
-   * POST activate, PATCH settings) per #657.
-   */
-  active: boolean;
-  /**
-   * Admin gate: when `true`, only org admins may create personal
-   * connections in this application. `false` when not activated.
-   */
-  block_user_connections: boolean;
-}
-
 export interface IntegrationOAuthClient {
   /** Row UUID — the `client_ref` handle for rotate / delete / default-client. */
   id: string;
-  applicationId: string;
+  spaceId: string;
   integration_package_id: string;
   auth_key: string;
   client_id: string;
@@ -191,7 +159,7 @@ export interface IntegrationOAuthClient {
 }
 
 /**
- * One connection an actor can pick from for a given (application,
+ * One connection an actor can pick from for a given (space,
  * integration): own + shared-with-org, with caller-facing display fields.
  * Base wire shape for the annotated candidate list surfaced by
  * `GET /api/agents/:scope/:name/connection-readiness`

@@ -63,7 +63,7 @@ export const workloadHandleSchema = z.object({
 const workloadResourcesSchema = z.looseObject({
   // The daemon sizes the microVM straight from these (vm-config.ts derives
   // guest MiB / vCPU) — a missing field would size the VM as NaN. Pin them;
-  // additive fields (pidsLimit, …) still pass through.
+  // additive fields still pass through (the schema is loose).
   memoryBytes: z.number().positive(),
   nanoCpus: z.number().positive(),
 }) as unknown as z.ZodType<WorkloadResources>;
@@ -180,7 +180,6 @@ export const handleBodySchema = z.object({
 
 export const stopWorkloadBodySchema = z.object({
   handle: workloadHandleSchema,
-  timeoutSeconds: z.number().int().nonnegative().optional(),
 });
 
 export const logsBodySchema = z.object({
@@ -194,7 +193,6 @@ export const logsBodySchema = z.object({
 
 export const stopRunBodySchema = z.object({
   runId: z.string().min(1),
-  timeoutSeconds: z.number().int().nonnegative().optional(),
 });
 
 // ---------------------------------------------------------------------------

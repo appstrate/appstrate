@@ -18,19 +18,14 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import {
-  useDeleteDocument,
-  useDocumentDownload,
-  useKeepDocument,
-  type DocumentDto,
-} from "../hooks/use-documents";
+import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { ErrorState, EmptyState } from "./page-states";
 import { CardGrid } from "./card-grid";
 import { DataTable, columnMenu, visibleColumns } from "./data-table";
 import type { ColumnMenuSpec } from "./list-toolbar";
-import { DocumentTile } from "./document-tile";
+import { FileTile } from "./file-tile";
 import { useDocumentColumns } from "./document-columns";
-import { DocumentPreview } from "./document-preview";
+import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
 import { TableRowActions } from "./table-row-actions";
 import { documentPreviewHref } from "../lib/documents";
@@ -61,7 +56,7 @@ export function DocumentListPanel({
   tableSurface = "framed",
   tableShowHeader = true,
 }: {
-  documents: DocumentDto[];
+  documents: FileDto[];
   isLoading: boolean;
   error: unknown;
   purpose?: PurposeFilter;
@@ -99,13 +94,13 @@ export function DocumentListPanel({
   /** The compact snapshot list names the group in its accordion trigger. */
   tableShowHeader?: boolean;
 }) {
-  const { t } = useTranslation("documents");
-  const download = useDocumentDownload();
-  const deleteDoc = useDeleteDocument();
-  const keepDoc = useKeepDocument();
+  const { t } = useTranslation("files");
+  const download = useFileDownload();
+  const deleteDoc = useDeleteFile();
+  const keepDoc = useKeepFile();
   const location = useLocation();
   const navigate = useNavigate();
-  const [pendingDelete, setPendingDelete] = useState<DocumentDto | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<FileDto | null>(null);
   const visibility = useColumnVisibility("documents");
 
   // Preview is URL-addressable via a `?preview=<doc_id>` param so it can be
@@ -143,10 +138,10 @@ export function DocumentListPanel({
   // Wire the delete/keep handlers unconditionally — per-document visibility is
   // driven by the server-computed `capabilities` (delete/keep) inside the tile,
   // not a client-side role guess. The server still enforces the real rule.
-  const onDelete = (doc: DocumentDto) => setPendingDelete(doc);
+  const onDelete = (doc: FileDto) => setPendingDelete(doc);
 
   // Keep ("pin") — clears the document's expiry.
-  const onKeep = (doc: DocumentDto) =>
+  const onKeep = (doc: FileDto) =>
     keepDoc.mutate(
       { params: { path: { id: doc.id } } },
       {
@@ -306,8 +301,8 @@ export function DocumentListPanel({
             error={<ErrorState message={getErrorMessage(error)} compact />}
             empty={emptyState}
             renderCard={(doc) => (
-              <DocumentTile
-                doc={doc}
+              <FileTile
+                file={doc}
                 onDownload={download}
                 onDelete={onDelete}
                 onKeep={onKeep}
@@ -331,7 +326,7 @@ export function DocumentListPanel({
         isPending={deleteDoc.isPending}
       />
 
-      {previewDoc && <DocumentPreview doc={previewDoc} onClose={() => setPreviewParam(null)} />}
+      {previewDoc && <FilePreview file={previewDoc} onClose={() => setPreviewParam(null)} />}
     </>
   );
 }

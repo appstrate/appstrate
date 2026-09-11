@@ -3,7 +3,7 @@
 export * from "./enums.ts";
 export * from "./auth.ts";
 export * from "./organizations.ts";
-export * from "./applications.ts";
+export * from "./spaces.ts";
 export * from "./profiles.ts";
 export * from "./packages.ts";
 export * from "./runs.ts";
@@ -12,7 +12,7 @@ export * from "./integrations.ts";
 export * from "./integration-pins.ts";
 export * from "./integration-org-defaults.ts";
 export * from "./uploads.ts";
-export * from "./documents.ts";
+export * from "./files.ts";
 export * from "./storage-deletion-jobs.ts";
 export * from "./audit.ts";
 export * from "./webhooks.ts";

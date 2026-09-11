@@ -7,7 +7,6 @@ import type { AppEnv } from "../types/index.ts";
 import {
   getRun,
   getRunFull,
-  getRunningRunsForPackage,
   deletePackageRuns,
   listPackageRuns,
   getPackageRunActivity,
@@ -18,15 +17,23 @@ import {
 } from "../services/state/runs.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
+import { getInstalledPackageSettings } from "../services/space-packages.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { mergeAndValidateConfigOverride } from "../services/agent-readiness.ts";
 import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
+import {
+  runVisibilityFilter,
+  ownRunsFilter,
+  assertRunVisible,
+  requireRunsRead,
+} from "../lib/run-visibility.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
+import { parseListPagination } from "../lib/list-query.ts";
+import { connectionOverridesSchema } from "../lib/launch-schemas.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
@@ -36,62 +43,119 @@ import type { IntegrationManifestCache } from "../services/integration-service.t
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
-  assertContextDocumentsFieldAvailable,
-  injectContextDocuments,
-  normalizeContextDocumentUris,
+  assertContextFilesFieldAvailable,
+  injectContextFiles,
+  normalizeContextFileUris,
   triggerInlineRun,
 } from "../services/inline-run.ts";
+import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
+import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
 import { TERMINAL_RUN_STATUSES, runStatusValues } from "@appstrate/db/schema";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
-import { readJsonBody } from "../lib/request-body.ts";
+import { readJsonBody } from "@appstrate/core/request-body";
 import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation";
+
+/**
+ * Wire-shape guard for the agent-run body (`POST /agents/{scope}/{name}/run`).
+ *
+ * `.strict()` on purpose (#1187). This surface had NO body schema at all: the
+ * body was read with `c.req.json<RunRequestBody>()`, a cast that validates
+ * nothing, so an unknown field was dropped without a trace and a malformed body
+ * became `{}` — a 201 for a run executing with parameters nobody asked for.
+ * That is the exact failure `assertFieldsUnlocked` states as a rule
+ * (`@appstrate/core/input-resolution`) and the one #1179 fixed on the MCP
+ * surface, and the
+ * launch body was the last place the rule did not hold. `POST /runs/remote` was
+ * already `.strict()`; the schedule bodies (`routes/schedules.ts`) took the
+ * rule afterwards, and the four launch surfaces now agree.
+ *
+ * Deep semantics stay downstream in `parseRequestInput` (is this dependency
+ * spec resolvable, does the replayed run belong to this agent) — this schema
+ * only settles which fields exist and of what type.
+ */
+export const runAgentBodySchema = z
+  .object({
+    input: z.record(z.string(), z.unknown()).optional(),
+    /**
+     * Replay a prior run's persisted input. Emptiness and the mutual exclusion
+     * with `input` are checked in `parseRequestInput`, which owns the message
+     * naming the field — neither is a shape.
+     */
+    rerun_from: z.string().optional(),
+    modelId: z.string().optional(),
+    generation: modelGenerationSettingsSchema.optional(),
+    proxyId: z.string().optional(),
+    connection_overrides: connectionOverridesSchema.optional(),
+    dependency_overrides: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
 
 /**
  * Wire-shape guard for the inline-run body (`POST /runs/inline` +
  * `/inline/validate`). Mirrors the `InlineRunBody` TS type: every field
- * is optional and the semantic validation (manifest/config/input/AJV) happens
+ * is optional and the semantic validation (manifest/input/AJV) happens
  * downstream in the preflight — this schema only rejects a malformed body or a
  * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
  * it cast through and surface later as a 500.
+ *
+ * `.strict()` since #1187, like the three other launch surfaces. It also closes
+ * a live silent drop: `dependency_overrides` was accepted here (the parser read
+ * it straight off the raw body) and then never applied — `triggerInlineRun`
+ * does not forward it. Undeclared here, it is now a 400 instead of a run that
+ * quietly ignored the pin it was handed.
  */
-const inlineRunBodySchema = z.object({
-  manifest: z.unknown().optional(),
-  prompt: z.unknown().optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
-  config: z.record(z.string(), z.unknown()).optional(),
-  modelId: z.string().nullable().optional(),
-  generation: modelGenerationSettingsSchema.optional(),
-  proxyId: z.string().nullable().optional(),
-  /**
-   * `document://` URIs to mount read-only into the run's `documents/` directory
-   * without declaring a file field in the manifest (fan-in by reference). Entry
-   * shape is checked downstream by `normalizeContextDocumentUris` so the error
-   * names the offending URI rather than a Zod path.
-   */
-  context_documents: z.array(z.unknown()).optional(),
-  /**
-   * Per-integration connection picks for this run (resolver mechanism #2).
-   * Declared here so the parse keeps the field for the preflight's readiness
-   * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
-   * it.
-   *
-   * `.min(1)` is owned here rather than delegated to `parseRequestInput`: an
-   * empty-string id is falsy at the resolver's `resolveOne`, so readiness would
-   * answer 412 before the parser's field-precise 400 could fire — and
-   * `POST /runs/inline/validate` never calls the parser at all, so the guard
-   * would have no owner there and the validator would disagree with the launch
-   * on the same body.
-   */
-  connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
-});
+const inlineRunBodySchema = z
+  .object({
+    manifest: z.unknown().optional(),
+    prompt: z.unknown().optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
+    modelId: z.string().nullable().optional(),
+    generation: modelGenerationSettingsSchema.optional(),
+    proxyId: z.string().nullable().optional(),
+    /**
+     * `appfile://` URIs to mount read-only into the run's input-file directory
+     * without declaring a file field in the manifest (fan-in by reference). Entry
+     * shape is checked downstream by `normalizeContextFileUris` so the error
+     * names the offending URI rather than a Zod path.
+     */
+    context_files: z.array(z.unknown()).optional(),
+    /**
+     * Per-integration connection picks for this run (resolver mechanism #2).
+     * Declared here so the parse keeps the field for the preflight's readiness
+     * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
+     * it.
+     *
+     * `.min(1)` and the reason it is owned at the schema rather than in
+     * `parseRequestInput` live with the rule itself, in `lib/launch-schemas.ts`.
+     */
+    connection_overrides: connectionOverridesSchema.optional(),
+    /**
+     * Not a field — a rejection. `rerun_from` is an agent-route concept (replay a
+     * cataloged agent's prior input) and means nothing here, so its presence must
+     * fail loudly rather than be silently stripped and half-applied: the inline
+     * preflight validates the raw `input`, which a replay would not populate.
+     *
+     * Declared as `z.undefined()` so the rule lives in the schema and travels
+     * with it, instead of being re-derived from a second `c.req.json()` read of
+     * the same body. It also puts the failure on the documented side of the error
+     * convention (see `responses.ts` → `ValidationError`): body-level failures
+     * answer `validation_failed` with a populated `errors[]`, and `invalid_request`
+     * is for single-field failures OUTSIDE the body. The hand-rolled throw this
+     * replaced emitted `invalid_request` from inside a body check.
+     */
+    rerun_from: z
+      .undefined({ error: "`rerun_from` is not supported for inline runs — pass `input` directly" })
+      .optional(),
+  })
+  .strict();
 
 /**
  * Resolve the traceparent to seed the run-execution trace tree with, honoring
@@ -186,6 +250,14 @@ export function createRunsRouter() {
       const agent = c.get("package");
       const orgId = c.get("orgId");
       const actor = getActor(c);
+
+      // Body first: it is a property of the request, so a body this surface
+      // cannot honour fails before any lookup. `allowEmpty` keeps the launch
+      // contract "no body == no input" (a run whose input is entirely resolved
+      // from stored values needs no body at all) while MALFORMED JSON now 400s
+      // instead of being swallowed into `{}` and launched as an input-less run.
+      const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
+
       // Version selector from query param: `draft`, `published`, or a
       // version spec (exact / dist-tag / semver range). Omitted ≡ `published`
       // for EVERY caller (latest published; 404 when none, #636) — the working
@@ -198,7 +270,7 @@ export function createRunsRouter() {
       );
 
       // Single canonical prefix — `run_` — shared with inline + remote origins.
-      // Minted BEFORE input parsing so input documents can be streamed straight
+      // Minted BEFORE input parsing so input files can be streamed straight
       // into this run's workspace namespace during consume (no buffering them in
       // API memory until the run row exists). The run row is still created later
       // with this same id.
@@ -206,29 +278,38 @@ export function createRunsRouter() {
 
       // Flips true the instant the pipeline launches (run row inserted, workload
       // dispatched). Past that point the run OWNS its workspace — a later failure
-      // (e.g. the read-back below) must NOT delete a live run's input documents.
+      // (e.g. the read-back below) must NOT delete a live run's input files.
       let launched = false;
       try {
+        // Per-space settings first: they carry the editor defaults and
+        // the locked-field list the input resolution needs, and the readiness
+        // preflight below reuses this same row (one read per trigger).
+        const packageSettings = await getInstalledPackageSettings(c.get("spaceId"), agent.id);
+
         const inputResult = await parseRequestInput(
           c,
+          body,
           runId,
           effectiveAgent.manifest.input?.schema
             ? asJSONSchemaObject(effectiveAgent.manifest.input.schema)
             : undefined,
-          // Same-agent gate for `rerun_from` — replaying another agent's run
-          // input is rejected with 409 `rerun_agent_mismatch`.
-          { agentPackageId: agent.id },
+          {
+            // Same-agent gate for `rerun_from` — replaying another agent's run
+            // input is rejected with 409 `rerun_agent_mismatch`.
+            agentPackageId: agent.id,
+            editorDefaults: packageSettings.values,
+            lockedFields: packageSettings.locked,
+          },
         );
 
         const {
           input: parsedInput,
           uploadedFiles,
-          pendingDocuments,
-          consumedDocumentIds,
+          pendingFiles,
+          consumedFileIds,
           modelIdOverride,
           generationConfigOverride,
           proxyIdOverride,
-          configOverride,
           connectionOverrides,
           dependencyOverrides,
         } = inputResult;
@@ -239,7 +320,7 @@ export function createRunsRouter() {
         // default downstream (or crash the uuid cast — see loadModel).
         await assertExplicitModelExists(orgId, modelIdOverride);
 
-        // Shared preflight: resolve config, validate readiness. Threading
+        // Shared preflight: validate readiness. Threading
         // `connectionOverrides` here is what makes the
         // MissingConnectionsModal retry actually work — readiness sees the
         // caller's pick and skips the must_choose error on >1 candidates.
@@ -250,27 +331,24 @@ export function createRunsRouter() {
         // `prepareAndExecuteRun` all load the same integration manifests;
         // sharing the Map collapses those repeats into one SELECT + Zod
         // parse per integration. Request-scoped: dies with this handler.
+        // `resolveRunPreflight` seeds it with the PINNED manifests before it
+        // reads anything, so the advisory verdict and the kickoff's gates
+        // judge the same versions.
         const manifestCache: IntegrationManifestCache = new Map();
 
-        const {
-          config,
-          modelId: preflightModelId,
-          generationConfig: preflightGenerationConfig,
-          proxyId: preflightProxyId,
-        } = await resolveRunPreflight({
+        await resolveRunPreflight({
           agent: effectiveAgent,
-          applicationId: c.get("applicationId"),
+          spaceId: c.get("spaceId"),
           orgId,
           actor,
+          // Opt-in only: absent header ⇒ null ⇒ a 412 with no connect link.
+          connectOffers: connectOfferPolicyFromRequest(c),
           connectionOverrides: connectionOverrides ?? null,
+          // Same overrides handed to `prepareAndExecuteRun` below, so the
+          // preflight seeds the manifests the kickoff will freeze.
+          dependencyOverrides: dependencyOverrides ?? null,
           manifestCache,
         });
-
-        // Deep-merge any per-run `config` override on top of the persisted
-        // application config and re-validate against the manifest schema.
-        // Single helper shared with the scheduler so both paths converge to
-        // an identical resolved config for the same `(persisted, override)`.
-        const mergedConfig = mergeAndValidateConfigOverride(effectiveAgent, config, configOverride);
 
         const runner = await resolveRunnerContext(c);
         await prepareAndExecuteRun({
@@ -282,23 +360,21 @@ export function createRunsRouter() {
           // `undefined`; map that to NULL so an input-less run persists
           // `runs.input` as SQL NULL (one representation across all origins).
           input: parsedInput ?? null,
-          // File metadata for prompt context — the document bytes were already
+          // File metadata for prompt context — the file bytes were already
           // streamed into the run workspace during consume.
           files: uploadedFiles,
-          // Staged uploads to materialize into durable `documents` rows after
-          // the run row exists (input already rewritten to `document://` ids).
-          pendingDocuments,
-          // `document://` inputs to protect via `document_links` (chaining).
-          consumedDocumentIds,
-          config: mergedConfig,
-          configOverride: configOverride ?? null,
-          modelId: modelIdOverride ?? preflightModelId,
-          generationConfig: preflightGenerationConfig,
+          // Staged uploads to materialize into durable `files` rows after
+          // the run row exists (input already rewritten to `appfile://` ids).
+          pendingFiles,
+          // `appfile://` inputs to protect via `file_links` (chaining).
+          consumedFileIds,
+          modelId: modelIdOverride ?? packageSettings.modelId,
+          generationConfig: packageSettings.generationConfig,
           generationConfigOverride: generationConfigOverride ?? null,
-          proxyId: proxyIdOverride ?? preflightProxyId,
+          proxyId: proxyIdOverride ?? packageSettings.proxyId,
           overrideVersionLabel,
           dependencyOverrides: dependencyOverrides ?? null,
-          applicationId: c.get("applicationId"),
+          spaceId: c.get("spaceId"),
           apiKeyId: c.get("apiKeyId") ?? undefined,
           connectionOverrides: connectionOverrides ?? null,
           traceparent: runTraceparent(c),
@@ -326,7 +402,7 @@ export function createRunsRouter() {
         // #635, plus status, version_ref, agent_scope, …) without a follow-up
         // GET. The run row exists once `prepareAndExecuteRun` resolves.
         // No legacy `runId` alias (#657): the run id is `id`.
-        const row = await getRunFull(getAppScope(c), runId, getActor(c));
+        const row = await getRunFull(getSpaceScope(c), runId, getActor(c));
         if (!row) {
           // The run row was inserted by `prepareAndExecuteRun` above and is
           // read back on the same scope, so a miss means it was deleted out
@@ -339,7 +415,7 @@ export function createRunsRouter() {
         }
         return c.json(row, 201);
       } catch (err) {
-        // Roll back any input documents streamed into the run workspace before
+        // Roll back any input files streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once
         // `prepareAndExecuteRun` resolves the run owns its own teardown, so a
         // post-launch failure (e.g. the read-back throwing) must NOT delete a
@@ -351,30 +427,17 @@ export function createRunsRouter() {
   );
 
   // GET /api/agents/:scope/:name/runs — list runs for an agent
-  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireAgent(), async (c) => {
+  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireRunsRead, requireAgent(), async (c) => {
     const agent = c.get("package");
-    const scope = getAppScope(c);
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(50)
-      .parse(c.req.query("limit") ?? 50);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
+    const scope = getSpaceScope(c);
+    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
     const status = closedSetListQuery(c, "status", runStatusValues);
-    const endUser = c.get("endUser");
     const result = await listPackageRuns(scope, agent.id, {
       limit,
       offset,
-      endUserId: endUser?.id,
       actor: getActor(c),
       status,
+      visibility: runVisibilityFilter(c),
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
@@ -385,7 +448,7 @@ export function createRunsRouter() {
   // list so the browser never has to download every page to compute a rate.
   router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/run-activity`, requireAgent(), async (c) => {
     const agent = c.get("package");
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const endUser = c.get("endUser");
     return c.json(
       await getPackageRunActivity(scope, agent.id, {
@@ -394,7 +457,7 @@ export function createRunsRouter() {
     );
   });
 
-  // GET /api/runs — global paginated run list across the application.
+  // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
   // for inline-run filtering, ?status, ?start_date/?end_date, and
   // ?chat_session_id for the conversation context sidebar.
@@ -404,34 +467,27 @@ export function createRunsRouter() {
   // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
   // size returns the first page, which narrows rather than widens, and callers
   // paging by `Link` headers never construct them by hand.
-  router.get("/runs", async (c) => {
+  router.get("/runs", requireRunsRead, async (c) => {
     const actor = getActor(c);
-    const scope = getAppScope(c);
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .catch(20)
-      .parse(c.req.query("limit") ?? 20);
-    const offset = z.coerce
-      .number()
-      .int()
-      .min(0)
-      .catch(0)
-      .parse(c.req.query("offset") ?? 0);
-    // `user` is a closed set of one: `me`. Validated BEFORE the end-user branch
-    // below so the param means the same thing for every caller, instead of a
-    // typo surviving in an end-user integration until it runs under an org
-    // session.
+    const scope = getSpaceScope(c);
+    const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
+    // `user` is a closed set of one: `me`. The param means the same thing for
+    // every caller, so a typo is a 400 rather than something that survives in
+    // an end-user integration until it runs under an org session.
     const userFilter = closedSetQuery(c, "user", USER_FILTERS);
-    const endUser = c.get("endUser");
-    // End-users always see only their own runs; a member asks for it with
-    // `?user=me`. It is one more condition on the SAME query rather than a
-    // branch to a separate one, because it has to COMPOSE: the branch it
-    // replaces dropped `kind`, `status` and the date range without a word, so
-    // "my failed runs" quietly answered "my runs".
-    const mine = userFilter === "me" || !!endUser;
+    // `?user=me` narrows to the caller's own runs even when `runs:read-all`
+    // would have widened the list; without it the caller reads whatever their
+    // permission allows. An end-user needs no branch of its own: `read-all` is
+    // not grantable to them, so `runVisibilityFilter` already yields exactly
+    // their own runs — and either way the list composes with every filter
+    // below, instead of a self-view that quietly drops them.
+    // `?user=me` narrows to the caller's own runs even when `runs:read-all`
+    // would have widened the list; without it the caller reads whatever their
+    // permission allows. An end-user needs no branch of its own: `read-all` is
+    // not grantable to them, so `runVisibilityFilter` already yields exactly
+    // their own runs — and either way the list composes with every filter
+    // below, instead of a self-view that quietly drops them.
+    const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
     const status = closedSetListQuery(c, "status", runStatusValues);
@@ -462,8 +518,8 @@ export function createRunsRouter() {
       endDate,
       chatSessionId,
       search,
-      mine,
       actor,
+      visibility,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
@@ -479,19 +535,16 @@ export function createRunsRouter() {
   // (run_update PG NOTIFY) with a periodic DB re-check as fallback — see
   // services/run-wait.ts. Auth/scoping is identical to the plain call:
   // ownership is verified BEFORE any waiting starts.
-  router.get("/runs/:id", async (c) => {
-    const runId = c.req.param("id");
-    const scope = getAppScope(c);
+  router.get("/runs/:id", requireRunsRead, async (c) => {
+    const runId = c.req.param("id")!;
+    const scope = getSpaceScope(c);
     // Validate the wait param before touching the DB so a malformed value
     // 400s even for runs the caller could not read.
     const waitMs = parseWaitQuery(c.req.query("wait"));
 
-    const row = await getRunFull(scope, runId, getActor(c));
+    const visibility = runVisibilityFilter(c);
+    const row = await getRunFull(scope, runId, getActor(c), visibility);
     if (!row) {
-      throw notFound("Run not found");
-    }
-    const endUser = c.get("endUser");
-    if (endUser && row.endUserId !== endUser.id) {
       throw notFound("Run not found");
     }
 
@@ -511,7 +564,7 @@ export function createRunsRouter() {
         // timers/subscriptions for a response nobody will read.
         signal: c.req.raw.signal,
       });
-      const fresh = await getRunFull(scope, runId, getActor(c));
+      const fresh = await getRunFull(scope, runId, getActor(c), visibility);
       // The run can be deleted mid-wait (e.g. DELETE agent runs) — surface
       // the same 404 the initial read would have.
       if (!fresh) {
@@ -549,17 +602,14 @@ export function createRunsRouter() {
   // Rate limited at 120/min per identity (same budget as the inbound MCP
   // server) — the log history can be large and the CLI tail polls it in a
   // loop, so an unmetered caller could turn this read into a DB hammer.
-  router.get("/runs/:id/logs", rateLimit(120), async (c) => {
+  router.get("/runs/:id/logs", requireRunsRead, rateLimit(120), async (c) => {
     const runId = c.req.param("id")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const exec = await getRun(scope, runId);
     if (!exec) {
       throw notFound("Run not found");
     }
-    const endUser = c.get("endUser");
-    if (endUser && exec.endUserId !== endUser.id) {
-      throw notFound("Run not found");
-    }
+    assertRunVisible(c, exec);
 
     const sinceParam = c.req.query("since");
     let sinceId: number | undefined;
@@ -570,16 +620,13 @@ export function createRunsRouter() {
 
     const minLevel = z.enum(RUN_LOG_LEVELS).optional().catch(undefined).parse(c.req.query("level"));
 
-    const limit = z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(1000)
-      .default(1000)
-      .catch(1000)
-      .parse(c.req.query("limit"));
+    // Log pages are limit-only (`since` is the cursor), so the helper's
+    // `offset` is dropped. The old inline form also carried a `.default(1000)`
+    // ahead of `.catch(1000)`: dead, because `.catch` already absorbs the
+    // `undefined` an absent `?limit=` produces.
+    const { limit } = parseListPagination(c, { defaultLimit: 1000, maxLimit: 1000 });
 
-    // Ownership was just verified via getRun(scope) above — we can hand
+    // Visibility was just verified via `assertRunVisible` above — we can hand
     // off to the org-scoped log reader safely. Over-fetch by one row so
     // `hasMore` is known without a COUNT round-trip.
     const rows = await listRunLogs({
@@ -607,25 +654,22 @@ export function createRunsRouter() {
   // aggregated from `llm_usage`, the runner ledger row settles, and the
   // `run_completed` log row + `onRunStatusChange` broadcast happen exactly
   // once. Pre-fix, this route wrote `status='cancelled'` and closed the sink
-  // directly — no terminal broadcast fired and the cloud module never debited
+  // directly — no terminal broadcast fired and a billing module never debited
   // credits for cancelled runs that had already burned LLM tokens.
   router.post("/runs/:id/cancel", requirePermission("runs", "cancel"), async (c) => {
     const runId = c.req.param("id")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
 
     const run = await getRun(scope, runId);
     if (!run) {
       throw notFound("Run not found");
     }
 
-    // End-user boundary: `runs:cancel` is an OIDC-grantable end-user scope, but
-    // an end-user must only cancel their OWN runs — mirror the ownership guard
-    // the read paths (`GET /runs/:id`, `/logs`) apply. Scope alone (org+app) is
-    // not enough here.
-    const endUser = c.get("endUser");
-    if (endUser && run.endUserId !== endUser.id) {
-      throw notFound("Run not found");
-    }
+    // `runs:cancel` gates the ACTION; visibility gates WHICH rows. A caller
+    // without `runs:read-all` — an end-user holding the OIDC-granted scope, an
+    // operator — cancels only what it may read, and a run it may not read 404s
+    // rather than 403s. Scope alone (org+space) is not enough here.
+    assertRunVisible(c, run);
 
     // Verify cancellable
     if (run.status !== "pending" && run.status !== "running") {
@@ -671,7 +715,7 @@ export function createRunsRouter() {
   });
 
   // POST /api/runs/inline — execute an inline (no persisted package) agent.
-  // See docs/specs/INLINE_RUNS.md. The manifest + prompt travel in the
+  // The manifest + prompt travel in the
   // request body; the platform creates a transient shadow package
   // (ephemeral = true), runs it through the existing pipeline, and
   // returns 201 + the bare created run resource (the shadow package id is
@@ -687,43 +731,39 @@ export function createRunsRouter() {
     requirePermission("agents", "run"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const actor = getActor(c);
 
+      // `rerun_from` is rejected by `inlineRunBodySchema` itself — see the field
+      // note there. No second read of the body here.
       const body = await readJsonBody(c, inlineRunBodySchema);
 
-      // `rerun_from` is an agent-route concept (replay a cataloged agent's
-      // prior input). The inline body schema strips it, but the shared input
-      // parser below reads the raw JSON body — reject it explicitly so a
-      // stray field fails loudly instead of being half-applied (preflight
-      // validates the raw `input`, which a replay would not populate).
-      const rawBody = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
-      if (rawBody && "rerun_from" in rawBody) {
-        throw invalidRequest(
-          "`rerun_from` is not supported for inline runs — pass `input` directly",
-          "rerun_from",
-        );
-      }
+      // Preflight BEFORE any input file streams — a bad manifest or
+      // readiness problem 4xxes without touching storage.
+      const preflight = await runInlinePreflight({
+        orgId,
+        spaceId,
+        actor,
+        body,
+        connectOffers: connectOfferPolicyFromRequest(c),
+        authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+      });
 
-      // Preflight BEFORE any input document streams — a bad manifest / config
-      // / readiness problem 4xxes without touching storage.
-      const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
-
-      // ----- Context documents (fan-in by reference) -----
+      // ----- Context files (fan-in by reference) -----
       // Both entry paths land on ONE synthesized reserved input field, and the
       // synthesis must happen HERE: `parseRequestInput` below reads the input
       // schema off `preflight.manifest`, so the field has to be declared before
       // it walks the input. Everything after this block is the ordinary file
-      // path — ACL (`getDocumentForActor`), byte + count caps, streaming into
-      // `documents/`, `document_links` — and the platform prompt announces the
-      // mounted documents exactly as it does for an uploaded file.
-      assertContextDocumentsFieldAvailable(preflight.manifest, body.input);
+      // path — ACL (`getFileForActor`), byte + count caps, streaming into
+      // `files/`, `file_links` — and the platform prompt announces the
+      // mounted files exactly as it does for an uploaded file.
+      assertContextFilesFieldAvailable(preflight.manifest, body.input);
       // B2 — the explicit argument. Shape-checked first: a malformed URI 400s
-      // without spending a document lookup.
-      const explicitDocumentUris = normalizeContextDocumentUris(body.context_documents);
-      const { manifest: effectiveManifest, inputPatch } = injectContextDocuments(
+      // without spending a file lookup.
+      const explicitFileUris = normalizeContextFileUris(body.context_files);
+      const { manifest: effectiveManifest, inputPatch } = injectContextFiles(
         preflight.manifest,
-        explicitDocumentUris,
+        explicitFileUris,
       );
       const effectivePreflight = inputPatch
         ? { ...preflight, manifest: effectiveManifest }
@@ -731,18 +771,19 @@ export function createRunsRouter() {
 
       // Same input machinery as POST /agents/:scope/:name/run: file fields
       // (`format: uri` + `contentMediaType`) resolve `upload://` /
-      // `document://` / inline `data:` URIs through the container ACL + caps
+      // `appfile://` / inline `data:` URIs through the container ACL + caps
       // and stream the bytes into this run's workspace. Minted before parsing
-      // for the same reason as the agent route (documents stream straight
+      // for the same reason as the agent route (files stream straight
       // into the run's workspace namespace).
       const runId = `run_${crypto.randomUUID()}`;
       // Flips true the instant `triggerInlineRun` launches the pipeline. Past
       // that point the run OWNS its workspace — a later failure (e.g. the
-      // read-back below) must NOT delete a live run's input documents.
+      // read-back below) must NOT delete a live run's input files.
       let launched = false;
       try {
         const parsed = await parseRequestInput(
           c,
+          body,
           runId,
           effectiveManifest.input?.schema
             ? asJSONSchemaObject(effectiveManifest.input.schema)
@@ -752,7 +793,7 @@ export function createRunsRouter() {
 
         const { packageId } = await triggerInlineRun({
           orgId,
-          applicationId,
+          spaceId,
           actor,
           runId,
           preflight: effectivePreflight,
@@ -776,7 +817,7 @@ export function createRunsRouter() {
         // to read from the `packageId` envelope field is the resource's own
         // `packageId`. The run row exists once `triggerInlineRun` resolves
         // (`prepareAndExecuteRun` inserts it before returning).
-        const row = await getRunFull(getAppScope(c), runId, getActor(c));
+        const row = await getRunFull(getSpaceScope(c), runId, getActor(c));
         if (!row) {
           // The shadow run was inserted by `triggerInlineRun` and read back on
           // the same scope; a miss means a concurrent teardown deleted it. The
@@ -787,7 +828,7 @@ export function createRunsRouter() {
         }
         return c.json(row, 201);
       } catch (err) {
-        // Roll back any input documents streamed into the run workspace before
+        // Roll back any input files streamed into the run workspace before
         // the run launched — same pre-launch teardown as the agent route. Once
         // `triggerInlineRun` has launched the pipeline the run owns its own
         // teardown, so a post-launch failure must NOT delete its workspace.
@@ -798,7 +839,7 @@ export function createRunsRouter() {
   );
 
   // POST /api/runs/inline/validate — dry-run validator for inline manifests.
-  // Runs the full preflight (manifest + config + input + agent readiness)
+  // Runs the full preflight (manifest + input + agent readiness)
   // WITHOUT inserting a shadow package or firing a pipeline. Lets developers
   // iterate on a manifest without creating phantom runs or burning credits.
   // Shares 100% of its validation with POST /api/runs/inline via
@@ -815,15 +856,22 @@ export function createRunsRouter() {
     requirePermission("agents", "run"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const actor = getActor(c);
       const body = await readJsonBody(c, inlineRunBodySchema);
 
-      await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
+      await runInlinePreflight({
+        orgId,
+        spaceId,
+        actor,
+        body,
+        mode: "accumulate",
+        authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+      });
       // Same reserved-name rule as the run endpoint — a manifest that validates
       // here must be runnable there.
-      assertContextDocumentsFieldAvailable(body.manifest, body.input);
-      normalizeContextDocumentUris(body.context_documents);
+      assertContextFilesFieldAvailable(body.manifest, body.input);
+      normalizeContextFileUris(body.context_files);
 
       // Structured validation result. Failures never reach this line — the
       // preflight throws problem+json ApiErrors (accumulated) — so a 200
@@ -838,15 +886,20 @@ export function createRunsRouter() {
     `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
     requireAgent(),
     requirePermission("runs", "delete"),
+    // The only run mutation that is not per-row: it spans every run of the
+    // agent in the space, so `assertRunVisible` has no row to apply and the
+    // space-wide read is what authorizes the span. Without it a principal
+    // scoped `runs:delete` alone would delete runs it cannot read.
+    requirePermission("runs", "read-all"),
     async (c) => {
       const agent = c.get("package");
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
 
-      const running = await getRunningRunsForPackage(scope, agent.id);
-      if (running > 0) {
-        throw conflict("run_in_progress", `${running} run(s) still running`);
-      }
-
+      // No pre-check here: `deletePackageRuns` counts active runs inside its
+      // own transaction, under the per-org run-admission advisory lock, and
+      // throws the same 409 `run_in_progress`. A count taken out here would be
+      // stale by the time the transaction opens — false assurance, and a
+      // second copy of the rule to keep in sync.
       const deleted = await deletePackageRuns(scope, agent.id);
       await recordAuditFromContext(c, {
         action: "agent.runs_bulk_deleted",

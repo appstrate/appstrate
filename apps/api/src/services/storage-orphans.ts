@@ -36,7 +36,7 @@
  *
  * Most buckets store one object per row, so the identity IS the key. The
  * `run-workspace` bucket stores several objects per run (bundle, manifest, and
- * one object per input document whose names live inside the manifest, not in
+ * one object per input file whose names live inside the manifest, not in
  * any table). Its descriptor therefore maps an object key back to its owning
  * runId and diffs against the set of live run ids. `identityOf` returning
  * `null` means "key shape not recognised" — reported separately and NEVER
@@ -46,7 +46,7 @@
 
 import { db } from "@appstrate/db/client";
 import {
-  documents,
+  files,
   uploads,
   runs,
   packages,
@@ -54,7 +54,7 @@ import {
   storageDeletionJobs,
 } from "@appstrate/db/schema";
 import type { StorageObject } from "@appstrate/core/storage";
-import { DOCUMENTS_BUCKET } from "./documents.ts";
+import { FILES_BUCKET } from "./files.ts";
 import { UPLOAD_BUCKET } from "./uploads.ts";
 import { RUN_WORKSPACE_BUCKET } from "./run-workspace-manifest.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
@@ -85,7 +85,7 @@ export interface OrphanScanBucket {
 }
 
 /** Per-bucket outcome of a diff pass. */
-export interface BucketDiff {
+interface BucketDiff {
   bucket: string;
   /** Objects enumerated in the bucket. */
   scanned: number;
@@ -98,9 +98,10 @@ export interface BucketDiff {
 }
 
 /**
- * Strip a stored `bucket/path` key down to its in-bucket path. `documents` and
- * `uploads` persist the bucket as part of `storage_key`; `listObjects` yields
- * keys without it. Returns null when the row's key does not belong to `bucket`.
+ * Strip a stored `bucket/path` key down to its in-bucket path. The `files` and
+ * `uploads` TABLES persist the bucket as part of `storage_key`; `listObjects`
+ * yields keys without it. Returns null when the row's key does not belong to
+ * `bucket`.
  */
 function inBucketKey(storageKey: string, bucket: string): string | null {
   const prefix = `${bucket}/`;
@@ -109,7 +110,8 @@ function inBucketKey(storageKey: string, bucket: string): string | null {
 
 /**
  * Which run owns a `run-workspace` object. Two key shapes exist:
- * `{runId}.afps` (the bundle) and `{runId}/…` (manifest + documents).
+ * `{runId}.afps` (the bundle) and `{runId}/…` (`manifest.json` plus the run's
+ * input objects under `{runId}/files/<name>`, see `runWorkspaceFileKey`).
  */
 export function runWorkspaceOwner(key: string): string | null {
   const slash = key.indexOf("/");
@@ -127,15 +129,23 @@ export function runWorkspaceOwner(key: string): string | null {
  * else. Both are loaded here from the same unfiltered queries, so a system
  * object can never be reported as an orphan — that is exactly why the
  * known-sets are built with no `orgId` filter at all.
+ *
+ * The first descriptor reconciles objects under the `files` bucket
+ * ({@link FILES_BUCKET}) against `files.storage_key` values, which are all
+ * written as `files/<path>`. Bucket and stored key must agree or every object
+ * in the bucket reads as an orphan: they were both spelled `documents` until
+ * the #1177 rename was finished at the physical layer, and migration
+ * `0044_finish_file_rename` moved the stored keys in the same change that moved
+ * the constant.
  */
 export function orphanScanBuckets(): OrphanScanBucket[] {
   return [
     {
-      bucket: DOCUMENTS_BUCKET,
-      describes: "documents.storage_key",
+      bucket: FILES_BUCKET,
+      describes: "files.storage_key",
       loadKnown: async () => {
-        const rows = await db.select({ storageKey: documents.storageKey }).from(documents);
-        return collectInBucketKeys(rows, DOCUMENTS_BUCKET);
+        const rows = await db.select({ storageKey: files.storageKey }).from(files);
+        return collectInBucketKeys(rows, FILES_BUCKET);
       },
     },
     {
@@ -174,8 +184,8 @@ export function orphanScanBuckets(): OrphanScanBucket[] {
     },
     {
       bucket: RUN_WORKSPACE_BUCKET,
-      describes: "runs.id (bundle + manifest + input documents per run)",
-      // Document names live inside the manifest object, not in any table, so
+      describes: "runs.id (bundle + manifest + input files per run)",
+      // File names live inside the manifest object, not in any table, so
       // the known-set is the set of live run ids and each object is matched by
       // the run prefix it sits under.
       identityOf: runWorkspaceOwner,

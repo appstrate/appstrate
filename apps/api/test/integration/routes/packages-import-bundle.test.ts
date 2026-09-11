@@ -20,7 +20,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import {
   _setRunLimitsForTesting,
   getInlineRunLimits,
@@ -28,7 +28,7 @@ import {
 } from "../../../src/services/run-limits.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
-  applicationPackages,
+  spacePackages,
   auditEvents,
   packageDistTags,
   packageVersions,
@@ -195,16 +195,11 @@ async function seedAndExportBundle(opts: {
     setLatest: true,
   });
 
-  await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootId);
+  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootId);
   await db
-    .update(applicationPackages)
+    .update(spacePackages)
     .set({ versionId: rootVer.versionId })
-    .where(
-      and(
-        eq(applicationPackages.applicationId, ctx.defaultAppId),
-        eq(applicationPackages.packageId, rootId),
-      ),
-    );
+    .where(and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, rootId)));
 
   const res = await app.request(`/api/agents/${rootId}/bundle`, { headers: authHeaders(ctx) });
   if (res.status !== 200) {
@@ -265,7 +260,7 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(body.root_installed).toBe(true);
 
     // Verify DB state — 3 packages registered + root installed in
-    // the importing app.
+    // the importing space.
     for (const id of ["@srcorg/agent-root", "@srcorg/skill-a", "@srcorg/skill-b"]) {
       const [pkg] = await db
         .select({ id: packages.id })
@@ -282,11 +277,11 @@ describe("POST /api/packages/import-bundle — import", () => {
     }
     const [installed] = await db
       .select()
-      .from(applicationPackages)
+      .from(spacePackages)
       .where(
         and(
-          eq(applicationPackages.applicationId, ctx.defaultAppId),
-          eq(applicationPackages.packageId, "@srcorg/agent-root"),
+          eq(spacePackages.spaceId, ctx.defaultSpaceId),
+          eq(spacePackages.packageId, "@srcorg/agent-root"),
         ),
       )
       .limit(1);
@@ -764,6 +759,36 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a `bundle` form field with 400", async () => {
+    // The retired `bundle` alias must fail loudly, not silently work:
+    // `file` is the only accepted part name.
+    const form = new FormData();
+    form.append(
+      "bundle",
+      new Blob([
+        buildAfps({
+          manifest: {
+            name: "@importorg/aliased",
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Aliased",
+            author: "tester",
+          },
+          content: "Aliased prompt.",
+          type: "agent",
+        }),
+      ]),
+      "aliased.afps",
+    );
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("reuses existing version without overwriting storage on same-org re-import", async () => {
     // Regression: on same-instance round-trip (publish → export → import),
     // the importer must detect the matching row via the content-hash
@@ -1148,5 +1173,132 @@ describe("POST /api/packages/import-bundle — import", () => {
     const body = (await res.json()) as { imported: Array<{ identity: string; status: string }> };
     expect(body.imported).toHaveLength(1);
     expect(body.imported[0]!.status).toBe("inserted");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// AFPS §3.3 applies to the bundle ROOT only.
+//
+// The root is what the operator is publishing — author input. Every other
+// entry is a dependency COPY of an already-published artifact the bundler
+// carried along, and this route is documented as the sanctioned read path for
+// re-ingesting platform-produced artifacts. Gating dependencies would make any
+// bundle transitively depending on a pre-rule skill permanently un-importable,
+// with no bypass and nothing the operator could fix.
+// ─────────────────────────────────────────────────────────────────────
+describe("POST /api/packages/import-bundle — §3.3 gates the root, not dependencies", () => {
+  let ctx: TestContext;
+
+  const LEGACY_SKILL_MD = "---\nname: legacy\n---\nLegacy body.";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "rootgate" });
+  });
+
+  /** An agent root whose ONE carried skill dependency is pre-rule. */
+  async function bundleWithLegacySkillDependency(): Promise<Uint8Array> {
+    const skillId = "@rootgate/legacy-skill";
+    const skillManifest = {
+      name: skillId,
+      version: "1.0.0",
+      type: "skill",
+      schema_version: "0.1",
+      display_name: "Legacy Skill",
+    };
+    const agentManifest = {
+      name: "@rootgate/root-agent",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Root Agent",
+      description: "Depends on a pre-rule skill",
+      dependencies: { skills: { [skillId]: "^1.0.0" } },
+    };
+    const afps = buildAfps({ manifest: agentManifest, content: "Prompt.", type: "agent" });
+    const identity = `${skillId}@1.0.0` as const;
+    const files = new Map([
+      ["manifest.json", enc(JSON.stringify(skillManifest, null, 2))],
+      ["SKILL.md", enc(LEGACY_SKILL_MD)],
+    ]);
+    const catalog: PackageCatalog = {
+      resolve: async (name) => (name === skillId ? { identity } : null),
+      fetch: async () => ({
+        identity,
+        manifest: skillManifest as never,
+        files,
+        integrity: "sha256-recomputed-by-the-builder",
+      }),
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), catalog, {
+      depTypes: ["skills"],
+    });
+    return writeBundleToBuffer(bundle);
+  }
+
+  /** A bundle-of-one whose ROOT is a skill with the given SKILL.md. */
+  async function skillRootBundle(content: string): Promise<Uint8Array> {
+    const manifest = {
+      name: "@rootgate/root-skill",
+      version: "1.0.0",
+      type: "skill",
+      schema_version: "0.1",
+      display_name: "Root Skill",
+    };
+    const afps = buildAfps({ manifest, content, type: "skill" });
+    const unusedCatalog: PackageCatalog = {
+      resolve: async () => {
+        throw new Error("catalog must not be consulted with depTypes: []");
+      },
+      fetch: async () => {
+        throw new Error("catalog must not be consulted with depTypes: []");
+      },
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), unusedCatalog, {
+      depTypes: [],
+    });
+    return writeBundleToBuffer(bundle);
+  }
+
+  async function importBundle(bytes: Uint8Array): Promise<Response> {
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+    return app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+  }
+
+  it("imports a bundle whose skill DEPENDENCY is pre-rule", async () => {
+    const res = await importBundle(await bundleWithLegacySkillDependency());
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { imported: Array<{ identity: string }> };
+    expect(body.imported.map((i) => i.identity)).toContain("@rootgate/legacy-skill@1.0.0");
+
+    // …and the pre-rule bytes were stored verbatim, not rewritten.
+    const [row] = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .where(eq(packages.id, "@rootgate/legacy-skill"));
+    expect(row?.id).toBe("@rootgate/legacy-skill");
+  });
+
+  it("rejects a bundle whose ROOT is a non-conforming skill", async () => {
+    const res = await importBundle(await skillRootBundle(LEGACY_SKILL_MD));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      errors?: Array<{ code?: string; message?: string }>;
+    };
+    expect(body.errors?.[0]?.code).toBe("skill_missing_frontmatter_description");
+    expect(body.errors?.[0]?.message).toContain("@rootgate/root-skill@1.0.0");
+    await assertDbMissing(packages, eq(packages.id, "@rootgate/root-skill"));
+  });
+
+  it("imports a bundle whose ROOT skill conforms", async () => {
+    const res = await importBundle(
+      await skillRootBundle("---\nname: root-skill\ndescription: A root skill.\n---\nBody."),
+    );
+    expect(res.status).toBe(201);
   });
 });

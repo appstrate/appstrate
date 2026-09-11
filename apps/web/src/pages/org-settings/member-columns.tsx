@@ -32,7 +32,7 @@ import {
 import type { components } from "../../api/schema";
 import type { DataColumn } from "../../components/data-table";
 import { roleI18nKey } from "../../hooks/use-permissions";
-import { formatDateField } from "../../lib/markdown";
+import { formatDateField } from "../../lib/format-date";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { TableRowActions } from "../../components/table-row-actions";
 

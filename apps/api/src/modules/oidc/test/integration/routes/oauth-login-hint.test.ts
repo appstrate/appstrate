@@ -28,10 +28,10 @@ async function registerClient(ctx: TestContext): Promise<{ clientId: string }> {
     method: "POST",
     headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
     body: JSON.stringify({
-      level: "application" as const,
+      level: "space" as const,
       name: "Login-hint Test App",
       redirectUris: ["https://acme.example.com/oauth/callback"],
-      referencedApplicationId: ctx.defaultAppId,
+      referencedSpaceId: ctx.defaultSpaceId,
       allowSignup: true,
     }),
   });

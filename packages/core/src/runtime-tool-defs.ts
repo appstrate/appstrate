@@ -7,8 +7,8 @@
  *
  * Two groups, both defined here: the four pure event emitters
  * (`output` / `log` / `note` / `pin`), assembled together by
- * {@link buildRuntimeToolDefs}; and `publish_document`, built on its own by
- * {@link buildPublishDocumentDef} because it needs an injected HTTP uploader
+ * {@link buildRuntimeToolDefs}; and `publish_file`, built on its own by
+ * {@link buildPublishFileDef} because it needs an injected HTTP uploader
  * only the runtime entrypoint can supply.
  *
  * These were previously Pi-SDK extension factories baked into the runtime
@@ -41,12 +41,14 @@
  * sidecar can import it without pulling the Pi SDK into its bundle.
  */
 
-import Ajv, { type ValidateFunction } from "ajv";
+import type { ValidateFunction } from "ajv";
+import { asJSONSchemaObject } from "./form.ts";
+import { compileCached } from "./schema-validation.ts";
 import {
   EVENT_EMITTER_RUNTIME_TOOLS,
   type EventEmitterRuntimeTool,
 } from "./runtime-tools-catalog.ts";
-import type { RunAndWaitDocument } from "./run-and-wait-client.ts";
+import type { RunAndWaitFile } from "./run-and-wait-client.ts";
 
 /**
  * MCP `_meta` key under which a runtime tool call surfaces the canonical
@@ -72,13 +74,22 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
   "log.written",
   "memory.added",
   "pinned.set",
-  // Emitted by the `publish_document` tool (and the entrypoint outputs sweep)
-  // once a run document has been stored on the platform. Carries the durable
-  // document metadata so ingestion persists a run_log the UI/chat can render.
-  "document.published",
+  // Emitted by the `publish_file` tool (and the entrypoint outputs sweep) once
+  // a run file has been stored on the platform. Carries the durable file
+  // metadata so ingestion persists a run_log the UI/chat can render.
+  "file.published",
 ] as const;
 
-const CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set(
+/**
+ * Membership form of {@link CANONICAL_RUNTIME_TOOL_EVENT_TYPES}, for the trust
+ * boundary in `reEmitRuntimeToolEvents`.
+ *
+ * Named CANONICAL, not ACCEPTED. It was briefly the latter, when it also held
+ * the pre-#1177 `document.published` spelling; that member is gone and the
+ * name outlived it. On a set whose whole job is to be closed, a name promising
+ * a wider membership than it has is an invitation to add one back.
+ */
+const CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(
   CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
 );
 
@@ -121,8 +132,6 @@ export interface BuildRuntimeToolDefsOptions {
   outputSchema?: Record<string, unknown> | null;
 }
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-
 function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult {
   // Stamp a production-time `timestamp` on every canonical event at the single
   // point they are wrapped. Canonical run events (`log.written`, …) carry a
@@ -145,12 +154,34 @@ function toolError(text: string): RuntimeToolResult {
 }
 
 function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeToolDef {
+  // Compile through the ONE shared Ajv2020 instance and its cache
+  // (`@appstrate/core/schema-validation`), not a private second instance.
+  //
+  // This used to be `new Ajv(...)` — the draft-07 default export, with no
+  // ajv-formats. The server validates the SAME `output.schema` on the 2020-12
+  // dialect with formats (`validateOutput` → `compileCached`), so a schema
+  // using `prefixItems`, `$dynamicRef` or `format` got two different verdicts
+  // on the two sides of the container boundary. That is the exact drift this
+  // in-container check exists to prevent.
+  //
+  // A private instance was doubly wrong: it never called `removeSchema`, so it
+  // retained every compiled schema AND threw "schema with key or id … already
+  // exists" the second time a schema carrying `$id` was compiled in the same
+  // process — which the `catch` below then swallowed into `validator = null`.
+  //
+  // A compile failure is now RECORDED, not swallowed. `if (validator && …)`
+  // meant an uncompilable schema silently accepted every payload: the agent saw
+  // a clean success and the run failed later, server-side, at the post-hoc
+  // check this tool exists to pre-empt. The server's `compileCached` throws on
+  // such a schema, so refusing here changes the failure's timing and legibility,
+  // not the run's outcome.
   let validator: ValidateFunction | null = null;
+  let schemaCompileError: string | null = null;
   if (outputSchema) {
     try {
-      validator = ajv.compile(outputSchema);
-    } catch {
-      validator = null;
+      validator = compileCached(asJSONSchemaObject(outputSchema));
+    } catch (err) {
+      schemaCompileError = err instanceof Error ? err.message : String(err);
     }
   }
   const dataSchema: Record<string, unknown> = outputSchema
@@ -185,6 +216,13 @@ function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeTo
     },
     handler: async (rawArgs) => {
       const { data } = (rawArgs ?? {}) as { data?: Record<string, unknown> };
+      if (schemaCompileError) {
+        return toolError(
+          `This agent's declared output schema cannot be compiled: ${schemaCompileError}\n\n` +
+            "No output can be recorded until the manifest's `output.schema` is a valid " +
+            "JSON Schema 2020-12 document. This is not something the run can work around.",
+        );
+      }
       if (validator && !validator(data)) {
         const errors = (validator.errors ?? [])
           .map((e) => `  - ${e.instancePath || "/"} ${e.message}`)
@@ -241,7 +279,7 @@ function buildNoteDef(): RuntimeToolDef {
         "Archive memories are NOT injected into the system prompt; retrieve them on demand with `recall_memory`. " +
         'Scope defaults to "actor" — personal observations stay private to the calling actor (scheduled runs, ' +
         "manual triggers, and different members each see only their own notes). " +
-        'Pass scope="shared" for facts universal to the app — API quirks, org conventions, shared-resource structure — ' +
+        'Pass scope="shared" for facts universal to the space — API quirks, org conventions, shared-resource structure — ' +
         "so every actor can recall them. " +
         "Use for insights worth remembering (e.g. 'Gmail API paginates at 100 results', 'User prefers CSV format').",
       inputSchema: {
@@ -254,7 +292,7 @@ function buildNoteDef(): RuntimeToolDef {
             type: "string",
             enum: ["actor", "shared"],
             description:
-              'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the app; use for facts universal regardless of who triggered the run.',
+              'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the space; use for facts universal regardless of who triggered the run.',
           },
         },
       },
@@ -296,7 +334,7 @@ function buildPinDef(): RuntimeToolDef {
             type: "string",
             enum: ["actor", "shared"],
             description:
-              'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot app-wide; use when the slot tracks a resource shared across actors.',
+              'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot space-wide; use when the slot tracks a resource shared across actors.',
           },
         },
       },
@@ -326,7 +364,7 @@ const RUNTIME_TOOL_BUILDERS: Record<
 
 /**
  * Build the {@link RuntimeToolDef}s for an agent's selected runtime tools.
- * Only the pure event-emitter tools are built here — `publish_document` is
+ * Only the pure event-emitter tools are built here — `publish_file` is
  * excluded (it needs an injected uploader; the entrypoint builds it). Unknown
  * entries are ignored — that is the contract that keeps a manifest naming a
  * retired tool (e.g. the removed `report`) runnable; `validateManifest` drops
@@ -348,92 +386,77 @@ export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): Runtime
 }
 
 // ---------------------------------------------------------------------------
-// publish_document — the one runtime tool with a side effect (HTTP upload)
+// publish_file — the one runtime tool with a side effect (HTTP upload)
 // ---------------------------------------------------------------------------
 
 /**
- * Durable document metadata returned by a successful upload. Extends the
- * {@link RunAndWaitDocument} projection (`{ id, uri, name, mime, size }` — the
- * shape the run_and_wait tool result embeds) with upload integrity and the
- * optional presentation selected by `publish_document`.
+ * Durable file metadata returned by a successful upload. Extends the
+ * {@link RunAndWaitFile} projection (`{ id, uri, name, mime, size }` — the
+ * shape the run_and_wait tool result embeds) with upload integrity.
  */
-export interface PublishedDocument extends RunAndWaitDocument {
+export interface PublishedFile extends RunAndWaitFile {
   sha256: string;
-  presentation?: "primary" | null;
 }
 
-/** The canonical `document.published` run event for a stored document. */
-export interface DocumentPublishedEvent extends RuntimeToolEvent {
-  type: "document.published";
-  document_id: string;
+/** The canonical `file.published` run event for a stored file. */
+export interface FilePublishedEvent extends RuntimeToolEvent {
+  type: "file.published";
+  file_id: string;
   uri: string;
   name: string;
   mime: string;
   size: number;
   sha256: string;
-  presentation: "primary" | null;
 }
 
 /**
- * Build the canonical `document.published` run event from an uploaded
- * document's metadata. Single builder shared by every producer — the
- * `publish_document` runtime tool ({@link buildPublishDocumentDef}) and the
- * runtime's end-of-run `outputs/` sweep — so the event's field set is defined
- * once and cannot drift between the two call sites.
+ * Build the canonical `file.published` run event from an uploaded file's
+ * metadata. Single builder shared by every producer — the `publish_file`
+ * runtime tool ({@link buildPublishFileDef}) and the runtime's end-of-run
+ * `outputs/` sweep — so the event's field set is defined once and cannot drift
+ * between the two call sites.
  */
-export function documentPublishedEvent(doc: PublishedDocument): DocumentPublishedEvent {
+export function filePublishedEvent(file: PublishedFile): FilePublishedEvent {
   return {
-    type: "document.published",
-    document_id: doc.id,
-    uri: doc.uri,
-    name: doc.name,
-    mime: doc.mime,
-    size: doc.size,
-    sha256: doc.sha256,
-    // A third-party uploader compiled against the previous public interface
-    // may omit the newly-added field. Keep its event wire-compatible by
-    // normalizing absence to the same explicit null the platform returns.
-    presentation: doc.presentation === "primary" ? "primary" : null,
+    type: "file.published",
+    file_id: file.id,
+    uri: file.uri,
+    name: file.name,
+    mime: file.mime,
+    size: file.size,
+    sha256: file.sha256,
   };
 }
 
 /**
- * Uploads a workspace file to the platform and returns its durable document
- * metadata. Injected into {@link buildPublishDocumentDef} by the runtime
+ * Uploads a workspace file to the platform and returns its durable file
+ * metadata. Injected into {@link buildPublishFileDef} by the runtime
  * entrypoint (which holds the run's HMAC sink signer).
  */
-export type DocumentUploader = (
-  path: string,
-  name?: string,
-  presentation?: "primary",
-) => Promise<PublishedDocument>;
+export type FileUploader = (path: string, name?: string) => Promise<PublishedFile>;
 
 /**
- * Build the `publish_document` runtime tool def around an injected
- * {@link DocumentUploader}. Unlike the pure event emitters this tool performs
+ * Build the `publish_file` runtime tool def around an injected
+ * {@link FileUploader}. Unlike the pure event emitters this tool performs
  * the upload itself (via `uploader`), then surfaces the canonical
- * `document.published` event under `_meta` so ingestion persists a run_log.
+ * `file.published` event under `_meta` so ingestion persists a run_log.
  * An upload failure (cap / quota / HTTP) is returned as a tool error, never a
  * throw — the agent sees a clear message and can continue.
  */
-export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeToolDef {
+export function buildPublishFileDef(uploader: FileUploader): RuntimeToolDef {
   return {
     descriptor: {
-      name: "publish_document",
+      name: "publish_file",
       description:
-        "Publish a workspace file (e.g. an HTML report, a CSV, a PDF) as a durable document " +
-        "attached to this run, right now: the document appears while the run is still going and " +
-        "the call returns its stable `document://` URI. Use it whenever you need to reference, " +
-        "link or send the document within this same run — cite the URI in your output, hand it to " +
+        "Publish a workspace file (an HTML report, a CSV, a PDF, an image, source code — " +
+        "anything on disk) as a durable file attached to this run, right now: the file appears " +
+        "while the run is still going and the call returns its stable `appfile://` URI. Use it " +
+        "whenever you need to reference, " +
+        "link or send the file within this same run — cite the URI in your output, hand it to " +
         "another tool — or to see an upload failure in time to react. Files written under " +
         "`./outputs/` are published automatically at the end of the run, which is enough for a " +
         "plain end-of-run deliverable, but that happens after you are done: you never get their " +
-        "URIs. Primary selection is an explicit semantic choice: never infer primary status from " +
-        "file count, filename, MIME type, or placement under `./outputs/`. If this run produces one " +
-        "clearly main user-facing file, finish editing it first, then publish it with " +
-        '`presentation: "primary"`; do not edit that file after publishing it. If the run produces ' +
-        "no file, or several peer files with no obvious main deliverable, do not select a primary. " +
-        "The last successful primary publication wins.",
+        "URIs.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -445,42 +468,33 @@ export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeTool
           },
           name: {
             type: "string",
-            description: "Optional display name for the document (defaults to the file name).",
-          },
-          presentation: {
-            type: "string",
-            enum: ["primary"],
-            description:
-              "Set to `primary` to feature this document as the run's main deliverable. " +
-              "Call only after the file's final edit; the last successful primary publication wins.",
+            description: "Optional display name for the file (defaults to the file name on disk).",
           },
         },
       },
     },
     handler: async (rawArgs) => {
-      const { path, name, presentation } = (rawArgs ?? {}) as {
+      // Only the declared arguments are read. `additionalProperties: false`
+      // already keeps a schema-validating caller from sending anything else;
+      // for a caller that skips validation, an extra key (notably the retired
+      // `presentation`) is silently ignored rather than rejected — the tool has
+      // no notion of presentation any more, and refusing the call would lose a
+      // real deliverable over a dead argument.
+      const { path, name } = (rawArgs ?? {}) as {
         path?: unknown;
         name?: unknown;
-        presentation?: unknown;
       };
       if (typeof path !== "string" || path.length === 0) {
-        return toolError("publish_document requires a non-empty `path`.");
+        return toolError("publish_file requires a non-empty `path`.");
       }
-      if (presentation !== undefined && presentation !== "primary") {
-        return toolError("publish_document `presentation` must be `primary` when provided.");
-      }
-      let doc: PublishedDocument;
+      let file: PublishedFile;
       try {
-        doc = await uploader(
-          path,
-          typeof name === "string" && name.length > 0 ? name : undefined,
-          presentation === "primary" ? presentation : undefined,
-        );
+        file = await uploader(path, typeof name === "string" && name.length > 0 ? name : undefined);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return toolError(`Failed to publish '${path}': ${message}`);
       }
-      return withEvents(`Published ${doc.name} → ${doc.uri}`, [documentPublishedEvent(doc)]);
+      return withEvents(`Published ${file.name} → ${file.uri}`, [filePublishedEvent(file)]);
     },
   };
 }
@@ -502,9 +516,9 @@ export function reEmitRuntimeToolEvents(
       ev &&
       typeof ev === "object" &&
       typeof (ev as { type?: unknown }).type === "string" &&
-      // Trust boundary: only forward the closed set of canonical run-event
-      // types. A non-canonical `type` is dropped — it can only come from an
-      // untrusted upstream attempting to forge a run event.
+      // Trust boundary: forward only the CLOSED canonical set. A type outside
+      // it is dropped — it can only come from an untrusted upstream attempting
+      // to forge a run event.
       CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET.has((ev as { type: string }).type)
     ) {
       emit(ev as RuntimeToolEvent);

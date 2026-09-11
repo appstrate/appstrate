@@ -26,7 +26,6 @@ describe("Idempotency integration (end-users)", () => {
       },
       body: JSON.stringify({
         name: "Idempotency Test Key",
-        applicationId: ctx.defaultAppId,
       }),
     });
     expect(res.status).toBe(201);

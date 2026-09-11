@@ -33,7 +33,48 @@ permissions:
   attestations: write
 
 jobs:
+  # ─── Release preflight: the shipped compose files must name THIS tag ───────
+  #
+  # `verify:release-version` has two arms (see the module header in
+  # scripts/verify-release-version.ts). `check.yml` runs the FLOOR arm on every
+  # PR — "not behind the newest tag" — and that arm structurally CANNOT catch a
+  # release whose compose files were never bumped: at the moment `v1.2.3` is
+  # pushed, the newest tag it can see IS `v1.2.3`, and on the PR that merged the
+  # commit the newest tag was still `v1.2.2`, which a `1.2.2` fallback matched
+  # exactly. The window between "merge the bump" and "push the tag" is precisely
+  # where a half-done bump hides, and until this job existed the EXACT arm ran
+  # nowhere at all — a documented protection that could not fire.
+  #
+  # `GITHUB_REF_TYPE=tag` is set by GitHub on a tag push, so the gate demands the
+  # shipped `${APPSTRATE_VERSION:-…}` fallbacks and literal image pins EQUAL
+  # `github.ref_name` — the same value fed to the Dockerfile as `APP_VERSION`
+  # and the same value GHCR's `{{version}}` tag carries.
+  #
+  # It gates the four ROOT publishing jobs; `sign-cli` and `release` already
+  # depend on those transitively, so nothing reaches GHCR, the signed binaries or
+  # the GH Release before this passes. Failing here costs a version bump
+  # (release.yml has no `workflow_dispatch`) — the correct price, and far below
+  # published images whose compose files point at the previous release.
+  #
+  # No `fetch-tags` here: the exact arm reads the ref, not the tag namespace.
+  verify-version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Shipped compose/env files must name ${{ github.ref_name }}
+        run: bun scripts/verify-release-version.ts
+
   build-and-push:
+    needs: verify-version
     runs-on: ubuntu-latest
     # 90, not 30. These are multi-arch builds (`linux/amd64,linux/arm64`) whose
     # `linux/arm64` half runs under QEMU emulation on an amd64 runner, and the
@@ -120,10 +161,10 @@ jobs:
         run: bash scripts/bake-firecracker-pubkey.sh
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -165,6 +206,14 @@ jobs:
           push: true
           # Stamp the deployed build identity into the image. Only the main
           # Dockerfile declares these ARGs; other matrix images ignore them.
+          #
+          # The runtime-pi / sidecar images need no build-arg of their own: the
+          # `labels:` input below carries metadata-action's OCI set, and a
+          # `--label` overrides the Dockerfile's `LABEL`, so released images
+          # already carry a real `org.opencontainers.image.revision` (verified
+          # on 1.0.0-beta.51). That label is what the platform compares to warn
+          # on a mismatched runtime/sidecar pair (#1200) — do not drop the
+          # `labels:` input without feeding BUILD_REVISION instead.
           build-args: |
             APP_VERSION=${{ github.ref_name }}
             GIT_SHA=${{ github.sha }}
@@ -191,6 +240,7 @@ jobs:
   # (`appstrate-${OS}-${ARCH}`) — do NOT rename without also updating
   # `scripts/bootstrap.sh`.
   build-cli:
+    needs: verify-version
     name: CLI binary (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
@@ -456,6 +506,7 @@ jobs:
   # that signature against a source-pinned public key BEFORE trusting any
   # hash inside the manifest (P1-4, runner/artifacts.ts).
   firecracker-artifacts:
+    needs: verify-version
     name: Firecracker guest artifacts (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -538,6 +589,7 @@ jobs:
   # Asset names (`appstrate-runner-<arch>`) match `daemonAssetName()` in
   # apps/cli/src/lib/runner/constants.ts — do NOT rename without updating it.
   build-runner-daemon:
+    needs: verify-version
     name: Runner daemon (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
@@ -786,7 +838,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           body: ${{ steps.notes.outputs.body }}
           # `fail_on_unmatched_files: false` (the default, pinned explicit for

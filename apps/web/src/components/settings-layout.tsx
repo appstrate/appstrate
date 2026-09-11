@@ -39,7 +39,7 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 
-export interface SettingsNavItem {
+interface SettingsNavItem {
   to: string;
   icon: LucideIcon;
   label: string;

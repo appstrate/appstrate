@@ -34,6 +34,7 @@ import {
   derivePiCompactionSettings,
   prepareRequestedThinkingLevel,
   setPiRuntimeCredential,
+  type PiCodingAgentSdk,
 } from "@appstrate/runner-pi";
 import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/chat-turn-metadata";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
@@ -44,21 +45,14 @@ import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
-import {
-  ChatTurnDeadlineError,
-  resolveTurnClosure,
-  turnDeadlineNoticeText,
-  turnNoticeChunks,
-} from "../turn-closure.ts";
-import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import { buildPiTurnMetadata, piFailureChunks } from "./pi-turn-closure.ts";
+import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import {
   PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
   type ResolvedPiChatModelBinding,
 } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
-import { createPiChatResourceLoader } from "./resource-loader.ts";
+import { createPiChatResourceLoader, PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
 export interface PiChatInput {
   /** Capacity reserved by the route before it persists the user turn. */
@@ -76,14 +70,115 @@ export interface PiChatInput {
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
-  /** Platform HTTP MCP server (meta-tools) — the engine opens its own client. */
-  platformMcp: { url: string; headers: Record<string, string> };
+  /**
+   * Platform HTTP MCP server (meta-tools) — the engine opens its own client.
+   *
+   * `fetch` is the transport for that handshake: production hands in the
+   * platform's in-process dispatch so the three JSON-RPC hops re-enter the Hono
+   * app directly rather than opening real loopback sockets to this same process.
+   * Omitted → global `fetch`.
+   */
+  platformMcp: { url: string; headers: Record<string, string>; fetch?: typeof fetch };
   /** Aborts when the turn is explicitly stopped (decoupled from client disconnect). */
   abortSignal: AbortSignal;
   /** Maps a thrown error to a client-safe message. */
   onError: (error: unknown) => string;
   /** Persist one metered `llm_usage` row for the turn (fire-and-forget). */
   recordUsage: (record: ChatUsageRecord) => void;
+  /**
+   * Build the Pi `AgentSession` this turn drives. Production omits it and the
+   * SDK's own `createAgentSession` is used — everything else about the turn
+   * (the MCP handshake, `ModelRuntime`, the resource loader, the projected
+   * history) is built for real either way.
+   *
+   * It earns its place because every teardown invariant this function owns —
+   * the subscription detach, the bounded abort, the MCP close, the concurrency
+   * slot — is only observable through a session that MISBEHAVES, and a real
+   * one never does: an `abort()` that never settles, an event emitted after
+   * `execute` returned. The alternative that stood here was a test that read
+   * this file's own source text and asserted on string literals, which cannot
+   * fail when the `finally` stops being reached — the exact defect it was
+   * meant to guard. One optional field is a smaller price than that.
+   */
+  createSession?: (
+    options: Parameters<PiCodingAgentSdk["createAgentSession"]>[0],
+  ) => Promise<{ session: unknown }>;
+  /**
+   * Open the platform MCP client for this turn. Production omits it and
+   * `buildPlatformMcpTools` is used. Same justification as `createSession`:
+   * the bound on `close()` in the turn's `finally` is only observable through
+   * a client whose close never settles, and a real one always settles — so the
+   * test wraps the real builder and replaces `close` alone.
+   */
+  buildMcpTools?: typeof buildPlatformMcpTools;
+}
+
+/**
+ * Per-turn construction timings, logged once per turn (`chat turn
+ * construction`). Every field is a duration in ms; `null` means the phase was
+ * never reached (a stop or failure earlier in construction).
+ */
+interface TurnConstructionTimings {
+  /** Platform MCP handshake + `tools/list`. Runs concurrently with `sdkLoadMs`. */
+  mcpHandshakeMs: number | null;
+  /** `loadPiCodingAgentSdk()` — memoized after the first turn of the process. */
+  sdkLoadMs: number | null;
+  /** UIMessage history → Pi session projection + session-manager rebuild. */
+  projectionMs: number | null;
+  /** `ModelRuntime.create` + credential registration. */
+  runtimeMs: number | null;
+  /** Resource loader (extensions, system prompt). */
+  loaderMs: number | null;
+  /** `createAgentSession`. */
+  sessionMs: number | null;
+  /** `startedAt` → the `prompt()` call: the whole construction critical path. */
+  constructionMs: number | null;
+  /**
+   * `startedAt` → the first assistant `message_start`, i.e. the provider's
+   * response headers for the first model call (see
+   * `PiChatUiStreamMapperOptions.onFirstModelEvent`).
+   */
+  firstModelEventMs: number | null;
+}
+
+/** Await `work` and record how long it took, whatever its outcome. */
+function timed<T>(work: Promise<T>, record: (ms: number) => void): Promise<T> {
+  const t0 = Date.now();
+  return work.finally(() => record(Date.now() - t0));
+}
+
+/**
+ * Grace given to a Pi session's wind-down before the turn tears down without it.
+ *
+ * No constant already in this file fits: `CHAT_TURN_DEADLINE_MS` is the ceiling
+ * on the WHOLE turn (10 minutes), and by the time this is spent the turn is
+ * already over — waiting a second ceiling's worth would be the leak, not the
+ * bound. A healthy wind-down is one aborted upstream request plus a microtask,
+ * so seconds is three orders of magnitude of headroom; five keeps the slot from
+ * flapping on a merely busy event loop while still being far below anything a
+ * user would attribute to the next message they send.
+ */
+const SESSION_ABORT_GRACE_MS = 5_000;
+
+/**
+ * Await `work`, but never longer than `ms`. Resolves `true` when it settled —
+ * fulfilled or rejected, either way the wind-down is over — and `false` when the
+ * grace expired and the caller must carry on without it.
+ *
+ * Both outcomes of `work` are handled before the race, so abandoning it cannot
+ * surface as an unhandled rejection, and the timer is cleared on every path so a
+ * fast wind-down leaves nothing armed.
+ */
+function settledWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
+  const settled = work.then(
+    () => true,
+    () => true,
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  return Promise.race([settled, expired]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -92,8 +187,22 @@ export interface PiChatInput {
 export function runPiChat(input: PiChatInput): Response {
   const { modelBinding, platformMcp, abortSignal, onError } = input;
   const model = modelBinding.model;
-  const mapper = new PiChatUiStreamMapper();
   const startedAt = Date.now();
+  const timings: TurnConstructionTimings = {
+    mcpHandshakeMs: null,
+    sdkLoadMs: null,
+    projectionMs: null,
+    runtimeMs: null,
+    loaderMs: null,
+    sessionMs: null,
+    constructionMs: null,
+    firstModelEventMs: null,
+  };
+  const mapper = new PiChatUiStreamMapper({
+    onFirstModelEvent: () => {
+      timings.firstModelEventMs = Date.now() - startedAt;
+    },
+  });
 
   const stream = createUIMessageStream({
     onError,
@@ -105,6 +214,21 @@ export function runPiChat(input: PiChatInput): Response {
         if (chunk.type === "start") streamStarted = true;
         if (chunk.type === "finish") streamFinished = true;
       };
+
+      // Safe with respect to the closing path: `closePiTurn` only emits a
+      // compensating `start` when `streamStarted` is false, so a construction
+      // failure closes a turn that is already open rather than one that never
+      // began — the same start/finish envelope either way.
+      //
+      // The write itself sits INSIDE the try below, not here. It was the one
+      // unconditional `write` outside it: if `writer.write` throws (a closed or
+      // errored controller answers `TypeError: Invalid state`), the exception
+      // escapes `execute` with no `finish` written at all, `onError` emits a
+      // transient `error` chunk, and `extractAssistantMessage` turns that into
+      // nothing — the turn vanishes on reload instead of showing as failed.
+      // Moving it inside costs nothing (the deadline timer is created either
+      // way) and is also what keeps the compensating-`start` branch reachable
+      // rather than dead code with five tests behind it.
 
       // Deadline + explicit-stop → one combined abort threaded into the prompt.
       // The two causes are NOT interchangeable at the finish line (an explicit
@@ -124,29 +248,111 @@ export function runPiChat(input: PiChatInput): Response {
         Math.max(0, turnDeadlineAt - Date.now()),
       );
 
+      // Created HERE, before any construction work — not next to the prompt it
+      // is raced against further down. That placement was the whole defect: for
+      // the entire construction phase nothing in this function observed
+      // `turnAbort`, so the deadline fired into the void and `POST …/stop`
+      // aborted a controller with no listener. A construction step that wedges
+      // (the platform-MCP handshake, the Pi SDK's dynamic import, agent-session
+      // creation) then never returned from `execute`, so `createUIMessageStream`
+      // never closed, `releaseOnClose` never ran, and the slot was held for the
+      // life of the process — six of those exhaust `CHAT_PI_MAX_CONCURRENCY`
+      // and every later chat 429s until restart.
+      //
+      // Racing against it makes `clearTimeout` and `slot.release()` reachable
+      // from a wedged construction. The `catch` is not defensive noise: a
+      // rejection with no race in flight (an abort landing after the last one
+      // settles) is an unhandled rejection, and `Promise.race` is the only
+      // consumer.
+      const abortPromise = new Promise<never>((_resolve, reject) => {
+        const onAbort = () => reject(turnAbort.signal.reason ?? new Error("chat turn aborted"));
+        if (turnAbort.signal.aborted) onAbort();
+        else turnAbort.signal.addEventListener("abort", onAbort, { once: true });
+      });
+      void abortPromise.catch(() => {});
+      /** Bound one construction step by the turn's deadline + stop button. */
+      const untilAborted = <T>(work: Promise<T>): Promise<T> => Promise.race([work, abortPromise]);
+
       // Inside the try so the deadline timer + abort listener above are torn
       // down even when construction fails (they'd otherwise survive until the
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
+      /** Detach handle for the Pi event subscription — released in `finally`. */
+      let unsubscribe: (() => void) | undefined;
       try {
-        // Platform meta-tools (search/describe/invoke_operation + run_and_wait).
-        // A failure here is a genuine misconfiguration (the chat's value IS the
+        // Open the stream NOW, before any of the turn's construction work. This
+        // chunk carries nothing but a message id, and it is what flips the
+        // client from "sending" to "the assistant is answering". It used to be
+        // written after the platform-MCP handshake, the Pi SDK's dynamic import
+        // and the agent-session construction — three round trips and a ~200 ms
+        // module evaluation during which the response body stayed empty and the
+        // user saw nothing. The HTTP response itself was already on its way
+        // (this producer runs eagerly and `runPiChat` returns synchronously),
+        // so the silence bought nothing.
+        write(mapper.startChunk(crypto.randomUUID()));
+
+        // Platform meta-tools (search/describe/invoke_operation + run_and_wait),
+        // and the Pi SDK's value graph. They are independent — the SDK import
+        // reads no MCP result — so they run together rather than back to back.
+        // The SDK module evaluation is the expensive half on a cold process
+        // (~200 ms, see `pi-sdk.ts`); the handshake is three JSON-RPC hops.
+        //
+        // A MCP failure is a genuine misconfiguration (the chat's value IS the
         // tools) — let it propagate to `onError`.
-        mcpTools = await buildPlatformMcpTools({
-          url: platformMcp.url,
-          headers: platformMcp.headers,
-          writeChunk: write,
-          signal: turnAbort.signal,
-          // Budget seam: the turn deadline bounds every run_and_wait, and the
-          // live step count feeds the per-step budget note the model reads.
-          turnBudget: {
-            deadlineAt: turnDeadlineAt,
-            stepCount: () => mapper.stepCount(),
-            chatSessionId: input.chatSessionId,
-            orgId: input.orgId,
-          },
+        // `allSettled`, not `all`: `all` rejects on the first failure, so an SDK
+        // import error would abandon a handshake still in flight and strand the
+        // MCP client it goes on to open — `finally` cannot close what was never
+        // assigned. Waiting for both outcomes keeps teardown total.
+        const buildMcpTools = input.buildMcpTools ?? buildPlatformMcpTools;
+        const construction = Promise.allSettled([
+          timed(
+            buildMcpTools({
+              url: platformMcp.url,
+              headers: platformMcp.headers,
+              writeChunk: write,
+              signal: turnAbort.signal,
+              ...(platformMcp.fetch ? { fetch: platformMcp.fetch } : {}),
+              // Budget seam: the turn deadline bounds every run_and_wait, and the
+              // live step count feeds the per-step budget note the model reads.
+              turnBudget: {
+                deadlineAt: turnDeadlineAt,
+                stepCount: () => mapper.stepCount(),
+                chatSessionId: input.chatSessionId,
+                orgId: input.orgId,
+              },
+            }),
+            (ms) => (timings.mcpHandshakeMs = ms),
+          ),
+          timed(loadPiCodingAgentSdk(), (ms) => (timings.sdkLoadMs = ms)),
+        ]);
+        // If the abort wins the race below, this function has already unwound
+        // past the assignment that hands the MCP client to the outer `finally`
+        // — but the handshake can still complete afterwards and leave a live
+        // client with no owner. Adopt it here for exactly that case. The flag
+        // is set synchronously in the catch, before `construction` (still
+        // pending at that instant, or the race would have resolved) can settle.
+        let abandoned = false;
+        void construction.then(([tools]) => {
+          if (!abandoned || tools.status !== "fulfilled") return;
+          void tools.value.close().catch(() => {});
         });
+
+        let toolsResult: Awaited<typeof construction>[0];
+        let sdkResult: Awaited<typeof construction>[1];
+        try {
+          [toolsResult, sdkResult] = await untilAborted(construction);
+        } catch (err) {
+          abandoned = true;
+          throw err;
+        }
+        // Adopt the client BEFORE rethrowing, so the outer `finally` owns it on
+        // every path — exactly as it did when these ran back to back.
+        if (toolsResult.status === "fulfilled") mcpTools = toolsResult.value;
+        if (toolsResult.status === "rejected") throw toolsResult.reason;
+        if (sdkResult.status === "rejected") throw sdkResult.reason;
+        const sdk = sdkResult.value;
+        const tools = toolsResult.value;
 
         const {
           createAgentSession,
@@ -155,7 +361,7 @@ export function runPiChat(input: PiChatInput): Response {
           ModelRuntime,
           SessionManager,
           SettingsManager,
-        } = await loadPiCodingAgentSdk();
+        } = sdk;
 
         const piModel = model;
         const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
@@ -164,6 +370,27 @@ export function runPiChat(input: PiChatInput): Response {
           thinkingLevel,
           thinkingBudgets,
         } = prepareRequestedThinkingLevel(piModel, requestedThinkingLevel);
+
+        // Assemble the FINAL system prompt here, before the turn is projected,
+        // so `baseTokens` below can be measured on the string Pi actually sends.
+        // It used to be built 46 lines further down, after the projection, which
+        // meant the compaction baseline silently omitted the multi-KB MCP
+        // instructions + operation index.
+        //
+        // `applyOperationIndexPolicy` is applied to the MCP instructions ALONE,
+        // not to the concatenation. The policy slices from the FIRST occurrence
+        // of `## Operation index` to the end of the string, and `input.system`
+        // carries org-authored text (agent display names, descriptions) — an
+        // agent named after the heading would truncate the whole prompt. The
+        // heading only ever legitimately appears in the server's instructions,
+        // so cutting there and concatenating afterwards removes the hazard by
+        // construction. See the note in `chat-stream.ts` that documents it.
+        const mcpInstructions = tools.instructions
+          ? applyOperationIndexPolicy(tools.instructions, model.api)
+          : undefined;
+        const system = mcpInstructions ? `${input.system}\n\n${mcpInstructions}` : input.system;
+
+        const projectionStartedAt = Date.now();
         const projectedTurn = buildStructuredPiTurn(
           input.messages,
           {
@@ -175,14 +402,19 @@ export function runPiChat(input: PiChatInput): Response {
             estimateTokens,
             // The system prompt is part of every request Pi sends, so it counts
             // toward the context the compaction threshold is measured against.
+            // Still a floor, not a measurement: tool schemas and this turn's own
+            // prompt text are not in it (`projectedTurn.prompt` is not history).
+            // That gap is pre-existing — do not close it silently, `contextTokens`
+            // seeds Pi's compaction threshold via `historyUsage`.
             baseTokens: estimateTokens({
               role: "user",
-              content: [{ type: "text", text: input.system }],
+              content: [{ type: "text", text: system }],
               timestamp: 0,
             }),
           },
         );
         const sessionManager = reconstructPiSession(SessionManager, projectedTurn.history);
+        timings.projectionMs = Date.now() - projectionStartedAt;
         logger.info("Pi chat session reconstructed", {
           chatSessionId: input.chatSessionId,
           branchHeadId: projectedTurn.branchHeadId,
@@ -205,26 +437,24 @@ export function runPiChat(input: PiChatInput): Response {
         // `registerProvider` (not `setRuntimeApiKey`) keeps that placeholder
         // synchronous and purely in-memory — no credential-state sync on the
         // turn's critical path.
-        const modelRuntime = await ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS);
+        // Every remaining construction await is bounded the same way. The MCP
+        // client is adopted by now, so the outer `finally` still tears it down
+        // on an abort here; what `untilAborted` adds is that the abort is
+        // OBSERVED — none of these calls takes a signal of its own.
+        const runtimeStartedAt = Date.now();
+        const modelRuntime = await untilAborted(
+          ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS),
+        );
         if (modelBinding.authMode === "proxy") {
           modelRuntime.registerProvider(modelBinding.provider, {
             apiKey: modelBinding.runtimeApiKey,
           });
         } else {
-          await setPiRuntimeCredential(
-            modelRuntime,
-            modelBinding.provider,
-            modelBinding.runtimeApiKey,
+          await untilAborted(
+            setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
           );
         }
-
-        // MCP server usage guidance is appended to the system prompt, then the
-        // (uncacheable) operation index is dropped for providers without a
-        // prompt cache.
-        let system = mcpTools.instructions
-          ? `${input.system}\n\n${mcpTools.instructions}`
-          : input.system;
-        system = applyOperationIndexPolicy(system, model.api);
+        timings.runtimeMs = Date.now() - runtimeStartedAt;
 
         const generationExtensions =
           input.generation.temperature === undefined
@@ -239,44 +469,51 @@ export function runPiChat(input: PiChatInput): Response {
               ];
         const authExtensions =
           modelBinding.authMode === "proxy" ? [modelBinding.authExtension] : [];
-        const resourceLoader = await createPiChatResourceLoader({
-          DefaultResourceLoader,
-          SettingsManager,
-          cwd: "/tmp",
-          agentDir: "/tmp/pi-chat",
-          extensionFactories: [
-            ...mcpTools.extensionFactories,
-            ...authExtensions,
-            ...generationExtensions,
-          ],
-          systemPrompt: system,
-        });
+        const resourceLoader = await untilAborted(
+          timed(
+            createPiChatResourceLoader({
+              DefaultResourceLoader,
+              SettingsManager,
+              extensionFactories: [
+                ...tools.extensionFactories,
+                ...authExtensions,
+                ...generationExtensions,
+              ],
+              systemPrompt: system,
+            }),
+            (ms) => (timings.loaderMs = ms),
+          ),
+        );
 
-        const { session } = await createAgentSession({
-          cwd: "/tmp",
-          agentDir: "/tmp/pi-chat",
-          model: sessionModel,
-          thinkingLevel,
-          modelRuntime,
-          resourceLoader,
-          sessionManager,
-          settingsManager: SettingsManager.inMemory({
-            compaction: derivePiCompactionSettings(piModel).compaction,
-            thinkingBudgets,
-            // ONE retry: chat is interactive — a user watches blank "thinking"
-            // dots for the whole retry window. One retry absorbs transient
-            // blips; anything sturdier (quota 429s, auth failures) fails the
-            // same way on every attempt and should surface fast. Runs keep
-            // their own (more patient) retry policy.
-            retry: { enabled: true, maxRetries: 1 },
+        const buildSession: NonNullable<PiChatInput["createSession"]> =
+          input.createSession ?? createAgentSession;
+        const sessionStartedAt = Date.now();
+        const { session } = await untilAborted(
+          buildSession({
+            cwd: PI_CHAT_CWD,
+            agentDir: PI_CHAT_AGENT_DIR,
+            model: sessionModel,
+            thinkingLevel,
+            modelRuntime,
+            resourceLoader,
+            sessionManager,
+            settingsManager: SettingsManager.inMemory({
+              compaction: derivePiCompactionSettings(piModel).compaction,
+              thinkingBudgets,
+              // ONE retry: chat is interactive — a user watches blank "thinking"
+              // dots for the whole retry window. One retry absorbs transient
+              // blips; anything sturdier (quota 429s, auth failures) fails the
+              // same way on every attempt and should surface fast. Runs keep
+              // their own (more patient) retry policy.
+              retry: { enabled: true, maxRetries: 1 },
+            }),
+            // Chat must NOT get the built-in host tools (read/bash/edit/write) —
+            // only the platform MCP meta-tools (extension tools stay enabled).
+            noTools: "builtin",
           }),
-          // Chat must NOT get the built-in host tools (read/bash/edit/write) —
-          // only the platform MCP meta-tools (extension tools stay enabled).
-          noTools: "builtin",
-        });
+        );
 
-        write(mapper.startChunk(crypto.randomUUID()));
-
+        timings.sessionMs = Date.now() - sessionStartedAt;
         const typedSession = session as unknown as PiChatSession;
 
         // Enforce CHAT_MAX_STEPS on this engine too (it used to be reported and
@@ -287,26 +524,23 @@ export function runPiChat(input: PiChatInput): Response {
         });
         stepCap.attach(typedSession);
 
-        typedSession.subscribe((raw) => {
+        // Keep the detach handle: `write` targets a stream writer that closes
+        // when this producer returns, and a Pi event arriving after that
+        // answers `TypeError: Invalid state` from outside any try/catch here.
+        unsubscribe = typedSession.subscribe((raw) => {
           for (const chunk of mapper.map(raw as AgentSessionEvent)) write(chunk);
         });
 
-        const abortPromise = new Promise<never>((_resolve, reject) => {
-          const onAbort = () => reject(turnAbort.signal.reason ?? new Error("chat turn aborted"));
-          if (turnAbort.signal.aborted) onAbort();
-          else turnAbort.signal.addEventListener("abort", onAbort, { once: true });
-        });
-
+        timings.constructionMs = Date.now() - startedAt;
         try {
-          await Promise.race([
+          await untilAborted(
             // `expandPromptTemplates` defaults to true, which routes a message
             // starting with "/" into Pi's extension-command dispatch. Chat text
             // is user prose, never a Pi command: the resource loader already
             // disables skills and prompt templates, and the chat extensions
             // register tools only — pin the invariant rather than depend on it.
             typedSession.prompt(projectedTurn.prompt, { expandPromptTemplates: false }),
-            abortPromise,
-          ]);
+          );
           // Early-stopping generate: the tool loop was cut at
           // CHAT_TOOL_STEP_BUDGET, so spend the last step on ONE tool-less model
           // call — the user gets a synthesis of the work already done instead of
@@ -317,61 +551,77 @@ export function runPiChat(input: PiChatInput): Response {
               stepCount: mapper.stepCount(),
               toolStepBudget: CHAT_TOOL_STEP_BUDGET,
             });
-            await Promise.race([stepCap.runFinalStep(typedSession), abortPromise]);
+            await untilAborted(stepCap.runFinalStep(typedSession));
           }
         } catch (err) {
           // An explicit stop / deadline surfaces as an abort — end the turn
           // gracefully (the partial stream is already delivered) rather than
           // throwing into the client. A genuine engine error still flows to the
           // finish chunk via the mapper's captured stopReason.
-          void typedSession.abort?.().catch(() => {});
+          // AWAIT it: the concurrency slot is released when the response body
+          // drains, and returning while the Pi session is still winding down
+          // would hand that capacity to the next turn while this one still
+          // holds a live session (and can still emit).
+          //
+          // BOUNDED, because nothing else bounds it. `AgentSession.abort()` is
+          // `agent.abort(); await waitForIdle()`, and `waitForIdle` resolves
+          // only when the agent's run flag flips — it carries no timeout of its
+          // own. Nor does this call site have one: `untilAborted` is not around
+          // it, and the deadline timer that would have raced it is either
+          // already spent (the turn was stopped or timed out) or firing into an
+          // `abortPromise` with no consumer left (the prompt rejected on its
+          // own). So a provider or MCP call that never observes the abort wedges
+          // `execute` here forever — the same leak the construction race above
+          // exists to prevent, re-entered through the back door: the `finally`
+          // below never runs, `createUIMessageStream` never closes,
+          // `releaseOnClose` never fires, and `CHAT_PI_MAX_CONCURRENCY` such
+          // turns make every later chat 429 until the process restarts.
+          // Downstream of the stream it also strands
+          // `chat_sessions.active_stream_id`, since the persist drain is waiting
+          // on the same producer. Giving up on the wind-down is strictly better
+          // than holding the slot for the life of the process.
+          const winding = typedSession.abort?.();
+          if (winding && !(await settledWithin(winding, SESSION_ABORT_GRACE_MS))) {
+            logger.warn("Pi chat session abort did not settle — tearing the turn down anyway", {
+              chatSessionId: input.chatSessionId,
+              graceMs: SESSION_ABORT_GRACE_MS,
+            });
+          }
           if (!turnAbort.signal.aborted) throw err;
         }
 
-        // Invariant: an errored turn ALWAYS surfaces a visible error. Raw Pi /
-        // provider text is classified before it crosses the stream or
-        // persistence boundary; the client localizes the stable category.
+        // Close the turn through the shared emitter (`pi-turn-closure.ts`) — the
+        // same sequence the catch below uses. Invariant: an errored turn ALWAYS
+        // surfaces a visible error. Raw Pi / provider text is classified there,
+        // before it crosses the stream or persistence boundary; the client
+        // localizes the stable category.
         const meta = mapper.result();
-        const rawError =
-          meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
-        const clientError = rawError ? classifyClientTurnError(rawError) : undefined;
-        if (clientError) write({ type: "error", errorText: clientTurnErrorMarker(clientError) });
-
         const stepCount = mapper.stepCount();
-        const closure = resolveTurnClosure({
+        const closing = closePiTurn({
+          error:
+            meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined),
+          finishReason: meta.finishReason,
+          streamStarted,
           aborted: turnAbort.signal.aborted,
           abortReason: turnAbort.signal.reason,
-          finishReason: meta.finishReason,
+          stepCount,
+          // Both flags report the CAP, not arithmetic: a turn that never hit
+          // the budget must not claim it did just because a retry pushed the
+          // model-call count to the ceiling.
+          stepCapReached: stepCap.fired(),
+          ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
         });
         // Same invariant, second failure mode: a turn killed by the deadline
-        // used to end in complete silence. It gets a REAL text part — an
-        // `error` chunk is transient and never becomes a persisted message part.
-        if (closure.deadlineReached) {
+        // used to end in complete silence. The emitter gives it a REAL text part
+        // — an `error` chunk is transient and never becomes a persisted part.
+        if (closing.deadlineReached) {
           logger.warn("chat turn deadline reached", {
             chatSessionId: input.chatSessionId,
             stepCount,
             deadlineMs: CHAT_TURN_DEADLINE_MS,
           });
-          const notice = turnNoticeChunks(
-            crypto.randomUUID(),
-            turnDeadlineNoticeText(CHAT_TURN_DEADLINE_MS),
-          );
-          for (const chunk of notice) write(chunk);
         }
-
-        write({
-          type: "finish",
-          messageMetadata: buildPiTurnMetadata({
-            finishReason: closure.finishReason,
-            ...(clientError ? { clientError } : {}),
-            stepCount,
-            // Both flags report the CAP, not arithmetic: a turn that never hit
-            // the budget must not claim it did just because a retry pushed the
-            // model-call count to the ceiling.
-            stepCapReached: stepCap.fired(),
-            ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
-          }),
-        });
+        for (const chunk of closing.chunks) write(chunk);
 
         // Meter the turn (fire-and-forget by the caller). We hand the platform
         // seam the token counts + the model's catalog rates and let it compute
@@ -404,22 +654,42 @@ export function runPiChat(input: PiChatInput): Response {
             err: String(err),
             chatSessionId: input.chatSessionId,
           });
-          for (const chunk of piFailureChunks({
-            error: err,
+          const aborted = turnAbort.signal.aborted;
+          const closing = closePiTurn({
+            // An abort is a normal ending (the user already knows) — there is
+            // no error to surface, and the turn finishes as a plain stop.
+            ...(aborted ? {} : { error: err }),
+            finishReason: aborted ? "stop" : "error",
             streamStarted,
-            aborted: turnAbort.signal.aborted,
+            aborted,
             abortReason: turnAbort.signal.reason,
             stepCount: mapper.stepCount(),
             stepCapReached: stepCap?.fired() ?? false,
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
-          })) {
-            write(chunk);
-          }
+          });
+          for (const chunk of closing.chunks) write(chunk);
         }
       } finally {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
-        await mcpTools?.close();
+        unsubscribe?.();
+        // Once per turn, on every exit, so a turn that died in construction
+        // still reports how far it got (`null` past that point).
+        logger.info("chat turn construction", { chatSessionId: input.chatSessionId, ...timings });
+        // BOUNDED, for the same reason the session abort above is: this is the
+        // last await between the producer and its return, so an MCP close that
+        // never settles (a transport whose teardown waits on a peer that is
+        // gone) holds `execute` open, `createUIMessageStream` never closes, and
+        // `releaseOnClose` never frees the concurrency slot. The client is
+        // closed either way — giving up on the wind-down costs nothing the
+        // turn still needs.
+        const closing = mcpTools?.close();
+        if (closing && !(await settledWithin(closing, SESSION_ABORT_GRACE_MS))) {
+          logger.warn("Pi chat MCP close did not settle — tearing the turn down anyway", {
+            chatSessionId: input.chatSessionId,
+            graceMs: SESSION_ABORT_GRACE_MS,
+          });
+        }
       }
     },
   });

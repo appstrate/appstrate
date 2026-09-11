@@ -2,12 +2,17 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  isFileField as sharedIsFileField,
+  isMultipleFileField as sharedIsMultipleFileField,
+} from "@appstrate/afps-shared/file-field";
+import {
   asJSONSchemaObject,
   getOrderedKeys,
   isFileField,
   isMultipleFileField,
   mapAfpsToRjsf,
-  mergeWithDefaults,
+  authorDefaults,
+  type JSONSchema7,
   type JSONSchemaObject,
   type SchemaWrapper,
 } from "../src/form.ts";
@@ -29,6 +34,128 @@ describe("isFileField / isMultipleFileField", () => {
     expect(isFileField(prop)).toBe(true);
     expect(isMultipleFileField(prop)).toBe(true);
   });
+
+  // The two predicates used to be two implementations: `isFileField`
+  // delegated to `@appstrate/afps-shared` ("`contentMediaType` DECLARED"),
+  // `isMultipleFileField` kept a local copy testing `!!items.contentMediaType`.
+  // An empty-string media type is the input that separates them, and it made
+  // the pair answer opposite things about ONE node — so `mapAfpsToRjsf` marked
+  // an array property `ui:widget: "file"` without `multiple`, i.e. a
+  // single-file picker bound to an array.
+  it("agrees with isFileField on an array whose items declare an EMPTY contentMediaType", () => {
+    const prop = {
+      type: "array" as const,
+      items: { type: "string" as const, format: "uri", contentMediaType: "" },
+    };
+    expect(isFileField(prop)).toBe(true);
+    expect(isMultipleFileField(prop)).toBe(true);
+
+    const { uiSchema } = mapAfpsToRjsf({
+      schema: { type: "object", properties: { docs: prop } },
+    });
+    expect(uiSchema.docs).toMatchObject({ "ui:widget": "file", "ui:options": { multiple: true } });
+  });
+
+  // Control: the two must also agree the OTHER way. An array of plain URIs
+  // declares no `contentMediaType` at all, so neither predicate may fire —
+  // without this half the assertion above passes for a predicate that
+  // returned `true` unconditionally.
+  it("agrees with isFileField on an array of plain URIs (no contentMediaType)", () => {
+    const prop = {
+      type: "array" as const,
+      items: { type: "string" as const, format: "uri" },
+    };
+    expect(isFileField(prop)).toBe(false);
+    expect(isMultipleFileField(prop)).toBe(false);
+
+    const { uiSchema } = mapAfpsToRjsf({
+      schema: { type: "object", properties: { links: prop } },
+    });
+    expect(uiSchema.links).toBeUndefined();
+  });
+});
+
+// `@appstrate/core/form` carries its own copy of the AFPS file-field rule
+// instead of importing `@appstrate/afps-shared/file-field`, because core ships
+// as SOURCE to npm: a consumer's `tsc` compiles core's files against the
+// `@appstrate/afps-shared` THEIR install resolves. Core's declared floor is
+// `^0.7.0` and `0.7.0` — the first release to export `isMultipleFileField`
+// from that subpath — is not published yet, so the import is unresolvable for
+// a consumer today. See the block comment above `isFileField` in
+// `../src/form.ts` for the full reasoning and for what would let the two
+// merge.
+//
+// This is the thing that keeps the parallel copies honest. The import below
+// resolves to LOCAL workspace source (tests are not part of the published
+// `files` list, so nothing here reaches a consumer), so editing one side and
+// not the other fails here at dev time — the drift that produced the
+// `contentMediaType: ""` bug is exactly what this table would have caught.
+describe("file-field rule parity with @appstrate/afps-shared", () => {
+  const nodes: Array<[string, unknown]> = [
+    ["single file", { type: "string", format: "uri", contentMediaType: "application/pdf" }],
+    ["single file, EMPTY media type", { type: "string", format: "uri", contentMediaType: "" }],
+    ["uri without contentMediaType", { type: "string", format: "uri" }],
+    ["plain string", { type: "string" }],
+    [
+      "array of files",
+      { type: "array", items: { type: "string", format: "uri", contentMediaType: "image/png" } },
+    ],
+    [
+      "array of files, EMPTY media type",
+      { type: "array", items: { type: "string", format: "uri", contentMediaType: "" } },
+    ],
+    ["array of plain URIs", { type: "array", items: { type: "string", format: "uri" } }],
+    ["array with items: false", { type: "array", items: false }],
+    [
+      "tuple items, first is a file",
+      { type: "array", items: [{ format: "uri", contentMediaType: "text/csv" }] },
+    ],
+    [
+      "union type, array first",
+      {
+        type: ["array", "null"],
+        items: { type: "string", format: "uri", contentMediaType: "image/png" },
+      },
+    ],
+    // Impossible under `JSONSchema7`, reachable through `asJSONSchemaObject`
+    // casts of JSONB columns and dynamic manifests — which is why both rules
+    // read the node structurally rather than trusting the declared type.
+    ["contentMediaType: false", { format: "uri", contentMediaType: false }],
+    ["not an object", "nope"],
+    ["null", null],
+  ];
+
+  for (const [label, node] of nodes) {
+    it(`agrees on: ${label}`, () => {
+      expect(isFileField(node as JSONSchema7)).toBe(sharedIsFileField(node));
+      expect(isMultipleFileField(node as JSONSchema7)).toBe(sharedIsMultipleFileField(node));
+    });
+  }
+
+  // Control: the table must contain both answers, or "agrees" would hold for a
+  // pair of predicates that always returned the same constant.
+  it("covers both answers", () => {
+    const answers = nodes.map(([, node]) => sharedIsFileField(node));
+    expect(answers).toContain(true);
+    expect(answers).toContain(false);
+    const multiple = nodes.map(([, node]) => sharedIsMultipleFileField(node));
+    expect(multiple).toContain(true);
+    expect(multiple).toContain(false);
+  });
+
+  // `@appstrate/afps-shared` is PUBLISHED, so every name this subpath exports
+  // is a semver commitment to out-of-tree consumers — taking one back later is
+  // a breaking release. Its three internal helpers (`isSingleFileNode`,
+  // `resolveItems`, `resolveType`) are shared implementation detail of the two
+  // predicates above and have no importer anywhere in this repo; exporting
+  // them would promise a surface nobody asked for, on a module whose own
+  // header argues that core must NOT import them. Pinned here rather than in
+  // `packages/afps-shared/test/` because this is the file that already owns
+  // the relationship between the two copies of this rule.
+  it("exports the two predicates and nothing else", async () => {
+    const surface = Object.keys(await import("@appstrate/afps-shared/file-field")).sort();
+    expect(surface).toEqual(["isFileField", "isMultipleFileField"]);
+  });
 });
 
 describe("getOrderedKeys", () => {
@@ -46,18 +173,50 @@ describe("getOrderedKeys", () => {
   });
 });
 
-describe("mergeWithDefaults", () => {
+describe("authorDefaults", () => {
   const schema: JSONSchemaObject = {
     type: "object",
     properties: {
       name: { type: "string", default: "anon" },
       count: { type: "integer" },
+      enabled: { type: "boolean", default: false },
+      tags: { type: "array", default: [] },
+      note: { type: "string", default: "" },
+      explicit_null: { type: "string", default: null },
     },
+    required: ["count"],
   };
 
-  it("fills missing keys with defaults, null otherwise", () => {
-    expect(mergeWithDefaults(schema, { count: 3 })).toEqual({ name: "anon", count: 3 });
-    expect(mergeWithDefaults(schema, null)).toEqual({ name: "anon", count: null });
+  it("returns only the properties that declare a `default`", () => {
+    expect(authorDefaults(schema)).toEqual({
+      name: "anon",
+      enabled: false,
+      tags: [],
+      note: "",
+      explicit_null: null,
+    });
+  });
+
+  it("leaves a property without a `default` absent rather than null", () => {
+    expect("count" in authorDefaults(schema)).toBe(false);
+  });
+
+  it("returns an empty object for an absent schema", () => {
+    expect(authorDefaults(undefined)).toEqual({});
+  });
+
+  it("returns an empty object for a schema with no properties", () => {
+    expect(authorDefaults({ type: "object", properties: {} })).toEqual({});
+  });
+
+  it("does not read `default` from anything but a top-level property", () => {
+    const nested: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        outer: { type: "object", properties: { inner: { type: "string", default: "deep" } } },
+      },
+    };
+    expect(authorDefaults(nested)).toEqual({});
   });
 });
 

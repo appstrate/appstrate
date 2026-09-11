@@ -16,22 +16,20 @@ import {
   type IntegrationManifestCache,
   type IntegrationManifestLoadFailure,
 } from "./integration-service.ts";
-import { validateConfig } from "./schema.ts";
 import { resolveDeclaredSkills } from "./package-catalog.ts";
-import { extractManifestSchemas } from "../lib/manifest-utils.ts";
 import { isPromptEmpty } from "@appstrate/core/validation";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { deepMergeConfig } from "@appstrate/core/schema-validation";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
+import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
+import { attachConnectOffers } from "./connect/preflight-connect-offer.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
-export interface AgentReadinessParams {
+interface AgentReadinessParams {
   agent: LoadedPackage;
   orgId: string;
-  config?: Record<string, unknown>;
-  applicationId: string;
+  spaceId: string;
   /**
    * Actor whose integration connections we validate. Run kickoff paths
    * pass an actor so missing or under-scoped connections produce a 412
@@ -59,6 +57,16 @@ export interface AgentReadinessParams {
    * and the spawn resolver dedupe the SELECT + Zod parse per integration.
    */
   manifestCache?: IntegrationManifestCache;
+  /**
+   * Opt-in relay for the run-kickoff connect link (#1207) — see
+   * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
+   *
+   * Read by the THROWING wrapper only: `collectAgentReadinessErrors` ignores
+   * it, so its one direct caller (the dry-run validator, via the accumulate
+   * branch of `inline-run-preflight.ts`) stays link-free by passing none — not
+   * by anything this function does.
+   */
+  connectOffers?: ConnectOfferPolicy | null;
 }
 
 /**
@@ -66,7 +74,7 @@ export interface AgentReadinessParams {
  *
  * Single source of truth for readiness checks — the throwing wrapper
  * `validateAgentReadiness` delegates to this. Fail-fast sequence:
- * prompt → skills → integration install/enable → integration connections → config.
+ * prompt → skills → integration install/enable → integration connections.
  */
 /**
  * Map an {@link IntegrationManifestLoadFailure} to a structured readiness
@@ -113,7 +121,7 @@ function manifestFailureError(
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, orgId, config, applicationId, actor, runOverrides, scheduleOverrides } = params;
+  const { agent, orgId, spaceId, actor, runOverrides, scheduleOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
@@ -142,8 +150,8 @@ export async function collectAgentReadinessErrors(
   }
 
   // Integration install/enable gate — runs regardless of actor (it is an
-  // app-level fact, not an actor-level one). Every integration the agent
-  // declares MUST be installed AND enabled on the application. Without this
+  // space-level fact, not an actor-level one). Every integration the agent
+  // declares MUST be installed AND enabled on the space. Without this
   // the run silently degrades: the runtime spawn resolver skips an inactive
   // integration (`isIntegrationActive` false) and the agent launches without
   // its tools. The connection resolver below does NOT catch this — it gates
@@ -151,9 +159,13 @@ export async function collectAgentReadinessErrors(
   // integration can still have lingering connections that resolve cleanly.
   // Checked before connections so an inactive integration fails fast with a
   // clear cause rather than a downstream `not_connected`.
-  // Batched: one SELECT over `application_packages` for every declared
+  // Batched: one SELECT over `space_packages` for every declared
   // integration instead of N serial single-row queries (run-kickoff hot path).
   const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
+  // Integrations this gate has already refused, and which the connection
+  // resolution below must therefore not look at a second time — see the
+  // `skipIntegrationIds` note on `resolveConnectionsForRun`.
+  const refusedIntegrations = new Set<string>();
   if (declaredIntegrations.length > 0) {
     // Integration manifest-health gate (#737) — mirrors the manifest drop
     // conditions in `resolveOne` (integration-spawn-resolver.ts): a declared
@@ -180,7 +192,7 @@ export async function collectAgentReadinessErrors(
     }
 
     // Install/enable gate — every declared integration MUST be installed AND
-    // enabled on the application. Without this the run silently degrades: the
+    // enabled on the space. Without this the run silently degrades: the
     // runtime spawn resolver skips an inactive integration (`isIntegrationActive`
     // false) and the agent launches without its tools. The connection resolver
     // below does NOT catch this — it gates on whether an accessible connection
@@ -190,18 +202,26 @@ export async function collectAgentReadinessErrors(
     // downstream `not_connected`. Integrations already flagged for a manifest
     // failure are skipped here — a missing package is necessarily inactive too,
     // and the manifest error is the more precise cause (no double-report).
+    //
+    // "Fails fast rather than a downstream `not_connected`" is enforced, not
+    // merely ordered: each id flagged here is added to `refusedIntegrations`,
+    // which the resolution below excludes. The resolver applies no active
+    // filter of its own, so without that the same integration produced BOTH
+    // errors — and, for a caller opted into the connect-offer relay, a live
+    // connect link for an integration nobody can use in this space.
     const activeIds = await listActiveIntegrationIds(
       declaredIntegrations.map((entry) => entry.id),
-      applicationId,
+      spaceId,
     );
     for (const entry of declaredIntegrations) {
       if (manifestUnhealthy.has(entry.id)) continue;
       if (!activeIds.has(entry.id)) {
+        refusedIntegrations.add(entry.id);
         errors.push({
           field: `integrations.${entry.id}`,
           code: "integration_not_active",
           title: "Integration Not Enabled",
-          message: `Integration '${entry.id}' is not installed or is disabled in this application.`,
+          message: `Integration '${entry.id}' is not installed or is disabled in this space.`,
         });
       }
     }
@@ -217,36 +237,25 @@ export async function collectAgentReadinessErrors(
   // picks a candidate, the modal POSTs `connection_overrides`, readiness
   // honours the pick instead of re-firing must_choose on the same N>1
   // candidate set. run-pipeline.ts re-runs the resolver after readiness
-  // (with the same overrides) to produce the persisted snapshot — both
-  // passes see the same inputs so they cannot disagree.
+  // (with the same overrides) to produce the persisted snapshot. The two
+  // passes cannot disagree even though only this one passes
+  // `skipIntegrationIds`: a non-empty set means an error was pushed above, and
+  // the throwing wrapper raises it, so the snapshot pass never runs on an
+  // agent whose integrations this pass refused. When the set IS empty the two
+  // calls are identical.
   if (actor) {
     const resolution = await resolveConnectionsForRun({
       agentManifest: manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
-      scope: { orgId, applicationId },
+      scope: { orgId, spaceId },
       ...(runOverrides ? { runOverrides } : {}),
       ...(scheduleOverrides ? { scheduleOverrides } : {}),
       ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+      ...(refusedIntegrations.size > 0 ? { skipIntegrationIds: refusedIntegrations } : {}),
     });
     for (const e of resolution.errors) {
       errors.push(translateResolutionError(e));
-    }
-  }
-
-  if (config) {
-    const { config: configSchema } = extractManifestSchemas(manifest);
-    const effectiveSchema = configSchema ?? { type: "object" as const, properties: {} };
-    const configValidation = validateConfig(config, effectiveSchema);
-    if (!configValidation.valid) {
-      for (const e of configValidation.errors) {
-        errors.push({
-          field: e.field ? `config.${e.field}` : "config",
-          code: "invalid_config",
-          title: "Invalid Config",
-          message: e.message,
-        });
-      }
     }
   }
 
@@ -275,7 +284,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     if (params.actor) {
       void emitEvent("onRunConnectionMissing", {
         orgId: params.orgId,
-        applicationId: params.applicationId,
+        spaceId: params.spaceId,
         packageId: params.agent.id,
         actor: { type: params.actor.type, id: params.actor.id },
         errors: integrationErrors.map((e) => ({
@@ -286,12 +295,25 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
         })),
       });
     }
+    // Mint the connect links LAST — strictly after the webhook projection
+    // above, which must never carry a bearer capability off-platform, and only
+    // for a caller that opted in and holds `integrations:connect`.
+    const responseErrors =
+      params.connectOffers && params.actor
+        ? await attachConnectOffers({
+            errors: integrationErrors,
+            scope: { orgId: params.orgId, spaceId: params.spaceId },
+            actor: params.actor,
+            policy: params.connectOffers,
+            ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+          })
+        : integrationErrors;
     throw new ApiError({
       status: 412,
       code: "missing_integration_connection",
       title: "Missing Integration Connection",
       detail: first.message,
-      errors: integrationErrors,
+      errors: responseErrors,
     });
   }
 
@@ -302,52 +324,4 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     title: first.title ?? first.code,
     detail: first.message,
   });
-}
-
-/**
- * Re-validate a deep-merged config against the manifest schema.
- *
- * `resolveRunPreflight` validates the *persisted* `application_packages.config`
- * once at preflight time. When a caller supplies a per-run `config` override
- * on `POST /run` (or freezes one on a schedule), the merged result has not
- * been vetted — the override could push the config out of schema. This
- * function closes that gap on every merge.
- *
- * Throws `ApiError(400, "invalid_config")` on the first violation, mirroring
- * the contract of `validateAgentReadiness` so existing error mapping handles
- * it without special cases. No-op when the manifest declares no config schema.
- */
-function validateMergedConfigOrThrow(agent: LoadedPackage, config: Record<string, unknown>): void {
-  const { config: configSchema } = extractManifestSchemas(agent.manifest);
-  if (!configSchema) return;
-  const result = validateConfig(config, configSchema);
-  if (result.valid) return;
-  const first = result.errors[0]!;
-  throw new ApiError({
-    status: 400,
-    code: "invalid_config",
-    title: "Invalid Config",
-    detail: first.field ? `config.${first.field}: ${first.message}` : first.message,
-  });
-}
-
-/**
- * Apply a per-run config override on top of the persisted config and re-validate
- * against the manifest schema. No-op when `override` is null/undefined — returns
- * `persisted` verbatim. Throws `ApiError(400, "invalid_config")` if the merged
- * result violates the manifest schema (via `validateMergedConfigOrThrow`).
- *
- * Single source of truth for the merge+validate sequence shared by `POST /run`
- * and the scheduler — every per-run invocation reaches an identical resolved
- * config for the same `(persisted, override)` pair.
- */
-export function mergeAndValidateConfigOverride(
-  agent: LoadedPackage,
-  persisted: Record<string, unknown>,
-  override: Record<string, unknown> | null | undefined,
-): Record<string, unknown> {
-  if (!override) return persisted;
-  const merged = deepMergeConfig(persisted, override);
-  validateMergedConfigOrThrow(agent, merged);
-  return merged;
 }

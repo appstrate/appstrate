@@ -14,7 +14,7 @@
 
 import type { Finding } from "./types.ts";
 
-export interface DiffOptions {
+interface DiffOptions {
   /** Check name stamped on each finding. */
   check: string;
   /** When true, server tools missing from the manifest are WARN, not FAIL. */

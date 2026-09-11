@@ -5,8 +5,8 @@
  * Auto-selects Redis or local implementations based on environment.
  */
 
+import type { PubSub } from "@appstrate/core/platform-types";
 import { hasRedis } from "./mode.ts";
-import type { PubSub } from "./pubsub/interface.ts";
 import type { KeyValueCache } from "./cache/interface.ts";
 import type { RateLimiterFactory } from "./rate-limit/interface.ts";
 import type { EventBuffer } from "./event-buffer/interface.ts";
@@ -17,8 +17,6 @@ import { LocalRateLimiterFactory } from "./rate-limit/local-rate-limit.ts";
 import { LocalEventBuffer } from "./event-buffer/local-event-buffer.ts";
 import { LocalCookieJarStore } from "./cookie-jar/local-cookie-jar.ts";
 import { logger } from "../lib/logger.ts";
-
-export { hasRedis, hasExternalDb, hasS3, getExecutionMode } from "./mode.ts";
 
 // ---------------------------------------------------------------------------
 // Singletons — Redis implementations are loaded lazily via dynamic import()

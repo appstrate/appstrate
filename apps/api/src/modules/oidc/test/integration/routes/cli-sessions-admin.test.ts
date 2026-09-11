@@ -8,14 +8,15 @@
  *
  * Covers:
  *   - Listing visibility scoped to current org members + cross-user info
- *   - Authorization gating (owner/admin only — member/viewer rejected)
+ *   - Authorization gating (owner/admin only — member rejected)
+ *   - Delegated credentials do NOT inherit their subject's org authority
  *   - Cross-org isolation (admin of org A cannot see org B's sessions)
  *   - Revocation by admin marks every row in the family with reason
  *     `org_admin_revoked`
  *   - Idempotent 404 on already-revoked, unknown, or out-of-org families
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
@@ -25,6 +26,7 @@ import {
   organizationMembers,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
+import { seedApiKey, seedSpace } from "../../../../../../test/helpers/seed.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestContext } from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
@@ -32,8 +34,30 @@ import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
 import { cliRefreshToken, deviceCode } from "@appstrate/db/schema";
+import { _resetCacheForTesting } from "@appstrate/env";
+import { resetClientIpCache } from "../../../../../lib/client-ip.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
+
+// Better Auth caps `/sign-up*` at 3 per 10s per IP, and a single test here
+// registers up to six distinct people. `app.request()` carries no socket, so
+// each one states its own forwarded address and the platform resolves it —
+// which needs the proxy trusted for the duration of this file.
+const originalTrustProxy = process.env.TRUST_PROXY;
+let signupAddress = 0;
+
+beforeAll(() => {
+  process.env.TRUST_PROXY = "true";
+  _resetCacheForTesting();
+  resetClientIpCache();
+});
+
+afterAll(() => {
+  if (originalTrustProxy === undefined) delete process.env.TRUST_PROXY;
+  else process.env.TRUST_PROXY = originalTrustProxy;
+  _resetCacheForTesting();
+  resetClientIpCache();
+});
 
 interface SignupResult {
   cookie: string;
@@ -41,9 +65,13 @@ interface SignupResult {
 }
 
 async function signUp(email: string, name: string): Promise<SignupResult> {
+  signupAddress += 1;
   const res = await app.request("/api/auth/sign-up/email", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Forwarded-For": `198.51.100.${signupAddress}`,
+    },
     body: JSON.stringify({ email, password: "Sup3rSecretPass!", name }),
   });
   expect(res.status).toBe(200);
@@ -111,7 +139,7 @@ async function loginCli(
 async function addMember(
   orgId: string,
   userId: string,
-  role: "owner" | "admin" | "member" | "viewer",
+  role: "owner" | "admin" | "member" | "guest",
 ): Promise<void> {
   await db.insert(organizationMembers).values({ orgId, userId, role });
 }
@@ -189,6 +217,53 @@ describe("GET /api/orgs/:orgId/cli-sessions (#251)", () => {
     const res = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
       method: "GET",
       headers: { Cookie: member.cookie },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("an owner-minted API key does NOT inherit its creator's org authority", async () => {
+    // `orgPathContext` derives from the membership row for session-shaped
+    // callers ONLY. A key keeps the ceiling-limited set the pipeline wrote, and
+    // `cli-sessions:read` is not in it — whoever minted the key. A module that
+    // derives its own org context for every caller breaks exactly this.
+    const { orgId, owner } = await setupOrg("adminclisess-key");
+    const space = await seedSpace({ orgId });
+    const key = await seedApiKey({
+      orgId,
+      spaceId: space.id,
+      createdBy: owner.userId,
+      scopes: ["runs:read"],
+    });
+
+    const res = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${key.rawKey}` },
+    });
+    expect(res.status).toBe(403);
+
+    // Control: the same owner, as a session, DOES reach it — so the 403 above
+    // is about the credential, not about the org or the route.
+    const asOwner = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+      method: "GET",
+      headers: { Cookie: owner.cookie },
+    });
+    expect(asOwner.status).toBe(200);
+  });
+
+  it("an API key bound to org A is refused on org B's path", async () => {
+    const a = await setupOrg("adminclisess-orga");
+    const b = await setupOrg("adminclisess-orgb");
+    const space = await seedSpace({ orgId: a.orgId });
+    const key = await seedApiKey({
+      orgId: a.orgId,
+      spaceId: space.id,
+      createdBy: a.owner.userId,
+      scopes: ["runs:read"],
+    });
+
+    const res = await app.request(`/api/orgs/${b.orgId}/cli-sessions`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${key.rawKey}` },
     });
     expect(res.status).toBe(403);
   });

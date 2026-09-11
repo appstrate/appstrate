@@ -7,10 +7,11 @@ import { Package } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
-import { usePermissions } from "../hooks/use-permissions";
 import { collectionVerdict } from "../components/collection";
-import { NavigateKeepingState } from "../components/navigate-keeping-state";
-import type { LibraryPackageItem, LibraryApp } from "../hooks/use-library";
+import type { PackageType } from "@appstrate/core/validation";
+import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
+import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
+import { useSpaces } from "../hooks/use-spaces";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
@@ -27,7 +28,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 const TABS = ["agents", "skills", "integrations"] as const;
 type Tab = (typeof TABS)[number];
 
-const TYPE_MAP: Record<Tab, "agent" | "skill" | "integration"> = {
+const TYPE_MAP: Record<Tab, PackageType> = {
   agents: "agent",
   skills: "skill",
   integrations: "integration",
@@ -49,9 +50,9 @@ const DETAIL_PATH_MAP: Record<string, string> = {
 };
 
 export function OrgSettingsLibraryPage() {
-  const { isAdmin } = usePermissions();
-
-  if (!isAdmin) return <NavigateKeepingState to="/org-settings/general" />;
+  // No gate here: the route mounts this behind its permission, and the
+  // per-space install checkboxes below carry their own. A second org-level
+  // check would only be a third thing to keep in step.
   return <LibraryContent />;
 }
 
@@ -77,7 +78,7 @@ function LibraryContent() {
           <TabsContent key={tab} value={tab}>
             <LibraryMatrix
               packages={data?.packages[TYPE_MAP[tab]] ?? []}
-              applications={data?.applications ?? []}
+              spaces={data?.spaces ?? []}
               type={TYPE_MAP[tab]}
               isLoading={isLoading}
               isError={Boolean(error)}
@@ -107,30 +108,40 @@ function LibraryContent() {
  */
 function LibraryMatrix({
   packages: pkgs,
-  applications,
+  spaces,
   type,
   isLoading,
   isError,
   errorMessage,
 }: {
   packages: LibraryPackageItem[];
-  applications: LibraryApp[];
-  type: string;
+  spaces: LibrarySpace[];
+  type: PackageType;
   isLoading?: boolean;
   isError?: boolean;
   errorMessage?: string;
 }) {
   const { t } = useTranslation();
+  const { data: accessibleSpaces } = useSpaces();
   const toggle = useTogglePackageInstall();
+  const permissionsBySpace = new Map(accessibleSpaces?.map((s) => [s.id, s.permissions]));
+  const { install: installPermission, uninstall: uninstallPermission } = PACKAGE_PERMISSIONS[type];
+  // Every column targets a different space. Installation state chooses the
+  // operation; the target space's effective set decides whether it is allowed.
+  const canToggle = (spaceId: string, installed: boolean) =>
+    permissionsBySpace
+      .get(spaceId)
+      ?.includes(installed ? uninstallPermission : installPermission) ?? false;
   // Agents/skills treat a "system" package as globally available (locked on,
   // can't toggle). Integrations are different: they must be activated per
-  // application even when system-sourced, so their system rows stay toggleable.
+  // space even when system-sourced, so their system rows stay toggleable.
   const lockSystem = type !== "integration";
 
-  const handleToggle = (pkg: LibraryPackageItem, applicationId: string, installed: boolean) => {
+  const handleToggle = (pkg: LibraryPackageItem, spaceId: string, installed: boolean) => {
     if (lockSystem && pkg.source === "system") return;
+    if (!canToggle(spaceId, installed)) return;
     toggle.mutate(
-      { applicationId, packageId: pkg.id, installed },
+      { spaceId, packageId: pkg.id, installed },
       {
         onError: (err) => {
           toast.error(err instanceof Error ? err.message : t("error.generic"));
@@ -158,17 +169,17 @@ function LibraryMatrix({
     );
   }
 
-  const matrixMinWidth = (applications.length + 1) * 160;
+  const matrixMinWidth = (spaces.length + 1) * 160;
 
   return (
     <Table data-library-matrix className="w-max min-w-full" style={{ minWidth: matrixMinWidth }}>
       <TableHeader>
         <TableRow>
           <TableHead className={HEAD}>{t("library.column.package")}</TableHead>
-          {applications.map((app) => (
-            <TableHead key={app.id} className={`${HEAD} text-center`}>
-              <span>{app.name}</span>
-              {app.isDefault && (
+          {spaces.map((space) => (
+            <TableHead key={space.id} className={`${HEAD} text-center`}>
+              <span>{space.name}</span>
+              {space.isDefault && (
                 <Badge variant="outline" className="ml-1 px-1 py-0 text-[0.6rem] normal-case">
                   {t("library.defaultApp")}
                 </Badge>
@@ -197,16 +208,26 @@ function LibraryMatrix({
                 </p>
               )}
             </TableCell>
-            {applications.map((app) => {
-              const installed = pkg.installed_in.includes(app.id);
-              const locked = lockSystem && pkg.source === "system";
+            {spaces.map((space) => {
+              const installed = pkg.installed_in.includes(space.id);
+              const systemAlwaysActive = lockSystem && pkg.source === "system";
+              const blocked = !canToggle(space.id, installed);
+              // Until `useSpaces` resolves the caller's standing is unknown, so the
+              // box is disabled without claiming a missing permission.
+              const missingPermission = accessibleSpaces !== undefined && blocked;
+              // Two different reasons the box cannot be clicked.
+              const title = systemAlwaysActive
+                ? t("library.systemAlwaysActive")
+                : missingPermission
+                  ? t(installed ? "library.cannotUninstall" : "library.cannotInstall")
+                  : undefined;
               return (
-                <TableCell key={app.id} className="text-center">
+                <TableCell key={space.id} className="text-center">
                   <Checkbox
-                    checked={locked || installed}
-                    disabled={locked}
-                    title={locked ? t("library.systemAlwaysActive") : undefined}
-                    onCheckedChange={() => handleToggle(pkg, app.id, installed)}
+                    checked={systemAlwaysActive || installed}
+                    disabled={systemAlwaysActive || blocked}
+                    title={title}
+                    onCheckedChange={() => handleToggle(pkg, space.id, installed)}
                   />
                 </TableCell>
               );

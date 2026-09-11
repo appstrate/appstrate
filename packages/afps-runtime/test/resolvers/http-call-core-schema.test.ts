@@ -20,8 +20,7 @@ import {
 } from "../../src/resolvers/http-call-core.ts";
 import { ResolverError } from "../../src/errors.ts";
 import type { ApiCallMeta, ApiCallResponse } from "../../src/resolvers/http-call-core.ts";
-import type { ToolContext } from "../../src/resolvers/types.ts";
-import type { RunEvent } from "../../src/resolvers/index.ts";
+import type { RunEvent, ToolContext } from "../../src/resolvers/index.ts";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -276,17 +275,19 @@ describe("apiCallRequestSchema — invalid inputs", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects body with extra properties on fromFile shape", () => {
+  // Not a rejection: an unknown sibling key is STRIPPED, and that is the
+  // contract worth pinning. The parsed body is what the resolver forwards
+  // upstream, so a loosened object schema here would ship a model-invented
+  // key into someone else's API instead of dropping it.
+  it("strips an unknown sibling key from the fromFile body instead of forwarding it", () => {
     const result = apiCallRequestSchema.safeParse({
       method: "POST",
       target: "https://api.example.com/x",
       body: { fromFile: "uploads/f.pdf", extraKey: "surprise" },
     });
-    // Zod strips extras by default and matches the union; extra keys are stripped
-    // but the schema succeeds. The important thing is the runtime validate rejects
-    // truly wrong shapes, not extra keys (Zod allows them by default in unions).
-    // This test just confirms the shape is parsed.
-    expect(result).toBeDefined();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.body).toEqual({ fromFile: "uploads/f.pdf" });
   });
 
   it("rejects multipart array with 0 items", () => {

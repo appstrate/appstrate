@@ -65,25 +65,32 @@ See the [Progressive Infrastructure](./README.md#progressive-infrastructure) sec
 
 The `.env.example` ships with dev-ready defaults — no manual secret generation needed. For production, regenerate all secrets (see comments in `.env`).
 
-**If you modify `runtime-pi/` or `runtime-pi/sidecar/`**, rebuild the Docker images:
+**If you modify `runtime-pi/` or `runtime-pi/sidecar/`**, rebuild the runtime images:
 
 ```sh
-bun run build-runtime    # agent image
-bun run build-sidecar    # sidecar proxy image
+bun run build-runtime    # rebuilds BOTH appstrate-pi and appstrate-sidecar
 ```
+
+There is deliberately no command that rebuilds one of the two. `PI_IMAGE` and
+`SIDECAR_IMAGE` are a version contract — the agent runtime and the sidecar speak
+a wire protocol that changes in the same commit — and a pair built from two
+different commits starts normally, passes every health check, then fails runs
+with an error that names neither image (#1195). Both images are stamped with the
+git revision they were built from, and the platform warns at boot when the two
+stamps disagree.
 
 ### Useful Commands
 
-| Command                        | Description                                         |
-| ------------------------------ | --------------------------------------------------- |
-| `bun run setup`                | One-command dev bootstrap (first time)              |
-| `bun run dev`                  | Start API + web (turbo, hot-reload)                 |
-| `bun run check`                | TypeScript + ESLint + Prettier + OpenAPI validation |
-| `bun test`                     | All tests (~4500) — requires Docker                 |
-| `bun test apps/api/test/unit/` | Unit tests only (fast, no DB)                       |
-| `bun run build`                | Build frontend + shared packages                    |
-| `bun run db:migrate`           | Apply database migrations                           |
-| `bun run verify:openapi`       | OpenAPI spec validation                             |
+| Command                        | Description                                                    |
+| ------------------------------ | -------------------------------------------------------------- |
+| `bun run setup`                | One-command dev bootstrap (first time)                         |
+| `bun run dev`                  | Start API + web (turbo, hot-reload)                            |
+| `bun run check`                | The full quality gate — 18 tasks, listed in `CLAUDE.md`        |
+| `bun test`                     | All tests (~11,400 `it()` across ~875 files) — requires Docker |
+| `bun test apps/api/test/unit/` | Unit tests only (fast, no DB)                                  |
+| `bun run build`                | Build frontend + shared packages                               |
+| `bun run db:migrate`           | Apply database migrations                                      |
+| `bun run verify:openapi`       | OpenAPI spec validation                                        |
 
 **Working on the Firecracker execution backend?** It's an opt-in built-in module (`apps/api/src/modules/firecracker/`, not in the default `MODULES`). The privileged engine runs as the `appstrate-runner` daemon (`bun run firecracker:runner`) and needs a Linux KVM host (`/dev/kvm`) — on macOS, run it inside a Lima VM with nested virtualization. Guest artifacts build via `bun run firecracker:build:{kernel,rootfs}`. Architecture + dev workflow: [`docs/architecture/FIRECRACKER.md`](./docs/architecture/FIRECRACKER.md).
 
@@ -136,6 +143,70 @@ git config commit.gpgsign true
 5. Wait for CI checks and code review
 6. Squash and merge after approval
 
+Step 5 is currently advice rather than a rule. The `Protect main` ruleset
+(`gh api repos/appstrate/appstrate/rulesets/14614228`) carries only `pull_request` and
+`non_fast_forward`; it declares **no** `required_status_checks`, and
+`repos/appstrate/appstrate/branches/main/protection` returns 404. So every gate in this repository —
+`check`, the test suites, CodeQL, secret scanning — is mergeable red today.
+
+### Required Checks (maintainers)
+
+The set that should gate a merge. Names are the GitHub check-run names, verbatim
+(`gh api repos/appstrate/appstrate/commits/main/check-runs --jq '.check_runs[].name'`):
+
+| Check                                                   | Workflow       |
+| ------------------------------------------------------- | -------------- |
+| `check`                                                 | `check.yml`    |
+| `Package resolves for consumers (packages/core)`        | `check.yml`    |
+| `Package resolves for consumers (packages/afps-shared)` | `check.yml`    |
+| `Unit tests`                                            | `test.yml`     |
+| `Platform container health e2e`                         | `test.yml`     |
+| `Secret Scanning`                                       | `security.yml` |
+| `Analyze`                                               | `codeql.yml`   |
+
+Deliberately **not** required, because a required check that does not report blocks the PR forever:
+`Integration tests`, `Runtime container e2e` and `E2E tests` are label-gated
+(`if: contains(github.event.pull_request.labels.*.name, …) || github.ref == 'refs/heads/main'`), so
+they are absent from an unlabelled PR, and `Scorecard Analysis` has no `pull_request` trigger at all.
+The same rule applies to any check added later: require it only once it is observed reporting on an
+ordinary PR.
+
+Applying it — a ruleset `PUT` **replaces** the whole ruleset, so read the live one and merge into it
+rather than writing a body from scratch:
+
+```sh
+gh api repos/appstrate/appstrate/rulesets/14614228 > /tmp/main-ruleset.json
+
+jq '.rules += [{
+      type: "required_status_checks",
+      parameters: {
+        strict_required_status_checks_policy: false,
+        do_not_enforce_on_create: false,
+        required_status_checks: [
+          { context: "check" },
+          { context: "Package resolves for consumers (packages/core)" },
+          { context: "Package resolves for consumers (packages/afps-shared)" },
+          { context: "Unit tests" },
+          { context: "Platform container health e2e" },
+          { context: "Secret Scanning" },
+          { context: "Analyze" }
+        ]
+      }
+    }]
+  | del(.id, .source_type, .source, .node_id, .created_at, .updated_at, ._links,
+        .current_user_can_bypass)' \
+  /tmp/main-ruleset.json > /tmp/main-ruleset-update.json
+
+gh api --method PUT repos/appstrate/appstrate/rulesets/14614228 --input /tmp/main-ruleset-update.json
+```
+
+`del(...)` rather than a `{name, target, …}` whitelist: the whitelist form emits `bypass_actors: null`
+when the live ruleset has none, and picking the fields to keep is the version of this edit that
+silently drops whatever GitHub adds to the payload next.
+`strict_required_status_checks_policy: false` means a PR does not have to be rebased onto the newest
+`main` before merging; set it to `true` only if stale-base merges become a real problem, since it
+makes every merge to `main` invalidate every open PR's status.
+
 ### Review Criteria
 
 - Quality gate passes (`bun run check` + `bun test`)
@@ -143,6 +214,7 @@ git config commit.gpgsign true
 - No unrelated changes bundled
 - New features include tests
 - API changes include OpenAPI spec updates
+- A change to a request the SPA sends includes a test that pins the emitted payload (see `apps/web/CLAUDE.md`, Tests) — the typed client checks shapes, not values
 
 ## Contributor License Agreement (CLA)
 

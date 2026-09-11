@@ -10,6 +10,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { cn } from "@appstrate/ui/cn";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthSuccessState } from "../components/auth-success-state";
+import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { useAuth } from "../hooks/use-auth";
 
 export function ResetPasswordPage() {
@@ -46,8 +47,8 @@ export function ResetPasswordPage() {
     e.preventDefault();
     setError(null);
 
-    if (password.length < 8) {
-      setError(t("validation.minLength", { ns: "common", min: 8 }));
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }));
       return;
     }
     if (password !== confirmPassword) {

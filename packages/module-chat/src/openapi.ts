@@ -33,26 +33,25 @@ export const chatComponentSchemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  // One stored conversation node returned by `GET /sessions/{id}` so the
+  // One stored conversation message returned by `GET /sessions/{id}` so the
   // client can seed `useChat({ messages })` on load. Written server-side
   // (user turn before inference, assistant turn on finalize); `content` is the
-  // ai-sdk/v6 format-encoded message (UIMessage minus its id).
+  // ai-sdk/v6 format-encoded message (UIMessage minus its id). The list is
+  // returned in insertion order — the transcript carries no ordering field of
+  // its own.
+  //
+  // `parent_id` and `format` were removed in `0054` along with the columns
+  // behind them: a re-encoding of `seq` order and a server constant, neither
+  // read by any client.
   ChatMessage: {
     type: "object",
-    required: ["id", "parent_id", "format", "content"],
+    required: ["id", "content"],
     properties: {
       id: {
         type: "string",
         minLength: 1,
         maxLength: 200,
         description: "Server-generated message id",
-      },
-      parent_id: { type: ["string", "null"], maxLength: 200 },
-      format: {
-        type: "string",
-        minLength: 1,
-        maxLength: 100,
-        description: "Storage format adapter id (e.g. ai-sdk/v6)",
       },
       content: { description: "Opaque encoded message" },
     },
@@ -67,7 +66,10 @@ export const chatPaths = {
       summary: "List chat sessions",
       description:
         "List the caller's chat sessions in the current organization (most recent first).",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+      ],
       responses: {
         "200": {
           description: "Sessions list",
@@ -93,7 +95,10 @@ export const chatPaths = {
       operationId: "createChatSession",
       tags: ["Chat"],
       summary: "Create a chat session",
-      parameters: [{ $ref: "#/components/parameters/XOrgId" }],
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+      ],
       requestBody: {
         required: false,
         content: {
@@ -101,6 +106,7 @@ export const chatPaths = {
             schema: {
               type: "object",
               properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              additionalProperties: false,
             },
           },
         },
@@ -126,6 +132,7 @@ export const chatPaths = {
       summary: "Get a chat session with its messages",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -162,6 +169,7 @@ export const chatPaths = {
       summary: "Rename a chat session",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -172,6 +180,7 @@ export const chatPaths = {
               type: "object",
               required: ["title"],
               properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              additionalProperties: false,
             },
           },
         },
@@ -189,6 +198,7 @@ export const chatPaths = {
       summary: "Delete a chat session",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -207,6 +217,7 @@ export const chatPaths = {
         "Records that the caller has seen the conversation up to now (clears `unread`). Idempotent. Does not affect the session's `updatedAt` ordering.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -226,6 +237,7 @@ export const chatPaths = {
         "Reconnect to the session's in-flight generation (the client's native AI-SDK `useChat({ resume: true })` calls this on mount). Returns the live UIMessage stream when a turn is generating, otherwise `204`. Lets a mid-inference page reload continue tokens exactly where they were.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -246,10 +258,10 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "Run a conversational turn (streaming)",
       description:
-        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference goes through the org's configured models via the llm-proxy; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
+        "Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through `/api/mcp` with the caller's own permissions. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "X-Model-Id",
           in: "header",
@@ -292,10 +304,14 @@ export const chatPaths = {
         },
         "402": {
           description:
-            "Usage not allowed — a platform admission module (e.g. metering) blocked the turn for a system-provided model. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+            "Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. RFC 9457 problem+json.",
+        },
         "429": { description: "Rate limited (20/min per caller)" },
       },
     },
@@ -309,6 +325,7 @@ export const chatPaths = {
         "Explicitly aborts the session's in-flight generation (distinct from a client disconnect, which never cancels generation). The live stream id is resolved server-side from the session. No-op if no turn is generating.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

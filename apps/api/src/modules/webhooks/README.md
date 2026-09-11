@@ -4,16 +4,16 @@ Standard Webhooks delivery for run lifecycle events.
 
 ## Purpose
 
-Lets applications subscribe to run status changes (`run.started`, `run.success`, `run.failed`, `run.timeout`, `run.cancelled`) and receive signed HTTP callbacks. Implements the Standard Webhooks specification (HMAC-SHA256 signing, secret rotation, 8-attempt exponential backoff, delivery history).
+Lets spaces subscribe to run status changes (`run.started`, `run.success`, `run.failed`, `run.timeout`, `run.cancelled`) and receive signed HTTP callbacks. Implements the Standard Webhooks specification (HMAC-SHA256 signing, secret rotation, 8-attempt exponential backoff, delivery history).
 
-## Owned tables
+## Tables it reads and writes
 
-| Table                | Purpose                                                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `webhooks`           | Subscription rows (URL, event list, secret, optional package filter, payload mode, enabled flag, org + app). |
-| `webhook_deliveries` | One row per delivery attempt with status code, latency, error, attempt count.                                |
+| Table                | Purpose                                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `webhooks`           | Subscription rows (URL, event list, secret, optional package filter, payload mode, enabled flag, org + space). |
+| `webhook_deliveries` | One row per delivery attempt with status code, latency, error, attempt count.                                  |
 
-All FKs to core tables are declared via Drizzle `.references()` in `schema.ts`. On application delete, webhooks cascade; on package delete, the scoped filter is set to null.
+Both tables live in the **core** schema (`packages/db/src/schema/webhooks.ts`) and migrate with core — this module has no `schema.ts` and owns no tables, per the module contract in `../README.md`. Their FKs are declared there via Drizzle `.references()`. On space delete, webhooks cascade; on package delete, the scoped filter is set to null.
 
 ## Feature flags contributed
 
@@ -23,23 +23,33 @@ features: {
 }
 ```
 
-## App-scoping
+## Space-scoping
 
-Webhooks routes are not registered in core's `APP_SCOPED_PREFIXES`. Each route
-validates the `applicationId` body/query field directly against the caller's
-org (`assertAppBelongsToOrg` in `routes.ts`) rather than relying on the
-`X-Application-Id` app-context middleware.
+Webhooks routes are not registered in core's `SPACE_SCOPED_PREFIXES`. Each route
+validates the `spaceId` body/query field directly against the caller's
+org (`assertSpaceBelongsToOrg` in `routes.ts`) rather than relying on the
+`X-Space-Id` space-context middleware.
 
 ## Permissions
 
-| Role  | Permissions                                          |
-| ----- | ---------------------------------------------------- |
-| owner | `webhooks:read`, `webhooks:write`, `webhooks:delete` |
-| admin | `webhooks:read`, `webhooks:write`, `webhooks:delete` |
+Two resources, one per scoping level — an org-level webhook fires for every
+space in the org, so it is not the same grant as administering one space's
+subscriptions.
 
-API key scopes: `webhooks:read`, `webhooks:write`, `webhooks:delete`.
+| Resource       | Level | Granted to                 |
+| -------------- | ----- | -------------------------- |
+| `webhooks`     | space | presets `admin`, `builder` |
+| `org-webhooks` | org   | org roles `owner`, `admin` |
 
-Members and viewers have no access — webhooks are considered developer tooling and live under the admin-only surface.
+Both carry `read`, `write`, `delete`, and both are API-key-grantable.
+
+Every route picks its resource from the webhook's own level: the `level` field
+of the create body, the stored row's `level` everywhere else. `GET
+/api/webhooks` spans both levels and drops the rows whose level the caller
+cannot read.
+
+`operator` and `viewer` have no access — webhooks are developer tooling and
+live under the governance surface.
 
 ## Events listened to
 

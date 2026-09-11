@@ -32,10 +32,10 @@ import {
   recordRunTerminal,
   recordContainerSpawn,
   recordLlmLatency,
-  recordDocumentCreated,
-  recordDocumentDeleted,
-  recordDocumentStorageLimitRejection,
-  recordDocumentPartialPublication,
+  recordFileCreated,
+  recordFileDeleted,
+  recordFileStorageLimitRejection,
+  recordFilePartialPublication,
   setQueueDepthProvider,
   _resetObservabilityForTesting,
   _forceFlushForTesting,
@@ -93,10 +93,10 @@ describe("observability — disabled (no-op)", () => {
     expect(() => recordRunTerminal({ status: "failed", errorCode: "timeout" })).not.toThrow();
     expect(() => recordContainerSpawn(10, { sidecar: true })).not.toThrow();
     expect(() => recordLlmLatency(5, { api_shape: "openai", status: 200 })).not.toThrow();
-    expect(() => recordDocumentCreated({ purpose: "agent_output" })).not.toThrow();
-    expect(() => recordDocumentDeleted(2)).not.toThrow();
-    expect(() => recordDocumentStorageLimitRejection()).not.toThrow();
-    expect(() => recordDocumentPartialPublication()).not.toThrow();
+    expect(() => recordFileCreated({ purpose: "agent_output" })).not.toThrow();
+    expect(() => recordFileDeleted(2)).not.toThrow();
+    expect(() => recordFileStorageLimitRejection()).not.toThrow();
+    expect(() => recordFilePartialPublication()).not.toThrow();
     expect(currentTraceparent()).toBeUndefined();
   });
 });
@@ -245,21 +245,21 @@ describe("observability — enabled (in-memory exporters)", () => {
     }
   });
 
-  it("records the documents lifecycle counters (created tagged by purpose, others plain)", async () => {
-    recordDocumentCreated({ purpose: "agent_output" });
-    recordDocumentCreated({ purpose: "agent_output" });
-    recordDocumentCreated({ purpose: "user_upload" });
-    recordDocumentDeleted(3); // one batch delete of 3 rows
-    recordDocumentDeleted(1); // one explicit delete
-    recordDocumentStorageLimitRejection();
-    recordDocumentPartialPublication();
+  it("records the files lifecycle counters (created tagged by purpose, others plain)", async () => {
+    recordFileCreated({ purpose: "agent_output" });
+    recordFileCreated({ purpose: "agent_output" });
+    recordFileCreated({ purpose: "user_upload" });
+    recordFileDeleted(3); // one batch delete of 3 rows
+    recordFileDeleted(1); // one explicit delete
+    recordFileStorageLimitRejection();
+    recordFilePartialPublication();
     await _forceFlushForTesting();
 
     const rms = metricExporter.getMetrics();
-    const created = findMetric(rms, "appstrate.documents.created");
-    const deleted = findMetric(rms, "appstrate.documents.deleted");
-    const quota = findMetric(rms, "appstrate.documents.storage_limit_rejections");
-    const partial = findMetric(rms, "appstrate.documents.partial_publications");
+    const created = findMetric(rms, "appstrate.files.created");
+    const deleted = findMetric(rms, "appstrate.files.deleted");
+    const quota = findMetric(rms, "appstrate.files.storage_limit_rejections");
+    const partial = findMetric(rms, "appstrate.files.partial_publications");
 
     expect(created).toBeDefined();
     expect(deleted).toBeDefined();

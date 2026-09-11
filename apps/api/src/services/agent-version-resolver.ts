@@ -58,7 +58,7 @@ export const VERSION_SELECTOR_DRAFT = "draft";
 /** Keyword selecting the latest published version. */
 const VERSION_SELECTOR_PUBLISHED = "published";
 
-export interface ResolvedRunAgent {
+interface ResolvedRunAgent {
   /** The agent definition the run will execute (draft or version snapshot). */
   agent: LoadedPackage;
   /**

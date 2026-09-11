@@ -9,10 +9,28 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { preflightUrl, hostLiterallyAllowlisted } from "../../src/resolvers/api-call-engine.ts";
+import { DEFAULT_MAX_REDIRECTS } from "@appstrate/afps-shared/guarded-fetch";
+import {
+  MAX_REDIRECTS,
+  preflightUrl,
+  hostLiterallyAllowlisted,
+} from "../../src/resolvers/api-call-engine.ts";
 
 const publicResolver = async () => ["203.0.113.7"];
 const internalResolver = async () => ["10.0.0.5"];
+
+// The two redirect followers in this codebase stay separate on purpose (the
+// reasons are in `api-call-engine.ts`'s docblock), but they must not carry two
+// unrelated redirect budgets: this one was a hard `10` while `guardedFetch`
+// defaulted to `5`, and nothing held the pair together.
+describe("redirect budget", () => {
+  it("is the SAME number as the shared guardedFetch default", () => {
+    expect(MAX_REDIRECTS).toBe(DEFAULT_MAX_REDIRECTS);
+    // Positive control: a budget of 0 would satisfy the equality above while
+    // making both followers refuse every redirect.
+    expect(MAX_REDIRECTS).toBeGreaterThan(1);
+  });
+});
 
 describe("hostLiterallyAllowlisted", () => {
   it("pins an exact literal host", () => {

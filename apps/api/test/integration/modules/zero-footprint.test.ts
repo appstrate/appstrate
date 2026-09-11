@@ -9,7 +9,7 @@
  * empty module list to prove that:
  *
  *   1. Module routes return 404 (not mounted)
- *   2. Module app-scoped prefixes don't trigger requireAppContext
+ *   2. Module space-scoped prefixes don't trigger requireSpaceContext
  *   3. OpenAPI spec has no module paths / components / tags
  *   4. The default buildAppConfig() has no module feature flags set
  *
@@ -22,7 +22,12 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { buildAppConfig } from "../../../src/lib/app-config.ts";
-import { resolvePermissions, getApiKeyAllowedScopes } from "../../../src/lib/permissions.ts";
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+import {
+  orgPermissions,
+  presetPermissions,
+  getApiKeyAllowedScopes,
+} from "../../../src/lib/permissions.ts";
 import {
   getModuleEndUserAllowedScopes,
   setModulePermissionsProvider,
@@ -58,6 +63,11 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       const res = await app.request("/api/webhooks/wh_123", { headers: authHeaders(ctx) });
       expect(res.status).toBe(404);
     });
+
+    it("GET /api/billing → 404", async () => {
+      const res = await app.request("/api/billing", { headers: authHeaders(ctx) });
+      expect(res.status).toBe(404);
+    });
   });
 
   describe("OpenAPI spec", () => {
@@ -79,6 +89,16 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       const webhookTag = spec.tags.find((t) => t.name.toLowerCase().includes("webhook"));
       expect(webhookTag).toBeUndefined();
     });
+
+    it("has no billing paths", () => {
+      const billingPaths = Object.keys(spec.paths).filter((p) => p.startsWith("/api/billing"));
+      expect(billingPaths).toEqual([]);
+    });
+
+    it("has no Ee* component schemas", () => {
+      const schemaNames = Object.keys(spec.components.schemas).filter((n) => n.startsWith("Ee"));
+      expect(schemaNames).toEqual([]);
+    });
   });
 
   describe("app config features", () => {
@@ -88,6 +108,11 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       // module-owned flag.
       const cfg = buildAppConfig();
       expect(cfg.features.webhooks).toBeUndefined();
+    });
+
+    it("base config has no billing flag — only @appstrate/module-ee contributes it", () => {
+      const cfg = buildAppConfig();
+      expect(cfg.features.billing).toBeUndefined();
     });
   });
 
@@ -109,11 +134,19 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       "oauth-clients:read",
       "oauth-clients:write",
       "oauth-clients:delete",
+      "billing:read",
+      "billing:manage",
     ];
 
-    it("role permission sets contain no module-owned scopes", () => {
-      for (const role of ["owner", "admin", "member", "viewer"] as const) {
-        const perms: ReadonlySet<string> = resolvePermissions(role);
+    it("role and preset permission sets contain no module-owned scopes", () => {
+      for (const role of ["owner", "admin", "member", "guest"] as const) {
+        const perms: ReadonlySet<string> = orgPermissions(role);
+        for (const scope of moduleOwnedScopes) {
+          expect(perms.has(scope)).toBe(false);
+        }
+      }
+      for (const preset of SPACE_ROLE_PRESETS) {
+        const perms: ReadonlySet<string> = presetPermissions(preset);
         for (const scope of moduleOwnedScopes) {
           expect(perms.has(scope)).toBe(false);
         }

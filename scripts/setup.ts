@@ -96,7 +96,6 @@ async function selectTier(): Promise<number> {
 
   process.stdout.write(`\n  Tier [0]: `);
   const input = await new Promise<string>((resolve) => {
-    const buf: number[] = [];
     process.stdin.setRawMode?.(false);
     process.stdin.resume();
     process.stdin.once("data", (data) => {

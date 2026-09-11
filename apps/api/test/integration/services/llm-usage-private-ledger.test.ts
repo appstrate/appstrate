@@ -2,9 +2,9 @@
 
 /**
  * Phase 5 (model alias) — private usage ledger. `llm_usage.real_model` / `api`
- * retain the REAL backing id for billing + audit, but they are admin/cloud-only
+ * retain the REAL backing id for billing + audit, but they are admin/billing-only
  * and must never reach a user-facing surface. `listLlmUsage` (the module-facing
- * cursor read, consumed by the cloud metering module) never projects the binding
+ * cursor read, consumed by the ee metering module) never projects the binding
  * columns — this locks that projection so a future column add can't silently
  * leak the backing of a model alias.
  */
@@ -31,7 +31,7 @@ describe("listLlmUsage — private ledger never leaks the alias backing", () => 
     const run = await seedRun({
       packageId: "@ledgerorg/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
 
     // A proxy row carrying the public alias in `model` and the hidden backing

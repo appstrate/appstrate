@@ -26,9 +26,13 @@
  *
  * `requireCallableTools` adds one more rule that is NOT a subset check — the
  * declared-but-empty gate — and is opt-in per call site (a publish/import rule,
- * not a draft rule). Turning it on also switches WHICH manifest every check
- * above judges against: the PINNED version the run will resolve, instead of the
- * integration author's live draft. See {@link resolvePinnedIntegrationManifests}.
+ * not a draft rule).
+ *
+ * WHICH manifest every check above judges against is a SEPARATE axis: the
+ * PINNED version the run will resolve whenever pins are available — the flag
+ * resolves them itself at a freeze point, and a run kickoff hands over the memo
+ * it already seeded (`manifestCache`) — else the integration author's live
+ * draft. See {@link resolvePinnedIntegrationManifests}.
  *
  * Only agent manifests go through this — other package types short-
  * circuit at the type check.
@@ -39,7 +43,6 @@ import { resolveVersionFromCatalog } from "@appstrate/core/semver";
 import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
 import { planCreateVersionOutcome } from "@appstrate/core/version-policy";
 import {
-  canonicalizeApiToolName,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
   validateAgentIntegrationScopes,
@@ -155,7 +158,7 @@ function asManifest(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-export interface ValidateAgentIntegrationSelectionsInput {
+interface ValidateAgentIntegrationSelectionsInput {
   /** Raw agent manifest (already shape-validated by `validateManifest`). */
   manifest: Record<string, unknown>;
   /** Org owning the agent — bounds the integration visibility lookup. */
@@ -194,6 +197,21 @@ export interface ValidateAgentIntegrationSelectionsInput {
    * directions. Carried and existing versions are resolved as one catalog.
    */
   extraManifests?: ReadonlyMap<string, ReadonlyArray<CarriedVersion>>;
+  /**
+   * An ALREADY-SEEDED per-call-graph manifest memo — the run kickoff's own
+   * ({@link resolveRunIntegrationVersions}). Passing it makes every check judge
+   * the PINNED versions carried in it, exactly as `requireCallableTools` does,
+   * WITHOUT that flag's freeze-point rule and without resolving the pins a
+   * second time.
+   *
+   * That decoupling is the point: the inline surface is a run, not a freeze
+   * point, so it must not apply the declared-but-empty gate — but judging its
+   * selections against the integration author's live draft while spawning the
+   * pinned version is a damaging false negative (an agent pinning `^1.0.0` and
+   * selecting a tool that version exposes was refused because the author had
+   * since dropped it from their working copy). See `inline-run-preflight.ts`.
+   */
+  manifestCache?: IntegrationManifestCache;
 }
 
 /**
@@ -230,7 +248,7 @@ function selectsNoCallableTool(
   // selection provably registers nothing.
   if (!surfaceIsKnown) return false;
   const callable = new Set(catalog.map((e) => e.name));
-  return !effective.some((t) => callable.has(canonicalizeApiToolName(integrationManifest, t)));
+  return !effective.some((t) => callable.has(t));
 }
 
 /**
@@ -254,6 +272,10 @@ function selectsNoCallableTool(
  * have registered nothing at boot; refusing it while the artifact is still
  * editable is the whole point. Draft writes keep reading the draft: nothing is
  * frozen there, and resolving pins on every autosave is not worth its cost.
+ *
+ * Only the freeze points call this. A run kickoff has resolved the very same
+ * pins already and passes its memo as `manifestCache` instead — see the note
+ * there — so no surface resolves them twice.
  */
 async function resolvePinnedIntegrationManifests(
   manifest: Record<string, unknown>,
@@ -269,6 +291,18 @@ async function resolvePinnedIntegrationManifests(
     ...(dependencyOverrides ? { dependencyOverrides } : {}),
     manifestCache: cache,
   });
+  return collectResolvedManifests(cache);
+}
+
+/**
+ * Drain a seeded {@link IntegrationManifestCache} into the id → manifest map
+ * this validator judges against. Ids whose load failed are dropped: an
+ * unhealthy or unresolvable integration is not this gate's error to raise
+ * (`agent-readiness.ts` owns it), and dropping them keeps the draft fallback.
+ */
+async function collectResolvedManifests(
+  cache: IntegrationManifestCache,
+): Promise<Map<string, IntegrationManifest>> {
   const resolved = new Map<string, IntegrationManifest>();
   for (const [id, pending] of cache) {
     const res = await pending;
@@ -297,6 +331,7 @@ export async function validateAgentIntegrationSelections(
     requireCallableTools = false,
     dependencyOverrides,
     extraManifests,
+    manifestCache,
   } = input;
   if (manifest.type !== "agent") return [];
 
@@ -322,9 +357,17 @@ export async function validateAgentIntegrationSelections(
   if (inspected.length === 0) return [];
   const configuredIds = new Set(configuredEntries.map((e) => e.id));
 
-  const pinnedManifests = requireCallableTools
-    ? await resolvePinnedIntegrationManifests(manifest, orgId, dependencyOverrides)
-    : undefined;
+  // Two ways to reach the pinned versions: a freeze point resolves them itself,
+  // and a run kickoff hands over the memo it already seeded. Either way the
+  // checks below judge the same manifests the spawn will read; absent both, the
+  // draft stands (nothing is frozen on a draft write, and resolving pins on
+  // every autosave is not worth its cost).
+  const pinnedManifests = manifestCache
+    ? await collectResolvedManifests(manifestCache)
+    : requireCallableTools
+      ? await resolvePinnedIntegrationManifests(manifest, orgId, dependencyOverrides)
+      : undefined;
+  const judgesPinnedVersions = pinnedManifests !== undefined;
 
   // Sequential DB lookups keep the implementation simple and the
   // typical agent declares ≤ 3 integrations; trade a little latency
@@ -348,10 +391,11 @@ export async function validateAgentIntegrationSelections(
       // about scopes against a non-existent catalog.
       continue;
     }
-    // THE manifest every check below judges against. At a freeze point that is
-    // the PINNED version — what the run will actually resolve and spawn (see
-    // `resolvePinnedIntegrationManifests`). The draft is the fallback, used
-    // when no pin resolves and on the ungated draft-write path.
+    // THE manifest every check below judges against. At a freeze point, and on
+    // a run kickoff, that is the PINNED version — what the run will actually
+    // resolve and spawn (see `resolvePinnedIntegrationManifests`). The draft is
+    // the fallback, used when no pin resolves and on the ungated draft-write
+    // path.
     //
     // Judging the subset checks on the draft while judging emptiness on the
     // pinned version was incoherent in both directions: an agent selecting a
@@ -392,7 +436,7 @@ export async function validateAgentIntegrationSelections(
         : null;
       const mcpServer = postImportServer
         ? (postImportServer as unknown as McpServerManifest)
-        : requireCallableTools
+        : judgesPinnedVersions
           ? await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
               r.ok ? r.manifest : null,
             )

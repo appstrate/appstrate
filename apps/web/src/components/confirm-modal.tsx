@@ -14,6 +14,8 @@ interface ConfirmModalProps {
   confirmLabel?: string;
   variant?: "default" | "destructive";
   isPending?: boolean;
+  /** The action cannot go ahead: the description says why, and only Cancel answers. */
+  confirmDisabled?: boolean;
 }
 
 export function ConfirmModal({
@@ -25,6 +27,7 @@ export function ConfirmModal({
   confirmLabel,
   variant = "destructive",
   isPending,
+  confirmDisabled,
 }: ConfirmModalProps) {
   const { t } = useTranslation("common");
 
@@ -39,7 +42,7 @@ export function ConfirmModal({
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button variant={variant} onClick={onConfirm} disabled={isPending}>
+          <Button variant={variant} onClick={onConfirm} disabled={isPending || confirmDisabled}>
             {isPending ? <Spinner label={t("loading")} /> : (confirmLabel ?? t("btn.confirm"))}
           </Button>
         </>

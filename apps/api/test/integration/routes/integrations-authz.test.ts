@@ -5,14 +5,16 @@
  * the existing `integrations.test.ts` (happy-path + CRUD) and the
  * service-level suites do NOT exercise:
  *
- *   1. block_user_connections workflow — admin PATCH /settings flips the gate;
- *      a non-admin MEMBER hitting connect/fields gets 403 with detail
- *      `connection_blocked_by_admin`; an ADMIN is exempt.
+ *   1. block_user_connections workflow — an `integrations:configure` holder
+ *      PATCHes /settings to flip the gate; a plain MEMBER hitting
+ *      connect/fields gets 403 with detail `connection_blocked_by_admin`; an
+ *      owner SESSION is exempt, an owner-minted API KEY is not.
  *   2. PATCH /:packageId/connections/:connectionId metadata authorization —
  *      owner edit (200), admin toggling sharedWithOrg on a row they don't own
- *      (403, owner-consent rule), unrelated member (403), foreign-app row (404).
- *   3. assertOrgAdmin defense-in-depth on admin writes — documents the
- *      reachable behavior of the role/scope intersection model.
+ *      (403, owner-consent rule), unrelated member (403), foreign-space row (404).
+ *   3. `integrations:configure` is session-only — the governance mutations
+ *      (settings gate, agent pins, org default) refuse every API key,
+ *      whatever its creator's role.
  *   4. connect/oauth2 reconnect scope-union (incremental consent) — the
  *      returned authorize URL never shrinks below the connection's
  *      previously-granted scopes.
@@ -31,9 +33,10 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedApiKey, seedApplication } from "../../helpers/seed.ts";
+import { seedPackage, seedApiKey, seedSpace } from "../../helpers/seed.ts";
+import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
 import { eq } from "drizzle-orm";
-import { integrationConnections, applicationPackages } from "@appstrate/db/schema";
+import { integrationConnections, spacePackages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -56,7 +59,11 @@ function gmailManifest(name = "@myorg/gmail"): IntegrationManifest {
       api: {
         type: "api_key",
         authorizedUris: ["https://gmail.googleapis.com/**"],
-        delivery: httpHeaderDelivery({ name: "Authorization", prefix: "Bearer", field: "api_key" }),
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer ",
+          field: "api_key",
+        }),
       },
       google: {
         type: "oauth2",
@@ -66,7 +73,7 @@ function gmailManifest(name = "@myorg/gmail"): IntegrationManifest {
         authorizedUris: ["https://www.googleapis.com/**"],
         delivery: httpHeaderDelivery({
           name: "Authorization",
-          prefix: "Bearer",
+          prefix: "Bearer ",
           field: "access_token",
         }),
       },
@@ -84,9 +91,9 @@ async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
   });
 }
 
-/** Activate (install) the integration in the application. */
-async function activate(applicationId: string, packageId: string): Promise<void> {
-  await db.insert(applicationPackages).values({ applicationId, packageId, config: {} });
+/** Activate (install) the integration in the space. */
+async function activate(spaceId: string, packageId: string): Promise<void> {
+  await db.insert(spacePackages).values({ spaceId, packageId });
 }
 
 function memberHeaders(
@@ -97,7 +104,7 @@ function memberHeaders(
   return {
     Cookie: cookie,
     "X-Org-Id": ctx.orgId,
-    "X-Application-Id": ctx.defaultAppId,
+    "X-Space-Id": ctx.defaultSpaceId,
     ...extra,
   };
 }
@@ -113,7 +120,7 @@ describe("block_user_connections workflow", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    await activate(ctx.defaultAppId, "@myorg/gmail");
+    await activate(ctx.defaultSpaceId, "@myorg/gmail");
   });
 
   it("admin can set blockUserConnections=true via PATCH /settings", async () => {
@@ -137,11 +144,11 @@ describe("block_user_connections workflow", () => {
     expect(body.manifest.name).toBe("@myorg/gmail");
     expect(Array.isArray(body.auths)).toBe(true);
 
-    // Persisted on the application_packages row.
+    // Persisted on the space_packages row.
     const [row] = await db
-      .select({ blocked: applicationPackages.blockUserConnections })
-      .from(applicationPackages)
-      .where(eq(applicationPackages.packageId, "@myorg/gmail"));
+      .select({ blocked: spacePackages.blockUserConnections })
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, "@myorg/gmail"));
     expect(row?.blocked).toBe(true);
   });
 
@@ -185,9 +192,10 @@ describe("block_user_connections workflow", () => {
       body: JSON.stringify({ block_user_connections: true }),
     });
 
-    // ctx.user is the org owner (admin-equivalent) — `assertConnectionCreationAllowed`
-    // returns early for owner/admin, so the connect succeeds even with the
-    // gate on (this is how the admin creates the shared connection).
+    // ctx.user is the org owner — `assertConnectionCreationAllowed` returns
+    // early for a holder of `integrations:configure`, so the connect succeeds
+    // even with the gate on (this is how the admin creates the shared
+    // connection).
     const res = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -202,6 +210,46 @@ describe("block_user_connections workflow", () => {
       .from(integrationConnections)
       .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
     expect(rows).toHaveLength(1);
+  });
+
+  it("does not exempt an owner-minted API KEY — configure is session-only", async () => {
+    // The exemption is a PERMISSION, not a role. `integrations:configure` is
+    // absent from the API-key allowlist, so no key can hold it, and the gate
+    // applies to an owner's key exactly as it does to a member's.
+    await app.request("/api/integrations/@myorg/gmail/settings", {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: true }),
+    });
+
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id, // owner
+      scopes: ["integrations:connect"],
+    });
+
+    const res = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code?: string }).code).toBe("connection_blocked_by_admin");
+
+    // Discriminating control: the same key connects fine once the gate is off,
+    // so the 403 is the gate, not the key lacking `integrations:connect`.
+    await app.request("/api/integrations/@myorg/gmail/settings", {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: false }),
+    });
+    const after = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
+    });
+    expect(after.status).toBe(200);
   });
 
   it("does NOT block a member when the gate is off (default)", async () => {
@@ -228,7 +276,7 @@ describe("block_user_connections — auto-active system integration", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    // Seed gmail but DO NOT activate it — no application_packages row exists.
+    // Seed gmail but DO NOT activate it — no space_packages row exists.
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/clickup"));
     // gmail ships a system client → auto-active. clickup does not.
@@ -264,11 +312,11 @@ describe("block_user_connections — auto-active system integration", () => {
     // Row materialized with enabled=true + block flag set.
     const [row] = await db
       .select({
-        enabled: applicationPackages.enabled,
-        blocked: applicationPackages.blockUserConnections,
+        enabled: spacePackages.enabled,
+        blocked: spacePackages.blockUserConnections,
       })
-      .from(applicationPackages)
-      .where(eq(applicationPackages.packageId, "@myorg/gmail"));
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, "@myorg/gmail"));
     expect(row?.enabled).toBe(true);
     expect(row?.blocked).toBe(true);
   });
@@ -283,8 +331,8 @@ describe("block_user_connections — auto-active system integration", () => {
     // Nothing materialized.
     const rows = await db
       .select()
-      .from(applicationPackages)
-      .where(eq(applicationPackages.packageId, "@myorg/clickup"));
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, "@myorg/clickup"));
     expect(rows).toHaveLength(0);
   });
 });
@@ -300,14 +348,14 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    await activate(ctx.defaultAppId, "@myorg/gmail");
+    await activate(ctx.defaultSpaceId, "@myorg/gmail");
   });
 
-  /** Insert a connection owned by `userId` in ctx's default app. */
+  /** Insert a connection owned by `userId` in ctx's default space. */
   async function seedConn(opts: {
     userId: string;
     shared?: boolean;
-    applicationId?: string;
+    spaceId?: string;
   }): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
@@ -315,7 +363,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
-        applicationId: opts.applicationId ?? ctx.defaultAppId,
+        spaceId: opts.spaceId ?? ctx.defaultSpaceId,
         userId: opts.userId,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
@@ -399,15 +447,17 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     });
     expect(res.status).toBe(403);
     const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/connection owner or an org admin/i);
+    expect(body.detail ?? "").toMatch(
+      /connection owner or a principal with integrations:configure/i,
+    );
   });
 
-  it("404s a connection that belongs to a different application", async () => {
-    // A second application in the SAME org; the connection lives there, so the
-    // route's `ownership.applicationId !== scope.applicationId` check 404s
-    // (scope is ctx.defaultAppId via the headers).
-    const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Other App" });
-    const connId = await seedConn({ userId: ctx.user.id, applicationId: otherApp.id });
+  it("404s a connection that belongs to a different space", async () => {
+    // A second space in the SAME org; the connection lives there, so the
+    // route's `ownership.spaceId !== scope.spaceId` check 404s
+    // (scope is ctx.defaultSpaceId via the headers).
+    const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other Space" });
+    const connId = await seedConn({ userId: ctx.user.id, spaceId: otherSpace.id });
 
     const res = await app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
       method: "PATCH",
@@ -419,17 +469,17 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// 3. assertOrgAdmin defense-in-depth on pin/default writes
+// 3. integrations:configure is session-only on the governance mutations
 // ─────────────────────────────────────────────────────────────────────────
 
-describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", () => {
+describe("integrations:configure is never grantable to an API key", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    await activate(ctx.defaultAppId, "@myorg/gmail");
+    await activate(ctx.defaultSpaceId, "@myorg/gmail");
   });
 
   async function seedSharedConn(): Promise<string> {
@@ -439,7 +489,7 @@ describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", ()
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
@@ -449,16 +499,17 @@ describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", ()
     return row!.id;
   }
 
-  it("admin-created api key WITH integrations:install passes both requirePermission and assertOrgAdmin", async () => {
-    // The only way an api key can hold `integrations:install` is to be minted
-    // by an admin/owner (resolveApiKeyPermissions intersects the requested
-    // scopes with the creator's role grants). Such a key's `orgRole` is the
-    // creator's admin role, so assertOrgAdmin lets it through. This pins the
-    // positive path the defense-in-depth guard deliberately allows.
+  it("refuses an owner-minted key holding integrations:install on PUT /default", async () => {
+    // `integrations:install` is the broadest install-tier scope a key can
+    // carry, and only an owner/admin creator can pass it through
+    // the pipeline's scopes ∩ authority intersection. The governance mutation
+    // still 403s because
+    // it now requires `integrations:configure`, which is absent from the
+    // API-key allowlist and therefore unreachable for any key.
     const connId = await seedSharedConn();
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id, // owner
       scopes: ["integrations:install"],
     });
@@ -468,24 +519,160 @@ describe("assertOrgAdmin defense-in-depth (api-key role/scope intersection)", ()
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ connection_id: connId }),
     });
+    expect(res.status).toBe(403);
+  });
+
+  it("an owner session still performs the same mutation", async () => {
+    // The discriminating half: the route is not simply closed — the same
+    // request over a cookie session, which does hold `integrations:configure`,
+    // succeeds.
+    const connId = await seedSharedConn();
+    const res = await app.request("/api/integrations/@myorg/gmail/default", {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connection_id: connId }),
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { connection_id: string };
     expect(body.connection_id).toBe(connId);
   });
 
-  it("member-created api key requesting integrations:install is stripped to 403 at requirePermission", async () => {
-    // Mint the key on a MEMBER creator while requesting `integrations:install`.
-    // resolveApiKeyPermissions intersects with member grants (which lack
-    // install), so the effective permission set never contains it — the
-    // request 403s at requirePermission, never reaching assertOrgAdmin. This
-    // is why the assertOrgAdmin guard is genuinely defense-in-depth: there is
-    // no reachable state where the install scope is held by a non-admin.
+  it("validateScopes refuses integrations:configure at mint time, for an owner", async () => {
+    // An owner's effective set in a space is everything, so the refusal cannot
+    // be the creator ceiling narrowing — it is the allowlist.
+    const ownerEverything = new Set<string>([
+      ...orgPermissions("owner"),
+      ...presetPermissions("admin"),
+    ]);
+    expect(() => validateScopes(["integrations:configure"], ownerEverything)).toThrow(
+      /non-grantable API key scope/,
+    );
+    // Same call with a grantable scope proves the throw is about the scope,
+    // not about the helper refusing everything.
+    expect(validateScopes(["integrations:install"], ownerEverything)).toEqual([
+      "integrations:install",
+    ]);
+  });
+
+  /**
+   * OAuth clients and the default among them are `integrations:configure`
+   * (spec §3.4), not `install`: registering a BYO app decides which OAuth
+   * application every connection in the space is minted against, which is
+   * governance, not installation. `install` IS API-key-grantable, so gating
+   * them on it let a key do what the vocabulary says no key may.
+   */
+  it("refuses an owner-minted install key on the OAuth client routes", async () => {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id, // owner
+      scopes: ["integrations:install"],
+    });
+    const asKey = {
+      Authorization: `Bearer ${key.rawKey}`,
+      "Content-Type": "application/json",
+    };
+
+    const created = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: asKey,
+      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+    });
+    expect(created.status).toBe(403);
+
+    const promoted = await app.request(
+      "/api/integrations/@myorg/gmail/auths/google/default-client",
+      {
+        method: "PUT",
+        headers: asKey,
+        body: JSON.stringify({ client_ref: "whatever" }),
+      },
+    );
+    expect(promoted.status).toBe(403);
+
+    // Rotate and delete are the other half of the same permission. A client
+    // the SESSION registers is the target, so the 403s are the key's own wall
+    // and not a missing row.
+    const registered = await app.request(
+      "/api/integrations/@myorg/gmail/auths/google/oauth-clients",
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+      },
+    );
+    expect(registered.status).toBe(201);
+    const clientId = ((await registered.json()) as { id: string }).id;
+
+    const rotated = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${clientId}`, {
+      method: "PUT",
+      headers: asKey,
+      body: JSON.stringify({ client_id: "abc2", client_secret: "shh2" }),
+    });
+    expect(rotated.status).toBe(403);
+
+    const deleted = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${clientId}`, {
+      method: "DELETE",
+      headers: asKey,
+    });
+    expect(deleted.status).toBe(403);
+
+    // The client survived both refusals.
+    const listed = await app.request("/api/integrations/@myorg/gmail/auths/google/clients", {
+      headers: authHeaders(ctx),
+    });
+    expect(listed.status).toBe(200);
+    const refs = ((await listed.json()) as { data: { client_ref: string }[] }).data.map(
+      (client) => client.client_ref,
+    );
+    expect(refs).toContain(clientId);
+  });
+
+  it("an owner session registers the client and promotes it", async () => {
+    // The discriminating half: the same two requests over a cookie session,
+    // which holds `integrations:configure`.
+    const created = await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+    });
+    expect(created.status).toBe(201);
+    const client = (await created.json()) as { id: string };
+
+    const rotated = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${client.id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: "abc2", client_secret: "shh2" }),
+    });
+    expect(rotated.status).toBe(200);
+
+    const promoted = await app.request(
+      "/api/integrations/@myorg/gmail/auths/google/default-client",
+      {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_ref: client.id }),
+      },
+    );
+    expect(promoted.status).toBe(200);
+
+    const deleted = await app.request(`/api/integrations/@myorg/gmail/oauth-clients/${client.id}`, {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(deleted.status).toBe(204);
+  });
+
+  it("member-created api key requesting integrations:install is stripped to 403", async () => {
+    // The pipeline intersects the key's scopes with the creator's effective
+    // set in the key's space (a member holds the `operator` preset, which
+    // lacks `install`), so the effective set never contains it.
     const connId = await seedSharedConn();
     const member = await createTestUser({ email: "member-key@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: member.id,
       scopes: ["integrations:install"],
     });
@@ -510,7 +697,7 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    await activate(ctx.defaultAppId, "@myorg/gmail");
+    await activate(ctx.defaultSpaceId, "@myorg/gmail");
     // Register the OAuth client so the kickoff can build an authorize URL.
     await app.request("/api/integrations/@myorg/gmail/auths/google/oauth-clients", {
       method: "POST",
@@ -529,7 +716,7 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"],

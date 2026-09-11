@@ -8,7 +8,7 @@
  *  - single-use consumption of the token's `jti` (atomic SET-NX on the KV cache)
  *  - the page-cookie variant (httpOnly, SameSite=Strict) that carries context
  *    across the standalone hosted form, plus its double-submit CSRF nonce
- *  - reconstruct `AppScope` / `Actor` from token claims (no request auth)
+ *  - reconstruct `SpaceScope` / `Actor` from token claims (no request auth)
  *
  * The token is the ONLY context source for the unauthenticated hosted surface;
  * the credential secret never rides the token or the query string.
@@ -24,7 +24,7 @@ import {
 import { getEnv } from "@appstrate/env";
 import { getCache } from "../../infra/index.ts";
 import type { AppEnv } from "../../types/index.ts";
-import type { AppScope } from "../../lib/scope.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
 import type { Actor } from "../../lib/actor.ts";
 
 /** Cookie carrying the page-scoped session token across the hosted form. */
@@ -54,7 +54,40 @@ function newId(): string {
 }
 
 /** Claims needed to mint a capability token — `jti`/`exp` are filled in here. */
-export type ConnectSessionInput = Omit<ConnectSessionClaims, "jti" | "exp" | "v" | "csrf">;
+type ConnectSessionInput = Omit<ConnectSessionClaims, "jti" | "exp" | "v" | "csrf">;
+
+/**
+ * Project a (scope, actor, target) triple into the capability token's claims.
+ *
+ * Every minter goes through here — the `connect/session` route and the
+ * run-kickoff offer (`preflight-connect-offer.ts`) — so the actor projection
+ * (`user_id` XOR `end_user_id`, which `actorFromClaims` reverses) and the
+ * omit-when-absent shape of the optional claims are written once. Optional
+ * fields are omitted rather than set to a falsy value: the claims are signed
+ * and replayed verbatim, so `scopes: []` and "no scopes" must not both appear.
+ */
+export function connectClaimsFor(input: {
+  scope: SpaceScope;
+  actor: Actor;
+  packageId: string;
+  authKey: string;
+  connectionId?: string;
+  scopes?: readonly string[];
+  forceAccountSelect?: boolean;
+}): ConnectSessionInput {
+  return {
+    org_id: input.scope.orgId,
+    space_id: input.scope.spaceId,
+    ...(input.actor.type === "user"
+      ? { user_id: input.actor.id }
+      : { end_user_id: input.actor.id }),
+    package_id: input.packageId,
+    auth_key: input.authKey,
+    ...(input.connectionId ? { connection_id: input.connectionId } : {}),
+    ...(input.scopes && input.scopes.length > 0 ? { scopes: [...input.scopes] } : {}),
+    ...(input.forceAccountSelect ? { force_account_select: true } : {}),
+  };
+}
 
 /**
  * Mint the initial capability token and build the agent-facing connect URL.
@@ -93,6 +126,30 @@ export async function consumeJti(jti: string, expSeconds: number): Promise<boole
   const ttlSeconds = Math.max(1, expSeconds - nowSeconds());
   const cache = await getCache();
   return cache.set(JTI_PREFIX + jti, "1", { nx: true, ttlSeconds });
+}
+
+/**
+ * Hand a consumed `jti` back so the same link can be clicked again.
+ *
+ * Only for a click that was consumed and then failed BEFORE anything was
+ * granted or minted on the strength of it — the missing-OAuth-client case of
+ * issue #1263, where the user has to wait for an admin and then retry. The
+ * failed click is then indistinguishable from no click at all, so the replay
+ * guard has nothing to protect; the token's own `exp` keeps bounding reuse.
+ * Never call this after a partial success (a state row or provider redirect
+ * issued): the burn is what stops a replay from re-entering that flow.
+ *
+ * Best-effort: a cache fault here must not mask the error being rendered, so
+ * it is swallowed — the worst case is the pre-#1263 behaviour (link burned,
+ * one re-mint).
+ */
+export async function releaseJti(jti: string): Promise<void> {
+  try {
+    const cache = await getCache();
+    await cache.del(JTI_PREFIX + jti);
+  } catch {
+    // Degrades to a burned link — the caller's error page stays actionable.
+  }
 }
 
 /**
@@ -161,9 +218,9 @@ export function csrfMatches(claims: ConnectSessionClaims, header: string | undef
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Build an `AppScope` from token claims. */
-export function scopeFromClaims(claims: ConnectSessionClaims): AppScope {
-  return { orgId: claims.org_id, applicationId: claims.application_id };
+/** Build a `SpaceScope` from token claims. */
+export function scopeFromClaims(claims: ConnectSessionClaims): SpaceScope {
+  return { orgId: claims.org_id, spaceId: claims.space_id };
 }
 
 /** Build an `Actor` from token claims (exactly one of user/end-user is set). */

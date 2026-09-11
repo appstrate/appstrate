@@ -76,11 +76,11 @@ const CALLERS = [
     ],
   },
   {
-    file: "../../hooks/use-documents.ts",
+    file: "../../hooks/use-files.ts",
     from: '"../lib/blob-download"',
     calls: ["triggerBlobDownload(data, name)"],
     /**
-     * `useDocumentImageSrc` builds ONE object URL of its own, for an
+     * `useFileImageSrc` builds ONE object URL of its own, for an
      * `<img src>` thumbnail — a preview, not a download, and no `<a download>`
      * anywhere near it. Declared here with the exact expression so it is an
      * accounted-for exception rather than a hole: a SECOND object URL in this

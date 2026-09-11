@@ -549,11 +549,11 @@ describe("RemoteFirecrackerOrchestrator misc calls", () => {
     const { fn, calls } = fetchStub(() => json({ result: "already_stopped" }));
     const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
 
-    const result = await orchestrator.stopByRunId("r-1", 5);
+    const result = await orchestrator.stopByRunId("r-1");
 
     expect(result).toBe("already_stopped");
     expect(calls[0]?.url).toBe(`${BASE_URL}${RUNNER_ROUTES.stopRun}`);
-    expect(bodyOf(calls[0] as RecordedCall)).toEqual({ runId: "r-1", timeoutSeconds: 5 });
+    expect(bodyOf(calls[0] as RecordedCall)).toEqual({ runId: "r-1" });
   });
 
   it("cleanupOrphans is a no-op that resolves to zeros WITHOUT any HTTP call", async () => {

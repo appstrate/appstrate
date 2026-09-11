@@ -24,7 +24,7 @@ import type { Bundle } from "@appstrate/afps-runtime/bundle";
 const REPORT_CTX = {
   instance: "https://app.example.com",
   bearerToken: "ask_test",
-  applicationId: "app_1",
+  spaceId: "spc_1",
   orgId: "org_1",
 };
 

@@ -18,7 +18,7 @@ import { SUBNET_NETMASK, type RunSubnet } from "./subnet.ts";
 // single definition next to the supervisor, imported type-only.
 import type { GuestConfig } from "./guest/guest-config.ts";
 
-export interface BuildGuestConfigInput {
+interface BuildGuestConfigInput {
   runId: string;
   /** Per-run random nonce authenticating the exit marker (see GuestConfig). */
   exitMarkerNonce: string;
@@ -88,7 +88,7 @@ export function buildKernelBootArgs(subnet: RunSubnet): string {
   ].join(" ");
 }
 
-export interface BuildVmConfigInput {
+interface BuildVmConfigInput {
   /**
    * Path mapping is the CALLER's contract: host-absolute paths for a
    * direct (unjailed) spawn, chroot-relative paths (`/vmlinux`, …) for a
@@ -113,7 +113,7 @@ export interface BuildVmConfigInput {
 }
 
 /** MMDS default link-local service address (Firecracker default). */
-export const MMDS_IPV4_ADDRESS = "169.254.169.254";
+const MMDS_IPV4_ADDRESS = "169.254.169.254";
 /** The guest NIC MMDS is bound to — wired into the `network-interfaces` iface_id below. */
 const MMDS_NETWORK_INTERFACE = "eth0";
 

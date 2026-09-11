@@ -30,7 +30,7 @@ const wait = (ms = 150) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function openStream(ctx: TestContext): Promise<Response> {
   const res = await app.request(
-    `/api/realtime/runs?orgId=${ctx.orgId}&applicationId=${ctx.defaultAppId}`,
+    `/api/realtime/runs?orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}`,
     { headers: { Cookie: ctx.cookie, Accept: "text/event-stream" } },
   );
   expect(res.status).toBe(200);

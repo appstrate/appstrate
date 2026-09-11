@@ -19,11 +19,19 @@
  * loop so a bucket can never silently miss the grace window or the `_system/`
  * carve-out):
  *
- *   documents        ← documents.storage_key
+ *   files            ← files.storage_key
  *   uploads          ← uploads.storage_key
  *   agent-packages   ← package_versions  (published version artifacts)
  *   library-packages ← packages          (library item artifacts, incl. _system/)
- *   run-workspace    ← runs.id           (bundle + manifest + input documents)
+ *   run-workspace    ← runs.id           (bundle + manifest + input files)
+ *
+ * The first line reconciles the `files/` object namespace against
+ * `files.storage_key` values, which all begin with `files/`; the run-workspace
+ * bucket's per-run input objects are keyed `{runId}/files/<name>`. Both were
+ * spelled `documents` until the #1177 rename was finished at the physical layer
+ * (migration `0044_finish_file_rename` moved the stored keys). A bucket literal
+ * that disagrees with the stored keys makes every object in it read as an
+ * orphan here — which is why the two only ever move together.
  *
  * SYSTEM packages (`packages.org_id IS NULL`, objects under `_system/`) are
  * part of the known-set by construction — the queries apply no org filter — so

@@ -21,7 +21,7 @@ import { DataTable, type DataColumn } from "./data-table";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { ActorLabel } from "./actor-label";
 import { EmptyState } from "./page-states";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
 export function useScheduleColumns({

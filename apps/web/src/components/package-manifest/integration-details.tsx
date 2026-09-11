@@ -8,10 +8,11 @@
  * the server-RESOLVED tool catalog with its per-auth `required_scopes` — and
  * with the tool descriptions the raw manifest `tools_policy` does not carry —
  * so re-rendering that map here would be a strictly poorer duplicate on the
- * same page. What no other surface shows a non-admin is `source` and `auths`:
- * the Configuration tab that owns them is `isAdmin`-gated. Hence these two,
- * plus the `allow_undeclared_tools` opt-in, which is a policy statement rather
- * than a tool listing.
+ * same page. What no other surface shows a caller without
+ * `integrations:configure` is `source` and `auths`: the Configuration tab that
+ * owns them needs exactly that permission. Hence these two, plus the
+ * `allow_undeclared_tools` opt-in, which is a policy statement rather than a
+ * tool listing.
  *
  * Deliberately NOT built out of `components/integration-editor/*`: those are
  * form controls, and a read view assembled from disabled inputs reads like a

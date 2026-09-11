@@ -1,10 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Test preload script — runs once before any test file.
  *
  * 1. Starts test containers (PostgreSQL + Redis + MinIO + DinD) if not already running
  * 2. Sets environment variables for the test database and Redis
- * 3. Runs Drizzle migrations against the test database (core + all modules)
- * 4. Registers module-owned tables for truncation
+ * 3. Runs the core Drizzle migrations — module tables live in the core schema. `module-ee` is
+ *    the exception: it self-migrates its `ee_*` tables from `init()`, which phase 3 below runs.
+ * 4. Registers the tables a module reads/writes for truncation
  *
  * Module discovery — two roots:
  *   - apps/api/src/modules/<name>/ (built-in modules, entry: index.ts)
@@ -12,15 +15,17 @@
  *
  * Each module directory contributes:
  *   - the entry file — default-exports an AppstrateModule (used by getTestApp)
- *   - drizzle/migrations/NNNN_name.sql — applied in file-name order (alphabetical)
  *   - test/tables.ts — default-exports a string[] of tables for truncateAll()
+ *   - test/requirements.ts — what the module needs before it can be imported
+ *     (see test/setup/modules.ts)
  *
  * All three are optional. Running core tests alone still picks up installed
  * modules because anything in either root is part of the repo — there is no
- * "module disabled" state in tests, unlike production (MODULES env var).
+ * "module disabled" state in tests, unlike production (MODULES env var). The
+ * one exception is a module whose requirements the current tier cannot meet.
  */
-import { resolve, join } from "path";
-import { readdirSync, existsSync, statSync, mkdtempSync, rmSync } from "fs";
+import { resolve, join, relative } from "path";
+import { existsSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import type { AppstrateModule } from "@appstrate/core/module";
 import {
@@ -29,6 +34,12 @@ import {
   TEST_MINIO_CONTAINER,
   TEST_POSTGRES_CONTAINER,
 } from "./constants.ts";
+import {
+  discoverModules,
+  loadModuleRequirements,
+  skipsInTier,
+  type DiscoveredModule,
+} from "./modules.ts";
 
 // ─── Tier selection ─────────────────────────────────────────
 // tier0 (TEST_TIER=0): fast in-memory dev mode — PGlite (throwaway temp dir),
@@ -92,8 +103,8 @@ process.env.RUN_WAIT_POLL_INTERVAL_MS = process.env.RUN_WAIT_POLL_INTERVAL_MS ??
 // operator internal-host allowlist to exempt exactly those fixture hosts for the
 // test run; production leaves it unset so every host stays guarded. NEVER set
 // these hosts in production.
-process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS =
-  process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS ??
+process.env.EGRESS_ALLOW_INTERNAL_HOSTS =
+  process.env.EGRESS_ALLOW_INTERNAL_HOSTS ??
   "auth.example.test,127.0.0.1,localhost,mcp.example.com,api.openai.test,api.anthropic.test,api.mistral.test,api.example.com,intranet.corp,mcp-norefresh.example,mcp-refresh.example";
 
 if (TIER0) {
@@ -273,49 +284,18 @@ if (TIER0) {
   }
 }
 
-// ─── Module migrations + truncation registration ────────────
+// ─── Module discovery + truncation registration ─────────────
 // Auto-discover every module in the repo and wire up its test infrastructure.
 // We do this from the root preload (not per-module) so that `bun test` from
 // any directory sees a consistent state.
 //
-// Two layouts are recognised:
-//   - apps/api/src/modules/<name>/index.ts (built-in modules)
-//   - packages/module-<name>/src/index.ts (workspace-package modules)
-// Both share the same `drizzle/migrations/` and `test/tables.ts` conventions
-// (relative to the module's root directory).
+// The two layouts, and the `test/tables.ts` / `test/requirements.ts`
+// conventions beside them, are described in `./modules.ts` — which the tier-0
+// runner reads too, so that a module this preload refuses to load is also a
+// module whose tests bun does not collect.
 
-interface DiscoveredModule {
-  /** Module root directory. */
-  dir: string;
-  /** Absolute path to the module's entry file. */
-  entry: string;
-}
-
-function discoverModules(
-  root: string,
-  entryRel: string,
-  dirPredicate: (name: string) => boolean = () => true,
-): DiscoveredModule[] {
-  if (!existsSync(root)) return [];
-  return readdirSync(root)
-    .filter(dirPredicate)
-    .map((name) => ({ dir: join(root, name), entry: join(root, name, entryRel) }))
-    .filter(({ dir, entry }) => statSync(dir).isDirectory() && existsSync(entry));
-}
-
-const builtinModulesRoot = resolve(import.meta.dir, "../../apps/api/src/modules");
-const workspaceModulesRoot = resolve(import.meta.dir, "../../packages");
-const moduleEntries: DiscoveredModule[] = [
-  // Built-in modules — `apps/api/src/modules/<name>/index.ts`.
-  ...discoverModules(builtinModulesRoot, "index.ts"),
-  // Workspace-package modules — `packages/module-<name>/src/index.ts`.
-  // The `module-` prefix is the convention that distinguishes module
-  // workspace packages from regular library packages (core, db, ui, …).
-  ...discoverModules(workspaceModulesRoot, "src/index.ts", (n) => n.startsWith("module-")),
-];
-
-// Modules no longer own migrations — their tables live in the core schema and
-// are created by the core migration step above. Nothing to apply per module.
+const repoRoot = resolve(import.meta.dir, "../..");
+const moduleEntries: DiscoveredModule[] = discoverModules(repoRoot);
 
 // Dynamic imports are async — bun supports top-level await in preloads.
 const { registerTruncationTables } = await import("../../apps/api/test/helpers/db.ts");
@@ -329,6 +309,26 @@ const { registerTestModule } = await import("../../apps/api/test/helpers/test-mo
 const importedModules: AppstrateModule[] = [];
 
 for (const { dir: moduleDir, entry: indexFile } of moduleEntries) {
+  // Read the module's requirements AFTER the env block above, not beside
+  // discovery: `requirements.ts` is TypeScript and may derive its values from
+  // the platform test env (DATABASE_URL and friends) at load time.
+  const requirements = await loadModuleRequirements(moduleDir);
+
+  if (skipsInTier(requirements, TIER0)) {
+    // Never silent. A module missing from the run makes a green tier-0 read as
+    // coverage it does not have, and nothing else here would say so.
+    console.warn(
+      `⚠ tier0: skipping module ${relative(repoRoot, moduleDir)} — it requires a real PostgreSQL.`,
+    );
+    continue;
+  }
+
+  // Modules cache their configuration at import/init, so this precedes the
+  // import. It overrides the ambient environment, like the platform's own
+  // DATABASE_URL above: the suite truncates and drops the tables it is pointed
+  // at, and a developer `.env` (Bun auto-loads it) may name a real one.
+  Object.assign(process.env, requirements.env ?? {});
+
   // Register the module itself so getTestApp() can mount its router
   const imported: { default?: AppstrateModule } = await import(indexFile);
   if (imported.default) {
@@ -357,11 +357,57 @@ for (const { dir: moduleDir, entry: indexFile } of moduleEntries) {
 // cast needed at this layer. Subsequent `getTestApp({ modules })` calls
 // reuse this singleton so strategy tests and E2E OAuth flow tests see a
 // coherent auth surface with no double-initialization cost.
-const { collectModuleContributions, emitEvent, loadModulesFromInstances } =
-  await import("../../apps/api/src/lib/modules/module-loader.ts");
+const {
+  collectModuleContributions,
+  collectModulePermissions,
+  emitEvent,
+  loadModulesFromInstances,
+} = await import("../../apps/api/src/lib/modules/module-loader.ts");
+const { setModulePermissionsProvider, setPermissionDenialHandler } =
+  await import("@appstrate/core/permissions");
 const { createAuth, setPostBootstrapOrgHook } = await import("../../packages/db/src/auth.ts");
-const contributions = collectModuleContributions(importedModules);
-createAuth(contributions.betterAuthPlugins as Parameters<typeof createAuth>[0]);
+const { betterAuthRateLimitStorage } =
+  await import("../../apps/api/src/infra/rate-limit/better-auth-storage.ts");
+const { resetBetterAuthRateLimitBuckets } = await import("../../apps/api/test/helpers/redis.ts");
+const { CLIENT_IP_HEADER } = await import("../../apps/api/src/lib/client-ip.ts");
+
+// Register module RBAC contributions BEFORE the plugins are built — mirrors
+// boot.ts, where `loadModules()` runs ahead of `createAuth()`. Plugin
+// factories read `getModuleEndUserAllowedScopes()` at construction; phase 3
+// re-sets an identical snapshot.
+const preloadRbacSnapshot = collectModulePermissions(importedModules);
+setModulePermissionsProvider(() => preloadRbacSnapshot);
+
+// A thunk, not a list — same contract as boot.ts. `_rebuildAuthForTesting()`
+// re-invokes it, so a test that flips an env flag mid-suite gets plugin
+// instances built against the new env, and never re-initializes the ones the
+// previous build already mutated.
+//
+// The snapshot is re-installed INSIDE the thunk because plugin construction
+// reads it (OIDC's self-service scope ceiling is
+// `OIDC_IDENTITY_SCOPES ∪ getModuleEndUserAllowedScopes()`), and the live
+// provider is volatile in tests: `getTestApp({ modules })` re-installs a
+// snapshot narrowed to that file's module list on every call. In production
+// the ceiling is always the FULL loaded module set — `createAuth()` runs
+// after `loadModules()` — so a rebuild must see the full set too, not
+// whichever subset the last-loaded test file happened to leave behind. The
+// harness restores its own view on the next `getTestApp()` call, which is
+// already how it recovers from the resets `module-loader.test.ts` does.
+//
+// `rateLimitStorage` and `clientIpHeader` are the production values, not
+// stand-ins: the storage rides the same limiter factory (real Redis in tier3,
+// in-memory in tier0) so the tests exercise Better Auth's limiter for real.
+createAuth({
+  plugins: () => {
+    setModulePermissionsProvider(() => preloadRbacSnapshot);
+    return collectModuleContributions(importedModules).betterAuthPlugins as ReturnType<
+      Parameters<typeof createAuth>[0]["plugins"]
+    >;
+  },
+  rateLimitStorage: betterAuthRateLimitStorage(),
+  rateLimitEnabled: true,
+  clientIpHeader: CLIENT_IP_HEADER,
+});
 
 // Phase 3: run each module's `init(ctx)` — the same topo-sorted pipeline
 // production uses, via the entry point that exists for exactly this
@@ -369,7 +415,7 @@ createAuth(contributions.betterAuthPlugins as Parameters<typeof createAuth>[0]);
 // call `createRouter()` straight off the discovered module (issue #989), so
 // every module served requests against whatever degraded baseline its
 // no-context fallback supplied — for chat that meant the #968/#971 admission
-// gate answering `null` (fail-open) and the #965 document teardown resolving
+// gate answering `null` (fail-open) and the #965 file teardown resolving
 // to a no-op. Tests believed they exercised two post-incident guards that
 // were not wired at all, and would have kept passing if either were deleted.
 //
@@ -384,33 +430,36 @@ await loadModulesFromInstances(importedModules, buildModuleInitContext());
 // Mirror the production post-bootstrap wiring (boot.ts) so the bootstrap
 // after-hook does the same provisioning under test as it does in prod.
 // Without this, the bootstrap test would only ever see the org row — the
-// default app + hello-world agent + onOrgCreate emit (issue #228) would
+// default space + hello-world agent + onOrgCreate emit (issue #228) would
 // never run in CI, and any regression in that wiring would slip past us.
-const { createDefaultApplication } = await import("../../apps/api/src/services/applications.ts");
+const { createDefaultSpace } = await import("../../apps/api/src/services/spaces.ts");
 const { provisionDefaultAgentForOrg } =
   await import("../../apps/api/src/services/default-agent.ts");
 setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
   await emitEvent("onOrgCreate", orgId, userEmail);
-  const defaultApp = await createDefaultApplication(orgId, userId).catch(() => null);
-  if (defaultApp) {
-    await provisionDefaultAgentForOrg(orgId, slug, userId, defaultApp.id).catch(() => {});
+  const defaultSpace = await createDefaultSpace(orgId, userId).catch(() => null);
+  if (defaultSpace) {
+    await provisionDefaultAgentForOrg(orgId, slug, userId, defaultSpace.id).catch(() => {});
   }
 });
 
-// ─── Global auto-reset for RBAC audit handler ─────────────────
-// `setPermissionDenialHandler` writes a module-level singleton inside
-// `@appstrate/core/permissions`. A test that installs a custom handler
-// and forgets to clean up would leak it into every subsequent test file
-// in the same process — `bun test` runs the full suite as a single
-// process (see the "Testing" header in CLAUDE.md). Reset after every
-// test so no test needs to remember an `afterEach` of its own.
+// ─── Global auto-reset for process-wide singletons ────────────
+// Both resets below cover state that is process-wide, and `bun test` runs the
+// whole suite as a single process (see the "Testing" header in CLAUDE.md), so
+// leaving either to individual files means every file has to remember it.
 //
-// Registering through a dynamic import avoids coupling this preload to
-// the core types at top-level, and lets us tolerate the (already
-// unlikely) case where the module fails to resolve — we log and move on
-// rather than blocking the whole suite.
+// `setPermissionDenialHandler` writes a module-level singleton inside
+// `@appstrate/core/permissions`. A test that installs a custom handler and
+// forgets to clean up would leak it into every subsequent test file. The
+// handler comes from the single dynamic `@appstrate/core/permissions` import
+// above, which keeps this preload uncoupled from the core types at top level.
+//
+// Better Auth's limiter is armed for the whole suite (`rateLimitEnabled` above)
+// and its built-in rule caps `/sign-in*` and `/sign-up*` at 3 per 10 s per
+// address — one address, shared by every test. Dropping the buckets after each
+// test is what lets a file sign a user in without budgeting for its neighbours.
 const { afterEach } = await import("bun:test");
-const { setPermissionDenialHandler } = await import("@appstrate/core/permissions");
-afterEach(() => {
+afterEach(async () => {
   setPermissionDenialHandler(null);
+  await resetBetterAuthRateLimitBuckets();
 });

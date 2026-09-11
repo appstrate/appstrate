@@ -24,7 +24,7 @@ import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmModal } from "../components/confirm-modal";
 
-export interface PairingDismissConfirm {
+interface PairingDismissConfirm {
   /** Pass to `<OAuthPairingBody onBusyChange>`. */
   onBusyChange: (busy: boolean) => void;
   /** Wire to the host `<Modal onClose>` and any explicit close button. */

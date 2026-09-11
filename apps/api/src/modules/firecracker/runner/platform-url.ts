@@ -13,7 +13,7 @@
  * never as an opaque in-guest network timeout at first run.
  */
 
-export interface ParsedPlatformApiUrl {
+interface ParsedPlatformApiUrl {
   /** Input with trailing slashes stripped — advertised to guests verbatim. */
   url: string;
   /** IPv4 literal the host firewall must let guests reach. */

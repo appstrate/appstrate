@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, timestamp, integer, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, bigint, uuid, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
-import { applications, endUsers } from "./applications.ts";
+import { spaces, endUsers } from "./spaces.ts";
 
 /**
  * Tracks direct-upload requests before the binary has been consumed by a run.
  *
  * Flow:
- *  1. Client POST /api/uploads { name, size, mime, applicationId } → creates row, returns { uploadId, url, method, headers }
+ *  1. Client POST /api/uploads { name, size, mime, spaceId } → creates row, returns { uploadId, url, method, headers }
  *  2. Client PUT url ← binary (to S3 directly, or to /api/uploads/_content for FS)
  *  3. Client POST /api/agents/:id/run { input: { file: "upload://upl_xxx" } }
  *  4. Run pipeline streams upload:// into the run workspace, marks `consumedAt`
@@ -28,9 +28,9 @@ export const uploads = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     /** Better Auth user who requested the upload (null = end-user / unattributed). */
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     /**
@@ -46,15 +46,22 @@ export const uploads = pgTable(
     name: text("name").notNull(),
     /** Declared MIME type (re-verified server-side via magic-byte sniffing). */
     mime: text("mime").notNull(),
-    /** Size in bytes (declared, then verified on consumption). */
-    size: integer("size").notNull(),
+    /**
+     * Size in bytes (declared, then verified on consumption). `bigint` to match
+     * `files.size` — an upload is consumed INTO a file, so the same quantity
+     * crossed a type boundary at the seam. Not a bug at the current 100 MiB
+     * cap; a raw `22003 integer out of range` the day that cap passes ~2 GiB.
+     * `{ mode: "number" }` keeps the TypeScript type `number`, as `files.size`
+     * already does.
+     */
+    size: bigint("size", { mode: "number" }).notNull(),
     /**
      * Optional client-declared SHA-256 of the payload (hex, lowercase). When
      * present it is enforced server-side: the S3 presign binds an
      * `x-amz-checksum-sha256` header (S3/MinIO verify on PUT), the proxy sink
      * re-hashes the streamed bytes, and consume/materialization compares the
      * hashed stream against it — a mismatch is rejected (400 `checksum_mismatch`)
-     * before the object becomes visible or a document is committed. NULL = no
+     * before the object becomes visible or a file is committed. NULL = no
      * client integrity claim (behaviour identical to before this column existed).
      */
     sha256: text("sha256"),
@@ -69,7 +76,7 @@ export const uploads = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("idx_uploads_app").on(table.applicationId),
+    index("idx_uploads_space").on(table.spaceId),
     // Partial index matching the GC sweep predicate so consumed rows never
     // hit the index and the hot set stays tiny as uploads accumulate.
     index("idx_uploads_expires_unconsumed")

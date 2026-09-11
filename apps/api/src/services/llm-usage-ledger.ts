@@ -5,7 +5,7 @@
  *
  * Every producer — the inference proxy (`llm-proxy/metering.ts`), the agent
  * runner sink (`run-launcher/appstrate-event-sink.ts`) and the subscription
- * chat engine seam (`chat-subscription.ts`) — inserts through {@link
+ * chat engine seam (`chat-platform-services.ts`) — inserts through {@link
  * recordLlmUsage} instead of building its own `db.insert(llmUsage)`. What is
  * unified here so it can't drift:
  *

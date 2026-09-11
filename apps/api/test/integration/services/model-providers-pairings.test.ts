@@ -27,13 +27,13 @@ import { ApiError } from "../../../src/lib/errors.ts";
 interface Fixture {
   userId: string;
   org: TestOrg;
-  defaultAppId: string;
+  defaultSpaceId: string;
 }
 
 async function setup(): Promise<Fixture> {
   const user = await createTestUser();
-  const { org, defaultAppId } = await createTestOrg(user.id);
-  return { userId: user.id, org, defaultAppId };
+  const { org, defaultSpaceId } = await createTestOrg(user.id);
+  return { userId: user.id, org, defaultSpaceId };
 }
 
 const PLATFORM_URL = "http://localhost:3000";
@@ -93,7 +93,7 @@ describe("consumePairing", () => {
 
   it("happy path — flips consumed_at and returns the row", async () => {
     const token = await mint();
-    const consumed = await consumePairing(token, "127.0.0.1");
+    const consumed = await consumePairing(token);
     expect(consumed.providerId).toBe("test-oauth");
     expect(consumed.orgId).toBe(fix.org.id);
     expect(consumed.consumedAt).toBeInstanceOf(Date);

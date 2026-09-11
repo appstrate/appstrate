@@ -75,10 +75,10 @@ export interface TelemetryProvider {
   recordProcessAnomaly(attrs: { kind: string }): void;
   recordStorageDeletionSweep(stats: StorageDeletionStats): void;
   recordStorageDeletionResult(attrs: { result: string }): void;
-  recordDocumentCreated(attrs: { purpose: string }): void;
-  recordDocumentDeleted(count: number): void;
-  recordDocumentStorageLimitRejection(): void;
-  recordDocumentPartialPublication(): void;
+  recordFileCreated(attrs: { purpose: string }): void;
+  recordFileDeleted(count: number): void;
+  recordFileStorageLimitRejection(): void;
+  recordFilePartialPublication(): void;
   setQueueDepthSource(source: QueueDepthSource): void;
   /**
    * Optional HTTP server-span middleware, mounted by the platform's global
@@ -214,24 +214,24 @@ export function recordStorageDeletionResult(attrs: { result: "completed" | "fail
 }
 
 /**
- * One durable document committed into the `documents` table, tagged by
+ * One durable file committed into the `files` table, tagged by
  * `purpose` (`agent_output` | `user_upload`). Emitted from the single commit
- * seam (`commitDocumentRow`) so a deduped agent-output republish — which never
- * commits — is correctly NOT counted. Feeds `appstrate.documents.created`.
+ * seam (`commitFileRow`) so a deduped agent-output republish — which never
+ * commits — is correctly NOT counted. Feeds `appstrate.files.created`.
  */
-export function recordDocumentCreated(attrs: { purpose: string }): void {
-  provider?.recordDocumentCreated(attrs);
+export function recordFileCreated(attrs: { purpose: string }): void {
+  provider?.recordFileCreated(attrs);
 }
 
 /**
- * `count` document rows physically removed from the `documents` table (explicit
+ * `count` file rows physically removed from the `files` table (explicit
  * delete, container-teardown detach-or-delete, or the retention GC sweep).
  * Counts ROWS, not storage objects — the object purge is the outbox's concern
  * (`appstrate.storage_deletion.result`). A non-positive count is a no-op. Feeds
- * `appstrate.documents.deleted`.
+ * `appstrate.files.deleted`.
  */
-export function recordDocumentDeleted(count = 1): void {
-  if (count > 0) provider?.recordDocumentDeleted(count);
+export function recordFileDeleted(count = 1): void {
+  if (count > 0) provider?.recordFileDeleted(count);
 }
 
 /**
@@ -239,20 +239,20 @@ export function recordDocumentDeleted(count = 1): void {
  * (403 `storage_limit_exceeded`). Emitted from the single quota-assert seam
  * (`assertWithinOrgQuota`), which fires exactly once per logical rejection (the
  * pre-flight fast reject OR the `FOR UPDATE` re-check, never both). Feeds
- * `appstrate.documents.storage_limit_rejections`.
+ * `appstrate.files.storage_limit_rejections`.
  */
-export function recordDocumentStorageLimitRejection(): void {
-  provider?.recordDocumentStorageLimitRejection();
+export function recordFileStorageLimitRejection(): void {
+  provider?.recordFileStorageLimitRejection();
 }
 
 /**
  * One run finalized with a `partial` artifacts summary — at least one
  * end-of-run deliverable was LOST (over-cap, over-quota, conflict, or abandoned
  * after upload retries). Emitted once on the finalize CAS winner, independent of
- * the run's own terminal status. Feeds `appstrate.documents.partial_publications`.
+ * the run's own terminal status. Feeds `appstrate.files.partial_publications`.
  */
-export function recordDocumentPartialPublication(): void {
-  provider?.recordDocumentPartialPublication();
+export function recordFilePartialPublication(): void {
+  provider?.recordFilePartialPublication();
 }
 
 /**

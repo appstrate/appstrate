@@ -89,7 +89,7 @@ export async function startTestServer(
             } else {
               const buf = new Uint8Array(await v.arrayBuffer());
               fields[k] = {
-                name: "name" in v ? (v as File).name : undefined,
+                name: "name" in v ? (v as { name: string }).name : undefined,
                 size: v.size,
                 type: v.type,
                 sha256: createHash("sha256").update(buf).digest("hex"),
@@ -107,7 +107,7 @@ export async function startTestServer(
         }
         case "/redirect/307": {
           // 307 with a ZERO-byte body — the exact shape of
-          // `GET /api/documents/{id}/content` when S3 has a public
+          // `GET /api/files/{id}/content` when S3 has a public
           // endpoint (Hono's `c.redirect()` sends no body). Reproduces
           // the "0 bytes, exit 0, no warning" papercut (#1021).
           calls.push(log);

@@ -21,19 +21,26 @@ import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "@/components/spinner";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { useAppForm } from "@/hooks/use-app-form";
+import { SpaceAssignmentsField } from "@/components/space-assignments-field";
+import { useSpaces } from "@/hooks/use-spaces";
+import { spaceRoleValue, useSpaceRoleOptions, type SpaceRoleOption } from "@/hooks/use-roles";
+import {
+  hasUnavailableAssignments,
+  assignmentsFor,
+  toSpaceAssignments,
+  validateSpaceAssignments,
+  type AssignmentDraft,
+} from "@/lib/space-assignments";
 import { usePermissions } from "@/hooks/use-permissions";
 import {
   useCreateOAuthClient,
   useUpdateOAuthClient,
   useOAuthScopes,
   type OAuthClient,
-  type SignupRole,
 } from "../hooks/use-oauth-clients";
+import { ASSIGNABLE_ORG_ROLES, type AssignableOrgRole } from "@appstrate/shared-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { looksLoopback } from "../lib/redirect-uri";
-
-/** Role allowlist for org-level auto-provisioning. `owner` deliberately excluded. */
-const SIGNUP_ROLE_OPTIONS: SignupRole[] = ["member", "admin", "viewer"];
 
 /** Scopes that are always granted — cannot be unchecked in the UI. */
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
@@ -42,7 +49,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   client: OAuthClient | null;
-  level?: "org" | "application";
+  level?: "org" | "space";
 }
 
 interface FormData {
@@ -61,17 +68,23 @@ function OAuthClientFormBody({
   onClose,
 }: {
   client: OAuthClient | null;
-  level?: "org" | "application";
+  level?: "org" | "space";
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { isAdmin } = usePermissions();
+  const { can } = usePermissions();
   const isEditing = !!client;
 
   const effectiveLevel = client?.level === "instance" ? undefined : client?.level;
   const formLevel = effectiveLevel ?? level;
   const isOrgLevel = formLevel === "org";
-  const isAppLevel = formLevel === "application";
+  // Either catalog feeds the org signup policy only.
+  const spacesQuery = useSpaces(isOrgLevel);
+  const rolesQuery = useSpaceRoleOptions(undefined, isOrgLevel);
+  const spaces = spacesQuery.data ?? [];
+  const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
+  const catalogError = spacesQuery.error || rolesQuery.error;
+  const isSpaceLevel = formLevel === "space";
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient();
   const { data: availableScopes } = useOAuthScopes();
@@ -87,11 +100,17 @@ function OAuthClientFormBody({
     () => new Set(client?.scopes?.length ? client.scopes : REQUIRED_SCOPES),
   );
   const [isFirstParty, setIsFirstParty] = useState(client?.isFirstParty ?? false);
-  // Unified signup opt-in (instance/org/application). Secure-by-default:
+  // Unified signup opt-in (instance/org/space). Secure-by-default:
   // brand-new clients start with the flag off. On org-level clients the
   // `signupRole` controls the role assigned to the auto-joined user.
   const [allowSignup, setAllowSignup] = useState(client?.allowSignup ?? false);
-  const [signupRole, setSignupRole] = useState<SignupRole>(client?.signupRole ?? "member");
+  const [signupRole, setSignupRole] = useState<AssignableOrgRole>(client?.signupRole ?? "member");
+  const [assignments, setAssignments] = useState<AssignmentDraft[]>(() =>
+    (client?.signupSpaceAssignments ?? []).map((assignment) => ({
+      space_id: assignment.space_id,
+      role: spaceRoleValue(assignment),
+    })),
+  );
   const [createdSecret, setCreatedSecret] = useState<{
     clientId: string;
     clientSecret: string;
@@ -101,6 +120,7 @@ function OAuthClientFormBody({
     register,
     handleSubmit,
     setError,
+    clearErrors,
     formState: { errors },
   } = useAppForm<FormData>({
     defaultValues: { name: client?.name ?? "" },
@@ -167,6 +187,34 @@ function OAuthClientFormBody({
   }
 
   function onSubmit(data: FormData) {
+    const signupSpaceAssignments = assignmentsFor(signupRole, toSpaceAssignments(assignments));
+    if (isOrgLevel && signupRole !== "admin" && assignments.length) {
+      if (
+        catalogLoading ||
+        catalogError ||
+        hasUnavailableAssignments(assignments, spaces, rolesQuery.options)
+      ) {
+        setError("root", {
+          message: t(
+            catalogLoading || catalogError
+              ? "settings:orgSettings.assignmentsNotReady"
+              : "settings:orgSettings.assignmentsUnavailable",
+          ),
+        });
+        return;
+      }
+    }
+    if (isOrgLevel) {
+      const validation = validateSpaceAssignments(
+        signupRole,
+        signupSpaceAssignments,
+        t("settings:orgSettings.inviteSpacesRequired"),
+      );
+      if (validation !== true) {
+        setError("root", { message: validation });
+        return;
+      }
+    }
     const cleaned = redirectUris.map((u) => u.trim()).filter((u) => u.length > 0);
     if (cleaned.length === 0) {
       setError("root", { message: t("settings:oauthClients.redirectUrisRequired") });
@@ -187,10 +235,10 @@ function OAuthClientFormBody({
             redirectUris: cleaned,
             postLogoutRedirectUris: cleanedPostLogout,
             scopes: Array.from(selectedScopes),
-            ...(isAdmin ? { isFirstParty } : {}),
+            ...(can("oauth-clients:write") ? { isFirstParty } : {}),
             // Unified `allowSignup` (all levels). `signupRole` is org-only.
             allowSignup,
-            ...(isOrgLevel ? { signupRole } : {}),
+            ...(isOrgLevel ? { signupRole, signupSpaceAssignments } : {}),
           },
         },
         {
@@ -212,7 +260,7 @@ function OAuthClientFormBody({
           scopes: Array.from(selectedScopes),
           ...(isFirstParty && { isFirstParty: true }),
           allowSignup,
-          ...(isOrgLevel ? { signupRole } : {}),
+          ...(isOrgLevel ? { signupRole, signupSpaceAssignments } : {}),
         },
         {
           onSuccess: (result) => {
@@ -249,6 +297,7 @@ function OAuthClientFormBody({
       open
       onClose={handleClose}
       title={title}
+      className="flex max-h-[85dvh] flex-col overflow-hidden"
       actions={
         <>
           <Button variant="outline" type="button" onClick={handleClose}>
@@ -260,7 +309,11 @@ function OAuthClientFormBody({
         </>
       }
     >
-      <form id="oauth-client-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form
+        id="oauth-client-form"
+        onSubmit={handleSubmit(onSubmit)}
+        className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1"
+      >
         <div className="space-y-2">
           <Label htmlFor="oauth-client-name">{t("settings:oauthClients.nameLabel")}</Label>
           <Input
@@ -340,7 +393,7 @@ function OAuthClientFormBody({
           </div>
         </div>
 
-        {isAdmin && (
+        {can("oauth-clients:write") && (
           <div className="space-y-2">
             <label className="flex items-start gap-2 text-sm">
               <input
@@ -359,51 +412,136 @@ function OAuthClientFormBody({
           </div>
         )}
 
-        {(isOrgLevel || isAppLevel) && (
-          <div className="space-y-3 rounded-md border p-3">
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={allowSignup}
-                onChange={() => setAllowSignup((v) => !v)}
-                className="accent-primary mt-0.5 h-4 w-4"
-              />
-              <span className="flex flex-col">
-                <span>{t("settings:oauthClients.allowSignupLabel")}</span>
-                <span className="text-muted-foreground text-xs">
-                  {t("settings:oauthClients.allowSignupHint")}
-                </span>
-              </span>
-            </label>
-            {isOrgLevel && (
-              <div className="space-y-1">
-                <Label htmlFor="oauth-client-signup-role">
-                  {t("settings:oauthClients.signupRoleLabel")}
-                </Label>
-                <select
-                  id="oauth-client-signup-role"
-                  value={signupRole}
-                  onChange={(e) => setSignupRole(e.target.value as SignupRole)}
-                  disabled={!allowSignup}
-                  className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {SIGNUP_ROLE_OPTIONS.map((role) => (
-                    <option key={role} value={role}>
-                      {t(`settings:oauthClients.signupRoleOption.${role}`)}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-muted-foreground text-xs">
-                  {t("settings:oauthClients.signupRoleHint")}
-                </p>
-              </div>
-            )}
-          </div>
+        {(isOrgLevel || isSpaceLevel) && (
+          <SignupPolicyFields
+            isOrgLevel={isOrgLevel}
+            allowSignup={allowSignup}
+            onAllowSignupChange={() => setAllowSignup((v) => !v)}
+            signupRole={signupRole}
+            onSignupRoleChange={(role) => {
+              setSignupRole(role);
+              clearErrors("root");
+            }}
+            assignments={assignments}
+            onAssignmentsChange={(value) => {
+              setAssignments(value);
+              clearErrors("root");
+            }}
+            isPending={isPending}
+            spaces={spaces}
+            roleOptions={rolesQuery.options}
+            catalogLoading={catalogLoading}
+            catalogError={catalogError}
+            onRetryCatalog={() => {
+              void spacesQuery.refetch();
+              void rolesQuery.refetch();
+            }}
+          />
         )}
 
         {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
       </form>
     </Modal>
+  );
+}
+
+/**
+ * The signup half of the client policy: the opt-in, and — on an org-level
+ * client — the role and space grants a self-registered user lands with. The
+ * policy is what a signup WOULD receive, so it is edited and validated whether
+ * or not the opt-in is on. Split out of the modal body so it can be rendered
+ * without the Radix dialog, which needs a DOM.
+ */
+export function SignupPolicyFields({
+  isOrgLevel,
+  allowSignup,
+  onAllowSignupChange,
+  signupRole,
+  onSignupRoleChange,
+  assignments,
+  onAssignmentsChange,
+  isPending,
+  spaces,
+  roleOptions,
+  catalogLoading,
+  catalogError,
+  onRetryCatalog,
+}: {
+  isOrgLevel: boolean;
+  allowSignup: boolean;
+  onAllowSignupChange: () => void;
+  signupRole: AssignableOrgRole;
+  onSignupRoleChange: (role: AssignableOrgRole) => void;
+  assignments: AssignmentDraft[];
+  onAssignmentsChange: (next: AssignmentDraft[]) => void;
+  isPending: boolean;
+  spaces: { id: string; name: string }[];
+  roleOptions: SpaceRoleOption[];
+  catalogLoading: boolean;
+  catalogError: unknown;
+  onRetryCatalog: () => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  return (
+    <div className="space-y-3 rounded-md border p-3">
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={allowSignup}
+          onChange={onAllowSignupChange}
+          className="accent-primary mt-0.5 h-4 w-4"
+        />
+        <span className="flex flex-col">
+          <span>{t("settings:oauthClients.allowSignupLabel")}</span>
+          <span className="text-muted-foreground text-xs">
+            {t("settings:oauthClients.allowSignupHint")}
+          </span>
+        </span>
+      </label>
+      {isOrgLevel && (
+        <div className="space-y-1">
+          <Label htmlFor="oauth-client-signup-role">
+            {t("settings:oauthClients.signupRoleLabel")}
+          </Label>
+          <select
+            id="oauth-client-signup-role"
+            value={signupRole}
+            onChange={(e) => onSignupRoleChange(e.target.value as AssignableOrgRole)}
+            disabled={isPending}
+            className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {ASSIGNABLE_ORG_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {t(`settings:oauthClients.signupRoleOption.${role}`)}
+              </option>
+            ))}
+          </select>
+          <p className="text-muted-foreground text-xs">
+            {t(`settings:orgSettings.roleHint.${signupRole}`)}
+            <br />
+            {t("settings:oauthClients.signupRoleHint")}
+          </p>
+        </div>
+      )}
+      {isOrgLevel && (
+        <SpaceAssignmentsField
+          spaces={spaces}
+          roleOptions={roleOptions}
+          loading={catalogLoading}
+          error={catalogError}
+          onRetry={onRetryCatalog}
+          hint={t(
+            signupRole === "admin"
+              ? "settings:orgSettings.roleHint.admin"
+              : "settings:oauthClients.signupSpacesHint",
+          )}
+          allSpacesAccess={signupRole === "admin"}
+          value={assignments}
+          onChange={onAssignmentsChange}
+          disabled={isPending || signupRole === "admin"}
+        />
+      )}
+    </div>
   );
 }
 

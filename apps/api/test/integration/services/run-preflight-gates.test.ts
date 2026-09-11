@@ -14,6 +14,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
 import { runPreflightGates } from "../../../src/services/run-preflight-gates.ts";
 import { getPlatformRunLimits } from "../../../src/services/run-limits.ts";
+import { initRunLimits } from "../../../src/services/run-limits.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import type { LoadedPackage } from "../../../src/types/index.ts";
 import type {
@@ -22,6 +23,9 @@ import type {
   BeforeUsageParams,
   UsageRejection,
 } from "@appstrate/core/module";
+
+// `runPreflightGates` reads the platform run limits; the HTTP harness initializes them at boot.
+initRunLimits();
 
 function loadedPackage(id: string, timeoutOverride?: number): LoadedPackage {
   return {
@@ -112,7 +116,7 @@ describe("runPreflightGates", () => {
  * (that hard-coded "BYOK ⇒ free", which stops being true the moment platform
  * compute is billed). It now reports neutral facts — `credentialSource`,
  * `executionPlane`, and the EFFECTIVE post-ceiling `timeoutSeconds` — and a
- * metering module (cloud) quotes them.
+ * metering module (the ee module) quotes them.
  *
  * These assertions pin the facts a module quotes against: dropping one, or
  * reporting a pre-ceiling timeout, would silently over- or under-charge rather
@@ -122,8 +126,9 @@ function fakeInitCtx(): ModuleInitContext {
   return {
     redisUrl: null,
     appUrl: "http://localhost:3000",
-    getSendMail: async () => () => {},
-    getOrgAdminEmails: async () => [],
+    getSendMail: async () => async () => {},
+    getOrgOwnerEmails: async () => [],
+    getOrgMembers: async () => [],
     getOrgName: async () => null,
     services: {} as ModuleInitContext["services"],
   };
@@ -286,13 +291,13 @@ describe("runPreflightGates — beforeUsage execution facts", () => {
     await seedRun({
       packageId: "@gates/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
     await seedRun({
       packageId: "@gates/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
 

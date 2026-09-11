@@ -4,18 +4,19 @@
  * In-process identity forwarding.
  *
  * The chat module consumes the platform through its own public surfaces
- * (`/api/models`, `/api/applications`, `/api/llm-proxy`, `/api/mcp`) instead
+ * (`/api/models`, `/api/spaces`, `/api/llm-proxy`, `/api/mcp`) instead
  * of importing apps/api internals — the same defence-in-depth the `mcp`
  * module applies: the chat can never do more than the caller's credential
  * could over REST.
  *
  * Where the satellite chat carried two audience-bound OAuth tokens, the
  * module simply forwards the caller's own credentials (session cookie or
- * Authorization header + org/app scoping headers) on a loopback request.
+ * Authorization header + org/space scoping headers) on a loopback request.
  * The platform auth pipeline re-authenticates each hop.
  */
 
 import type { Context } from "hono";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
@@ -48,7 +49,18 @@ export function selfOrigin(): string {
   return `http://127.0.0.1:${port}`;
 }
 
-const FORWARDED = ["cookie", "authorization", "x-org-id", "x-application-id"] as const;
+/**
+ * `x-view-as` rides with the scoping headers: a loopback read made under a role
+ * preview must answer as that role, or the prompt describes an org the previewed
+ * role cannot reach. The platform re-validates it on the hop.
+ */
+const FORWARDED = [
+  "cookie",
+  "authorization",
+  "x-org-id",
+  "x-space-id",
+  VIEW_AS_HEADER.toLowerCase(),
+] as const;
 
 /** Copy the caller's auth + scoping headers onto an outgoing loopback call. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

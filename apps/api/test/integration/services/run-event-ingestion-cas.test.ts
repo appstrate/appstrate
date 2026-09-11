@@ -66,7 +66,7 @@ async function seedSinkRun(
     id: runId,
     packageId: AGENT,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: overrides.status ?? "running",
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(RUN_SECRET),
@@ -142,7 +142,7 @@ describe("run event ingestion — CAS closed against finalize (CRIT-12)", () => 
 
   it("updateRun refuses to set an ACTIVE status on a terminal run (monotone status)", async () => {
     const runId = await seedSinkRun(ctx, { status: "success" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
 
     // A late "flip to running" (event ingestion racing finalize) must be a
     // no-op — the WHERE constrains active-status writes to still-active rows.
@@ -155,7 +155,7 @@ describe("run event ingestion — CAS closed against finalize (CRIT-12)", () => 
 
   it("updateRun still allows the normal pending → running transition", async () => {
     const runId = await seedSinkRun(ctx, { status: "pending" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
 
     await updateRun(scope, runId, { status: "running" });
     expect((await readRun(runId)).status).toBe("running");

@@ -13,8 +13,8 @@ it; start here when you need the detail behind a subsystem.
 
 Design notes for the internal subsystems — see [`architecture/`](./architecture/README.md)
 for the full index: run execution (Firecracker, sidecar, integrations runtime,
-run cost), documents, model providers, and platform posture (observability,
-supply chain).
+run cost), tenancy and data (spaces, files), model providers, and platform
+posture (observability, supply chain).
 
 ## Guides
 
@@ -36,6 +36,13 @@ See [`../apps/cli/README.md`](../apps/cli/README.md) for the command reference a
 
 For production self-hosting, see [`../examples/self-hosting/README.md`](../examples/self-hosting/README.md)
 and [`../examples/self-hosting/AUTH_MODES.md`](../examples/self-hosting/AUTH_MODES.md).
+
+## Plans
+
+Open follow-ups kept only while they still carry knowledge nothing else does. A
+plan whose every item has landed is deleted, not archived.
+
+- [**plans/post-pi-unification-cleanup.md**](./plans/post-pi-unification-cleanup.md) — follow-ups to #1173. Four of five landed; kept for item 3, which holds the measurements behind the `public-origin` coverage flag's phantom misses and the refutation of the obvious remedy.
 
 ## Elsewhere in the repo
 

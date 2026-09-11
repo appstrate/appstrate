@@ -13,7 +13,7 @@ import { describe, it, expect } from "bun:test";
 import agentsFr from "../../locales/fr/agents.json";
 import { RunDetailRow, RunDetailPanel } from "../run-detail-row.tsx";
 import { makeRun, render, STARTED_AT } from "./run-fixture.tsx";
-import { formatDateField } from "../../lib/markdown.ts";
+import { formatDateField } from "../../lib/format-date.ts";
 
 /** Derived, never hardcoded — `Intl` output is locale- and TZ-dependent. */
 const STARTED_AT_LABEL = formatDateField(STARTED_AT);
@@ -129,7 +129,7 @@ describe("RunDetailPanel (the panel body)", () => {
       <RunDetailPanel
         run={makeRun({
           package_ephemeral: false,
-          document_counts: { input: 0, output: 0 },
+          file_counts: { input: 0, output: 0 },
         })}
       />,
     );

@@ -4,10 +4,10 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { deriveLabel, displayIp, type CliSessionDisplay } from "../lib/cli-sessions";
-import { formatDateField } from "../lib/markdown";
+import { formatDateField } from "../lib/format-date";
 import { CliSessionIcon } from "./cli-session-icon";
 
-export interface CliSessionCardProps {
+interface CliSessionCardProps {
   session: CliSessionDisplay;
   /** Optional inline meta (e.g. "· user@example.com" on the admin variant). */
   meta?: ReactNode;

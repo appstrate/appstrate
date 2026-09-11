@@ -92,7 +92,7 @@ export type { IntegrationCredentialsWire };
  *   header_prefix         → headerPrefix         (per delivery plan)
  *   allow_server_override → allowServerOverride  (per delivery plan)
  */
-export function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentialsWire {
+function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentialsWire {
   const r = (raw ?? {}) as Record<string, unknown>;
   const rawAuths = Array.isArray(r.auths) ? (r.auths as Record<string, unknown>[]) : [];
   const auths: ResolvedAuthCredentials[] = rawAuths.map((a) => {
@@ -129,7 +129,7 @@ export function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCr
   return { auths, deliveryPlans, expiresAtEpochMs };
 }
 
-export interface CreateIntegrationCredentialsSourceOptions {
+interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
   integrationId: string;
   /** Platform base URL (e.g. `http://appstrate-api:3000`). */
@@ -373,7 +373,7 @@ export function createIntegrationCredentialsSource(
   };
 
   async function runRelogin(authKey: string, handler: () => Promise<boolean>): Promise<boolean> {
-    let ok = false;
+    let ok: boolean;
     try {
       ok = await handler();
     } catch (err) {
@@ -537,10 +537,20 @@ export function createIntegrationCredentialsSource(
 }
 
 /**
- * Fetch the initial credentials payload at sidecar boot. Returns null
- * when the integration has no `delivery.http` auths (the GET still
- * succeeds but `deliveryPlans` is empty — caller decides to skip the
- * MITM listener entirely).
+ * Fetch the initial credentials payload at sidecar boot.
+ *
+ * It NEVER returns null — the docstring that said so predated the non-nullable
+ * return type and misstated the contract callers depend on. Two outcomes only:
+ *
+ *   - any non-2xx THROWS (aborting boot), and
+ *   - a 2xx is parsed as JSON UNCONDITIONALLY, so a bodyless 2xx (`204`)
+ *     throws as well.
+ *
+ * A 2xx with an EMPTY payload is a legitimate, meaningful answer: the
+ * integration declares no `delivery.http` auth, or — on the connect-run path —
+ * the credential does not exist yet because minting it is the point of the run.
+ * `bootIntegrations` reads emptiness as "skip the MITM listener";
+ * `runConnectOnce` deliberately does not, and forces the listener on.
  */
 export async function fetchInitialIntegrationCredentials(
   integrationId: string,

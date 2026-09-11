@@ -22,7 +22,6 @@ import {
   validateAgentIntegrationScopes,
   apiUploadToolNameFor,
   isApiCallToolName,
-  isApiUploadToolName,
   API_CALL_TOOL_NAME,
   API_UPLOAD_TOOL_NAME,
   type IntegrationManifest,
@@ -286,7 +285,7 @@ describe("resolveIntegrationToolCatalog", () => {
     expect(out.map((entry) => entry.name)).toEqual(["api_call", "api_upload"]);
   });
 
-  it("reserves persisted long-key aliases against native MCP collisions", () => {
+  it("no longer reserves the raw long-key spelling against native MCP tools", () => {
     const longAuthKey = "authentication_key_that_is_valid_but_long";
     const integration = localSourceManifest({});
     (integration as unknown as { auths: Record<string, unknown> }).auths = {
@@ -304,12 +303,18 @@ describe("resolveIntegrationToolCatalog", () => {
     const out = resolveIntegrationToolCatalog({
       integration,
       mcpServerTools: [
-        { name: `api_call__${longAuthKey}`, description: "legacy native collision" },
-        { name: `api_upload__${longAuthKey}`, description: "legacy native collision" },
+        // These used to be swallowed: the synthetic surface reserved the raw
+        // `api_call__{authKey}` spelling as well as its bounded canonical
+        // form. That alias is gone, so a native tool that happens to carry the
+        // raw name is just a native tool — it collides with nothing.
+        { name: `api_call__${longAuthKey}`, description: "native, not an alias" },
+        { name: `api_upload__${longAuthKey}`, description: "native, not an alias" },
         { name: "native_keep" },
       ],
     });
     expect(out.map((entry) => entry.name)).toEqual([
+      `api_call__${longAuthKey}`,
+      `api_upload__${longAuthKey}`,
       "native_keep",
       "api_call__short",
       "api_call__h0a0593260c3968fd8",
@@ -511,13 +516,11 @@ describe("api_call / api_upload tool-name helpers", () => {
     }
   });
 
-  it("classifies both families without overlap", () => {
+  it("classifies the api_call family and excludes the api_upload one", () => {
     for (const name of [API_CALL_TOOL_NAME, "api_call__k"]) {
       expect(isApiCallToolName(name)).toBe(true);
-      expect(isApiUploadToolName(name)).toBe(false);
     }
     for (const name of [API_UPLOAD_TOOL_NAME, "api_upload__k"]) {
-      expect(isApiUploadToolName(name)).toBe(true);
       expect(isApiCallToolName(name)).toBe(false);
     }
   });
@@ -525,7 +528,6 @@ describe("api_call / api_upload tool-name helpers", () => {
   it("does not classify unrelated tools that merely share a prefix", () => {
     for (const name of ["api_calls", "api_call_extra", "api_uploader", "kv_set"]) {
       expect(isApiCallToolName(name)).toBe(false);
-      expect(isApiUploadToolName(name)).toBe(false);
     }
   });
 });

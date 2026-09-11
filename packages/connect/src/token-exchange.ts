@@ -26,7 +26,7 @@ import {
 import type { OAuthStateStore, TokenEndpointAuthMethod } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export interface ExchangeAuthorizationCodeInput {
+interface ExchangeAuthorizationCodeInput {
   /** Token endpoint URL (`auths.{key}.token_endpoint`). */
   tokenEndpoint: string;
   /** OAuth client id. Required (even for `none` — sent in the body). */
@@ -71,7 +71,7 @@ export interface ExchangeAuthorizationCodeInput {
   fetchImpl?: typeof fetch;
 }
 
-export interface ExchangeAuthorizationCodeResult {
+interface ExchangeAuthorizationCodeResult {
   parsed: ParsedTokenResponse;
   /** Raw JSON body of the token response — integration callers persist it for identity extraction. */
   raw: Record<string, unknown>;
@@ -174,11 +174,22 @@ export async function exchangeAuthorizationCode(
   let raw: Record<string, unknown>;
   try {
     raw = (await response.json()) as Record<string, unknown>;
-  } catch {
+  } catch (err) {
+    // `response.json()` already consumed the stream, so `body` (the parameter
+    // built for exactly this) cannot be filled in here — the SyntaxError is
+    // the only remaining evidence of WHAT the provider sent. An empty 200 and
+    // an HTML interstitial are the same sentence without it. `status` is
+    // passed for the same reason; the four `undefined`s are the positional
+    // tail this class predates `ErrorOptions` by.
     throw new OAuthCallbackError(
       `Token exchange returned non-JSON response for '${input.errorLabel}'`,
       "transient",
       input.errorLabel,
+      response.status,
+      undefined,
+      undefined,
+      undefined,
+      { cause: err },
     );
   }
 

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 export const uploadsPaths = {
   "/api/uploads": {
     post: {
@@ -28,7 +30,7 @@ export const uploadsPaths = {
         "Rate-limited to 20/min.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -68,6 +70,7 @@ export const uploadsPaths = {
                     "mismatch is rejected (400 `checksum_mismatch`).",
                 },
               },
+              additionalProperties: false,
             },
             example: { name: "invoice.pdf", size: 24576, mime: "application/pdf" },
           },
@@ -76,10 +79,7 @@ export const uploadsPaths = {
       responses: {
         "201": {
           description: "Upload descriptor created.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -142,7 +142,7 @@ export const uploadsPaths = {
             "organization's staging budget (`UPLOAD_STAGING_MAX_BYTES_PER_ORG`, summed over " +
             "unconsumed, unexpired uploads plus the declared `size`) would be exceeded. " +
             "Retrying is pointless until uploads are consumed or expire, or the quota is raised.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -164,7 +164,7 @@ export const uploadsPaths = {
             "`UPLOAD_MAX_ACTIVE_PER_ACTOR` active staged uploads. Back-pressure, not an authz " +
             "denial: retry after consuming an upload or letting one expire.",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            ...REQUEST_ID_ONLY_HEADERS,
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
           },
@@ -225,13 +225,13 @@ export const uploadsPaths = {
       responses: {
         "204": {
           description: "Bytes accepted.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "409": {
           description: "Upload content already written for this token.",
-          headers: { "Request-Id": { $ref: "#/components/headers/RequestId" } },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

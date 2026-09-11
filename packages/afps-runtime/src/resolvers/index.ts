@@ -24,21 +24,20 @@
  * Specification: `afps-spec/spec.md` §8.
  */
 
-export type {
-  Bundle,
-  BundlePackage,
-  DependencyRef,
-  JSONSchema,
-  Tool,
-  ToolContext,
-  ToolResult,
-} from "./types.ts";
+// Spec-level contracts (Tool protocol, manifest refs) come straight from
+// `@afps-spec/types`, the vendor-neutral projection of the AFPS spec.
+export type { DependencyRef, JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
+
+// Bundle surface passed to resolvers — the spec {@link Bundle} is the single
+// contract. Each resolver looks up its dependencies via {@link resolvePackageRef}
+// against {@link Bundle.packages}.
+export type { Bundle, BundlePackage } from "../bundle/types.ts";
 
 // RunEvent lives in src/types/ — re-exported here for convenience so
 // resolver authors can import all the types they need from one place.
 export type { RunEvent } from "@afps-spec/types";
 
-export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-adapter.ts";
+export { resolvePackageRef } from "./bundle-adapter.ts";
 
 // Canonical `delivery.http` credential-injection resolver (shared with
 // `@appstrate/connect`, which re-exports these).
@@ -57,20 +56,17 @@ export { substituteVars } from "./template-vars.ts";
 
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
+  ABSOLUTE_BODY_CEILING,
   ABSOLUTE_MAX_RESPONSE_SIZE,
-  defaultInlineLimit,
   MAX_REQUEST_BODY_SIZE,
   MAX_STREAMED_BODY_SIZE,
   STREAMING_THRESHOLD,
   makeApiCallTool,
   matchesAuthorizedUriSpec,
-  isReproducibleBody,
   apiCallRequestJsonSchema,
-  resolveBodyForFetch,
   resolveSafeFile,
   resolveSafePath,
   resolveWorkspaceFile,
-  serializeFetchResponse,
   type MakeApiCallToolOptions,
   type ApiCallContext,
   type ApiCallFn,
@@ -107,7 +103,6 @@ export {
   RemoteAppstrateIntegrationResolver,
   readIntegrationRefs,
   readApiCallIntegrationMetas,
-  apiCallToolName,
   type IntegrationApiCallResolver,
   type IntegrationRef,
 } from "./integration-api-call.ts";

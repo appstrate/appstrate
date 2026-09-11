@@ -25,7 +25,7 @@ import {
   useIntegrationClientColumns,
 } from "../../pages/integration-columns.tsx";
 import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
-import { useApplicationColumns } from "../../pages/org-settings/application-columns.tsx";
+import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
 import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
 import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
@@ -91,6 +91,8 @@ const SETS = {
         onEdit: () => {},
         onDelete: () => {},
         onSetDefault: () => {},
+        canWrite: true,
+        canDelete: true,
       }),
     ),
   credentials: () =>
@@ -104,6 +106,8 @@ const SETS = {
         onDelete: () => {},
         onRename: () => {},
         onConnectOAuth: () => {},
+        canWrite: true,
+        canDelete: true,
       }),
     ),
   proxies: () =>
@@ -141,7 +145,7 @@ const SETS = {
       }),
     ),
   applications: () =>
-    columnsFrom(() => useApplicationColumns({ defaultLabel: "Défaut", onOpen: () => {} })),
+    columnsFrom(() => useSpaceColumns({ defaultLabel: "Défaut", onOpen: () => {} })),
   connections: () =>
     columnsFrom(() =>
       useConnectionColumns({

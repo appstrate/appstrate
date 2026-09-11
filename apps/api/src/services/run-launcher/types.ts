@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { modelCostSchema } from "@appstrate/core/module";
-import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { TokenUsage } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -10,18 +8,17 @@ import type { ResolvedModel } from "../org-models.ts";
 import type { ResolvedAgentResources } from "../run-limits.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
-export type { ToolMeta, TokenUsage, ResolvedModel };
-export { modelCostSchema, tokenUsageSchema };
+export type { ToolMeta, TokenUsage };
 
 /**
- * Reference to an input document surfaced to a run — field, filename, MIME, and
- * size. Document bytes are streamed into the run workspace during upload-consume,
+ * Reference to an input file surfaced to a run — field, filename, MIME, and
+ * size. File bytes are streamed into the run workspace during upload-consume,
  * so this carries metadata only (no content).
  *
- * `name` is the document's human display name (may collide across documents);
+ * `name` is the file's human display name (may collide across files);
  * `workspaceName` is the unique single-segment filename actually written into
- * the run container at `workspace/documents/<workspaceName>` — the prompt path
- * and the documents manifest are both keyed on it (see run-document-naming.ts).
+ * the run container at `workspace/files/<workspaceName>` — the prompt path
+ * and the files manifest are both keyed on it (see run-file-naming.ts).
  */
 export interface FileReference {
   fieldName: string;
@@ -75,11 +72,17 @@ export interface AppstrateRunPlan {
   // --- Platform wiring ---
   /**
    * Signed run token authorising the sidecar's `/internal/*` calls back into
-   * the platform. Optional — runners that don't expose a callback API omit
-   * it. The platform URL is resolved by the container orchestrator at spawn
-   * time, not surfaced on this plan.
+   * the platform. The platform URL is resolved by the container orchestrator
+   * at spawn time, not surfaced on this plan.
+   *
+   * REQUIRED. It was optional for "runners that don't expose a callback API",
+   * a distinction from the multi-runner era — there is one runner now and
+   * `run-context-builder` always signs a token for it. The optionality only
+   * survived as a `?? ""` at the spawn site, which would have booted a sidecar
+   * with an EMPTY `RUN_TOKEN` instead of failing. Requiring the field turns
+   * that silent-empty-credential path into a compile error.
    */
-  runToken?: string;
+  runToken: string;
   /** Outbound HTTP proxy, if any. */
   proxyUrl?: string | null;
   /** Seconds cap on the container lifetime. */
@@ -89,8 +92,8 @@ export interface AppstrateRunPlan {
 
   // --- Files ---
   /**
-   * Input-document references surfaced in the prompt ("## Documents" section).
-   * The document bytes themselves are streamed into the run workspace during
+   * Input-file references surfaced in the prompt ("## Files" section).
+   * The file bytes themselves are streamed into the run workspace during
    * upload-consume — the plan carries only metadata, never the content.
    */
   files?: FileReference[];

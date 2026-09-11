@@ -45,7 +45,7 @@ const MANIFEST = {
         http: {
           in: "header",
           name: "Authorization",
-          prefix: "Bearer",
+          prefix: "Bearer ",
           value: "{$credential.access_token}",
         },
       },
@@ -65,7 +65,7 @@ describe("integration OAuth2 — refresh_token connect-time guard", () => {
     actor = { type: "user", id: ctx.user.id };
     strategy = new OAuth2Strategy();
     connectCtx = {
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       actor,
       integrationId: INTEGRATION,
       authKey: "primary",
@@ -86,7 +86,7 @@ describe("integration OAuth2 — refresh_token connect-time guard", () => {
       packageId: INTEGRATION,
       authKey: "primary",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor,
       accessToken: "at-1",
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
@@ -169,7 +169,7 @@ describe("integration OAuth2 — refresh_token connect-time guard", () => {
             http: {
               in: "header",
               name: "Authorization",
-              prefix: "Bearer",
+              prefix: "Bearer ",
               value: "{$credential.access_token}",
             },
           },

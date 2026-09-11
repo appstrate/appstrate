@@ -22,10 +22,12 @@
  * server-side finalize race.
  */
 
+import { randomBytes } from "node:crypto";
 import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
-import { buildRuntimePiEnv } from "@appstrate/runner-pi";
+import { buildRuntimePiEnv, derivePiProvider } from "@appstrate/runner-pi";
+import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import {
   assertOauthRunIsolation,
   assertOauthRunNotAliased,
@@ -42,13 +44,13 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
-import { uploadRunBundle, deleteRunWorkspace } from "../run-workspace-storage.ts";
+import { uploadRunBundle } from "../run-workspace-storage.ts";
 import { startBootHeartbeat } from "../run-boot-heartbeat.ts";
 import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
 import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";
-import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
+import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 import { toNativeModelReasoningLevel } from "@appstrate/core/model-generation";
 
 /**
@@ -82,7 +84,7 @@ export interface PlatformContainerResult {
   cancelled: boolean;
 }
 
-export interface RunPlatformContainerInput {
+interface RunPlatformContainerInput {
   runId: string;
   context: ExecutionContext;
   plan: AppstrateRunPlan;
@@ -94,12 +96,11 @@ export interface RunPlatformContainerInput {
   orchestrator?: RunOrchestrator;
   /**
    * Injectable workspace provisioning — production defaults to the
-   * run-workspace storage helpers. The agent fetches the bundle itself at
-   * startup; input documents were already streamed into the workspace during
+   * run-workspace storage helper. The agent fetches the bundle itself at
+   * startup; input files were already streamed into the workspace during
    * upload-consume. Tests substitute a capturing stub.
    */
   uploadBundle?: typeof uploadRunBundle;
-  deleteWorkspace?: typeof deleteRunWorkspace;
   /**
    * Grace (ms) added to `plan.timeout` for the platform's safety-net
    * container watchdog. Defaults to {@link platformTimeoutBootGraceMs}.
@@ -140,7 +141,6 @@ async function runPlatformContainerImpl(
   const { runId, context, plan, sinkCredentials, signal } = input;
   const orch = input.orchestrator ?? getOrchestrator();
   const uploadBundle = input.uploadBundle ?? uploadRunBundle;
-  const deleteWorkspace = input.deleteWorkspace ?? deleteRunWorkspace;
 
   const { llmConfig } = plan;
 
@@ -153,7 +153,7 @@ async function runPlatformContainerImpl(
   // leak the raw token into the agent container and skip the sidecar).
   const delivery = resolveCredentialDelivery({
     providerId: llmConfig.providerId,
-    hasCredentialId: !!llmConfig.credentialId,
+    credentialId: llmConfig.credentialId,
   });
 
   const prompt = await buildPlatformSystemPrompt(context, plan);
@@ -188,7 +188,7 @@ async function runPlatformContainerImpl(
     // process orchestrator has no sidecar to swap the bearer. API-key providers
     // are unaffected.
     assertOauthRunIsolation({
-      isOauthCredential: delivery.isOauthCredential,
+      isOauthCredential: delivery.kind === "oauth",
       providerId: llmConfig.providerId,
       orchestratorMode: getExecutionMode(),
     });
@@ -197,17 +197,12 @@ async function runPlatformContainerImpl(
     // Alias creation already rejects oauth credentials; fail-closed here for
     // any row predating that rule.
     assertOauthRunNotAliased({
-      isOauthCredential: delivery.isOauthCredential,
+      isOauthCredential: delivery.kind === "oauth",
       aliased: !!llmConfig.aliased,
       providerId: llmConfig.providerId,
     });
 
     const llmApiKey = llmConfig.apiKey;
-
-    // OAuth credentials must take the sidecar's OAuth branch — the API-key
-    // path can't refresh tokens or inject the provider's identity routing
-    // headers at request time.
-    const isOauthCredential = delivery.isOauthCredential;
 
     // Skip the sidecar entirely when the run declares no integrations AND
     // uses a static API key AND has no egress proxy. The sidecar's purposes
@@ -224,7 +219,7 @@ async function runPlatformContainerImpl(
     skipSidecar =
       !hasIntegrations &&
       !!llmConfig.apiKey &&
-      !isOauthCredential &&
+      delivery.kind !== "oauth" &&
       !plan.proxyUrl &&
       !llmConfig.aliased;
 
@@ -251,9 +246,10 @@ async function runPlatformContainerImpl(
     // agent container. Provider-specific shape (e.g. a structured JWT) is
     // built by the module's `buildApiKeyPlaceholder` hook — see
     // `deriveOauthPlaceholder` below.
-    const llmPlaceholder = isOauthCredential
-      ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
-      : deriveKeyPlaceholder(llmApiKey);
+    const llmPlaceholder =
+      delivery.kind === "oauth"
+        ? deriveOauthPlaceholder(llmApiKey, llmConfig.providerId)
+        : deriveKeyPlaceholder(llmApiKey);
 
     // Model-alias swap descriptor (LLM-gateway alias pattern). The container is
     // handed the public alias as MODEL_ID (below); the sidecar swaps it for the
@@ -263,10 +259,25 @@ async function runPlatformContainerImpl(
       requestedReasoningLevel,
       llmConfig.generation,
     );
-    const modelSwap = llmConfig.aliased
+    const modelSwap: ModelSwap | undefined = llmConfig.aliased
       ? {
           alias: llmConfig.aliasId,
           real: llmConfig.modelId,
+          // The container speaks the canonical dialect whatever the backing is:
+          // it restricts this run's `/llm/*` surface to that dialect's one
+          // endpoint, and tells the sidecar to terminate rather than proxy.
+          clientApiShape: ALIAS_CLIENT_API_SHAPE,
+          backingApiShape: llmConfig.apiShape,
+          // What the sidecar rebuilds the backing's pi-ai Model from. Private
+          // to this channel — none of it reaches `containerEnv` below.
+          backing: {
+            providerId: derivePiProvider(llmConfig.providerId, llmConfig.apiShape),
+            reasoning: llmConfig.reasoning ?? false,
+            ...(llmConfig.generation?.reasoning.nativeLevels
+              ? { reasoningLevelMap: llmConfig.generation.reasoning.nativeLevels }
+              : {}),
+            input: llmConfig.input ?? ["text"],
+          },
           ...(llmConfig.apiShape === "anthropic-messages" &&
           llmConfig.generation?.reasoning.adaptive === true &&
           requestedReasoningLevel !== "off" &&
@@ -277,32 +288,28 @@ async function runPlatformContainerImpl(
       : undefined;
 
     let sidecarLlm: LlmProxyConfig | undefined;
-    // M4 — pre-flight: an oauth run dereferences `credentialId` below.
-    // `resolveCredentialDelivery` already rejects an oauth provider without a
-    // credential id, so this branch is normally unreachable — kept as the
-    // in-file assertion that keeps the non-null `!` below justified, and as a
-    // last belt so a future call-site regression fails fast with a clear
-    // message instead of shipping `undefined` into an opaque sidecar boot
-    // crash AFTER both containers were already launched.
-    if (isOauthCredential && !llmConfig.credentialId) {
-      throw new Error(
-        `Run launcher: oauth-mode run for provider ` +
-          `"${llmConfig.providerId}" has no resolved credentialId — cannot deliver the credential.`,
-      );
-    }
-    if (isOauthCredential) {
+    // OAuth credentials must take the sidecar's OAuth branch — the API-key
+    // path can't refresh tokens or inject the provider's identity routing
+    // headers at request time. Narrowing `delivery` (rather than carrying a
+    // boolean) is what supplies `credentialId` here: `resolveCredentialDelivery`
+    // refused to build an `oauth` delivery without one, so there is nothing
+    // left to re-assert at this point.
+    if (delivery.kind === "oauth") {
       // OAuth subscription: the Pi SDK signs the subscription request shape
       // itself, so the sidecar just swaps the placeholder bearer for the real
       // token — no forging, no modelSwap (aliases rejected above).
       sidecarLlm = buildOauthSidecarLlm({
         baseUrl: llmConfig.baseUrl,
-        credentialId: llmConfig.credentialId!,
+        credentialId: delivery.credentialId,
       });
     } else if (llmApiKey) {
       // API-key flow: the sidecar forwards directly to the upstream
-      // provider. The Pi SDK's native retry (Retry-After honoring +
-      // exponential backoff, `maxRetries: 2`) covers transient 429/5xx —
-      // see `packages/runner-pi/src/pi-runner.ts`.
+      // provider. Transient 429/5xx are absorbed by two budgets, neither of
+      // them this file's and neither restated here (one number, one place):
+      // the container's turn-level retry policy in
+      // `packages/runner-pi/src/pi-runner.ts`, and — for an ALIASED run, whose
+      // container never sees a `retry-after` header — the sidecar's own
+      // provider-level budget in `runtime-pi/sidecar/pi-messages-backend.ts`.
       sidecarLlm = {
         authMode: "api_key",
         baseUrl: llmConfig.baseUrl,
@@ -312,8 +319,22 @@ async function runPlatformContainerImpl(
       };
     }
 
+    // Agent↔sidecar bearer for THIS run. Minted here, in the one frame that
+    // feeds both halves of the pair (`sidecarSpec` → the sidecar's env,
+    // `buildRuntimePiEnv` → the agent container's), so the two can never be
+    // set from different values. Never persisted, never logged, and never
+    // handed to an integration runner — the sidecar keeps it in its config
+    // object and builds runner env from the integration spec alone.
+    //
+    // Deliberately NOT `plan.runToken`, and not derived from it: the agent
+    // container must stay unable to call the platform back (zero-knowledge),
+    // so this secret carries no platform authority and no path to one.
+    // `skipSidecar` runs have no sidecar to authenticate to.
+    const sidecarAuthToken = skipSidecar ? undefined : randomBytes(32).toString("base64url");
+
     const sidecarSpec: SidecarLaunchSpec = {
-      runToken: plan.runToken ?? "",
+      runToken: plan.runToken,
+      ...(sidecarAuthToken ? { sidecarAuthToken } : {}),
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
       // Propagate the resolved model's context window so the sidecar's
@@ -356,6 +377,11 @@ async function runPlatformContainerImpl(
         api: llmConfig.apiShape,
         modelId,
         baseUrl: llmConfig.baseUrl,
+        // The vendor key pi-ai derives a request shape from. A sidecar-proxied
+        // run replaces MODEL_BASE_URL with the sidecar's, erasing one of the two
+        // inputs compat detection reads; without it every provider would get
+        // plain-OpenAI bytes. An aliased run needs no vendor key at all.
+        providerId: llmConfig.providerId,
         apiKey: llmApiKey,
         // When the sidecar is skipped, the agent talks to the upstream
         // provider directly — we must hand it the real API key, not the
@@ -367,6 +393,9 @@ async function runPlatformContainerImpl(
         reasoning: llmConfig.reasoning,
         reasoningLevelMap: llmConfig.generation?.reasoning.nativeLevels,
         cost: llmConfig.cost,
+        // WHAT this run is, not which vars to mask: `buildRuntimePiEnv` owns
+        // the alias policy for the container env contract.
+        aliased: !!llmConfig.aliased,
       },
       generation: plan.generationConfig,
       agentPrompt: prompt,
@@ -380,6 +409,11 @@ async function runPlatformContainerImpl(
       // owns the topology (Docker DNS alias, host loopback port, in-guest
       // loopback for microVMs) and pi.ts stays backend-agnostic.
       sidecarUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.sidecarUrl,
+      // Other half of the pair minted above. `buildRuntimePiEnv` throws when a
+      // sidecar-backed run reaches it without one, the same way it does for
+      // `sidecarUrl` — a run that cannot authenticate to its sidecar must not
+      // start rather than 401 on its first inference call.
+      sidecarAuthToken,
       // Sidecar-backed runs route LLM traffic through the sidecar proxy
       // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
       // directly, so buildRuntimePiEnv derives MODEL_BASE_URL from the
@@ -392,10 +426,10 @@ async function runPlatformContainerImpl(
           ? boundary.sidecarEndpoints.llmProxyUrl
           : undefined,
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
-      // Forward the effective per-file document cap so the runtime's outputs
+      // Forward the effective per-file cap so the runtime's outputs
       // sweep agrees with the server-authoritative gate (avoids silently
       // skipping large deliverables when an operator raises the platform cap).
-      documentMaxFileBytes: getEnv().DOCUMENT_MAX_FILE_BYTES,
+      maxFileBytes: getEnv().FILE_MAX_BYTES,
       forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
       noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
       sink: {
@@ -420,10 +454,10 @@ async function runPlatformContainerImpl(
 
     // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
     // to run-scoped storage; the agent container fetches and extracts it itself
-    // at startup (`GET /api/runs/:runId/workspace`). Input documents were
+    // at startup (`GET /api/runs/:runId/workspace`). Input files were
     // already streamed into the same run-workspace namespace during
     // upload-consume — the agent fetches each one (`GET
-    // /api/runs/:runId/documents/:name`) and streams it to disk, never buffering
+    // /api/runs/:runId/files/:name`) and streams it to disk, never buffering
     // the whole payload. This replaces the old seed-into-the-run-volume
     // delivery, whose correctness depended on the volume driver — a tmpfs-backed
     // `local` volume is NOT shared between the short-lived seed helper and the
@@ -435,36 +469,77 @@ async function runPlatformContainerImpl(
     // agent boots; racing it alongside the create calls here satisfies that
     // ordering. When `skipSidecar`, only the agent is created (it reaches the
     // platform directly over its egress network).
-    const [sidecar, agent] = await Promise.all([
-      skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
-      orch.createWorkload(
-        {
-          runId,
-          role: "agent",
-          image: getEnv().PI_IMAGE,
-          env: containerEnv,
-          resources: plan.resources.workload,
-          // Without a sidecar there is no egress proxy — the agent must
-          // reach the upstream LLM and the platform sink directly, so it
-          // goes on the egress network instead of the internal boundary.
-          egress: skipSidecar,
-          // Hard host-side lifetime ceiling (B2): run budget + the same
-          // boot grace the platform safety net uses + a 600 s margin, so
-          // the daemon's kill is strictly a LAST resort behind the
-          // safety-net setTimeout in waitForWorkload — it only ever fires
-          // when the platform died or was partitioned mid-run and its own
-          // stop can no longer reach the workload.
-          maxLifetimeSeconds:
-            plan.timeout +
-            Math.ceil((input.timeoutBootGraceMs ?? platformTimeoutBootGraceMs()) / 1000) +
-            600,
-        },
-        boundary,
+    //
+    // `allSettled`, NOT `all`. Two distinct leaks came out of `all`, and only
+    // waiting for every branch closes both:
+    //   - `all` rejects on the FIRST failure, so the `await` never returns and
+    //     `sidecarHandle` / `agentHandle` are never assigned — the `finally`
+    //     below then sees `undefined` and removes nothing. On Docker the agent
+    //     container sits on `boundary.id`, so `removeIsolationBoundary`'s
+    //     network + volume removals 409 on the still-attached container and are
+    //     swallowed by its own `allSettled`: container, network AND volume all
+    //     leak, holding `spec.env` — RUN_TOKEN, sink secret, model credentials,
+    //     the sidecar auth token — readable via `docker inspect` forever
+    //     (`cleanupOrphans()` runs only at boot).
+    //   - `all` also resumes the caller while the slower branches are still in
+    //     flight, so a container created AFTER a sibling's rejection is born
+    //     orphaned — cleanup has already run.
+    // Assignment therefore happens on the settled results, before the rethrow.
+    //
+    // `rejections` preserves WHICH failure the caller sees: `all` reported the
+    // branch that failed first IN TIME, not the lowest index, and the catch
+    // below plus the caller's error mapping have always keyed off that one.
+    // Re-deriving it from array position would silently blame a different phase.
+    const rejections: unknown[] = [];
+    const track = <T>(p: Promise<T>): Promise<T> =>
+      p.catch((err: unknown) => {
+        rejections.push(err);
+        throw err;
+      });
+    const [sidecarResult, agentResult, uploadResult] = await Promise.allSettled([
+      track(
+        skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
       ),
-      uploadBundle(runId, plan.agentPackage ?? undefined),
+      track(
+        orch.createWorkload(
+          {
+            runId,
+            role: "agent",
+            image: getEnv().PI_IMAGE,
+            env: containerEnv,
+            resources: plan.resources.workload,
+            // Without a sidecar there is no egress proxy — the agent must
+            // reach the upstream LLM and the platform sink directly, so it
+            // goes on the egress network instead of the internal boundary.
+            egress: skipSidecar,
+            // Hard host-side lifetime ceiling (B2): run budget + the same
+            // boot grace the platform safety net uses + a 600 s margin, so
+            // the daemon's kill is strictly a LAST resort behind the
+            // safety-net setTimeout in waitForWorkload — it only ever fires
+            // when the platform died or was partitioned mid-run and its own
+            // stop can no longer reach the workload.
+            maxLifetimeSeconds:
+              plan.timeout +
+              Math.ceil((input.timeoutBootGraceMs ?? platformTimeoutBootGraceMs()) / 1000) +
+              600,
+          },
+          boundary,
+        ),
+      ),
+      track(uploadBundle(runId, plan.agentPackage ?? undefined)),
     ]);
-    sidecarHandle = sidecar;
-    agentHandle = agent;
+    // Reclaimable BEFORE the rethrow: whatever exists must reach the `finally`.
+    if (sidecarResult.status === "fulfilled") sidecarHandle = sidecarResult.value;
+    if (agentResult.status === "fulfilled") agentHandle = agentResult.value;
+    if (
+      sidecarResult.status === "rejected" ||
+      agentResult.status === "rejected" ||
+      uploadResult.status === "rejected"
+    ) {
+      throw rejections[0];
+    }
+    const sidecar = sidecarResult.value;
+    const agent = agentResult.value;
     recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
     spawnRecorded = true;
 
@@ -519,9 +594,16 @@ async function runPlatformContainerImpl(
         });
       });
     }
-    // Drop the provisioning archive — the agent has long since fetched it.
-    // Best-effort: deleteRunWorkspace never throws.
-    await deleteWorkspace(runId);
+    // NOTHING drops the run workspace here. `finalizeRun` enqueues the bundle
+    // + files-manifest deletion INSIDE its terminal CAS transaction
+    // (run-event-ingestion.ts), and every path that tears this container down
+    // converges there: the container's own `sink.finalize`, the synthesised
+    // terminal `executeAgentInBackground` posts for each exit code / timeout /
+    // orchestrator throw, the cancel route, the stall watchdog, and the boot
+    // orphan sweep. Enqueuing again from this `finally` was the same two keys
+    // with the same reason in a second, non-durable transaction — pure
+    // duplicate work, and strictly weaker than the transactional one, which
+    // survives a SIGKILL between the terminal write and this teardown.
   }
 }
 
@@ -603,17 +685,35 @@ async function waitForWorkload(
 
 // --- Helpers ---
 
+/** Leading dash-separated segments a placeholder may keep. */
+const PLACEHOLDER_PREFIX_SEGMENTS = 2;
+
 /**
- * Derive a placeholder that preserves the key's dash-separated prefix.
- * The last segment (the secret) is replaced; prefix segments are kept intact.
- * This ensures the SDK's prefix-based behavior (e.g. OAuth detection, auth header
- * format, beta headers) works identically with the placeholder.
+ * Derive a placeholder that preserves the key's dash-separated prefix, so the
+ * SDK's prefix-based behavior (OAuth detection, auth header format, beta
+ * headers) works identically with the placeholder.
+ *
+ * Bounded on both axes, because the original rule — drop the LAST segment,
+ * keep everything before it — did not bound what it keeps. A key body is
+ * base64url, whose alphabet contains `-`, so `sk-ant-api03-AbC-dEf-XyZ` kept
+ * `sk-ant-api03-AbC-dEf`: real secret material placed inside the agent
+ * container. Two segments is what prefix sniffing actually reads (`sk-ant-`,
+ * `sk-proj-`, `sk-or-`), and the half-length ceiling keeps a short key from
+ * handing over most of itself.
+ *
+ * This still names the VENDOR, which is correct here and only here: on a
+ * non-aliased run the container is told the provider outright via
+ * `MODEL_PROVIDER`. An aliased run never reaches this value — see
+ * `ALIAS_API_KEY_PLACEHOLDER` in `@appstrate/runner-pi`.
  */
 function deriveKeyPlaceholder(key: string | undefined): string {
   if (!key) return "sk-placeholder";
   const parts = key.split("-");
   if (parts.length <= 1) return "sk-placeholder";
-  return parts.slice(0, -1).join("-") + "-placeholder";
+  const kept = parts.slice(0, Math.min(PLACEHOLDER_PREFIX_SEGMENTS, parts.length - 1)).join("-");
+  const ceiling = Math.floor(key.length / 2);
+  const bounded = kept.length > ceiling ? kept.slice(0, ceiling) : kept;
+  return bounded ? `${bounded}-placeholder` : "sk-placeholder";
 }
 
 /**

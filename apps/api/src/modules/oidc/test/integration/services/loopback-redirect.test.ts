@@ -9,12 +9,14 @@
  * listens on an ephemeral port and sends `http://localhost:<port>/callback`.
  * The authorization server MUST match these ignoring the port.
  *
- * Better Auth's `findRegisteredRedirectUri` applied the port-flexible match only
- * when the registered host was a loopback IP *literal* (`isLoopbackIP`), which
- * excludes the literal name `localhost` — so `http://localhost/callback` failed
- * to match `http://localhost:63785/callback` and the authorize step returned
- * `invalid_redirect`. We patch the plugin to use `isLoopbackHost` (which
- * includes `localhost`). This test locks in the fix.
+ * `findRegisteredRedirectUri` compares each registered URI with the requested
+ * one through `stripLoopbackRedirectPort`, which drops the port for an `http:`
+ * URI whose host is a loopback IP literal or the bare name `localhost`, and for
+ * nothing else. Our registration gate (`services/redirect-uri.ts`,
+ * `isLoopbackHost`) is wider — it also admits `*.localhost` subdomains — so such
+ * a redirect registers but is still matched port-exactly. The tests below bound
+ * the concession: the port is relaxed for `localhost` and `127.0.0.1`, never for
+ * the path and never for a non-loopback host.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -117,11 +119,10 @@ describe("RFC 8252 loopback redirect port-flexibility", () => {
   });
 
   it("does NOT relax the port for a NON-loopback host: exact-port match still required", async () => {
-    // Port-flexibility is an RFC 8252 loopback-ONLY concession (the patched
-    // `isLoopbackHost` gate). A non-loopback registration must still match the
-    // port exactly — otherwise a code could be redirected to attacker-controlled
-    // infrastructure on a different port of the same host. This is the negative
-    // axis that bounds the loopback patch.
+    // Port-flexibility is an RFC 8252 loopback-ONLY concession. A non-loopback
+    // registration must still match the port exactly — otherwise a code could be
+    // redirected to attacker-controlled infrastructure on a different port of
+    // the same host. This is the negative axis that bounds the concession.
     const clientId = await registerLoopbackClient("https://app.example.com/callback");
     const location = await authorizeRedirectLocation(
       clientId,

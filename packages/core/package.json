@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "6.2.0",
+  "version": "10.0.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -43,6 +43,7 @@
     "./env": "./src/env.ts",
     "./ajv": "./src/ajv.ts",
     "./api-errors": "./src/api-errors.ts",
+    "./request-body": "./src/request-body.ts",
     "./safe-json": "./src/safe-json.ts",
     "./storage": "./src/storage.ts",
     "./storage-s3": "./src/storage-s3.ts",
@@ -56,6 +57,7 @@
     "./zip": "./src/zip.ts",
     "./package-files": "./src/package-files.ts",
     "./naming": "./src/naming.ts",
+    "./image-ref": "./src/image-ref.ts",
     "./mime": "./src/mime.ts",
     "./dependencies": "./src/dependencies.ts",
     "./integrity": "./src/integrity.ts",
@@ -68,14 +70,18 @@
     "./runtime-event-drain": "./src/runtime-event-drain.ts",
     "./ssrf": "./src/ssrf.ts",
     "./sse": "./src/sse.ts",
+    "./cache": "./src/cache.ts",
+    "./map-with-concurrency": "./src/map-with-concurrency.ts",
     "./html": "./src/html.ts",
     "./schemas": "./src/schemas.ts",
     "./schema-validation": "./src/schema-validation.ts",
     "./form": "./src/form.ts",
+    "./input-resolution": "./src/input-resolution.ts",
     "./format": "./src/format.ts",
     "./module": "./src/module.ts",
     "./telemetry": "./src/telemetry.ts",
     "./permissions": "./src/permissions.ts",
+    "./principal-permissions": "./src/principal-permissions.ts",
     "./platform-types": "./src/platform-types.ts",
     "./token-usage": "./src/token-usage.ts",
     "./token-budget": "./src/token-budget.ts",
@@ -86,16 +92,18 @@
     "./jwt": "./src/jwt.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
     "./chat-contract": "./src/chat-contract.ts",
-    "./document-uri": "./src/document-uri.ts",
+    "./file-uri": "./src/file-uri.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
+    "./model-error": "./src/model-error.ts",
     "./bearer": "./src/bearer.ts",
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
     "./url": "./src/url.ts",
-    "./run-and-wait-client": "./src/run-and-wait-client.ts"
+    "./run-and-wait-client": "./src/run-and-wait-client.ts",
+    "./connect-handshake": "./src/connect-handshake.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.6.1",
-    "@appstrate/afps-shared": "^0.3.1",
+    "@afps-spec/schema": "^0.7.0",
+    "@appstrate/afps-shared": "^0.8.0",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
     "ajv": "^8.20.0",
@@ -103,7 +111,7 @@
     "fflate": "^0.8.3",
     "pino": "^10.3.1",
     "semver": "^7.8.4",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/mime-db": "^1.43.6",
@@ -114,7 +122,7 @@
     "@aws-sdk/lib-storage": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "hono": "^4.12.9",
-    "typescript": "^5"
+    "typescript": ">=5 <8"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-s3": {
@@ -132,7 +140,6 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "check": "tsc --noEmit",
     "test": "bun test",
     "generate:schemas": "bun scripts/generate-schemas.ts"
   }

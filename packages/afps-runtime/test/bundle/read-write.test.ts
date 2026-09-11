@@ -2,12 +2,12 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unzipSync, zipSync } from "fflate";
 import { readBundleFromBuffer, readBundleFromFile } from "../../src/bundle/read.ts";
-import { writeBundleToBuffer, writeBundleToFile } from "../../src/bundle/write.ts";
+import { writeBundleToBuffer } from "../../src/bundle/write.ts";
 import { BundleError } from "../../src/bundle/errors.ts";
 import {
   BUNDLE_FORMAT_VERSION,
@@ -358,7 +358,7 @@ describe("readBundleFromFile", () => {
       packages: [pkg],
     });
     const path = join(dir, "agent.afps-bundle");
-    await writeBundleToFile(bundle, path);
+    await writeFile(path, writeBundleToBuffer(bundle));
     const read = await readBundleFromFile(path);
     expect(read.packages.size).toBe(1);
   });

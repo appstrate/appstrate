@@ -18,8 +18,8 @@ import { db } from "@appstrate/db/client";
 import { uploads } from "@appstrate/db/schema";
 import { parseRequestInput } from "../../../src/services/input-parser.ts";
 import {
-  downloadRunDocumentStream,
-  downloadRunDocumentsManifest,
+  downloadRunFileStream,
+  downloadRunFilesManifest,
 } from "../../../src/services/run-workspace-storage.ts";
 import { uploadFile as storagePut } from "@appstrate/db/storage";
 import { ApiError } from "../../../src/lib/errors.ts";
@@ -52,25 +52,20 @@ const arrayFileSchema: JSONSchemaObject = {
   },
 };
 
-/** Minimal Hono context stub — parseRequestInput only reads the JSON body and orgId/applicationId. */
 /**
  * Minimal Hono context stub. A principal is always present: `parseRequestInput`
  * resolves the acting actor with the strict `getActor`, mirroring the fact that
  * every route reaching it sits behind authentication (the actor gates both the
- * document ACL and the staged-upload ownership check).
+ * file ACL and the staged-upload ownership check).
  */
-function fakeCtx(
-  body: unknown,
-  ctx: { orgId: string; applicationId: string; user?: { id: string } },
-): Context {
+function fakeCtx(ctx: { orgId: string; spaceId: string; user?: { id: string } }): Context {
   const user = ctx.user ?? { id: "usr_input_parser_test" };
   return {
-    req: { json: async () => body },
     get: (key: string) =>
       key === "orgId"
         ? ctx.orgId
-        : key === "applicationId"
-          ? ctx.applicationId
+        : key === "spaceId"
+          ? ctx.spaceId
           : key === "user"
             ? user
             : undefined,
@@ -78,7 +73,7 @@ function fakeCtx(
 }
 
 async function readDoc(runId: string, name: string): Promise<Uint8Array | null> {
-  const stream = await downloadRunDocumentStream(runId, name);
+  const stream = await downloadRunFileStream(runId, name);
   if (!stream) return null;
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
@@ -90,12 +85,13 @@ describe("parseRequestInput — inline data: URIs", () => {
 
   it("materializes an unnamed inline text file + strips the payload from the input", async () => {
     const ctx = await createTestContext({ orgSlug: "org-inline-text" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
 
     const uri = `data:text/plain;base64,${TEXT_BYTES.toString("base64")}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: uri } }, scope),
+      fakeCtx(scope),
+      { input: { doc: uri } },
       runId,
       singleTextSchema,
     );
@@ -111,10 +107,10 @@ describe("parseRequestInput — inline data: URIs", () => {
       },
     ]);
 
-    // Bytes landed in the run workspace + manifest enumerates the document.
+    // Bytes landed in the run workspace + manifest enumerates the file.
     expect(await readDoc(runId, "doc.txt")).toEqual(new Uint8Array(TEXT_BYTES));
-    const manifest = await downloadRunDocumentsManifest(runId);
-    expect(manifest?.documents).toEqual([
+    const manifest = await downloadRunFilesManifest(runId);
+    expect(manifest?.files).toEqual([
       { name: "doc.txt", workspace_name: "doc.txt", size: TEXT_BYTES.length },
     ]);
 
@@ -124,12 +120,13 @@ describe("parseRequestInput — inline data: URIs", () => {
 
   it("honours the data URI's name parameter", async () => {
     const ctx = await createTestContext({ orgSlug: "org-inline-named" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
 
     const uri = `data:application/pdf;name=invoice.pdf;base64,${PDF_BYTES.toString("base64")}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { doc: uri } }, scope),
+      fakeCtx(scope),
+      { input: { doc: uri } },
       runId,
       singlePdfSchema,
     );
@@ -149,7 +146,7 @@ describe("parseRequestInput — inline data: URIs", () => {
 
   it("rejects an inline file whose bytes do not match the declared binary MIME", async () => {
     const ctx = await createTestContext({ orgSlug: "org-inline-mime" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
 
     // Declared application/pdf, payload is plain text → magic-byte sniff fails,
@@ -157,7 +154,7 @@ describe("parseRequestInput — inline data: URIs", () => {
     const uri = `data:application/pdf;base64,${TEXT_BYTES.toString("base64")}`;
     let thrown: unknown;
     try {
-      await parseRequestInput(fakeCtx({ input: { doc: uri } }, scope), runId, singlePdfSchema);
+      await parseRequestInput(fakeCtx(scope), { input: { doc: uri } }, runId, singlePdfSchema);
     } catch (e) {
       thrown = e;
     }
@@ -166,22 +163,22 @@ describe("parseRequestInput — inline data: URIs", () => {
     expect((thrown as ApiError).message).toContain("doc");
 
     // Nothing materialized.
-    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunFilesManifest(runId)).toBeNull();
   });
 
   it("mixes staged uploads and inline files in one array field", async () => {
     const ctx = await createTestContext({ orgSlug: "org-inline-mixed" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
 
     // Stage one classic upload.
     const uploadId = "upl_inline_mix_1";
-    const storagePath = `${ctx.defaultAppId}/${uploadId}/file.pdf`;
+    const storagePath = `${ctx.defaultSpaceId}/${uploadId}/file.pdf`;
     await storagePut("uploads", storagePath, PDF_BYTES);
     await db.insert(uploads).values({
       id: uploadId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: null,
       storageKey: `uploads/${storagePath}`,
       name: "file.pdf",
@@ -192,7 +189,8 @@ describe("parseRequestInput — inline data: URIs", () => {
 
     const inlineUri = `data:application/pdf;base64,${PDF_BYTES.toString("base64")}`;
     const result = await parseRequestInput(
-      fakeCtx({ input: { docs: [`upload://${uploadId}`, inlineUri] } }, scope),
+      fakeCtx(scope),
+      { input: { docs: [`upload://${uploadId}`, inlineUri] } },
       runId,
       arrayFileSchema,
     );
@@ -215,22 +213,22 @@ describe("parseRequestInput — inline data: URIs", () => {
       },
     ]);
 
-    // Both documents in the workspace + manifest.
+    // Both files in the workspace + manifest.
     expect(await readDoc(runId, "file.pdf")).toEqual(new Uint8Array(PDF_BYTES));
     expect(await readDoc(runId, "docs-1.pdf")).toEqual(new Uint8Array(PDF_BYTES));
-    const manifest = await downloadRunDocumentsManifest(runId);
-    expect(manifest?.documents).toEqual([
+    const manifest = await downloadRunFilesManifest(runId);
+    expect(manifest?.files).toEqual([
       { name: "file.pdf", workspace_name: "file.pdf", size: PDF_BYTES.length },
       { name: "docs-1.pdf", workspace_name: "docs-1.pdf", size: PDF_BYTES.length },
     ]);
 
     // Both entries are rewritten in the persisted input: the upload:// reference
-    // becomes a durable document:// id (materialization deferred to the run
+    // becomes a durable appfile:// id (materialization deferred to the run
     // pipeline — one pending entry), the inline entry becomes its stripped marker.
     const docs = result.input?.docs as string[];
-    expect(docs[0]).toStartWith("document://doc_");
+    expect(docs[0]).toStartWith("appfile://file_");
     expect(docs[1]).toBe("data:application/pdf;name=docs-1.pdf;base64,");
-    expect(result.pendingDocuments).toHaveLength(1);
-    expect(result.pendingDocuments![0]).toMatchObject({ uploadId });
+    expect(result.pendingFiles).toHaveLength(1);
+    expect(result.pendingFiles![0]).toMatchObject({ uploadId });
   });
 });

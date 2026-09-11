@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ChatTurnErrorCategory =
-  | "credential_unavailable"
-  | "rate_limited"
-  | "upstream_unavailable"
-  | "invalid_request"
-  | "unknown";
+import type { ModelErrorCategory } from "./model-error.ts";
+
+/**
+ * The chat surface's name for {@link ModelErrorCategory} — an ALIAS, not a
+ * second vocabulary. It stays because the values are persisted under this name
+ * (`AppstrateTurnMetadata.errorCategory`, on immutable chat messages) and
+ * because out-of-tree readers import it; the rules that produce them live in
+ * `./model-error.ts`, shared with the run surface.
+ */
+export type ChatTurnErrorCategory = ModelErrorCategory;
 
 /**
  * `deadline` is Appstrate's own reason (no provider emits it): the turn was cut
@@ -122,9 +126,13 @@ export interface AppstrateTurnMetadata {
   /**
    * Stable, provider-neutral class for retry UI + telemetry.
    *
-   * Absent on a turn persisted before this field existed, when the failure copy
-   * was the provider's own unclassified string (`errorText`, removed): such a
-   * turn reads as `unknown` rather than rendering raw upstream text.
+   * OPTIONAL because it is stamped only on a turn that actually carried an
+   * error: `buildPiTurnMetadata` (`pi-chat/pi-turn-closure.ts`) derives it from
+   * the classified `ClientTurnError`, and the ordinary turn — the one that
+   * simply finished — has none. So a reader indexing a table by this field must
+   * carry a default for the common case, not for a historical one; the client
+   * degrades a category-less turn to `unknown` rather than rendering raw
+   * upstream text.
    */
   errorCategory?: ChatTurnErrorCategory;
   /** Whether retrying later may succeed without changing the request. */
@@ -165,10 +173,6 @@ export function mergeTurnMetadata(
   };
 }
 
-export function isFinalChatStep(stepNumber: number): boolean {
-  return stepNumber >= CHAT_MAX_STEPS - 1;
-}
-
 export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata | null {
   if (!isRecord(message)) return null;
   const metadata = isRecord(message.metadata) ? message.metadata : null;
@@ -186,7 +190,22 @@ export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata
   return turn as unknown as AppstrateTurnMetadata;
 }
 
+/**
+ * Did this turn stop because it ran out of budget?
+ *
+ * One field answers it. `maxStepsReached` is what the single writer sets
+ * (`pi-turn-closure.ts`, from `input.stepCapReached`) and it is the SHAPE GATE
+ * above — every historical writer emitted it, which is why the gate can require
+ * it.
+ *
+ * This used to read `maxStepsReached || toolStepBudgetReached`, for rows
+ * written before the chat unified on one engine. The second arm reached less
+ * than it appeared to: the gate already rejects a turn carrying
+ * `toolStepBudgetReached` alone, so the only rows it could speak for were those
+ * carrying both with `maxStepsReached: false`. Those were folded by
+ * `scripts/migration/0006-chat-turn-step-cap-fold.sql`, and the read is one
+ * form again (`docs/NO_TRANSITIONAL_CODE.md` §1).
+ */
 export function turnLimitReached(message: unknown): boolean {
-  const turn = turnMetadataFromMessage(message);
-  return Boolean(turn?.maxStepsReached || turn?.toolStepBudgetReached);
+  return Boolean(turnMetadataFromMessage(message)?.maxStepsReached);
 }
