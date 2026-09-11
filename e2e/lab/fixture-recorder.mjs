@@ -322,7 +322,7 @@ export function sanitizeJson(value, pseudonymizer = new Pseudonymizer(), path = 
     ) {
       throw new UnsafeFixtureValueError(`${path}.${key}`, "sensitive key");
     }
-    if (typeof child === "string" && /^[\[{]/.test(child.trim())) {
+    if (typeof child === "string" && /^[[{]/.test(child.trim())) {
       try {
         const parsed = JSON.parse(child);
         output[safeKey] = JSON.stringify(

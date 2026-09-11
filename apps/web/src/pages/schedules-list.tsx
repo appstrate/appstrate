@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Calendar, Plus, SearchX } from "lucide-react";
@@ -44,8 +44,13 @@ export function SchedulesListPage() {
   );
 
   // The same cached agents query every other surface holds, keyed by package id.
-  const agentName = (packageId: string) =>
-    agents?.find((a) => a.id === packageId)?.display_name ?? packageId;
+  // Memoised on `agents` so the filter below can depend on the lookup itself
+  // rather than on the array it closes over — a fresh function each render
+  // would defeat the `useMemo` it is a dependency of.
+  const agentName = useCallback(
+    (packageId: string) => agents?.find((a) => a.id === packageId)?.display_name ?? packageId,
+    [agents],
+  );
 
   const allColumns = useScheduleColumns({
     agentName: (schedule) => agentName(schedule.packageId),
@@ -75,7 +80,7 @@ export function SchedulesListPage() {
         agentName(schedule.packageId).toLowerCase().includes(q)
       );
     });
-  }, [schedules, query, states, agents]);
+  }, [schedules, query, states, agentName]);
 
   const filtering = query.trim() !== "" || states.length > 0;
   const emptyBody = filtering ? (

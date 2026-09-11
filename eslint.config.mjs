@@ -405,9 +405,38 @@ export default tseslint.config(
     // this block covers it for `no-console`. The migration cost was 10
     // findings, all style, none a defect.
     files: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}", "runtime-pi/**/*.ts"],
-    ignores: ["**/src/**/scripts/**", "**/src/**/test/**", "runtime-pi/**/test/**"],
+    // `apps/web/src/lab/**` joins the carve-outs: the lab's missing-fixture
+    // warning is its contract with whoever is looking at a screen ("no fixture
+    // for GET /api/… → 404"), and the panel is plain DOM outside the React
+    // tree. Neither ships in a production bundle — the `labMode()` Vite plugin
+    // is `apply: "serve"`.
+    ignores: [
+      "**/src/**/scripts/**",
+      "**/src/**/test/**",
+      "runtime-pi/**/test/**",
+      "apps/web/src/lab/**",
+    ],
     rules: {
       "no-console": "error",
+    },
+  },
+  {
+    // Lab drivers (`e2e/lab/*.mjs`). They straddle two runtimes, exactly like
+    // `e2e/tsconfig.json` says of the `.ts` beside them: the script body runs
+    // under bun, but every `page.evaluate` / `addInitScript` callback is
+    // serialised and executed INSIDE the browser, where `document`, `window`
+    // and `getComputedStyle` are real. Without the browser globals, each of
+    // those callbacks reads as 80 `no-undef` findings over code that runs
+    // correctly.
+    //
+    // `console` is their output contract — they print measurements to the
+    // terminal — and `no-console` does not reach them anyway (it is scoped to
+    // `apps/*/src`), so nothing is relaxed here that was enforced before.
+    files: ["e2e/lab/**/*.mjs"],
+    languageOptions: {
+      // `Bun` because these run under `bun lab/<driver>.mjs` and reach for
+      // `Bun.write` / `Bun.file` to save their captures.
+      globals: { ...globals.node, ...globals.browser, Bun: "readonly" },
     },
   },
   {
@@ -678,7 +707,24 @@ export default tseslint.config(
           extraHOCs: ["makeAssistantToolUI"],
           // Public shadcn-style design-system helpers exported from component
           // entrypoints. Keep the API stable while avoiding Fast Refresh noise.
-          allowExportNames: ["badgeVariants", "buttonVariants", "useSidebar"],
+          // Column hooks exported beside the table they feed. The cleaner fix is
+          // the one the rule suggests — move each into its own `*-columns.tsx`,
+          // as this branch already did for models, members and api-keys — and
+          // that is worth doing; naming them here keeps Fast Refresh quiet in
+          // the meantime without pretending the split happened.
+          allowExportNames: [
+            "badgeVariants",
+            "buttonVariants",
+            "useSidebar",
+            "usePackageColumns",
+            "useRunColumns",
+            "useScheduleColumns",
+            "useProxyColumns",
+            "getRunTriggerType",
+            "getRunTriggerActor",
+            "columnMenu",
+            "visibleColumns",
+          ],
         },
       ],
       // Re-render robustness: the React Compiler rules above check Rules-of-React
