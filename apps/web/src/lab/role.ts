@@ -15,7 +15,11 @@
  * cannot be shared is the filtering itself — those constants live in the API
  * package, which the browser bundle must not import.
  */
-import { ORG_LEVEL_PERMISSIONS, SPACE_LEVEL_PERMISSIONS } from "@appstrate/core/permissions";
+import {
+  ORG_LEVEL_PERMISSIONS,
+  ORG_ROLES_WITH_FULL_ACCESS,
+  SPACE_LEVEL_PERMISSIONS,
+} from "@appstrate/core/permissions";
 
 export const LAB_ROLES = ["owner", "admin", "member", "guest"] as const;
 export type LabRole = (typeof LAB_ROLES)[number];
@@ -31,7 +35,7 @@ export type LabPreset = (typeof LAB_PRESETS)[number];
 
 const PRESET_KEY = "appstrate-lab-preset";
 
-export function getPreset(): LabPreset {
+function getPreset(): LabPreset {
   const stored = read(PRESET_KEY);
   return (LAB_PRESETS as readonly string[]).includes(stored ?? "")
     ? (stored as LabPreset)
@@ -140,6 +144,21 @@ export function orgPermissionsForRole(role: LabRole = getRole()): string[] {
   return ORG_PERMISSIONS[role];
 }
 
-export function spacePermissionsForPreset(preset: LabPreset = getPreset()): string[] {
+/**
+ * Owners and admins hold `admin` in every space whatever the panel says: the
+ * server resolves their space role from the org role (`resolveSpaceRole`),
+ * and refuses an explicit row for them. Serving the picked preset instead
+ * would show a combination no real caller can be in.
+ */
+export function hasFullSpaceAccess(role: LabRole = getRole()): boolean {
+  return (ORG_ROLES_WITH_FULL_ACCESS as readonly string[]).includes(role);
+}
+
+/** The preset the lab actually serves: the panel's pick, unless the org role overrides it. */
+export function effectivePreset(): LabPreset {
+  return hasFullSpaceAccess() ? "admin" : getPreset();
+}
+
+export function spacePermissionsForPreset(preset: LabPreset = effectivePreset()): string[] {
   return SPACE_PERMISSIONS[preset];
 }

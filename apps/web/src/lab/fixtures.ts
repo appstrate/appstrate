@@ -3,7 +3,7 @@
 import { SPACE_LEVEL_PERMISSIONS } from "@appstrate/core/permissions";
 import {
   LAB_PRESETS,
-  getPreset,
+  effectivePreset,
   getRole,
   orgPermissionsForRole,
   spacePermissionsForPreset,
@@ -183,7 +183,7 @@ const LAB_SPACE_PERMISSIONS = spacePermissionsForPreset();
  * preset sees in the lab exactly what it would see for real.
  */
 export const LAB_READS_ALL_RUNS = LAB_SPACE_PERMISSIONS.includes("runs:read-all");
-const LAB_SPACE_PRESET = getPreset();
+const LAB_SPACE_PRESET = effectivePreset();
 const LAB_ORG_ROLE = getRole();
 
 export const orgs: Json200<"/api/orgs", "get"> = {

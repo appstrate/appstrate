@@ -9,9 +9,7 @@ import {
   Calendar,
   Wrench,
   Plug,
-  Webhook,
   Loader2,
-  Users,
   Boxes,
   MessageSquare,
   FileText,
@@ -24,7 +22,6 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { useChatUnreadCount } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "../lib/scoping-headers";
-import { WEBHOOK_READ_PERMISSIONS } from "../lib/webhook-permissions";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -102,16 +99,6 @@ export function NavOrg() {
       : []),
   ];
 
-  const canReadWebhooks = WEBHOOK_READ_PERMISSIONS.some((p) => can(p));
-  const adminItems: NavItem[] = [
-    ...(features.webhooks && canReadWebhooks
-      ? [{ path: "/webhooks", label: t("nav.webhooks"), icon: Webhook }]
-      : []),
-    ...(can("end-users:read")
-      ? [{ path: "/end-users", label: t("nav.endUsers"), icon: Users }]
-      : []),
-  ];
-
   const renderItems = (items: NavItem[]) =>
     items.map((item) => (
       <SidebarNavLink
@@ -176,13 +163,6 @@ export function NavOrg() {
         <SidebarGroupLabel>{t("nav.section.build")}</SidebarGroupLabel>
         <SidebarMenu>{renderItems(buildItems)}</SidebarMenu>
       </SidebarGroup>
-
-      {adminItems.length > 0 && (
-        <SidebarGroup>
-          <SidebarGroupLabel>{t("nav.section.admin")}</SidebarGroupLabel>
-          <SidebarMenu>{renderItems(adminItems)}</SidebarMenu>
-        </SidebarGroup>
-      )}
     </>
   );
 }

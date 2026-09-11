@@ -11,7 +11,8 @@ import { SCENARIOS, getScenario, setScenario, type Scenario } from "./scenario";
 import {
   LAB_PRESETS,
   LAB_ROLES,
-  getPreset,
+  effectivePreset,
+  hasFullSpaceAccess,
   getRole,
   setPreset,
   setRole,
@@ -82,15 +83,18 @@ export function mountLabPanel(): void {
     ),
   );
 
-  const preset = getPreset();
-  host.append(
-    row(
-      "ESPACE",
-      LAB_PRESETS.map((value) =>
-        pill(PRESET_LABELS[value], value === preset, () => setPreset(value)),
-      ),
+  // Owner and Admin are `admin` in every space: the row shows it and stays
+  // inert, rather than offering a combination the server never produces.
+  const preset = effectivePreset();
+  const locked = hasFullSpaceAccess();
+  const presetRow = row(
+    "ESPACE",
+    LAB_PRESETS.map((value) =>
+      pill(PRESET_LABELS[value], value === preset, () => setPreset(value), locked),
     ),
   );
+  if (locked) presetRow.title = "Owner et Admin sont admin dans tous les espaces";
+  host.append(presetRow);
 
   document.body.append(host);
 }
@@ -111,19 +115,26 @@ function label(text: string): HTMLSpanElement {
   return span;
 }
 
-function pill(text: string, active: boolean, onClick: () => void): HTMLButtonElement {
+function pill(
+  text: string,
+  active: boolean,
+  onClick: () => void,
+  disabled = false,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = text;
-  button.addEventListener("click", onClick);
-  style(button, active);
+  button.disabled = disabled;
+  if (!disabled) button.addEventListener("click", onClick);
+  style(button, active, disabled);
   return button;
 }
 
-function style(button: HTMLButtonElement, active: boolean): void {
+function style(button: HTMLButtonElement, active: boolean, disabled: boolean): void {
   button.style.cssText = [
     "all:unset",
-    "cursor:pointer",
+    disabled ? "cursor:default" : "cursor:pointer",
+    disabled ? "opacity:.4" : "opacity:1",
     "padding:4px 8px",
     "border-radius:6px",
     `background:${active ? "#fff" : "transparent"}`,

@@ -18,5 +18,12 @@ export function getScenario(): Scenario {
 /** Full reload on purpose: it clears the React Query cache in one step. */
 export function setScenario(next: Scenario): void {
   localStorage.setItem(STORAGE_KEY, next);
+  // "Vide" lands on onboarding because it removes the orgs. Leaving it must
+  // leave onboarding too: reloading in place would keep walking its steps
+  // with the orgs back.
+  if (next !== "empty" && window.location.pathname.startsWith("/onboarding")) {
+    window.location.assign("/");
+    return;
+  }
   window.location.reload();
 }

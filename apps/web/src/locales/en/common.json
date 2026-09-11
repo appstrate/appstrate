@@ -33,8 +33,6 @@
   "pageActions.label": "Actions",
   "nav.appSettings": "App Settings",
   "nav.settings": "Settings",
-  "nav.endUsers": "End-Users",
-  "nav.webhooks": "Webhooks",
   "btn.cancel": "Cancel",
   "btn.save": "Save",
   "btn.delete": "Delete",
@@ -133,6 +131,5 @@
   "viewAs.stopped.view_as_forbidden": "Preview stopped: you may no longer preview this role.",
   "viewAs.stopped.view_as_not_found": "Preview stopped: the previewed space or role no longer exists.",
   "viewAs.stopped.generic": "Preview stopped.",
-  "nav.section.admin": "Administration",
   "nav.chat": "Chat"
 }

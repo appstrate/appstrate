@@ -33,8 +33,6 @@
   "pageActions.label": "Actions",
   "nav.appSettings": "Paramètres app",
   "nav.settings": "Paramètres",
-  "nav.endUsers": "End-Users",
-  "nav.webhooks": "Webhooks",
   "btn.cancel": "Annuler",
   "btn.save": "Enregistrer",
   "btn.delete": "Supprimer",
@@ -133,6 +131,5 @@
   "viewAs.stopped.view_as_forbidden": "Prévisualisation arrêtée : vous n'avez plus le droit de prévisualiser ce rôle.",
   "viewAs.stopped.view_as_not_found": "Prévisualisation arrêtée : l'espace ou le rôle prévisualisé n'existe plus.",
   "viewAs.stopped.generic": "Prévisualisation arrêtée.",
-  "nav.section.admin": "Administration",
   "nav.chat": "Chat"
 }
