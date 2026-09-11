@@ -8,9 +8,8 @@
  * extension). This file covers the OIDC end-user half: a token that pins a
  * space, carries NO `orgRole`, and holds `agents:read` — the one end-user
  * grantable string among the space-package routes. `applySpacePermissions`
- * returns early for a role-less caller, so before the fix nothing compared the
- * path space to the pinned one and `run-config` handed back the target space's
- * stored input values, `locked_fields` included, for `private` spaces too.
+ * returns early for a role-less caller, so the pin has to be compared against
+ * the path space explicitly.
  *
  * The strategy is a stub rather than the OIDC module: the shape that matters is
  * `{ orgId, spaceId, no orgRole, permissions }`, which is exactly what
@@ -19,10 +18,9 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll, db } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace } from "../../helpers/seed.ts";
-import { spacePackages } from "@appstrate/db/schema";
+import { seedInstalledPackage, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
 
 let currentCtx: TestContext | null = null;
@@ -87,18 +85,12 @@ describe("an end-user token pinned to a space and the spaces router (issue #1313
       type: "agent",
       draftManifest: { name: AGENT_ID, version: "1.0.0", type: "agent" },
     });
-    await db.insert(spacePackages).values([
-      {
-        spaceId: currentCtx.defaultSpaceId,
-        packageId: AGENT_ID,
-        inputSettings: { values: { folder: "own-space" }, locked: ["folder"] },
-      },
-      {
-        spaceId: otherSpaceId,
-        packageId: AGENT_ID,
-        inputSettings: { values: { api_token: "SECRET-FROM-OTHER-SPACE" }, locked: ["api_token"] },
-      },
-    ]);
+    await seedInstalledPackage(currentCtx.defaultSpaceId, AGENT_ID, {
+      inputSettings: { values: { folder: "own-space" }, locked: ["folder"] },
+    });
+    await seedInstalledPackage(otherSpaceId, AGENT_ID, {
+      inputSettings: { values: { api_token: "SECRET-FROM-OTHER-SPACE" }, locked: ["api_token"] },
+    });
   });
 
   it("refuses run-config for a space it is not pinned to, private included", async () => {
