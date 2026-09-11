@@ -1225,8 +1225,7 @@ const fileSelect = {
  * creator's ownership right is not a role grant, so `permissions` cannot
  * narrow it and the CREDENTIAL must (see `credentialAdmits`). It defaults to
  * FALSE — a caller that does not state its credential's reach grants no
- * ownership override, and a surface with no `keep` / `delete` affordance says
- * so explicitly.
+ * ownership override.
  */
 export async function getFileForActor(
   scope: SpaceScope,
@@ -1335,11 +1334,7 @@ export async function resolveChatAttachment(
   if (isFileUri(request.uri)) {
     const fileId = parseFileUri(request.uri);
     if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
-    // Attach = read: this resolver exposes no `keep` / `delete` affordance, so
-    // a creator's ownership right never applies through it.
-    const resolved = await getFileForActor(scope, actor, fileId, request.permissions, {
-      creatorCanManage: false,
-    });
+    const resolved = await getFileForActor(scope, actor, fileId, request.permissions);
     if (!resolved) throw notFound(`File '${fileId}' not found`);
     const { row } = resolved;
     return { uri: fileUri(row.id), name: row.name, mime: row.mime, size: row.size };
