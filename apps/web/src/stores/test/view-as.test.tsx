@@ -44,7 +44,7 @@ const { endPreviewIfRefused, noteViewAsRefusal, viewAsRefusalCode } =
 const { ApiError } = await import("../../api/errors.ts");
 const { ViewAsBanner } = await import("../../components/view-as-banner.tsx");
 const { render } = await import("../../test/render.tsx");
-const { i18nReady } = await import("../../i18n.ts");
+const { default: i18n, i18nReady } = await import("../../i18n.ts");
 
 await i18nReady;
 
@@ -308,27 +308,22 @@ describe("exit on refusal", () => {
  * permanent, and "try again" is a lie for all three.
  */
 describe("naming a refused entry", () => {
-  it("names every code the server refuses the persona with", () => {
+  it("names every code the server refuses the persona with, and has copy for each", () => {
     for (const code of [
       "invalid_view_as",
       "view_as_unsupported",
       "view_as_forbidden",
       "view_as_not_found",
-    ])
+    ]) {
       expect(viewAsRefusalCode(new ApiError(code, "refused", 403))).toBe(code);
+      const key = `viewAs.stopped.${code}`;
+      expect(i18n.t(key, { ns: "common" })).not.toBe(key);
+    }
   });
 
   it("names nothing for a denial the persona earned, nor for a transport failure", () => {
     expect(viewAsRefusalCode(new ApiError("forbidden", "denied", 403))).toBeNull();
     expect(viewAsRefusalCode(new TypeError("fetch failed"))).toBeNull();
-  });
-
-  it("has copy for every code it names", async () => {
-    const { default: i18n } = await import("../../i18n.ts");
-    for (const code of ["invalid_view_as", "view_as_forbidden"]) {
-      const key = `viewAs.stopped.${viewAsRefusalCode(new ApiError(code, "refused", 403))}`;
-      expect(i18n.t(key, { ns: "common" })).not.toBe(key);
-    }
   });
 });
 

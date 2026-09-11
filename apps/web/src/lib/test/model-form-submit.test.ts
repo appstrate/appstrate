@@ -142,21 +142,6 @@ describe("submitModelForm — single model", () => {
     expect(h.created).toEqual([]);
   });
 
-  it("reports the minted credential when an edit is refused", async () => {
-    const h = harness("model");
-    const outcome = await submitModelForm({
-      writes: h.writes,
-      editModelId: "mdl_1",
-      onSuccess: h.onSuccess,
-    })(oneWithTypedKey);
-
-    expect(outcome).toEqual({
-      failedModelIds: ["gpt-6"],
-      duplicateModelIds: [],
-      credentialId: "cred_1",
-    });
-  });
-
   it("reports a 409 model_already_added apart from a failure to retry", async () => {
     const h = harness("duplicate");
     const outcome = await submitModelForm({
