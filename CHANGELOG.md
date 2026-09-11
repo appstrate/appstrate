@@ -599,6 +599,28 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   `APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1` never had a keyring entry and still
   exits 0.
 
+- **`EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering only.** The
+  module's `init()` always arms its maintenance tick (300 s), so account
+  repair and cursor upkeep keep running while the sweep itself is paused; the
+  value is no longer a way to run the module with no timer at all. (#1326)
+
+- **`appstrate skills sync` treats a revoked organization as an empty source.**
+  When `GET /api/spaces` answers 403, every skill the sync installed from that
+  organization is removed and the run exits 0 with a note on stderr; a
+  `--space` flag typed on that run fails instead, because you typed it just
+  now. (#1362)
+
+- **Operators: every enabled Stripe webhook endpoint must pin the API version
+  the module pins** (`STRIPE_API_VERSION` in `packages/module-ee/src/stripe/client.ts`).
+  The live contract suite fails on an endpoint left at the account default or
+  at an older version, because webhook payloads are rendered at the endpoint's
+  version, not the SDK's. (#1332)
+
+- **Operators: `scripts/migration/0010` tolerates a target the module has
+  already booted against.** The watermark `init()` seeds in `ee_billing_cursor`
+  is replaced by the source's; any other billing row on the target still
+  refuses the copy. (#1318)
+
 - **Entering a role preview reports the server's own refusal.** A refused
   `X-View-As` surfaced as one generic "could not start" message; the dialog now
   reads the refusal code (`invalid_view_as`, `view_as_unsupported`,
