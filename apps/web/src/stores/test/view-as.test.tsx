@@ -207,6 +207,30 @@ describe("cache reset", () => {
     enterViewAs(PERSONA, ORGS_AS_PERSONA);
     expect(queryClient.getQueryData<Organization[]>(orgKeys.all)).toEqual(ORGS_AS_PERSONA);
   });
+
+  it("drops a listing from the previous authority instead of letting it land on that row", async () => {
+    // #1368: seeding cancels nothing, and `["orgs"]` is the query the reset
+    // spares, so an `/api/orgs` still in flight for the PREVIEWER resolves
+    // after the seed and puts their permissions back under the persona's
+    // banner. `exitViewAs` starts exactly such a refetch, so re-entering a
+    // preview while it is open is enough to reach this — no boot race needed.
+    const previewerListing = Promise.withResolvers<Organization[]>();
+    // Cancelling rejects the caller, which is the point: that answer is stale.
+    const inFlight = queryClient
+      .fetchQuery({ queryKey: orgKeys.all, queryFn: () => previewerListing.promise })
+      .catch(() => undefined);
+    await Bun.sleep(0);
+    expect(queryClient.getQueryState(orgKeys.all)?.fetchStatus).toBe("fetching");
+
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
+    previewerListing.resolve([
+      { ...ORGS_AS_PERSONA[0]!, role: "owner", permissions: ["org:read", "webhooks:read"] },
+    ]);
+    await inFlight;
+    await Bun.sleep(0);
+
+    expect(queryClient.getQueryData<Organization[]>(orgKeys.all)).toEqual(ORGS_AS_PERSONA);
+  });
 });
 
 describe("realtime carrier", () => {
