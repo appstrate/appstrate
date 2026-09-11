@@ -46,7 +46,10 @@ for (const width of [1440, 390]) {
       await chooser.waitFor({ state: "visible" });
       assert.equal(await chooser.locator("[data-creation-method]").count(), 3);
       assert.equal(await chooser.locator("[data-creation-method]:disabled").count(), 1);
-      assert.equal(await chooser.locator('[data-creation-method="coding-agent"]').isDisabled(), true);
+      assert.equal(
+        await chooser.locator('[data-creation-method="coding-agent"]').isDisabled(),
+        true,
+      );
       const overflow = await chooser.evaluate(() => ({
         viewport: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         dialog: (() => {

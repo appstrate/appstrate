@@ -190,7 +190,9 @@ await check("API documentation is a page action", () =>
 await browser.close();
 
 if (failures.length > 0) {
-  console.error("\nSettings review corrections failed:\n" + failures.map((f) => `- ${f}`).join("\n"));
+  console.error(
+    "\nSettings review corrections failed:\n" + failures.map((f) => `- ${f}`).join("\n"),
+  );
   process.exit(1);
 }
 
