@@ -1511,8 +1511,7 @@ export async function deletePackageRuns(scope: SpaceScope, packageId: string): P
 type RunListPage = ListEnvelope<EnrichedRun> & { total: number };
 
 /**
- * The enriched page + total behind the two list surfaces in this module
- * (`listPackageRuns`, `listScheduleRuns`). Module-private: a caller outside
+ * The enriched page + total behind all run lists in this module. Module-private: a caller outside
  * builds its WHERE by hand, and a hand-built `runs` predicate is what the
  * `runs:read` visibility rule exists to keep out of the query.
  */
@@ -1527,7 +1526,11 @@ async function listRunsWithFilter(
   // reads — issued concurrently so the endpoint costs one round trip instead
   // of two serialized ones. Both are tenant-indexed; neither is a seq scan.
   const [countRows, rows] = await Promise.all([
-    db.select({ count: count() }).from(runs).where(filter),
+    db
+      .select({ count: count() })
+      .from(runs)
+      .leftJoin(packages, eq(packages.id, runs.packageId))
+      .where(filter),
     db
       .select(enrichedRunSelect(actor))
       .from(runs)
@@ -1662,37 +1665,7 @@ export async function listGlobalRuns(
     conditions.push(or(eq(packages.ephemeral, false), isNull(packages.ephemeral))!);
   }
 
-  const filter = and(...conditions)!;
-
-  // Same rationale as `listRunsWithFilter`: count and page are independent
-  // reads over one filter, so they go out concurrently.
-  const [countRows, rows] = await Promise.all([
-    db
-      .select({ count: count() })
-      .from(runs)
-      .leftJoin(packages, eq(packages.id, runs.packageId))
-      .where(filter),
-    db
-      .select(enrichedRunSelect(actor))
-      .from(runs)
-      .leftJoin(packages, eq(packages.id, runs.packageId))
-      .leftJoin(profiles, eq(runs.userId, profiles.id))
-      .leftJoin(endUsers, eq(runs.endUserId, endUsers.id))
-      .leftJoin(apiKeys, eq(runs.apiKeyId, apiKeys.id))
-      .leftJoin(schedules, eq(runs.scheduleId, schedules.id))
-      .where(filter)
-      .orderBy(desc(runs.startedAt))
-      .limit(limit)
-      .offset(offset),
-  ]);
-  const [countRow] = countRows;
-
-  const data = rows.map((row) => mapEnrichedRun(row, canReadAgentInput));
-  const total = countRow?.count ?? 0;
-  return {
-    ...listResponse(data, { hasMore: offset + data.length < total }),
-    total,
-  };
+  return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
 
 export async function listScheduleRuns(

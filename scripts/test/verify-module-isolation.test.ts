@@ -24,17 +24,14 @@ async function runGate(args: string[] = []): Promise<{ code: number; out: string
   return { code, out, err };
 }
 
-// Both spawns happen ONCE, here, and in parallel. The commercial-dependency
-// direction reads every tracked source file in the repository, so a spawn
-// inside an `it()` spends seconds of repo-wide I/O against that test's timeout
-// — which is what it started failing on.
-const [plain, verbose] = await Promise.all([runGate(), runGate(["--verbose"])]);
+// One verbose scan covers both the result and the population actually read.
+const verbose = await runGate(["--verbose"]);
 
 describe("verify-module-isolation as a process", () => {
   it("passes over this repository", () => {
-    expect(plain.err).toBe("");
-    expect(plain.code).toBe(0);
-    expect(plain.out).toContain("module isolation clean");
+    expect(verbose.err).toBe("");
+    expect(verbose.code).toBe(0);
+    expect(verbose.out).toContain("module isolation clean");
   });
 
   it("reads a module's production code that lives outside `src/`", () => {

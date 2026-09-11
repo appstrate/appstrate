@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  useState,
-  useCallback,
-  useMemo,
-  useEffect,
-  type ComponentType,
-  type ComponentProps,
-} from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -61,13 +54,7 @@ function isQuerySettled(query: { isPending: boolean; fetchStatus: string }): boo
   return !query.isPending || query.fetchStatus === "idle";
 }
 
-export function RunDetailPage({
-  RerunButton = Button,
-  InputModal = RunModal,
-}: {
-  RerunButton?: ComponentType<ComponentProps<typeof Button>>;
-  InputModal?: ComponentType<ComponentProps<typeof RunModal>>;
-} = {}) {
+export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
   const packageId = `${scope}/${name}`;
@@ -282,7 +269,7 @@ export function RunDetailPage({
       </div>
 
       {agent && canReadAgent && (
-        <InputModal
+        <RunModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}
           agent={agent}
@@ -373,7 +360,7 @@ export function RunDetailPage({
               for the readings, the live cadence and when it renders nothing. */}
                 <ContextGaugeReadout turns={turnRows} status={run.status} />
                 {!isRunning && !isInline && agent && (
-                  <RerunButton
+                  <Button
                     variant="outline"
                     size="sm"
                     disabled={!permissionsReady || runAgent.isPending}
@@ -390,7 +377,7 @@ export function RunDetailPage({
                     {runAgent.isPending && <Spinner />}
                     <Play className="size-3.5" />
                     {t("run.rerun")}
-                  </RerunButton>
+                  </Button>
                 )}
                 {/* Cancel hidden for remote-origin runs — the process runs on the
               caller's host and the platform cannot signal it. A soft-cancel

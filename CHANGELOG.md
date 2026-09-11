@@ -734,6 +734,23 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Idempotent run retries enforce current permissions and input visibility.**
+  The request fingerprint includes its method, URL and body; using the same key
+  for a different route or version returns `422 idempotency_conflict` without
+  executing again. Existing cache entries without a request fingerprint also
+  return 422 until their 24-hour TTL expires. On deployment, reconcile the
+  original resource before issuing a new key for such a retry.
+
+- **Stripe deliveries use the current subscription for plan and quota.** Late
+  updates and checkout completions preserve the current entitlement and billed
+  consumption. Subscription creation refuses an unknown live price; notifications
+  continue to describe the historical transition, after commit.
+
+- **Pricing refresh refuses missing rates before writing catalog files.**
+  `refresh-pricing-catalog.ts --apply` stops if an existing model or token rate
+  disappears upstream. Resolve the catalog entry explicitly before applying;
+  missing prices cannot silently replace existing prices during a refresh.
+
 - **The hosted connect portal stops burning a link over a refusal that cost
   nothing upstream.** A package whose auth strategy cannot begin an OAuth flow
   was answered 500 with the link's `jti` already consumed, so the retry the page

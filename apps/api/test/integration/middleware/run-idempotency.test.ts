@@ -66,7 +66,7 @@ describe("run replay respects current permissions on the real test application",
     }
     const normal = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(runner) });
     expect(normal.status).toBe(200);
-    expect((await normal.json()).input).toBeNull();
+    expect(((await normal.json()) as { input: unknown }).input).toBeNull();
     const replayAs = (ctx: TestContext) =>
       app.request(path, {
         method: "POST",
@@ -76,7 +76,7 @@ describe("run replay respects current permissions on the real test application",
     const hidden = await replayAs(outsider);
     expect(hidden.status).toBe(404);
     const replay = await replayAs(runner);
-    const replayBody = await replay.json();
+    const replayBody = (await replay.json()) as { id: string; input: unknown };
     const viewerReplay = await replayAs(viewer);
     const viewerDirect = await app.request(path, {
       method: "POST",
@@ -90,7 +90,9 @@ describe("run replay respects current permissions on the real test application",
     expect(viewerDirect.status).toBe(403);
     const again = await replayAs(owner);
     expect(again.status).toBe(201);
-    expect((await again.json()).input).toEqual({ imposed: "SYNTHETIC-IMPOSED-VALUE" });
+    expect(((await again.json()) as { input: unknown }).input).toEqual({
+      imposed: "SYNTHETIC-IMPOSED-VALUE",
+    });
     expect(viewerReplay.status).toBe(403);
     await assertDbCount(runs, eq(runs.orgId, owner.orgId), 1);
     await db.delete(runs).where(eq(runs.id, run.id));
