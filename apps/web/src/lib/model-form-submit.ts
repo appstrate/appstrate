@@ -121,7 +121,7 @@ async function submitOne(
     };
   }
   onSuccess();
-  return { failedModelIds: [], duplicateModelIds: [] };
+  return { failedModelIds: [], duplicateModelIds: [], credentialId };
 }
 
 /** One submission handler over `writes` — a batch when the payload carries `models`. */
