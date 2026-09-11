@@ -42,17 +42,10 @@ export const eeEnvSchema = z
     // confirm — and keeps its own timer, because a paused sweep that also stopped
     // those retries would keep charging customers for deleted organizations.
     EE_RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(0).default(300),
-    // The absolute ceiling is {@link LEDGER_LIST_MAX_LIMIT}, the platform's
-    // `usage.list` limit: the cursor read is capped there server-side, so a larger
-    // batch would silently cap. The batch does NOT own that budget alone — the
-    // replay window is read on top of it — so the real bound is the cross-field
-    // rule under this object, and this `.max` is only the replay-window-of-0 case.
-    EE_RECONCILIATION_BATCH_SIZE: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(LEDGER_LIST_MAX_LIMIT)
-      .default(100),
+    // Upper-bounded by the cross-field rule under this object, not here: the
+    // batch shares {@link LEDGER_LIST_MAX_LIMIT} with the replay window, which is
+    // read on top of it.
+    EE_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).default(100),
 
     // How far BELOW the watermark every sweep pass re-reads the ledger.
     //
