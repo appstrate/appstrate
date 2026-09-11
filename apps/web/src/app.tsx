@@ -403,7 +403,14 @@ export function App() {
           </RequirePermission>
         }
       />
-      <Route path="library" element={<OrgSettingsLibraryPage />} />
+      <Route
+        path="library"
+        element={
+          <RequirePermission permission="spaces:read">
+            <OrgSettingsLibraryPage />
+          </RequirePermission>
+        }
+      />
       <Route
         path="models"
         element={
@@ -454,21 +461,49 @@ export function App() {
   const workspaceSettingsRoutes = (
     <>
       <Route index element={<NavigateKeepingState to="general" />} />
-      <Route path="general" element={<OrgSettingsAppGeneralPage />} />
+      <Route
+        path="general"
+        element={
+          <RequirePermission permission="space-settings:write">
+            <OrgSettingsAppGeneralPage />
+          </RequirePermission>
+        }
+      />
       {/* Space membership and its custom roles: who is in THIS space, and as
           what. Org members are the other surface — a person can hold an org
           role and no seat here. */}
       <Route
         path="members"
         element={
-          <RequirePermission permission="space-members:read">
+          <RequirePermission permission={["space-members:read", "space-members:invite"]}>
             <OrgSettingsSpaceMembersPage />
           </RequirePermission>
         }
       />
-      <Route path="auth" element={<OrgSettingsAppAuthPage />} />
-      <Route path="api-keys" element={<ApiKeysPage />} />
-      <Route path="oauth" element={<OrgSettingsSpaceOauthPage />} />
+      <Route
+        path="auth"
+        element={
+          <RequirePermission permission="spaces:write">
+            <OrgSettingsAppAuthPage />
+          </RequirePermission>
+        }
+      />
+      <Route
+        path="api-keys"
+        element={
+          <RequirePermission permission="api-keys:read">
+            <ApiKeysPage />
+          </RequirePermission>
+        }
+      />
+      <Route
+        path="oauth"
+        element={
+          <RequirePermission permission="oauth-clients:read">
+            <OrgSettingsSpaceOauthPage />
+          </RequirePermission>
+        }
+      />
       <Route
         path="end-users"
         element={

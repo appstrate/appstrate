@@ -13,9 +13,12 @@ import {
   Plug,
   Settings,
   Shield,
+  ShieldCheck,
   Users,
   Webhook,
 } from "lucide-react";
+import type { GateablePermission } from "../../hooks/use-permissions";
+import { WEBHOOK_READ_PERMISSIONS } from "../../lib/webhook-permissions";
 import type { SettingsScope } from "../../lib/settings-context";
 
 export interface UnifiedSettingsNavItem {
@@ -32,7 +35,11 @@ export interface UnifiedSettingsSection {
 }
 
 interface SettingsNavigationOptions {
-  isAdmin: boolean;
+  /**
+   * Every entry is gated on the permission its own route checks, so an entry
+   * is there exactly when the page behind it can load something.
+   */
+  can: (permission: GateablePermission) => boolean;
   features: {
     oidc: boolean;
     billing: boolean;
@@ -41,7 +48,7 @@ interface SettingsNavigationOptions {
 }
 
 export function buildSettingsNavigation({
-  isAdmin,
+  can,
   features,
 }: SettingsNavigationOptions): UnifiedSettingsSection[] {
   return [
@@ -49,42 +56,60 @@ export function buildSettingsNavigation({
       scope: "organization",
       labelKey: "orgSettings.sectionOrganization",
       items: [
-        { to: "/org-settings/general", icon: Building, labelKey: "orgSettings.tabGeneral" },
-        { to: "/org-settings/members", icon: Users, labelKey: "orgSettings.tabMembers" },
+        {
+          to: "/org-settings/general",
+          icon: Building,
+          labelKey: "orgSettings.tabGeneral",
+          show: can("org:read"),
+        },
+        {
+          to: "/org-settings/members",
+          icon: Users,
+          labelKey: "orgSettings.tabMembers",
+          show: can("members:read"),
+        },
+        {
+          to: "/org-settings/roles",
+          icon: ShieldCheck,
+          labelKey: "roles.tabTitle",
+          show: can("roles:read"),
+        },
         {
           to: "/org-settings/spaces",
           icon: LayoutGrid,
           labelKey: "applications.pageTitle",
+          show: can("spaces:read"),
         },
         {
           to: "/org-settings/library",
           icon: Library,
           labelKey: "orgSettings.tabLibrary",
-          show: isAdmin,
+          show: can("spaces:read"),
         },
         {
           to: "/org-settings/models",
           icon: BrainCircuit,
           labelKey: "models.tabTitle",
-          show: isAdmin,
+          show: can("models:read"),
         },
         {
           to: "/org-settings/proxies",
           icon: Globe,
           labelKey: "proxies.tabTitle",
-          show: isAdmin,
+          show: can("proxies:read"),
         },
         {
+          // Shown before collaborator SSO is switched on: this is where it is.
           to: "/org-settings/oauth",
           icon: KeyRound,
           labelKey: "orgSettings.tabOauth",
-          show: isAdmin && features.oidc,
+          show: features.oidc && can("oauth-clients:read"),
         },
         {
           to: "/org-settings/cli-sessions",
           icon: Laptop,
           labelKey: "orgSettings.tabCliSessions",
-          show: isAdmin && features.oidc,
+          show: features.oidc && can("cli-sessions:read"),
         },
         {
           to: "/org-settings/mcp-access",
@@ -95,7 +120,7 @@ export function buildSettingsNavigation({
           to: "/org-settings/billing",
           icon: CreditCard,
           labelKey: "billing.tabTitle",
-          show: features.billing,
+          show: features.billing && can("billing:read"),
         },
       ],
     },
@@ -107,37 +132,43 @@ export function buildSettingsNavigation({
           to: "/workspace-settings/general",
           icon: Settings,
           labelKey: "appSettings.tabGeneral",
-          show: isAdmin,
+          show: can("space-settings:write"),
+        },
+        {
+          to: "/workspace-settings/members",
+          icon: Users,
+          labelKey: "spaceMembers.tabTitle",
+          show: can("space-members:read") || can("space-members:invite"),
         },
         {
           to: "/workspace-settings/auth",
           icon: Shield,
           labelKey: "appSettings.tabAuth",
-          show: isAdmin && features.oidc,
+          show: features.oidc && can("spaces:write"),
         },
         {
           to: "/workspace-settings/api-keys",
           icon: KeyRound,
           labelKey: "orgSettings.tabApiKeys",
-          show: isAdmin,
+          show: can("api-keys:read"),
         },
         {
           to: "/workspace-settings/oauth",
           icon: KeyRound,
           labelKey: "appSettings.tabOauth",
-          show: isAdmin && features.oidc,
+          show: features.oidc && can("oauth-clients:read"),
         },
         {
           to: "/workspace-settings/end-users",
           icon: Users,
           labelKey: "endUsers.pageTitle",
-          show: isAdmin,
+          show: can("end-users:read"),
         },
         {
           to: "/workspace-settings/webhooks",
           icon: Webhook,
           labelKey: "webhooks.pageTitle",
-          show: isAdmin && features.webhooks,
+          show: features.webhooks && WEBHOOK_READ_PERMISSIONS.some(can),
         },
       ],
     },

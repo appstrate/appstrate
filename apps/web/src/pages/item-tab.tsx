@@ -47,7 +47,9 @@ export function ItemTab({
   const { can } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
-  const creation = useCreationHandoff(type, can("org:read"));
+  // Creating and importing are writes on the package type, as their routes are.
+  const canCreate = can(type === "skill" ? "skills:write" : "mcp-servers:write");
+  const creation = useCreationHandoff(type, canCreate);
 
   const presentation = TYPE_PRESENTATION[type];
   const typeLabel = t(presentation.typeKey);
@@ -73,7 +75,7 @@ export function ItemTab({
         emptyHint={t("packages.emptyItemsHint", { type: typeLabel })}
         emptyIcon={presentation.emptyIcon}
         extraActions={
-          can("org:read") ? (
+          canCreate ? (
             <PageActionsMenu>
               <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
                 <Upload />

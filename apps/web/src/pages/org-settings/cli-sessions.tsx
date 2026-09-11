@@ -18,6 +18,7 @@ import { memberLabel, useCliSessionColumns, type AdminCliSession } from "./cli-s
 export function OrgSettingsCliSessionsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { currentOrg } = useOrg();
+  const { can } = usePermissions();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
@@ -44,7 +45,7 @@ export function OrgSettingsCliSessionsPage() {
   const [pendingRevoke, setPendingRevoke] = useState<AdminCliSession | null>(null);
   const columns = useCliSessionColumns({
     revokingFamilyId: revoke.isPending ? (revoke.variables?.params.path.familyId ?? null) : null,
-    onRevoke: setPendingRevoke,
+    onRevoke: can("cli-sessions:delete") ? setPendingRevoke : undefined,
   });
 
   // Not a request state: without an org id the query never runs, so `isLoading`
@@ -62,7 +63,6 @@ export function OrgSettingsCliSessionsPage() {
           {t("orgCliSessions.description")}
         </p>
       </div>
-      import {usePermissions} from "../../hooks/use-permissions";
       <DataTable
         columns={columns}
         rows={sessions}

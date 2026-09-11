@@ -25,7 +25,8 @@ export function useCliSessionColumns({
   onRevoke,
 }: {
   revokingFamilyId: string | null;
-  onRevoke: (session: AdminCliSession) => void;
+  /** Absent without `cli-sessions:delete`: the row then has no menu. */
+  onRevoke?: (session: AdminCliSession) => void;
 }): DataColumn<AdminCliSession>[] {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -119,6 +120,8 @@ export function useCliSessionColumns({
       width: "48px",
       align: "end",
       cell: (session) => {
+        const revoke = onRevoke;
+        if (!revoke) return null;
         const isPending = revokingFamilyId === session.familyId;
         return (
           <TableRowActions
@@ -127,7 +130,7 @@ export function useCliSessionColumns({
             pendingLabel={t("common:loading")}
           >
             <DropdownMenuItem
-              onSelect={() => onRevoke(session)}
+              onSelect={() => revoke(session)}
               disabled={session.current || isPending}
               className="text-destructive focus:text-destructive"
             >

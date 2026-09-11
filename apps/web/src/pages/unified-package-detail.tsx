@@ -6,6 +6,7 @@ import { useParams, Link, Navigate, useLocation, useNavigate } from "react-route
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
+import { usePermissions } from "../hooks/use-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   usePackageDetail,
@@ -147,6 +148,10 @@ function AgentRunButtonInline({
 
 export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
+  const { can } = usePermissions();
+  // Only an agent has a narrower read: without `agents:read` a runner launches
+  // it and follows its own runs, but does not see what it is made of.
+  const fullRead = type !== "agent" || can("agents:read");
   const location = useLocation();
   const navigate = useNavigate();
   const {
@@ -214,10 +219,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── State ──
   const allValidTabs: DetailTab[] =
     type === "agent"
-      ? [...AGENT_DETAIL_TABS]
+      ? AGENT_DETAIL_TABS.filter((id) => fullRead || id !== "overview")
       : ["overview", "versions", "diff", "content", "usedBy"];
   // Every detail has a useful summary; explicit file/version deep links still win.
-  const defaultTab: DetailTab = "overview";
+  const defaultTab: DetailTab = fullRead ? "overview" : "runs";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   const openAgentSettings = (section: "map" | "files" | "model") => {
     const search = new URLSearchParams(location.search);
@@ -357,7 +362,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     memory: t("detail.tabMemory"),
     settings: t("detail.tabSettings"),
   };
-  const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.map((id) => ({
+  const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.filter(
+    (id) => fullRead || id !== "overview",
+  ).map((id) => ({
     id,
     label: agentTabLabels[id],
   }));

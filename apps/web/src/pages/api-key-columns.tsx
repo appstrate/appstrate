@@ -37,7 +37,8 @@ export function useApiKeyColumns({
 }: {
   availableScopes: string[] | undefined;
   revokingKeyId: string | null;
-  onRevoke: (key: ApiKeyInfo) => void;
+  /** Absent without `api-keys:revoke`: the row then has no menu. */
+  onRevoke?: (key: ApiKeyInfo) => void;
 }): DataColumn<ApiKeyInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -126,21 +127,25 @@ export function useApiKeyColumns({
       header: "",
       width: "48px",
       align: "end",
-      cell: (key) => (
-        <TableRowActions
-          menuLabel={t("apiKeys.moreActions", { name: key.name })}
-          isPending={revokingKeyId === key.id}
-          pendingLabel={t("common:loading")}
-        >
-          <DropdownMenuItem
-            onSelect={() => onRevoke(key)}
-            className="text-destructive focus:text-destructive"
+      cell: (key) => {
+        const revoke = onRevoke;
+        if (!revoke) return null;
+        return (
+          <TableRowActions
+            menuLabel={t("apiKeys.moreActions", { name: key.name })}
+            isPending={revokingKeyId === key.id}
+            pendingLabel={t("common:loading")}
           >
-            <Trash2 />
-            {t("apiKeys.revoke")}
-          </DropdownMenuItem>
-        </TableRowActions>
-      ),
+            <DropdownMenuItem
+              onSelect={() => revoke(key)}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 />
+              {t("apiKeys.revoke")}
+            </DropdownMenuItem>
+          </TableRowActions>
+        );
+      },
     },
   ];
 }

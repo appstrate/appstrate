@@ -37,7 +37,7 @@ export function ApiKeysPage() {
   const columns = useApiKeyColumns({
     availableScopes,
     revokingKeyId: revokeApiKeyMutation.isPending ? (confirmState?.id ?? null) : null,
-    onRevoke: handleRevoke,
+    onRevoke: can("api-keys:revoke") ? handleRevoke : undefined,
   });
 
   if (!can("api-keys:read")) return null;
@@ -47,10 +47,12 @@ export function ApiKeysPage() {
     <div>
       <SettingsPageActions>
         <PageActionsMenu>
-          <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
-            <Plus />
-            {t("settings:apiKeys.createBtn")}
-          </DropdownMenuItem>
+          {can("api-keys:create") && (
+            <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
+              <Plus />
+              {t("settings:apiKeys.createBtn")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem asChild>
             <a
               href="/api/docs"

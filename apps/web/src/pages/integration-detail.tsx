@@ -1246,6 +1246,8 @@ function ConnectionsTable({
   initialMethod?: string;
 }) {
   const { t } = useTranslation("settings");
+  const { can } = usePermissions();
+  const canConnect = can("integrations:connect");
   const [search, setSearch] = useState("");
   const [sharing, setSharing] = useState<string[]>([]);
   const location = useLocation();
@@ -1345,12 +1347,14 @@ function ConnectionsTable({
           setMethods([]);
         }}
         actions={
-          canConfigure ? (
+          canConfigure || canConnect ? (
             <AddIntegrationConnection
               packageId={packageId}
               detail={detail}
               userId={user?.id}
               onConfigure={onConfigure}
+              canConfigure={canConfigure}
+              canConnect={canConnect}
             />
           ) : undefined
         }

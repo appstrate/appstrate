@@ -21,11 +21,17 @@ export function AddIntegrationConnection({
   detail,
   userId,
   onConfigure,
+  canConfigure,
+  canConnect,
 }: {
   packageId: string;
   detail: IntegrationDetailWire;
   userId?: string;
   onConfigure: (authKey?: string) => void;
+  /** Setting up an auth method (`integrations:configure`). */
+  canConfigure: boolean;
+  /** Adding one's own connection (`integrations:connect`). */
+  canConnect: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { openPopup, isPending } = useHostedConnectPopup();
@@ -41,6 +47,7 @@ export function AddIntegrationConnection({
     });
   };
   if (!detail.auths.length) return null;
+  if (!allowed.size && !canConfigure) return null;
   if (!allowed.size)
     return (
       <Button
@@ -55,6 +62,12 @@ export function AddIntegrationConnection({
         <span className="hidden @sm/bar:inline">{t("integration.presentation.configureAuth")}</span>
       </Button>
     );
+  // Each method offers what the caller may do with it: connect when it is
+  // set up, set it up when it is not.
+  const offered = detail.auths.filter((auth) =>
+    allowed.has(auth.auth_key) ? canConnect : canConfigure,
+  );
+  if (!offered.length) return null;
   const label = t("integration.presentation.addConnection");
   if (detail.auths.length === 1)
     return (
@@ -88,7 +101,7 @@ export function AddIntegrationConnection({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {detail.auths.map((auth) => (
+        {offered.map((auth) => (
           <DropdownMenuItem
             key={auth.auth_key}
             onSelect={() =>

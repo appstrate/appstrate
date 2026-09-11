@@ -25,6 +25,7 @@ import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings } from "luc
 import { useOrg } from "../hooks/use-org";
 import { $api } from "../api/client";
 import { useSpaces } from "../hooks/use-spaces";
+import { usePermissions } from "../hooks/use-permissions";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -69,6 +70,7 @@ export function OrgSwitcher({
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const { isMobile, setOpenMobile } = useSidebar();
+  const { can } = usePermissions();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   // The organisation whose workspaces column two is showing. Null means "the
@@ -361,11 +363,14 @@ export function OrgSwitcher({
           <div className={cn("border-l p-2.5", mobilePresentation && "border-t border-l-0")}>
             {/* Adding a workspace lands in the CURRENT org's settings, so the
                 shortcut is offered only while you are looking at your own —
-                elsewhere it would create it in the wrong place. */}
+                elsewhere it would create it in the wrong place. Creating is
+                `spaces:write`. */}
             <ColumnHeader
               label={t("switcher.workspacesColumn")}
               addLabel={t("switcher.add")}
-              onAdd={isExploringElsewhere ? undefined : "/org-settings/spaces"}
+              onAdd={
+                isExploringElsewhere || !can("spaces:write") ? undefined : "/org-settings/spaces"
+              }
             />
             {exploredSpaces.isPending ? (
               <div className="space-y-1 p-2">

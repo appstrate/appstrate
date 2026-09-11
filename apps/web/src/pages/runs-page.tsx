@@ -15,6 +15,7 @@ import { RunList } from "../components/run-list";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunViewStore } from "../stores/list-view-store";
+import { usePermissions } from "../hooks/use-permissions";
 
 /**
  * The filters live in the URL, so a filtered list is a link. They also come
@@ -41,6 +42,10 @@ export function RunsPage() {
   const markAllRead = useMarkAllRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("runs.entity"));
+  const { can } = usePermissions();
+  // Without `runs:read-all` the list is already "mine": the scope filter would
+  // answer the same set, so it is not offered.
+  const canSeeEveryRun = can("runs:read-all");
 
   const scopes = list.values("user", SCOPES);
   const kinds = list.values("kind", KINDS);
@@ -50,13 +55,17 @@ export function RunsPage() {
   const setView = useRunViewStore((state) => state.setView);
 
   const filters: FilterSpec[] = [
-    {
-      id: "user",
-      label: t("runs.filterScope"),
-      values: scopes,
-      options: [{ value: "me", label: t("runs.filterMine") }],
-      onChange: list.setValues("user"),
-    },
+    ...(canSeeEveryRun
+      ? [
+          {
+            id: "user",
+            label: t("runs.filterScope"),
+            values: scopes,
+            options: [{ value: "me", label: t("runs.filterMine") }],
+            onChange: list.setValues("user"),
+          },
+        ]
+      : []),
     {
       id: "kind",
       label: t("runs.filterKind"),
@@ -84,7 +93,7 @@ export function RunsPage() {
   // for scope, whose single box is on or off. Neither collapses the ticks
   // themselves: what you ticked stays ticked and stays chipped.
   const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
-  const user = scopes.includes("me") ? "me" : undefined;
+  const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
 
   return (
     <div>

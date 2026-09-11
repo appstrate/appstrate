@@ -236,7 +236,7 @@ export function IntegrationsPage() {
   const setView = useIntegrationViewStore((state) => state.setView);
   const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const creation = useCreationHandoff("integration", can("integrations:read"));
+  const creation = useCreationHandoff("integration", can("integrations:write"));
 
   const statuses = list.values("status", INTEGRATION_STATUSES);
   const origins = list.values("origin", INTEGRATION_ORIGINS);
@@ -324,7 +324,7 @@ export function IntegrationsPage() {
               <LibraryBig />
               {t("integrations.catalogue.browse")}
             </DropdownMenuItem>
-            {can("integrations:read") && (
+            {can("integrations:write") && (
               <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
                 <Plus />
                 {t("integrations.create")}

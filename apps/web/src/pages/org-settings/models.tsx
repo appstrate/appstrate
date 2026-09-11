@@ -49,6 +49,7 @@ function ModelsList({
   settingDefaultId,
   canWrite,
   canDelete,
+  canReadCredentials,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -63,11 +64,13 @@ function ModelsList({
   // step with the route that already gates this screen.
   canWrite: boolean;
   canDelete: boolean;
+  /** The provider registry sits behind `model-provider-credentials:read`. */
+  canReadCredentials: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
   const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
-  const { data: registry } = useProvidersRegistry();
+  const { data: registry } = useProvidersRegistry(canReadCredentials);
 
   const columns = useModelColumns({
     registry,
@@ -285,6 +288,7 @@ export function OrgSettingsModelsPage() {
           onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
           canWrite={canWriteModels}
           canDelete={canDeleteModels}
+          canReadCredentials={canReadCredentials}
         />
       )}
 

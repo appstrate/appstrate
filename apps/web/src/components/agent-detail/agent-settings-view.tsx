@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
+import { usePermissions } from "../../hooks/use-permissions";
 import { RailLink } from "../settings/rail-link";
 import { AgentOverviewTab } from "./agent-overview-tab";
 import { AgentConfigurationView, type ConfigurationSection } from "./agent-configuration-view";
@@ -73,10 +74,31 @@ export function AgentSettingsView({
   const { t } = useTranslation("agents");
   const location = useLocation();
   const navigate = useNavigate();
+  const { can } = usePermissions();
+  // Three permissions behind one rail: configuring the agent, reading its
+  // schedules, reading what it is made of. Connections are open to anyone who
+  // reaches the agent.
+  const visible = (section: AgentSettingsSection) => {
+    if (section === "model" || section === "proxy" || section === "inputs") {
+      return can("agents:configure");
+    }
+    if (section === "schedules") return can("schedules:read");
+    if (section === "map" || section === "files") return can("agents:read");
+    return true;
+  };
+  const groups = SETTINGS_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => visible(item.id)),
+  })).filter((group) => group.items.length > 0);
   const requested = new URLSearchParams(location.search).get("agentSettings");
-  const activeSection = SETTINGS_SECTION_IDS.includes(requested as AgentSettingsSection)
-    ? (requested as AgentSettingsSection)
-    : "model";
+  const fallback: AgentSettingsSection = groups[0]?.items[0]?.id ?? "connections";
+  const activeSection =
+    SETTINGS_SECTION_IDS.includes(requested as AgentSettingsSection) &&
+    visible(requested as AgentSettingsSection)
+      ? (requested as AgentSettingsSection)
+      : visible("model")
+        ? "model"
+        : fallback;
 
   const sectionHref = (section: AgentSettingsSection) => {
     const search = new URLSearchParams(location.search);
@@ -120,7 +142,7 @@ export function AgentSettingsView({
       railClassName="p-6"
       rail={
         <nav className="space-y-5" aria-label={t("detail.tabSettings")}>
-          {SETTINGS_GROUPS.map((group) => (
+          {groups.map((group) => (
             <section key={group.labelKey}>
               <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
                 {t(group.labelKey)}

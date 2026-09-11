@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { AppWindow, Plus } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useSpaces } from "../../hooks/use-spaces";
+import { usePermissions } from "../../hooks/use-permissions";
 import { useSpaceSwitcher } from "../../hooks/use-current-space";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
@@ -22,6 +23,7 @@ export function OrgSettingsSpacesPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { switchSpace } = useSpaceSwitcher();
+  const { can } = usePermissions();
 
   const handleSpaceClick = (spaceId: string) => {
     switchSpace(spaceId);
@@ -33,22 +35,23 @@ export function OrgSettingsSpacesPage() {
     onOpen: handleSpaceClick,
   });
 
-  // No admin gate here: the route mounts this behind `spaces:read`, and a
-  // second check inside would be a second thing to keep in step with it.
+  // Reading is the route's gate (`spaces:read`); creating is its own permission.
   return (
     <>
-      <SettingsPageActions>
-        <PageActionsMenu>
-          <DropdownMenuItem
-            data-page-action="create"
-            data-testid="create-space-button"
-            onSelect={() => setCreateOpen(true)}
-          >
-            <Plus />
-            {t("spaces.create")}
-          </DropdownMenuItem>
-        </PageActionsMenu>
-      </SettingsPageActions>
+      {can("spaces:write") && (
+        <SettingsPageActions>
+          <PageActionsMenu>
+            <DropdownMenuItem
+              data-page-action="create"
+              data-testid="create-space-button"
+              onSelect={() => setCreateOpen(true)}
+            >
+              <Plus />
+              {t("spaces.create")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
+        </SettingsPageActions>
+      )}
 
       <DataTable
         label={t("spaces.pageTitle")}

@@ -55,6 +55,7 @@ function GeneralForm({
   };
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   const location = useLocation();
   const navigate = useNavigate();
   const updateMutation = useUpdateSpace();
@@ -286,7 +287,7 @@ function GeneralForm({
           the CONTROL — a button that opens a confirm — which is what the row
           pattern says a destructive setting looks like, rather than a red-bordered
           card that reads as a different kind of screen. */}
-      {!application.isDefault && (
+      {!application.isDefault && can("spaces:delete") && (
         <SettingsGroup title={t("applications.dangerZone")}>
           <SettingRow
             variant="action"

@@ -26,6 +26,8 @@ export function OAuthClientActions({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const canWrite = can("oauth-clients:write");
+  const canDelete = can("oauth-clients:delete");
   const updateMutation = useUpdateOAuthClient();
   const deleteMutation = useDeleteOAuthClient();
   const rotateMutation = useRotateOAuthClientSecret();
@@ -69,15 +71,19 @@ export function OAuthClientActions({
   const isPending =
     updateMutation.isPending || deleteMutation.isPending || rotateMutation.isPending;
 
+  // Every hook above, THEN this: a row the caller can neither change nor
+  // delete has no menu at all.
+  if (!canWrite && !canDelete) return null;
+
   return (
     <>
       <TableRowActions
-        primary={{ label: t("common:btn.edit"), onSelect: onEdit }}
+        primary={canWrite ? { label: t("common:btn.edit"), onSelect: onEdit } : undefined}
         menuLabel={t("oauthClients.moreActions", { name: rowName })}
         isPending={isPending}
         pendingLabel={t("common:loading")}
       >
-        {can("oauth-clients:write") && (
+        {canWrite && (
           <DropdownMenuItem
             onSelect={() => handleUpdate({ isFirstParty: !client.isFirstParty })}
             disabled={updateMutation.isPending}
@@ -88,29 +94,37 @@ export function OAuthClientActions({
               : t("oauthClients.makeFirstParty")}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem
-          onSelect={() => handleUpdate({ disabled: !client.disabled })}
-          disabled={updateMutation.isPending}
-        >
-          <Power />
-          {client.disabled ? t("oauthClients.enable") : t("oauthClients.disable")}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={() => setRotateConfirmOpen(true)}
-          disabled={rotateMutation.isPending}
-        >
-          <RotateCcw />
-          {t("oauthClients.rotate")}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => setDeleteConfirmOpen(true)}
-          disabled={deleteMutation.isPending}
-          className="text-destructive focus:text-destructive"
-        >
-          <Trash2 />
-          {t("common:btn.delete")}
-        </DropdownMenuItem>
+        {canWrite && (
+          <>
+            <DropdownMenuItem
+              onSelect={() => handleUpdate({ disabled: !client.disabled })}
+              disabled={updateMutation.isPending}
+            >
+              <Power />
+              {client.disabled ? t("oauthClients.enable") : t("oauthClients.disable")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => setRotateConfirmOpen(true)}
+              disabled={rotateMutation.isPending}
+            >
+              <RotateCcw />
+              {t("oauthClients.rotate")}
+            </DropdownMenuItem>
+          </>
+        )}
+        {canDelete && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => setDeleteConfirmOpen(true)}
+              disabled={deleteMutation.isPending}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 />
+              {t("common:btn.delete")}
+            </DropdownMenuItem>
+          </>
+        )}
       </TableRowActions>
 
       <ConfirmModal

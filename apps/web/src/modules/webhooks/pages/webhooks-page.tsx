@@ -13,25 +13,29 @@ import { PageActionsMenu } from "@/components/page-actions-menu";
 import { useWebhookColumns } from "../components/webhook-columns";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { usePermissions } from "@/hooks/use-permissions";
 
 export function WebhooksPage() {
   const location = useLocation();
   const { t } = useTranslation(["settings", "common"]);
   const [createOpen, setCreateOpen] = useState(false);
+  const { can } = usePermissions();
 
   const { data: webhooks, isLoading, error } = useWebhooks();
   const columns = useWebhookColumns();
 
   return (
     <div>
-      <SettingsPageActions>
-        <PageActionsMenu>
-          <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
-            <Plus />
-            {t("settings:webhooks.createTitle")}
-          </DropdownMenuItem>
-        </PageActionsMenu>
-      </SettingsPageActions>
+      {can("webhooks:write") && (
+        <SettingsPageActions>
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
+              <Plus />
+              {t("settings:webhooks.createTitle")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
+        </SettingsPageActions>
+      )}
 
       <DataTable
         label={t("settings:webhooks.pageTitle")}

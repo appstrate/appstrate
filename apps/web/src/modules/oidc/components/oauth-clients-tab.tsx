@@ -18,6 +18,7 @@ import { SettingsPageActions } from "@/components/settings/settings-page-actions
 import { PageActionsMenu } from "@/components/page-actions-menu";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useOAuthClients } from "../hooks/use-oauth-clients";
 import { OAuthClientFormModal } from "./oauth-client-form-modal";
 import { useOAuthClientColumns } from "./oauth-client-columns";
@@ -29,6 +30,7 @@ interface OAuthClientsTabProps {
 export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { data, isLoading, error } = useOAuthClients(level);
+  const { can } = usePermissions();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -66,14 +68,16 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
             {t("settings:oauthClients.introApp")}
           </p>
         )}
-        <SettingsPageActions>
-          <PageActionsMenu>
-            <DropdownMenuItem data-page-action="create" onSelect={() => setSelectedClient("new")}>
-              <Plus />
-              {t("settings:oauthClients.createBtn")}
-            </DropdownMenuItem>
-          </PageActionsMenu>
-        </SettingsPageActions>
+        {can("oauth-clients:write") && (
+          <SettingsPageActions>
+            <PageActionsMenu>
+              <DropdownMenuItem data-page-action="create" onSelect={() => setSelectedClient("new")}>
+                <Plus />
+                {t("settings:oauthClients.createBtn")}
+              </DropdownMenuItem>
+            </PageActionsMenu>
+          </SettingsPageActions>
+        )}
       </div>
 
       <DataTable

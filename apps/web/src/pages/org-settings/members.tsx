@@ -154,7 +154,7 @@ export function OrgSettingsMembersPage() {
           })
         : [],
     canRemove: (member) =>
-      orgRole
+      orgRole && can("members:remove")
         ? canRemoveMember({
             actorRole: orgRole,
             targetRole: member.role,

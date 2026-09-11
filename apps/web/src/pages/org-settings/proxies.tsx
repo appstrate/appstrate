@@ -46,9 +46,10 @@ export function useProxyColumns({
   testResults: Record<string, TestResult | null>;
   settingDefaultId: string | null;
   onTest: (id: string) => void;
-  onEdit: (p: OrgProxyInfo) => void;
-  onDelete: (p: OrgProxyInfo) => void;
-  onSetDefault: (p: OrgProxyInfo) => void;
+  /** Each absent without its permission, and its menu entry with it. */
+  onEdit?: (p: OrgProxyInfo) => void;
+  onDelete?: (p: OrgProxyInfo) => void;
+  onSetDefault?: (p: OrgProxyInfo) => void;
 }): DataColumn<OrgProxyInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -137,7 +138,9 @@ export function useProxyColumns({
           <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
             <TableRowActions
               primary={
-                isCustom ? { label: t("proxies.edit"), onSelect: () => onEdit(p) } : undefined
+                isCustom && onEdit
+                  ? { label: t("proxies.edit"), onSelect: () => onEdit(p) }
+                  : undefined
               }
               menuLabel={t("proxies.moreActions", { name: p.label })}
               isPending={isTesting || isSettingDefault}
@@ -147,7 +150,7 @@ export function useProxyColumns({
                 <FlaskConical />
                 {t("proxies.test")}
               </DropdownMenuItem>
-              {!p.is_default && (
+              {!p.is_default && onSetDefault && (
                 <DropdownMenuItem
                   onSelect={() => onSetDefault(p)}
                   disabled={settingDefaultId !== null}
@@ -157,7 +160,7 @@ export function useProxyColumns({
                   {t("proxies.setDefault")}
                 </DropdownMenuItem>
               )}
-              {isCustom && (
+              {isCustom && onDelete && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -180,6 +183,8 @@ export function useProxyColumns({
 export function OrgSettingsProxiesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const canWrite = can("proxies:write");
+  const canDelete = can("proxies:delete");
 
   const [proxyModalOpen, setProxyModalOpen] = useState(false);
   const [editProxy, setEditProxy] = useState<OrgProxyInfo | null>(null);
@@ -207,9 +212,9 @@ export function OrgSettingsProxiesPage() {
     testingIds,
     testResults,
     onTest: handleTest,
-    onEdit,
-    onDelete,
-    onSetDefault,
+    onEdit: canWrite ? onEdit : undefined,
+    onDelete: canDelete ? onDelete : undefined,
+    onSetDefault: canWrite ? onSetDefault : undefined,
     settingDefaultId: setDefaultMutation.isPending
       ? (setDefaultMutation.variables?.body.proxyId ?? null)
       : null,
@@ -228,14 +233,16 @@ export function OrgSettingsProxiesPage() {
       {/* The page's own action, in the treatment every list bar uses: a white
           surface, not a filled blue. A screen whose table now looks like every
           other table cannot keep the one button that does not. */}
-      <SettingsPageActions>
-        <PageActionsMenu>
-          <DropdownMenuItem data-page-action="create" onSelect={onCreate}>
-            <Plus />
-            {t("proxies.add")}
-          </DropdownMenuItem>
-        </PageActionsMenu>
-      </SettingsPageActions>
+      {canWrite && (
+        <SettingsPageActions>
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="create" onSelect={onCreate}>
+              <Plus />
+              {t("proxies.add")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
+        </SettingsPageActions>
+      )}
 
       <DataTable
         label={t("proxies.tabTitle")}

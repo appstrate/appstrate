@@ -185,10 +185,7 @@ export function UnifiedSettingsLayout() {
   );
 
   const sections = buildSettingsNavigation({
-    // The navigation builder still asks the question as a single boolean; what
-    // changed is where the answer comes from — the permission matrix, not the
-    // role name.
-    isAdmin: can("org:read"),
+    can,
     features: {
       oidc: !!features.oidc,
       billing: !!features.billing,
