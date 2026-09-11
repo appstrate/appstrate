@@ -36,6 +36,9 @@ import { formatDateField } from "../../lib/format-date";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { TableRowActions } from "../../components/table-row-actions";
 
+/** Widest reach first, the order every org-role list uses. */
+const ORG_ROLE_DISPLAY_ORDER: readonly AssignableOrgRole[] = ["admin", "member", "guest"];
+
 type OrgMember = components["schemas"]["OrgMember"];
 
 export function useMemberColumns({
@@ -100,7 +103,7 @@ export function useMemberColumns({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {roles.map((r) => (
+              {ORG_ROLE_DISPLAY_ORDER.filter((r) => roles.includes(r)).map((r) => (
                 <SelectItem key={r} value={r}>
                   {t(roleI18nKey(r))}
                 </SelectItem>

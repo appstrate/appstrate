@@ -179,6 +179,12 @@ export function OrgSettingsRolesPage() {
         </SettingsPageActions>
       )}
 
+      {/* The page is named for what it lists: roles granted inside a space.
+          The org role is the other axis, and lives with the people. */}
+      <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
+        {t("roles.pageIntro")}
+      </p>
+
       {!customRolesEnabled && (
         <Alert className="mb-6">
           <AlertDescription>{t("roles.customUnavailable")}</AlertDescription>

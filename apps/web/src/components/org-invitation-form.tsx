@@ -25,8 +25,8 @@ import {
 import { SpaceAssignmentsField } from "./space-assignments-field";
 import { Spinner } from "./spinner";
 
-/** Rising reach first, then the exception: standard user, admin, guest. */
-const ORG_ROLE_DISPLAY_ORDER: readonly AssignableOrgRole[] = ["member", "admin", "guest"];
+/** Widest reach first: admin, member, guest — the order every org-role list uses. */
+const ORG_ROLE_DISPLAY_ORDER: readonly AssignableOrgRole[] = ["admin", "member", "guest"];
 
 interface InviteFormValues {
   email: string;
