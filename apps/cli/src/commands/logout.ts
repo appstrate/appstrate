@@ -39,15 +39,18 @@ export async function logoutCommand(
   intro(`Appstrate logout — profile "${profileName}"`, io);
 
   let hadTokens = false;
+  let credentialsCleared = false;
+  // Marked cleared once the profile is gone, keyring throw or not: the local
+  // sign-out has happened, and a second attempt would only throw again.
   const clearCredentials = async (): Promise<void> => {
     await _awaitRefreshQuiesce(profileName);
     try {
       await deleteTokens(profileName);
     } finally {
       await deleteProfile(profileName);
+      credentialsCleared = true;
     }
   };
-  let credentialsCleared = false;
   try {
     await withSyncLock(
       async () => {
@@ -67,8 +70,14 @@ export async function logoutCommand(
             `warning: could not revoke refresh token server-side (${formatError(err)}); continuing with local cleanup.\n`,
           );
         } finally {
-          await clearCredentials();
-          credentialsCleared = true;
+          // A keyring that will not release its copy is reported on its own
+          // terms; the local sign-out is done and the skills still need taking
+          // off the disk.
+          try {
+            await clearCredentials();
+          } catch (err) {
+            io.stderr.write(`warning: ${formatError(err)}\n`);
+          }
         }
         const cleanup = await cleanupProfileSkills(profileName);
         if (cleanup.pluginReset)

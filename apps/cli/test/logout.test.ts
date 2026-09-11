@@ -17,9 +17,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { loadTokens } from "../src/lib/keyring.ts";
+import { loadTokens, _setKeyringFactoryForTesting } from "../src/lib/keyring.ts";
 import { getProfile } from "../src/lib/config.ts";
 import { logoutCommand } from "../src/commands/logout.ts";
+import { createMemoryIO } from "./helpers/memory-io.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
@@ -153,7 +154,6 @@ describe("logout (idempotency)", () => {
 it("removes credentials even when the synchronization lock cannot be opened", async () => {
   const { mkdir } = await import("node:fs/promises");
   const { getLockPath } = await import("../src/lib/skills-sync/lock.ts");
-  const { createMemoryIO } = await import("./helpers/memory-io.ts");
   await seedLoggedInProfile("default");
   await mkdir(getLockPath(), { recursive: true });
   const { io, stderr } = createMemoryIO();
@@ -161,4 +161,84 @@ it("removes credentials even when the synchronization lock cannot be opened", as
   expect(await loadTokens("default")).toBeNull();
   expect(await getProfile("default")).toBeNull();
   expect(stderr()).toContain("could not complete skills cleanup");
+});
+
+/**
+ * A locked keyring is not a reason to leave the machine holding the
+ * organization's skills: the local sign-out has happened either way, so
+ * `cleanupProfileSkills` must run and the command must reach its outro
+ * (issue #1321).
+ */
+describe("logout (keyring refuses the delete)", () => {
+  const KEYRING_LOCKED = "Couldn't access platform storage: the keychain is locked";
+  let previousOptIn: string | undefined;
+
+  beforeEach(async () => {
+    previousOptIn = process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+    delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+    await seedLoggedInProfile("default");
+    installFetch(async () => new Response(JSON.stringify({ revoked: true }), { status: 200 }));
+    const { writeSyncState } = await import("../src/lib/skills-sync/state.ts");
+    const { targetRoot } = await import("../src/lib/skills-sync/targets.ts");
+    await writeSyncState({
+      version: 1,
+      targets: {
+        "claude-plugin": {
+          context: {
+            profileName: "default",
+            instance: "https://app.example.com",
+            userId: "u_1",
+            orgId: "org_1",
+          },
+          source: "published",
+          root: targetRoot("claude-plugin"),
+          managed: {},
+        },
+      },
+    });
+    // Reads still answer, so the revoke call gets its token; only the removal
+    // is refused, which is what a locked store does.
+    _setKeyringFactoryForTesting((profile) => ({
+      setPassword: () => undefined,
+      getPassword: () => keyring.store.get(profile) ?? null,
+      deletePassword: () => {
+        throw new Error(KEYRING_LOCKED);
+      },
+    }));
+  });
+
+  afterEach(() => {
+    if (previousOptIn === undefined) delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+    else process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = previousOptIn;
+  });
+
+  it("cleans up the skills and signs out when plaintext storage is opted into", async () => {
+    process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = "1";
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await logoutCommand({ profile: "default" }, io);
+
+    expect(stderr()).not.toContain("could not be removed");
+    expect(stderr()).toContain("Appstrate plugin reset");
+    expect(stdout()).toContain('Signed out of "default".');
+    expect(await getProfile("default")).toBeNull();
+    const { readSyncState } = await import("../src/lib/skills-sync/state.ts");
+    expect((await readSyncState()).state.targets).toEqual({});
+  });
+
+  it("names the keyring as the failure and still cleans up without the opt-in", async () => {
+    // Negative control for the case above: without the env var the refusal is
+    // real, and it must be reported as itself rather than as a skills-cleanup
+    // fault — with the cleanup and the outro happening all the same.
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await logoutCommand({ profile: "default" }, io);
+
+    expect(stderr()).toContain("the OS keyring entry could not be removed");
+    expect(stderr()).toContain(KEYRING_LOCKED);
+    expect(stderr()).not.toContain("could not complete skills cleanup");
+    expect(stderr()).toContain("Appstrate plugin reset");
+    expect(stdout()).toContain('Signed out of "default".');
+    expect(await getProfile("default")).toBeNull();
+  });
 });
