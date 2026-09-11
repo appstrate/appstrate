@@ -437,17 +437,10 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
  * a registration body may set it, so a flag kept there is a flag the client can
  * name. Idempotent — a refreshed CIMD client is re-stamped on every resolution.
  *
- * It writes exactly those two columns and NEVER `scopes` (issue #1351). This
- * function once backfilled the scope set from the CIMD document, to work around
- * a Better Auth < 1.7.3 bug where the first resolution handed `/authorize` a
- * client row with `scopes: []` and the request bounced with `invalid_scope`.
- * That bug is fixed upstream — `persistOAuthClientRegistration` now writes the
- * self-service ceiling in the same statement that creates the row — and the
- * backfill was removed in #1287. Do not restore it: it is a path where the
- * CLIENT decides its own persisted scope set, which is the ceiling `/authorize`
- * enforces. The recorded symptom "CIMD 1st hit = invalid_scope" is not a reason
- * to bring it back; `test/integration/services/dcr-cimd.test.ts` pins both the
- * first-resolution flow and this function leaving `scopes` alone.
+ * It writes exactly those two columns and never `scopes`: the provider owns the
+ * scope set (`persistOAuthClientRegistration` writes the self-service ceiling in
+ * the statement that creates the row), and a writer here would let the client
+ * choose the ceiling `/authorize` enforces.
  */
 export async function markClientSelfService(clientId: string): Promise<void> {
   await db
