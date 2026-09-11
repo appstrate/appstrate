@@ -320,7 +320,44 @@ const config: KnipConfig = {
    * still reported, which is the whole reason the `./components/*` wildcard
    * was dropped from the `packages/ui` entry list below.
    */
-  ignoreIssues: { "packages/ui/src/components/*.tsx": ["exports"] },
+  ignoreIssues: {
+    "packages/ui/src/components/*.tsx": ["exports"],
+    /**
+     * Redesign components built but not yet mounted. They are kept, not
+     * deleted, because the screens that consume them are the next items on
+     * `docs/redesign-2026.md`'s ordered list — and a component deleted for
+     * being early is a component rewritten later from memory.
+     *
+     * This list is a debt, not a carve-out: an entry that outlives its screen
+     * should be removed, not renewed.
+     */
+    "apps/web/src/components/appstrate-mark.tsx": ["files"],
+    "apps/web/src/components/sidebar-billing.tsx": ["files"],
+    "apps/web/src/components/run-detail/run-source-card.tsx": ["files"],
+    "apps/web/src/components/agent-detail/agent-bundle-tab.tsx": ["files"],
+    "apps/web/src/components/persistence/memory-row.tsx": ["files"],
+    "apps/web/src/components/persistence/pinned-slot-card.tsx": ["files"],
+    "apps/web/src/components/source-badge.tsx": ["files"],
+    /**
+     * The lab's fixture catalogue is consumed as a namespace (`import * as f`),
+     * which knip does not resolve per named export. Reporting each fixture as
+     * unused would make the whole file unreadable as a signal.
+     */
+    "apps/web/src/lab/fixtures.ts": ["exports"],
+    "apps/web/src/lab/handlers.ts": ["exports"],
+    /** Helpers of the screens listed above, same debt. */
+    "apps/web/src/components/agent-identity-options.ts": ["exports"],
+    "apps/web/src/components/persistence/scope-filter.tsx": ["files", "exports"],
+    "apps/web/src/lib/integration-collection.ts": ["exports"],
+    "apps/web/src/lib/list-params.ts": ["exports"],
+    "apps/web/src/lib/modal-route.ts": ["exports"],
+    "apps/web/src/pages/api-key-columns.tsx": ["exports"],
+    "apps/web/src/test/render.tsx": ["exports"],
+    "apps/web/src/components/package-detail/agent-tabs.tsx": ["exports"],
+    "apps/api/src/lib/agent-appearance.ts": ["exports"],
+    /** The map's wire types, exported for the screens still to be built. */
+    "apps/web/src/modules/agent-map/use-agent-map.ts": ["types"],
+  },
 
   /**
    * Invoked through `npx`/`bunx` or a shell builtin, so no manifest lists
@@ -454,6 +491,11 @@ const config: KnipConfig = {
         // Type-level guard over the generated OpenAPI types: it exists to be
         // type-checked, so it has no importer by design.
         "src/api/schema.assert.ts",
+        // Lab mode. `src/lab/install.ts` is injected as a module script by the
+        // serve-only `labMode()` Vite plugin, BEFORE `src/main.tsx` — there is
+        // no static import to follow, so everything it pulls in reads as
+        // unreachable. See `apps/web/vite.config.ts` and docs/redesign-2026.md.
+        "src/lab/install.ts",
       ],
     },
 
@@ -599,7 +641,15 @@ const config: KnipConfig = {
       entry: [...manifestEntries("packages/ui", ["./components/*"])],
     },
     // Playwright specs, discovered by the runner, not imported.
-    e2e: { entry: [...manifestEntries("e2e"), "**/*.spec.ts"] },
+    e2e: {
+      entry: [
+        ...manifestEntries("e2e"),
+        "**/*.spec.ts",
+        // Lab drivers: each is run by its own `lab:*` root script (`bun
+        // lab/shots.mjs`), so nothing imports them — they ARE the entry.
+        "lab/*.mjs",
+      ],
+    },
   },
 };
 

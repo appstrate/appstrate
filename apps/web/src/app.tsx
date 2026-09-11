@@ -161,9 +161,9 @@ const OrgSettingsSpacesPage = lazy(() =>
     default: m.OrgSettingsSpacesPage,
   })),
 );
-const OrgSettingsSpaceGeneralPage = lazy(() =>
-  import("./pages/org-settings/space/general").then((m) => ({
-    default: m.OrgSettingsSpaceGeneralPage,
+const OrgSettingsAppGeneralPage = lazy(() =>
+  import("./pages/org-settings/app/general").then((m) => ({
+    default: m.OrgSettingsAppGeneralPage,
   })),
 );
 const OrgSettingsSpaceMembersPage = lazy(() =>
@@ -171,8 +171,8 @@ const OrgSettingsSpaceMembersPage = lazy(() =>
     default: m.OrgSettingsSpaceMembersPage,
   })),
 );
-const OrgSettingsSpaceAuthPage = lazy(() =>
-  import("./pages/org-settings/space/auth").then((m) => ({ default: m.OrgSettingsSpaceAuthPage })),
+const OrgSettingsAppAuthPage = lazy(() =>
+  import("./pages/org-settings/app/auth").then((m) => ({ default: m.OrgSettingsAppAuthPage })),
 );
 const OrgSettingsSpaceOauthPage = lazy(() =>
   import("./pages/org-settings/space/oauth").then((m) => ({
@@ -454,7 +454,7 @@ export function App() {
   const workspaceSettingsRoutes = (
     <>
       <Route index element={<NavigateKeepingState to="general" />} />
-      <Route path="general" element={<OrgSettingsSpaceGeneralPage />} />
+      <Route path="general" element={<OrgSettingsAppGeneralPage />} />
       {/* Space membership and its custom roles: who is in THIS space, and as
           what. Org members are the other surface — a person can hold an org
           role and no seat here. */}
@@ -466,7 +466,7 @@ export function App() {
           </RequirePermission>
         }
       />
-      <Route path="auth" element={<OrgSettingsSpaceAuthPage />} />
+      <Route path="auth" element={<OrgSettingsAppAuthPage />} />
       <Route path="api-keys" element={<ApiKeysPage />} />
       <Route path="oauth" element={<OrgSettingsSpaceOauthPage />} />
       <Route

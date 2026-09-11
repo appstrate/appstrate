@@ -12,10 +12,19 @@ import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spa
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
+import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
+import { Label } from "@appstrate/ui/components/label";
+import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import { RoleCatalogState } from "../../../components/role-catalog-state";
+import { SpaceRoleSelect } from "../../../components/space-role-select";
+import { useSpaceRoleOptions, type SpaceRolePreset } from "../../../hooks/use-roles";
+import type { components } from "../../../api/client";
 import { SettingsGroup, SettingRow } from "../../../components/settings/setting-row";
 import { InlineTextSetting } from "../../../components/settings/inline-text-setting";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toast } from "sonner";
+
+type SpaceVisibility = components["schemas"]["SpaceObject"]["visibility"];
 
 export function OrgSettingsAppGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -41,6 +50,8 @@ function GeneralForm({
     name: string;
     isDefault: boolean;
     settings?: { allowedRedirectDomains?: string[] };
+    visibility: SpaceVisibility;
+    default_role: SpaceRolePreset;
   };
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -51,15 +62,42 @@ function GeneralForm({
 
   const domains = application.settings?.allowedRedirectDomains ?? [];
   const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
+  const [editedVisibility, setEditedVisibility] = useState<SpaceVisibility | null>(null);
+  const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [saving, setSaving] = useState<"name" | "domains" | null>(null);
+  const [saving, setSaving] = useState<"name" | "domains" | "visibility" | "defaultRole" | null>(
+    null,
+  );
   const activeDomains = editedDomains ?? domains;
+  const activeVisibility = editedVisibility ?? application.visibility;
+  const activeDefaultRole = editedDefaultRole ?? application.default_role;
+
+  // The assignable presets come from the org's role catalogue, which a space
+  // admin may read without owning it.
+  const {
+    roles,
+    rolesKnown,
+    isLoading: rolesLoading,
+    error: rolesError,
+    refetch: refetchRoles,
+  } = useSpaceRoleOptions(spaceId);
+  const presetOptions = (roles ?? [])
+    .filter((role) => role.kind === "preset")
+    .map((role) => ({ value: role.key, label: t(`roles.preset.${role.key}`) }));
 
   // Each control commits on its own — "the control IS the setting". The Save
   // button that used to sit under this form was the last one in the settings
   // surfaces, and it made the workspace the one screen where a change was not
   // a change until you pressed something else.
-  const save = (patch: { name?: string; domains?: string[] }, field: "name" | "domains") => {
+  const save = (
+    patch: {
+      name?: string;
+      domains?: string[];
+      visibility?: SpaceVisibility;
+      default_role?: SpaceRolePreset;
+    },
+    field: "name" | "domains" | "visibility" | "defaultRole",
+  ) => {
     setSaving(field);
     updateMutation.mutate(
       {
@@ -67,6 +105,8 @@ function GeneralForm({
         body: {
           name: (patch.name ?? application.name).trim(),
           settings: { allowedRedirectDomains: patch.domains ?? activeDomains },
+          visibility: patch.visibility ?? activeVisibility,
+          default_role: patch.default_role ?? activeDefaultRole,
         },
       },
       {
@@ -76,6 +116,16 @@ function GeneralForm({
         onSettled: () => setSaving(null),
       },
     );
+  };
+
+  const commitVisibility = (next: SpaceVisibility) => {
+    setEditedVisibility(next);
+    save({ visibility: next }, "visibility");
+  };
+
+  const commitDefaultRole = (next: SpaceRolePreset) => {
+    setEditedDefaultRole(next);
+    save({ default_role: next }, "defaultRole");
   };
 
   const commitDomains = (next: string[]) => {
@@ -157,6 +207,79 @@ function GeneralForm({
             </Button>
           </div>
         </SettingRow>
+
+        {/* Who reaches this space without an explicit membership row (RBAC
+            spec §3.1). Radios rather than a select: the three answers differ
+            in consequence, not in degree, and each needs its sentence. */}
+        <SettingRow
+          variant="field"
+          label={t("spaces.visibilityLabel")}
+          description={t("spaces.visibilityHint")}
+          status={saving === "visibility" && <Spinner />}
+        >
+          <div className="flex w-full flex-col gap-3">
+            <RadioGroup
+              value={activeVisibility}
+              onValueChange={(value) => commitVisibility(value as SpaceVisibility)}
+              disabled={application.isDefault || updateMutation.isPending}
+              aria-label={t("spaces.visibilityLabel")}
+            >
+              {SPACE_VISIBILITIES.map((value) => (
+                <div key={value} className="flex items-start gap-2">
+                  <RadioGroupItem
+                    value={value}
+                    id={`space-visibility-${value}`}
+                    className="mt-1 shrink-0"
+                  />
+                  <Label
+                    htmlFor={`space-visibility-${value}`}
+                    className="flex min-w-0 flex-col items-start gap-1"
+                  >
+                    <span>{t(`spaces.visibility.${value}`)}</span>
+                    <span className="text-muted-foreground text-sm leading-relaxed font-normal">
+                      {t(`spaces.visibilityDesc.${value}`)}
+                    </span>
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+            <p className="text-muted-foreground text-xs">{t("spaces.adminAccessHint")}</p>
+            {application.isDefault && (
+              <p className="text-muted-foreground text-xs">{t("spaces.visibilityDefaultLocked")}</p>
+            )}
+          </div>
+        </SettingRow>
+
+        {/* Only an `open` space has implicit members, so only it has a preset
+            to give them. */}
+        {activeVisibility === "open" && (
+          <SettingRow
+            variant="field"
+            label={t("spaces.defaultRoleLabel")}
+            description={t("spaces.defaultRoleHint")}
+            status={saving === "defaultRole" && <Spinner />}
+          >
+            <div className="flex w-full flex-col gap-2">
+              <SpaceRoleSelect
+                id="space-default-role"
+                className="w-full sm:w-[240px]"
+                value={activeDefaultRole}
+                options={presetOptions}
+                fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
+                disabled={updateMutation.isPending}
+                onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
+              />
+              <RoleCatalogState
+                isLoading={rolesLoading}
+                rolesKnown={rolesKnown}
+                error={rolesError}
+                refetch={() => void refetchRoles()}
+                emptyMessage={presetOptions.length === 0 ? t("spaces.noAssignablePresets") : null}
+              />
+              <p className="text-muted-foreground text-xs">{t("spaces.defaultRoleImpact")}</p>
+            </div>
+          </SettingRow>
+        )}
       </SettingsGroup>
 
       {/* The danger zone is a settings group like any other. Its exception is
