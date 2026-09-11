@@ -90,9 +90,7 @@ function normalizeForwardedIp(value: string): string | undefined {
  * SHORTER chain proves the trusted hops did not all append, which leaves every
  * entry in it caller-supplied, so this fails closed and returns `undefined`:
  * the caller falls back to the socket peer, the one address no header can
- * forge. Clamping to the leftmost entry instead — what this did before #1316 —
- * handed any caller a chosen IP under any `TRUST_PROXY >= 1`, defeating every
- * per-IP rate limit including the one that guards `AUTH_BOOTSTRAP_TOKEN`.
+ * forge.
  */
 function pickFromXff(xff: string, hops: number): string | undefined {
   const parts = xff

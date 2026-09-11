@@ -377,6 +377,10 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
     const html = await res.text();
     expect(html).toContain("Ask an administrator");
     expect(html).not.toContain("Please try again");
+    // This link survives its own refusal (next case), so the advice must point
+    // back at it — and must NOT be the wording the burned branch gets.
+    expect(html).toContain("open this link again");
+    expect(html).not.toContain("request a new connection link");
     // The `detail` that names the remedy is written for an operator, and this
     // route has no session (issue #1345) — it belongs in the log line only.
     expect(html).not.toContain("Administrator must register OAuth client credentials");
@@ -422,6 +426,10 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
     expect(res.status).toBe(403);
     const html = await res.text();
     expect(html).toContain("Ask an administrator");
+    // This click burns the link (next case), so reopening it answers 410: the
+    // only advice that works is a re-mint.
+    expect(html).toContain("request a new connection link");
+    expect(html).not.toContain("open this link again");
     // This `detail` embeds the authorization server's OWN message verbatim
     // (`resolveConnectClient` renders `provisioningFailure.message` as-is), so
     // it is upstream-controlled text on a session-less page. Log only.

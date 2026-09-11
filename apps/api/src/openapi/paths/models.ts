@@ -236,6 +236,7 @@ export const modelsPaths = {
                   type: "array",
                   minItems: 1,
                   maxItems: 50,
+                  uniqueItems: true,
                   items: { type: "string", minLength: 1 },
                 },
               },
