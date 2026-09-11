@@ -1015,7 +1015,7 @@ export const integrationsPaths = {
         },
         "403": {
           description:
-            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned: reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click.",
+            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead.",
         },
         "410": { description: "Invalid, expired, or already-used token (HTML error page)." },
         "429": { $ref: "#/components/responses/RateLimited" },

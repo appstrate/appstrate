@@ -1090,10 +1090,15 @@ export function createIntegrationsRouter() {
           // spam amplifier attributable to this deployment (issue #1344). Burn
           // it. The refusal is permanent anyway, so the retry this forbids was
           // never going to succeed.
-          if (!usesAutoProvisionedClient(manifest, auth)) await releaseJti(claims.jti);
+          //
+          // The advice follows the same fork: a burned link answers 410 on the
+          // next click, so telling that caller to reopen it is a dead end.
+          const reusable = !usesAutoProvisionedClient(manifest, auth);
+          if (reusable) await releaseJti(claims.jti);
+          const retry = reusable ? "open this link again" : "request a new connection link";
           return c.html(
             popupHtmlError(
-              "This integration is not ready to be connected. Ask an administrator to finish setting it up, then open this link again.",
+              `This integration is not ready to be connected. Ask an administrator to finish setting it up, then ${retry}.`,
               completionDetail,
             ),
             err.status as ContentfulStatusCode,
