@@ -273,6 +273,22 @@ export function membersOfSpace(spaceId: string): SpaceMember[] {
   return spaceMembers;
 }
 
+/**
+ * What is ACTIVE in a space — the lab's `space_packages`. The library says
+ * where each package is installed, and a system package counts everywhere,
+ * the same rule the real list routes apply.
+ */
+export function activePackageIds(
+  type: "agent" | "skill" | "mcp-server" | "integration",
+  spaceId: string,
+): Set<string> {
+  return new Set(
+    library.packages[type]
+      .filter((pkg) => pkg.source === "system" || pkg.installed_in.includes(spaceId))
+      .map((pkg) => pkg.id),
+  );
+}
+
 export const availableApiKeyScopes: Json200<"/api/api-keys/available-scopes", "get"> = {
   object: "list",
   hasMore: false,
@@ -3542,7 +3558,6 @@ export const library: Json200<"/api/library", "get"> = {
   packages: {
     agent: [
       {
-        type: "agent" as const,
         id: "@tractr/compta-trimestrielle",
         name: "Compta trimestrielle",
         description: "Pipeline de comptabilité trimestrielle.",
@@ -3550,28 +3565,45 @@ export const library: Json200<"/api/library", "get"> = {
         installed_in: ["app_lab_default", APP_ID],
       },
       {
-        type: "agent" as const,
         id: "@default/wiki-brain",
         name: "Wiki-brain",
         description: "Mémoire proactive par personne.",
         source: "system",
         installed_in: ["app_lab_default"],
       },
+      // Absent from the space the lab opens in, so the catalogue has something
+      // to offer and the detail page something to activate.
       {
-        // Absent from the space the lab opens in, so the detail page can offer
-        // to install it there — the action the library used to be the only
-        // place for.
-        type: "agent" as const,
         id: "@tractr/analyse-recurrence-articles-tastet",
         name: "Analyse de récurrence des articles Tastet",
         description: "Détecte le potentiel de récurrence éditoriale.",
         source: "local",
         installed_in: [APP_ID, "app_lab_sandbox"],
       },
-    ],
+      {
+        id: "@tractr/reponse-leads",
+        name: "Réponse aux leads",
+        description: "Qualifie les demandes entrantes.",
+        source: "local",
+        installed_in: ["app_lab_default"],
+      },
+      {
+        id: "@tractr/radar-ia",
+        name: "Radar IA",
+        description: "Veille hebdomadaire.",
+        source: "local",
+        installed_in: ["app_lab_default", "app_lab_sandbox"],
+      },
+      {
+        id: "@tractr/debrief-appel",
+        name: "Débrief d'appel",
+        description: "Compte rendu d'un appel prospect.",
+        source: "local",
+        installed_in: [APP_ID],
+      },
+    ].map((pkg) => ({ ...pkg, type: "agent" as const })),
     skill: [
       {
-        type: "skill" as const,
         id: "@tractr/compta-references",
         name: "compta-references",
         description: "Références et scripts pour la comptabilité Tractr.",
@@ -3579,17 +3611,24 @@ export const library: Json200<"/api/library", "get"> = {
         installed_in: ["app_lab_default", APP_ID],
       },
       {
-        type: "skill" as const,
         id: "@default/triage-sentiment",
         name: "triage-sentiment",
         description: "Trie les demandes entrantes par sentiment.",
+        source: "system",
+        installed_in: ["app_lab_default", APP_ID],
+      },
+      {
+        // The catalogue's candidate for skills: local, and absent from the
+        // space the lab opens in.
+        id: "@tractr/wiki-brain-method",
+        name: "wiki-brain-method",
+        description: "Méthode du WikiBrain multi-client.",
         source: "local",
         installed_in: [APP_ID],
       },
-    ],
+    ].map((pkg) => ({ ...pkg, type: "skill" as const })),
     integration: [
       {
-        type: "integration" as const,
         id: "@appstrate/google-drive",
         name: "Google Drive",
         description: "Fichiers, documents et dossiers partagés.",
@@ -3597,14 +3636,28 @@ export const library: Json200<"/api/library", "get"> = {
         installed_in: ["app_lab_default", APP_ID, "app_lab_sandbox"],
       },
       {
-        type: "integration" as const,
         id: "@appstrate/gmail",
         name: "Gmail",
         description: "Courriels au nom de l'employé connecté.",
         source: "system",
         installed_in: [],
       },
-    ],
-    "mcp-server": [],
+    ].map((pkg) => ({ ...pkg, type: "integration" as const })),
+    "mcp-server": [
+      {
+        id: "@appstrate/gdrive-mcp",
+        name: "Google Drive MCP",
+        description: "Serveur MCP Drive.",
+        source: "system",
+        installed_in: ["app_lab_default"],
+      },
+      {
+        id: "@tractr/qbo-mcp",
+        name: "QuickBooks MCP",
+        description: "Serveur MCP QuickBooks.",
+        source: "local",
+        installed_in: [APP_ID],
+      },
+    ].map((pkg) => ({ ...pkg, type: "mcp-server" as const })),
   },
 };

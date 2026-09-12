@@ -183,6 +183,55 @@ function orgIdFromSettingsUrl(url: URL): string {
 }
 
 /** `heavy` swaps the list bodies; `empty` empties them; `nominal` is as authored. */
+/**
+ * The space a request is scoped to, as the client stamps it. The lab opens on
+ * the default space, so an unstamped request answers for that one.
+ */
+function currentSpace(headers: Headers): string {
+  return headers.get("X-Space-Id") || "app_lab_default";
+}
+
+/**
+ * What the lab activated or deactivated since it loaded, per space. Without it
+ * the fixtures would answer the same thing after an install as before, and the
+ * one thing this screen is for — a package moving from the catalogue into the
+ * space — could never be seen.
+ */
+const labActivations = new Map<string, { on: Set<string>; off: Set<string> }>();
+
+function activationOverlay(spaceId: string) {
+  let entry = labActivations.get(spaceId);
+  if (!entry) {
+    entry = { on: new Set<string>(), off: new Set<string>() };
+    labActivations.set(spaceId, entry);
+  }
+  return entry;
+}
+
+function activeIdsFor(
+  type: "agent" | "skill" | "mcp-server" | "integration",
+  spaceId: string,
+): Set<string> {
+  const ids = f.activePackageIds(type, spaceId);
+  const overlay = labActivations.get(spaceId);
+  for (const id of overlay?.on ?? []) ids.add(id);
+  for (const id of overlay?.off ?? []) ids.delete(id);
+  return ids;
+}
+
+/**
+ * A list route answers with what is ACTIVE in this space: that is the rule for
+ * agents always, and for the other types when `?active=true` asks for it.
+ */
+function activeHere<T extends { id: string }>(
+  rows: T[],
+  type: "agent" | "skill" | "mcp-server",
+  headers: Headers,
+): T[] {
+  const active = activeIdsFor(type, currentSpace(headers));
+  return rows.filter((row) => active.has(row.id));
+}
+
 function list<T>(rows: T[], scenario: Scenario, heavy?: T[]): T[] {
   if (scenario === "empty") return [];
   if (scenario === "heavy" && heavy) return heavy;
@@ -237,7 +286,29 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/library$/,
-    handler: () => ({ status: 200, body: f.library }),
+    // The matrix reads the same overlay as the lists, so a box ticked here and
+    // a package activated from a catalogue tell the same story.
+    handler: () => ({
+      status: 200,
+      body: {
+        ...f.library,
+        packages: Object.fromEntries(
+          Object.entries(f.library.packages).map(([type, rows]) => [
+            type,
+            rows.map((pkg) => ({
+              ...pkg,
+              installed_in: f.library.spaces
+                .filter((space) =>
+                  activeIdsFor(type as "agent", space.id).has(pkg.id) && pkg.source !== "system"
+                    ? true
+                    : pkg.installed_in.includes(space.id),
+                )
+                .map((space) => space.id),
+            })),
+          ]),
+        ),
+      },
+    }),
   },
   {
     method: "GET",
@@ -642,15 +713,29 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/agents$/,
-    handler: (_u, s) => ({
+    // Space-scoped, like the real route: what can be launched HERE.
+    handler: (_u, s, headers) => ({
       status: 200,
-      body: { ...f.agents, data: list(f.agents.data, s, f.heavyAgents) },
+      body: {
+        ...f.agents,
+        data: activeHere(list(f.agents.data, s, f.heavyAgents), "agent", headers),
+      },
     }),
   },
   {
     method: "GET",
     pattern: /^\/api\/packages\/skills$/,
-    handler: (_u, s) => ({ status: 200, body: { ...f.skills, data: list(f.skills.data, s) } }),
+    handler: (url, s, headers) => {
+      const rows = list(f.skills.data, s);
+      return {
+        status: 200,
+        body: {
+          ...f.skills,
+          data:
+            url.searchParams.get("active") === "true" ? activeHere(rows, "skill", headers) : rows,
+        },
+      };
+    },
   },
   {
     method: "GET",
@@ -689,10 +774,19 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/packages\/mcp-servers$/,
-    handler: (_u, s) => ({
-      status: 200,
-      body: { ...f.mcpServers, data: list(f.mcpServers.data, s) },
-    }),
+    handler: (url, s, headers) => {
+      const rows = list(f.mcpServers.data, s);
+      return {
+        status: 200,
+        body: {
+          ...f.mcpServers,
+          data:
+            url.searchParams.get("active") === "true"
+              ? activeHere(rows, "mcp-server", headers)
+              : rows,
+        },
+      };
+    },
   },
   {
     method: "GET",
@@ -1168,6 +1262,34 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     method: "PUT",
     pattern: /^\/api\/notifications\/read\/[^/]+$/,
     handler: () => ({ status: 200, body: {} }),
+  },
+
+  /* Activating a package in a space, and taking it back out. */
+  {
+    method: "POST",
+    pattern: /^\/api\/spaces\/[^/]+\/packages$/,
+    handler: (url, _s, headers, body) => {
+      const spaceId = url.pathname.split("/")[3] ?? currentSpace(headers);
+      const packageId = (body as { packageId?: string } | undefined)?.packageId;
+      if (!packageId) return { status: 400, body: null };
+      const overlay = activationOverlay(spaceId);
+      overlay.off.delete(packageId);
+      overlay.on.add(packageId);
+      return { status: 200, body: { installed: true } };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/spaces\/[^/]+\/packages\/[^/]+\/[^/]+$/,
+    handler: (url, _s, headers) => {
+      const parts = url.pathname.split("/");
+      const spaceId = parts[3] ?? currentSpace(headers);
+      const packageId = `${decodeURIComponent(parts[5] ?? "")}/${decodeURIComponent(parts[6] ?? "")}`;
+      const overlay = activationOverlay(spaceId);
+      overlay.on.delete(packageId);
+      overlay.off.add(packageId);
+      return { status: 200, body: { installed: false } };
+    },
   },
 
   { method: "GET", pattern: /^\/api\/billing$/, handler: () => ({ status: 200, body: f.billing }) },

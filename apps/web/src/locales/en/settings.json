@@ -1304,5 +1304,12 @@
   "userDetail.noSpacesHint": "Add them from a space’s Members page.",
   "userDetail.joinedAt": "Joined {{date}}",
   "packages.install": "Install in this space",
-  "packages.installed": "“{{name}}” is active in this space."
+  "packages.installed": "“{{name}}” is active in this space.",
+  "catalogue.title": "Organization catalogue",
+  "catalogue.intro": "What the organization has that is not active in this space.",
+  "catalogue.browse": "Browse the catalogue",
+  "catalogue.search": "Search the catalogue…",
+  "catalogue.activate": "Activate here",
+  "catalogue.empty": "Everything is already active in this space.",
+  "catalogue.emptyHint": "What the organization adds shows here until it is activated."
 }

@@ -3,7 +3,7 @@
 import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
-import { type LucideIcon, Layers, Plus, SearchX, Upload } from "lucide-react";
+import { Layers, LibraryBig, Plus, SearchX, type LucideIcon, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -23,6 +23,9 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import { ImportModal } from "../components/import-modal";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
+import { PackageCatalogueModal } from "../components/package-catalogue-modal";
+import { useModalParam } from "../hooks/use-modal-param";
+import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 
@@ -215,6 +218,8 @@ export function PackageList() {
   const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
   const creation = useCreationHandoff("agent", can("agents:write"));
+  const canActivate = can(PACKAGE_PERMISSIONS.agent.install);
+  const catalogue = useModalParam("catalogue");
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
@@ -241,20 +246,33 @@ export function PackageList() {
         emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
         emptyIcon={Layers}
         extraActions={
-          can("agents:write") ? (
+          can("agents:write") || canActivate ? (
             <PageActionsMenu>
-              <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
-                <Upload />
-                {t("nav.import", { ns: "common" })}
-              </DropdownMenuItem>
-              <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
-                <Plus />
-                {t("list.create")}
-              </DropdownMenuItem>
+              {canActivate && (
+                <DropdownMenuItem data-page-action="catalogue" onSelect={() => catalogue.open()}>
+                  <LibraryBig />
+                  {t("catalogue.browse", { ns: "settings" })}
+                </DropdownMenuItem>
+              )}
+              {can("agents:write") && (
+                <>
+                  <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
+                    <Upload />
+                    {t("nav.import", { ns: "common" })}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
+                    <Plus />
+                    {t("list.create")}
+                  </DropdownMenuItem>
+                </>
+              )}
             </PageActionsMenu>
           ) : undefined
         }
       />
+      {catalogue.value !== null && canActivate && (
+        <PackageCatalogueModal type="agent" onClose={catalogue.close} />
+      )}
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
       {creation.isOpen && (
         <CreationHandoffModal

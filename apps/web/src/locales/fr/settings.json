@@ -1304,5 +1304,12 @@
   "userDetail.noSpacesHint": "Ajoutez-la depuis la page Membres d’un espace.",
   "userDetail.joinedAt": "Arrivé le {{date}}",
   "packages.install": "Installer dans cet espace",
-  "packages.installed": "« {{name}} » est actif dans cet espace."
+  "packages.installed": "« {{name}} » est actif dans cet espace.",
+  "catalogue.title": "Catalogue de l’organisation",
+  "catalogue.intro": "Ce que l’organisation possède et qui n’est pas actif dans cet espace.",
+  "catalogue.browse": "Parcourir le catalogue",
+  "catalogue.search": "Rechercher dans le catalogue…",
+  "catalogue.activate": "Activer ici",
+  "catalogue.empty": "Tout est déjà actif dans cet espace.",
+  "catalogue.emptyHint": "Ce que l’organisation ajoutera apparaîtra ici tant que ce ne sera pas activé."
 }
