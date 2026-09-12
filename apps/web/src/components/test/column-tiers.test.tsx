@@ -174,6 +174,7 @@ const SETS = {
         isRemoving: false,
         onChangeRole: () => {},
         onRemove: () => {},
+        spaces: () => ["Production"],
       }),
     ),
   applications: () =>

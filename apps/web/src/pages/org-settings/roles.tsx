@@ -189,13 +189,6 @@ export function OrgSettingsRolesPage() {
         </SettingsPageActions>
       )}
 
-      {/* Two axes side by side, because keeping them apart is what made
-          them hard to tell apart: the org role (fixed, set in Users) and the
-          space role (granted per space, from its Members page). */}
-      <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
-        {t("roles.pageIntro")}
-      </p>
-
       <Tabs value={tab} onValueChange={(next) => setParam("tab", next, "org")}>
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <DetailTabsList aria-label={t("roles.tabTitle")}>

@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toast } from "sonner";
+import { useQueries } from "@tanstack/react-query";
+import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useOrgOnlyScope } from "../../hooks/use-org-scope";
+import { useSpaces } from "../../hooks/use-spaces";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -37,7 +40,6 @@ export function OrgSettingsMembersPage() {
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
   const invite = useModalParam("invite");
-  const location = useLocation();
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
@@ -83,6 +85,34 @@ export function OrgSettingsMembersPage() {
     });
   };
 
+  // Which spaces a person actually reaches is the question this table could
+  // not answer. Only an owner or admin can ask it: they are admin in every
+  // space, so every member list answers them. One request per space, which is
+  // what the API offers today — a `spaces` field on the member would replace
+  // this loop.
+  const seesEverySpace = (ORG_ROLES_WITH_FULL_ACCESS as readonly string[]).includes(orgRole ?? "");
+  const { data: spaces } = useSpaces(seesEverySpace);
+  const scope = useOrgOnlyScope();
+  const spaceMemberships = useQueries({
+    queries: (seesEverySpace ? (spaces ?? []) : []).map((space) => ({
+      ...$api.queryOptions("get", "/api/spaces/{id}/members", {
+        params: { path: { id: space.id }, header: scope.header },
+      }),
+      enabled: scope.enabled,
+      select: (envelope: { data: { userId: string }[] }) => ({
+        space: space.name,
+        userIds: envelope.data.map((member) => member.userId),
+      }),
+    })),
+  });
+  const spacesByUser = new Map<string, string[]>();
+  for (const query of spaceMemberships) {
+    if (!query.data) continue;
+    for (const userId of query.data.userIds) {
+      spacesByUser.set(userId, [...(spacesByUser.get(userId) ?? []), query.data.space]);
+    }
+  }
+
   const memberColumns = useMemberColumns({
     assignableRoles: (member) =>
       orgRole && canChangeRole
@@ -104,6 +134,7 @@ export function OrgSettingsMembersPage() {
     isRemoving: removeMemberMutation.isPending,
     onChangeRole: handleRoleChange,
     onRemove: handleRemove,
+    spaces: seesEverySpace ? (member) => spacesByUser.get(member.userId) ?? [] : undefined,
   });
 
   // Below the hooks: an early return above `useMemberColumns` would change
@@ -143,22 +174,6 @@ export function OrgSettingsMembersPage() {
           />
         </Modal>
       )}
-
-      {/* The one question this page raises and cannot answer from a row:
-          what does a role let someone do? The answer is a guide with its own
-          place — the roles page, on the org roles, as a matrix — reached from
-          the sentence that raises it rather than from a second button beside
-          the title's single Actions trigger. */}
-      <p className="text-muted-foreground mb-6 max-w-2xl text-sm leading-relaxed">
-        {t("orgSettings.rolesIntro")}{" "}
-        <Link
-          to="/org-settings/roles?view=matrix"
-          state={location.state}
-          className="text-primary underline underline-offset-4"
-        >
-          {t("orgRolesGuide.link")}
-        </Link>
-      </p>
 
       {/* No `empty` prop on purpose: this page has TWO lists and one shared
           empty state below, for when neither members nor invitations exist. A

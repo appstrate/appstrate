@@ -1281,8 +1281,6 @@
   "roles.matrixGranted": "Granted",
   "roles.matrixNotGranted": "Not granted",
   "roles.matrixOrgNote": "Organization owners and admins are space Administrators everywhere, whatever this table says.",
-  "orgSettings.rolesIntro": "An organization role sets what a person can administer here, and which spaces they reach.",
-  "orgRolesGuide.link": "Compare roles",
   "orgRolesGuide.capability": "Capability",
   "orgRolesGuide.can.view": "See the organization, its spaces, models and proxies",
   "orgRolesGuide.can.directory": "See the list of users",
@@ -1296,8 +1294,8 @@
   "orgRolesGuide.access.all": "Admin of every space",
   "orgRolesGuide.access.open": "Open spaces, plus those assigned to them",
   "orgRolesGuide.access.assigned": "Only the spaces assigned to them",
-  "roles.pageIntro": "Two levels. The organization role, set in Users, decides what a person administers and which spaces they reach. The space role, set on each space’s Members page, decides what they do there.",
   "roles.tabOrg": "Organization roles",
   "roles.tabSpace": "Space roles",
-  "orgSettings.roleHint.owner": "Created the organization and has the last word: the only one who can rename or delete it and manage admins."
+  "orgSettings.roleHint.owner": "Created the organization and has the last word: the only one who can rename or delete it and manage admins.",
+  "orgSettings.spacesColumn": "Spaces"
 }

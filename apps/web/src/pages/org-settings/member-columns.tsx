@@ -48,6 +48,7 @@ export function useMemberColumns({
   isRemoving,
   onChangeRole,
   onRemove,
+  spaces,
 }: {
   /** Which roles this actor may move that member to. Empty = not theirs to change. */
   assignableRoles: (member: OrgMember) => readonly AssignableOrgRole[];
@@ -56,6 +57,8 @@ export function useMemberColumns({
   isRemoving: boolean;
   onChangeRole: (userId: string, role: AssignableOrgRole) => void;
   onRemove: (member: OrgMember) => void;
+  /** The spaces this person reaches, when the caller may see every one. */
+  spaces?: (member: OrgMember) => string[];
 }): DataColumn<OrgMember>[] {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -113,16 +116,39 @@ export function useMemberColumns({
         );
       },
     },
+    ...(spaces
+      ? [
+          {
+            id: "spaces",
+            header: t("orgSettings.spacesColumn"),
+            width: "minmax(100px,1.2fr)" as const,
+            tier: 2 as const,
+            cell: (member: OrgMember) => {
+              const names = spaces(member);
+              if (names.length === 0)
+                return <span className="text-muted-foreground text-xs">—</span>;
+              const text = names.join(", ");
+              return (
+                <span
+                  className="text-muted-foreground relative z-10 block truncate text-xs"
+                  title={text}
+                >
+                  {text}
+                </span>
+              );
+            },
+          },
+        ]
+      : []),
     {
       id: "joined",
       header: t("orgSettings.joinedColumn"),
       width: "92px",
       align: "end",
-      // Tier 2, NOT 3. This table lives in the settings dialog, which tops out
-      // around 800px, so it never crosses the 56rem threshold at all: a column
-      // parked in tier 3 here is not "shown later", it is never shown. The same
-      // trap the models table fell into.
-      tier: 2,
+      // Tier 3, which in this dialog means "not shown": the spaces a person
+      // reaches took the room, and it answers a question asked far more often
+      // than the date they joined.
+      tier: 3,
       cell: (member) => (
         <span className="text-muted-foreground text-xs">
           {member.joinedAt ? formatDateField(member.joinedAt, "date") : "—"}

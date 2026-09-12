@@ -1281,8 +1281,6 @@
   "roles.matrixGranted": "Accordée",
   "roles.matrixNotGranted": "Non accordée",
   "roles.matrixOrgNote": "Les propriétaires et administrateurs de l’organisation sont Administrateurs de l’espace partout, quel que soit ce tableau.",
-  "orgSettings.rolesIntro": "Le rôle d’organisation fixe ce qu’une personne peut administrer ici, et les espaces qu’elle atteint.",
-  "orgRolesGuide.link": "Comparer les rôles",
   "orgRolesGuide.capability": "Capacité",
   "orgRolesGuide.can.view": "Voir l’organisation, ses espaces, ses modèles et ses proxies",
   "orgRolesGuide.can.directory": "Voir la liste des utilisateurs",
@@ -1296,8 +1294,8 @@
   "orgRolesGuide.access.all": "Admin de tous les espaces",
   "orgRolesGuide.access.open": "Espaces ouverts, et ceux qui lui sont attribués",
   "orgRolesGuide.access.assigned": "Seulement les espaces qui lui sont attribués",
-  "roles.pageIntro": "Deux étages. Le rôle d’organisation, attribué dans Utilisateurs, fixe ce qu’une personne administre et les espaces qu’elle atteint. Le rôle d’espace, attribué dans la page Membres de chaque espace, fixe ce qu’elle y fait.",
   "roles.tabOrg": "Rôles d’organisation",
   "roles.tabSpace": "Rôles d’espace",
-  "orgSettings.roleHint.owner": "A créé l’organisation et garde le dernier mot : seul à pouvoir la renommer, la supprimer et gérer les administrateurs."
+  "orgSettings.roleHint.owner": "A créé l’organisation et garde le dernier mot : seul à pouvoir la renommer, la supprimer et gérer les administrateurs.",
+  "orgSettings.spacesColumn": "Espaces"
 }
