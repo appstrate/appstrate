@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
@@ -26,6 +26,8 @@ import {
   languageForPath,
   pickActiveEntry,
   previewBlockReason,
+  validateNewPath,
+  NEW_PATH_ERROR_KEYS,
   type PackageFileEntry,
   type PackageFileWriteOperation,
 } from "../../lib/package-file-tree";
@@ -118,6 +120,26 @@ export function PackageFilesEditor({
       return;
     }
     const target = replacePath.current;
+    if (target === null) {
+      // Validate the complete selection before reading or staging anything.
+      // Include earlier selections so one import cannot overwrite itself.
+      const planned = [...entries];
+      for (const file of files) {
+        const rejection = validateNewPath(planned, file.name);
+        if (rejection) {
+          toast.error(
+            t(
+              rejection === "exists" || rejection === "conflict"
+                ? "files.errorImportConflict"
+                : NEW_PATH_ERROR_KEYS[rejection],
+              { path: file.name },
+            ),
+          );
+          return;
+        }
+        planned.push({ path: file.name, size: file.size, media_kind: "binary" });
+      }
+    }
     setUploading(true);
     onBusyChange(true);
     try {
@@ -136,6 +158,12 @@ export function PackageFilesEditor({
   const pinned = (path: string) => isPinnedEntry(type, path);
   const editable =
     current && current.path !== PACKAGE_MANIFEST_FILE && previewBlockReason(current) === null;
+  const replacementAction =
+    current && current.path !== PACKAGE_MANIFEST_FILE ? (
+      <Button variant="outline" disabled={busy} onClick={() => pick(current.path)}>
+        {t("files.replace")}
+      </Button>
+    ) : null;
   return (
     <div className="flex flex-col gap-3">
       <p className="text-muted-foreground text-sm">{t("files.pendingHint")}</p>
@@ -170,6 +198,7 @@ export function PackageFilesEditor({
               packageId={packageId}
               entry={current}
               disabled={busy}
+              actions={replacementAction}
               onChange={(text) => stage([fileTextOperation(current.path, text)])}
             />
           ) : (
@@ -179,13 +208,7 @@ export function PackageFilesEditor({
               version={undefined}
               entry={current}
               downloadPath={current.sourcePath ?? null}
-              actions={
-                current.path === PACKAGE_MANIFEST_FILE ? null : (
-                  <Button variant="outline" disabled={busy} onClick={() => pick(current.path)}>
-                    {t("files.replace")}
-                  </Button>
-                )
-              }
+              actions={replacementAction}
             />
           ))}
       </div>
@@ -239,12 +262,14 @@ function DraftFilePane({
   packageId,
   entry,
   disabled,
+  actions,
   onChange,
 }: {
   id: string;
   packageId: string;
   entry: DraftFile;
   disabled: boolean;
+  actions: ReactNode;
   onChange: (text: string) => void;
 }) {
   const { t } = useTranslation("agents");
@@ -256,7 +281,10 @@ function DraftFilePane({
   );
   return (
     <div id={id} role="region" aria-label={entry.path} className="min-w-0">
-      <p className="truncate font-mono text-sm">{entry.path}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="truncate font-mono text-sm">{entry.path}</p>
+        {actions}
+      </div>
       {isError ? (
         <ErrorState message={t("files.errorLoad")} />
       ) : isLoading || text === undefined ? (

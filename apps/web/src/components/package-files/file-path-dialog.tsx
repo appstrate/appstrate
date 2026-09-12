@@ -22,16 +22,9 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import {
   validateNewPath,
-  type NewPathRejection,
+  NEW_PATH_ERROR_KEYS,
   type PackageFileEntry,
 } from "../../lib/package-file-tree";
-
-const MESSAGE_KEY: Record<NewPathRejection, string> = {
-  invalid: "files.errorInvalidPath",
-  reserved: "files.errorReserved",
-  exists: "files.errorExists",
-  conflict: "files.errorConflictPath",
-};
 
 interface FilePathDialogProps {
   title: string;
@@ -54,6 +47,7 @@ export function FilePathDialog({
 }: FilePathDialogProps) {
   const { t } = useTranslation(["agents", "common"]);
   const inputId = useId();
+  const errorId = `${inputId}-error`;
   const [path, setPath] = useState(initialPath);
 
   const rejection = path === "" ? null : validateNewPath(entries, path);
@@ -91,6 +85,7 @@ export function FilePathDialog({
           spellCheck={false}
           placeholder={t("files.pathPlaceholder")}
           aria-invalid={rejection !== null}
+          aria-describedby={rejection ? errorId : undefined}
           onChange={(e) => setPath(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter") return;
@@ -98,7 +93,11 @@ export function FilePathDialog({
             submit();
           }}
         />
-        {rejection && <p className="text-destructive text-sm">{t(MESSAGE_KEY[rejection])}</p>}
+        {rejection && (
+          <p id={errorId} role="alert" className="text-destructive text-sm">
+            {t(NEW_PATH_ERROR_KEYS[rejection])}
+          </p>
+        )}
       </div>
     </Modal>
   );

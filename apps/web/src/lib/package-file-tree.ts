@@ -26,7 +26,7 @@ import type { components } from "../api/schema";
 /** One real file in the artifact, as returned by `GET .../files`. */
 export type PackageFileEntry = components["schemas"]["PackageFileEntry"];
 
-/** One edit of the draft tree, as `PATCH .../files` takes it. */
+/** One staged file edit carried by the package PUT's `operations` field. */
 export type PackageFileWriteOperation = components["schemas"]["PackageFileWriteOperation"];
 
 /**
@@ -392,6 +392,13 @@ export function isPinnedEntry(type: PackageType, path: string): boolean {
  */
 export type NewPathRejection = "invalid" | "reserved" | "exists" | "conflict";
 
+export const NEW_PATH_ERROR_KEYS: Record<NewPathRejection, string> = {
+  invalid: "files.errorInvalidPath",
+  reserved: "files.errorReserved",
+  exists: "files.errorExists",
+  conflict: "files.errorConflictPath",
+};
+
 export function validateNewPath(
   entries: readonly PackageFileEntry[],
   path: string,
@@ -407,7 +414,11 @@ export function validateNewPath(
       "skill",
     );
   } catch (error) {
-    if (error instanceof PackageFileWriteError) return "conflict";
+    if (error instanceof PackageFileWriteError) {
+      if (error.code === "invalid_path") return "invalid";
+      if (error.code === "reserved_entry") return "reserved";
+      if (error.code === "path_conflict") return "conflict";
+    }
     throw error;
   }
 

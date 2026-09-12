@@ -247,6 +247,69 @@ test("required files are protected and new paths reject canonical directory coll
   await editor.dialog.getByLabel("Chemin du fichier").fill("Scripts/run.py");
   await expect(editor.dialog).toBeVisible();
   await expect(editor.dialog.getByRole("button", { name: "Créer", exact: true })).toBeDisabled();
+  await expect(editor.dialog.getByLabel("Chemin du fichier")).toHaveAccessibleDescription(
+    /chemin/i,
+  );
+});
+
+test("import refuses collisions without losing local edits; Replace remains explicit", async ({
+  authedPage: page,
+  apiClient,
+  browserCtx,
+}) => {
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = `upload-${Date.now()}`;
+  const id = `${scope}/${name}`;
+  await createSkill(apiClient, scope, name);
+  await writeElsewhere(apiClient, id, "run.py", "SERVER");
+  const editor = new PackageEditorPage(page, scope, name);
+  await editor.goto();
+  await editor.openFilesTab();
+  await editor.fileRow("run.py").click();
+  const pane = page.getByRole("region", { name: "run.py", exact: true });
+  const lines = pane.locator(".monaco-editor .view-lines");
+  await lines.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" LOCAL");
+
+  for (const filenames of [
+    ["fresh.txt", "run.py"],
+    ["fresh.txt", "RUN.py"],
+    ["fresh.txt", "fresh.txt"],
+  ]) {
+    const choosing = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Importer", exact: true }).click();
+    await (
+      await choosing
+    ).setFiles(
+      filenames.map((filename) => ({
+        name: filename,
+        mimeType: "text/plain",
+        buffer: Buffer.from("IMPORTED"),
+      })),
+    );
+    await expect(page.getByText(/Pour remplacer un fichier/).first()).toBeVisible();
+    await expect(lines).toContainText("SERVER LOCAL");
+    await expect(editor.fileRow("fresh.txt")).toHaveCount(0);
+    expect((await listFiles(apiClient, id)).find((entry) => entry.path === "run.py")?.inline).toBe(
+      "SERVER",
+    );
+  }
+
+  const choosing = page.waitForEvent("filechooser");
+  await pane.getByRole("button", { name: "Remplacer", exact: true }).click();
+  await (
+    await choosing
+  ).setFiles({ name: "replacement.txt", mimeType: "text/plain", buffer: Buffer.from("REPLACED") });
+  await expect(lines).toContainText("REPLACED");
+  expect((await listFiles(apiClient, id)).find((entry) => entry.path === "run.py")?.inline).toBe(
+    "SERVER",
+  );
+  await editor.saveButton.click();
+  await expect(page).toHaveURL(`/skills/${id}`);
+  expect((await listFiles(apiClient, id)).find((entry) => entry.path === "run.py")?.inline).toBe(
+    "REPLACED",
+  );
 });
 
 for (const nonInline of [false, true]) {
