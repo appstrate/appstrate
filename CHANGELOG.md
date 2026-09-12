@@ -763,6 +763,11 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Restore MinIO image pulls for CI, development and self-hosting.** Compose
+  files use the official `quay.io/minio` repositories after Docker Hub stopped
+  serving the referenced images. Existing release tags are preserved and all
+  references pin verified multi-platform digests. The test fixture replaces
+  `latest` with the server release already used by the Tier 3 example.
 - **Typing fast into a Monaco pane no longer drops characters.** The agent
   prompt editor, the package JSON tab and the new file editor fed Monaco a
   controlled `value` from React state, and `@monaco-editor/react` applies a
