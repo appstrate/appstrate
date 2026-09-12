@@ -1307,8 +1307,14 @@
   "catalogue.title": "Catalogue de l’organisation",
   "catalogue.intro": "Ce que l’organisation possède et qui n’est pas actif dans cet espace.",
   "catalogue.browse": "Parcourir le catalogue",
-  "catalogue.search": "Rechercher dans le catalogue…",
   "catalogue.activate": "Activer ici",
   "catalogue.empty": "Tout est déjà actif dans cet espace.",
-  "catalogue.emptyHint": "Ce que l’organisation ajoutera apparaîtra ici tant que ce ne sera pas activé."
+  "catalogue.emptyHint": "Ce que l’organisation ajoutera apparaîtra ici tant que ce ne sera pas activé.",
+  "catalogue.selectColumn": "Sélection",
+  "catalogue.selectAll": "Tout sélectionner",
+  "catalogue.selectOne": "Sélectionner {{name}}",
+  "catalogue.activateSelection_one": "Activer la sélection ({{count}})",
+  "catalogue.activateSelection_other": "Activer la sélection ({{count}})",
+  "catalogue.kinds": "Types d'éléments",
+  "packages.type.agents": "Agents"
 }

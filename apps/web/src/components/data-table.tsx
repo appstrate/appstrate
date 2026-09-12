@@ -54,8 +54,16 @@ export type DataColumnWidth = `${number}px` | `minmax(${number}px,${number}fr)`;
 export interface DataColumn<T> {
   /** Stable handle, independent of the label — a column set is a list of these. */
   id: string;
-  /** Column head, already translated. */
+  /** Column head, already translated. Also the label the column menu lists. */
   header: string;
+  /** Drawn instead of `header` when the head is a control rather than a word. */
+  headerNode?: ReactNode;
+  /**
+   * A column of controls rather than content: a tick, a button. It never
+   * carries the row's link — a link wrapped around a checkbox navigates instead
+   * of ticking, whatever the z-index says.
+   */
+  control?: boolean;
   /** Grid track: `"88px"` for a fixed column, `"minmax(100px,1fr)"` for an elastic one with a measurable floor. */
   width: DataColumnWidth;
   /** Numbers, durations and dates read against the right edge. */
@@ -195,8 +203,9 @@ export function DataTable<T>({
 
   // The link goes in the first column of tier one, not in column zero: a run
   // list leads with `#131`, which is a tier-two column, so a link parked there
-  // would leave the row unclickable on a phone.
-  const linkColumn = columns.findIndex((c) => !c.tier);
+  // would leave the row unclickable on a phone. A control column is skipped
+  // too — the catalogue leads with a tick, and a tick inside a link navigates.
+  const linkColumn = columns.findIndex((c) => !c.tier && !c.control);
 
   const rowGrid =
     columnMode === "scroll"
@@ -261,7 +270,7 @@ export function DataTable<T>({
                     columnMode === "tiered" && tierClass(col, "block"),
                   )}
                 >
-                  {col.header}
+                  {col.headerNode ?? col.header}
                 </th>
               ))}
             </tr>

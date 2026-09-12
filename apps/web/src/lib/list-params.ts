@@ -21,7 +21,24 @@
  * the call site.
  */
 
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
+
+/**
+ * What a list's bar reads and writes, wherever that state happens to live.
+ *
+ * A page keeps it in the URL ({@link useListParams}); a panel floating over
+ * that page keeps it in itself ({@link useLocalListParams}), because both would
+ * otherwise write `?q=` and searching the catalogue would filter the list
+ * underneath it.
+ */
+export interface ListState {
+  search: string;
+  setSearch: (value: string) => void;
+  values<T extends string>(key: string, allowed: readonly T[]): T[];
+  setValues: (key: string) => (values: string[]) => void;
+  reset: () => void;
+}
 
 /** Only the values the screen declares — a URL is user input. */
 export function readList<T extends string>(raw: string | null, allowed: readonly T[]): T[] {
@@ -66,6 +83,25 @@ export function useListParams(filterKeys: readonly string[]) {
         for (const key of [...filterKeys, "q"]) next.delete(key);
         return next;
       });
+    },
+  };
+}
+
+/** The same state, held in the component — for a panel, which has no URL of its own. */
+export function useLocalListParams(): ListState {
+  const [search, setSearch] = useState("");
+  const [values, setValues] = useState<Record<string, string[]>>({});
+
+  return {
+    search,
+    setSearch,
+    values<T extends string>(key: string, allowed: readonly T[]): T[] {
+      return (values[key] ?? []).filter((v): v is T => (allowed as readonly string[]).includes(v));
+    },
+    setValues: (key: string) => (next: string[]) => setValues((prev) => ({ ...prev, [key]: next })),
+    reset: () => {
+      setSearch("");
+      setValues({});
     },
   };
 }

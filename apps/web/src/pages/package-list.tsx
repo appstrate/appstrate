@@ -3,27 +3,19 @@
 import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
-import { Layers, LibraryBig, Plus, SearchX, type LucideIcon, Upload } from "lucide-react";
+import { Layers, LibraryBig, Plus, type LucideIcon, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
-import { PackageCard } from "../components/package-card";
-import { CardGrid } from "../components/card-grid";
-import { PackagesTable, usePackageColumns } from "../components/packages-table";
-import { columnMenu, visibleColumns } from "../components/data-table";
-import { useColumnVisibility } from "../stores/column-visibility-store";
-import { ListFooter, ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { usePackageViewStore } from "../stores/list-view-store";
-import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
+import { PackageCollection } from "../components/package-collection";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { ImportModal } from "../components/import-modal";
-import { ErrorState, EmptyState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
-import { PackageCatalogueModal } from "../components/package-catalogue-modal";
+import { OrgCatalogueModal } from "../components/org-catalogue-modal";
 import { useModalParam } from "../hooks/use-modal-param";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
@@ -60,17 +52,6 @@ interface PackageTabProps {
   headerContent?: ReactNode;
 }
 
-/** Name, description and keywords — everything a card puts on screen. */
-function matches(item: CardItem, query: string): boolean {
-  if (!query) return true;
-  const q = query.toLowerCase();
-  return (
-    item.displayName.toLowerCase().includes(q) ||
-    (item.description?.toLowerCase().includes(q) ?? false) ||
-    (item.keywords?.some((keyword) => keyword.toLowerCase().includes(q)) ?? false)
-  );
-}
-
 export function PackageTab({
   title,
   breadcrumbs,
@@ -85,126 +66,37 @@ export function PackageTab({
   extraActions,
   headerContent,
 }: PackageTabProps) {
-  const { t } = useTranslation(["agents", "common"]);
   const view = usePackageViewStore((s) => s.view);
   const setView = usePackageViewStore((s) => s.setView);
-  // Client-side on purpose, and honestly so: this catalogue arrives whole, so
-  // the box searches the whole list rather than the page on screen — which is
-  // exactly why the run list, paginated server-side, has no box.
   const list = useListParams(["origin", "activity"]);
-  const query = list.search;
-  const origins = list.values("origin", ["local", "system"] as const);
-  const activities = list.values("activity", ["active", "inactive"] as const);
-  const allColumns = usePackageColumns(holds);
-  const searchPlaceholder = useSearchPlaceholder(entity);
-  const visibility = useColumnVisibility("packages");
-
-  const header = title ? (
-    <PageHeader title={title} variant="collection" breadcrumbs={breadcrumbs} actions={extraActions}>
-      {headerContent}
-    </PageHeader>
-  ) : null;
-
-  const shown = (items ?? []).filter((item) => {
-    if (!matches(item, query)) return false;
-    if (origins.length > 0 && !origins.includes(item.source ?? "local")) return false;
-
-    const isActive = holds === "agent" ? Boolean(item.runningRuns) : Boolean(item.usedByAgents);
-    if (activities.includes("active") && !activities.includes("inactive") && !isActive)
-      return false;
-    if (activities.includes("inactive") && !activities.includes("active") && isActive) return false;
-    return true;
-  });
-  const filters: FilterSpec[] = [
-    {
-      id: "origin",
-      label: t("list.filter.origin"),
-      values: origins,
-      options: [
-        { value: "local", label: t("list.filter.local") },
-        { value: "system", label: t("list.filter.system") },
-      ],
-      onChange: list.setValues("origin"),
-    },
-    {
-      id: "activity",
-      label: t(holds === "agent" ? "list.filter.execution" : "list.filter.usage"),
-      values: activities,
-      options:
-        holds === "agent"
-          ? [
-              { value: "active", label: t("list.filter.running") },
-              { value: "inactive", label: t("list.filter.idle") },
-            ]
-          : [
-              { value: "active", label: t("list.filter.used") },
-              { value: "inactive", label: t("list.filter.unused") },
-            ],
-      onChange: list.setValues("activity"),
-    },
-  ];
-  const filtering = Boolean(query) || origins.length > 0 || activities.length > 0;
-
-  // An empty list, a search that matched nothing, and a request that failed are
-  // three different sentences, and the body says whichever applies IN PLACE —
-  // the bar and the count above and below it never move. This used to be three
-  // early returns above the toolbar, which is how an empty list lost its bar
-  // and had to re-offer the page's own actions as unlabelled icons.
-  const emptyBody = filtering ? (
-    <EmptyState message={t("list.noMatch")} icon={SearchX} compact>
-      <Button variant="outline" size="sm" onClick={list.reset}>
-        {t("toolbar.clearAll", { ns: "common" })}
-      </Button>
-    </EmptyState>
-  ) : (
-    // No actions of its own any more: the bar above is always there now, with
-    // the same two, written out. The empty state used to carry them because it
-    // REPLACED the bar, and it carried them as unlabelled icons — in the one
-    // state where the reader least knows what to do.
-    <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon} compact />
-  );
 
   return (
     <>
-      {header}
-      <ListToolbar
-        search={{
-          value: query,
-          onChange: list.setSearch,
-          placeholder: searchPlaceholder,
-        }}
-        filters={filters}
-        onReset={list.reset}
-        // Only the table view has columns to choose from.
-        columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
+      {title ? (
+        <PageHeader
+          title={title}
+          variant="collection"
+          breadcrumbs={breadcrumbs}
+          actions={extraActions}
+        >
+          {headerContent}
+        </PageHeader>
+      ) : null}
+      <PackageCollection
+        items={items}
+        isLoading={isLoading}
+        error={error}
+        holds={holds}
+        entity={entity}
+        emptyMessage={emptyMessage}
+        emptyHint={emptyHint}
+        emptyIcon={emptyIcon}
+        list={list}
         view={view}
         onViewChange={setView}
+        // A titled page already carries them in its header; a tab has no header
+        // of its own, so the bar is where they go.
         actions={title ? undefined : extraActions}
-      />
-      {view === "table" ? (
-        <PackagesTable
-          items={shown}
-          columns={visibleColumns(allColumns, visibility.hidden)}
-          isLoading={isLoading}
-          isError={Boolean(error)}
-          empty={emptyBody}
-          error={<ErrorState message={error?.message} compact />}
-        />
-      ) : (
-        <CardGrid
-          items={shown}
-          itemKey={(item) => item.id}
-          renderCard={(item) => <PackageCard {...item} />}
-          isLoading={isLoading}
-          isError={Boolean(error)}
-          empty={emptyBody}
-          error={<ErrorState message={error?.message} compact />}
-        />
-      )}
-      {/* Under the body, like the runs page: what the collection amounts to,
-          whatever it happens to hold and whether or not anyone searched. */}
-      <ListFooter
-        count={isLoading || error ? undefined : t("list.count", { count: shown.length })}
       />
     </>
   );
@@ -249,7 +141,10 @@ export function PackageList() {
           can("agents:write") || canActivate ? (
             <PageActionsMenu>
               {canActivate && (
-                <DropdownMenuItem data-page-action="catalogue" onSelect={() => catalogue.open()}>
+                <DropdownMenuItem
+                  data-page-action="catalogue"
+                  onSelect={() => catalogue.open("agent")}
+                >
                   <LibraryBig />
                   {t("catalogue.browse", { ns: "settings" })}
                 </DropdownMenuItem>
@@ -271,7 +166,11 @@ export function PackageList() {
         }
       />
       {catalogue.value !== null && canActivate && (
-        <PackageCatalogueModal type="agent" onClose={catalogue.close} />
+        <OrgCatalogueModal
+          type={catalogue.value}
+          onTypeChange={catalogue.open}
+          onClose={catalogue.close}
+        />
       )}
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
       {creation.isOpen && (

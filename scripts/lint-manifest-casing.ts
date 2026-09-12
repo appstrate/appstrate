@@ -301,7 +301,7 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
   { path: "apps/web/src/pages/package-list.tsx", keys: ["displayName"], reason: WIRE_DTO },
   { path: "apps/web/src/pages/item-tab.tsx", keys: ["displayName"], reason: WIRE_DTO },
   {
-    path: "apps/web/src/components/package-catalogue-modal.tsx",
+    path: "apps/web/src/components/org-catalogue-modal.tsx",
     keys: ["displayName"],
     reason: WIRE_DTO,
   },

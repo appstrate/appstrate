@@ -15,7 +15,7 @@ import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import { usePermissions } from "../hooks/use-permissions";
 import { useModalParam } from "../hooks/use-modal-param";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
-import { PackageCatalogueModal } from "../components/package-catalogue-modal";
+import { OrgCatalogueModal } from "../components/org-catalogue-modal";
 
 type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
 
@@ -84,7 +84,10 @@ export function ItemTab({
           canCreate || canActivate ? (
             <PageActionsMenu>
               {canActivate && (
-                <DropdownMenuItem data-page-action="catalogue" onSelect={() => catalogue.open()}>
+                <DropdownMenuItem
+                  data-page-action="catalogue"
+                  onSelect={() => catalogue.open(type)}
+                >
                   <LibraryBig />
                   {t("catalogue.browse")}
                 </DropdownMenuItem>
@@ -108,7 +111,11 @@ export function ItemTab({
         breadcrumbs={[{ label: title }]}
       />
       {catalogue.value !== null && canActivate && (
-        <PackageCatalogueModal type={type} onClose={catalogue.close} />
+        <OrgCatalogueModal
+          type={catalogue.value}
+          onTypeChange={catalogue.open}
+          onClose={catalogue.close}
+        />
       )}
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
       {creation.isOpen && (
