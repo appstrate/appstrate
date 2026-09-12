@@ -36,8 +36,13 @@ export interface UnifiedSettingsSection {
 
 interface SettingsNavigationOptions {
   /**
-   * Every entry is gated on the permission its own route checks, so an entry
-   * is there exactly when the page behind it can load something.
+   * Per-entry gates. An ORGANISATION entry shows when the caller can DO
+   * something there, not merely read it: the server grants a guest `org:read`,
+   * `spaces:read`, `models:read` and `proxies:read` so its runs can name a
+   * model and resolve its own spaces, and following those to the letter sent
+   * someone with nothing to change into four administration screens. The
+   * routes stay on what the API allows, so a pasted URL still opens the
+   * read-only page.
    */
   can: (permission: GateablePermission) => boolean;
   features: {
@@ -60,7 +65,7 @@ export function buildSettingsNavigation({
           to: "/org-settings/general",
           icon: Building,
           labelKey: "orgSettings.tabGeneral",
-          show: can("org:read"),
+          show: can("org:settings") || can("org:update"),
         },
         {
           to: "/org-settings/members",
@@ -78,25 +83,31 @@ export function buildSettingsNavigation({
           to: "/org-settings/spaces",
           icon: LayoutGrid,
           labelKey: "applications.pageTitle",
-          show: can("spaces:read"),
+          show: can("spaces:write"),
         },
         {
           to: "/org-settings/library",
           icon: Library,
           labelKey: "orgSettings.tabLibrary",
-          show: can("spaces:read"),
+          // The library installs packages into spaces: it is for whoever
+          // authors one somewhere.
+          show:
+            can("agents:write") ||
+            can("skills:write") ||
+            can("mcp-servers:write") ||
+            can("integrations:install"),
         },
         {
           to: "/org-settings/models",
           icon: BrainCircuit,
           labelKey: "models.tabTitle",
-          show: can("models:read"),
+          show: can("models:write"),
         },
         {
           to: "/org-settings/proxies",
           icon: Globe,
           labelKey: "proxies.tabTitle",
-          show: can("proxies:read"),
+          show: can("proxies:write"),
         },
         {
           // Shown before collaborator SSO is switched on: this is where it is.

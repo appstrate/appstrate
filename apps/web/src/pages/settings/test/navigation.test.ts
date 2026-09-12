@@ -20,23 +20,47 @@ describe("unified settings navigation", () => {
     expect(destinations(ALL_FEATURES, ["oauth-clients:read"])).toContain("/org-settings/oauth");
   });
 
-  it("gates every entry on the permission its route checks", () => {
-    // A guest reads the org and its spaces, and nothing it administers.
-    const guest = destinations(ALL_FEATURES, ["org:read", "spaces:read"]);
-    expect(guest).toContain("/org-settings/general");
-    expect(guest).toContain("/org-settings/spaces");
-    expect(guest).toContain("/org-settings/library");
-    expect(guest).toContain("/org-settings/mcp-access");
-    for (const path of [
-      "/org-settings/members",
-      "/org-settings/models",
-      "/org-settings/oauth",
-      "/org-settings/billing",
-    ]) {
-      expect(guest).not.toContain(path);
-    }
-    expect(guest.some((path) => path.startsWith("/workspace-settings/"))).toBe(false);
+  it("offers an organisation entry only to someone who can act there", () => {
+    // A guest holds `org:read`, `spaces:read`, `models:read` and `proxies:read`
+    // so its runs work — none of which is a reason to open an administration
+    // screen. Only the personal destination survives.
+    const guest = destinations(ALL_FEATURES, [
+      "org:read",
+      "spaces:read",
+      "models:read",
+      "proxies:read",
+    ]);
+    expect(guest).toEqual(["/org-settings/mcp-access"]);
 
+    // A member adds the directory and the role catalog, and nothing else.
+    const member = destinations(ALL_FEATURES, [
+      "org:read",
+      "spaces:read",
+      "models:read",
+      "proxies:read",
+      "members:read",
+      "roles:read",
+    ]);
+    expect(member).toEqual([
+      "/org-settings/members",
+      "/org-settings/roles",
+      "/org-settings/mcp-access",
+    ]);
+
+    // Authoring somewhere is what the library is for.
+    expect(destinations(ALL_FEATURES, ["skills:write"])).toContain("/org-settings/library");
+
+    // Writing is what the infrastructure screens are for.
+    const admin = destinations(ALL_FEATURES, ["org:settings", "spaces:write", "models:write"]);
+    expect(admin).toContain("/org-settings/general");
+    expect(admin).toContain("/org-settings/spaces");
+    expect(admin).toContain("/org-settings/models");
+    expect(admin).not.toContain("/org-settings/proxies");
+    // `spaces:write` also governs a space's own auth screen, and says so.
+    expect(admin).toContain("/workspace-settings/auth");
+  });
+
+  it("keeps a module's screen behind its module, whatever the permission", () => {
     // Holding the permission is not enough when the module behind it is off.
     const withoutModules = destinations(NO_FEATURES, [
       "oauth-clients:read",
