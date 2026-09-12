@@ -709,7 +709,6 @@
   "credentials.oauth.copy": "Copier",
   "credentials.oauth.copied": "Copié !",
   "credentials.oauth.copyFailed": "Impossible de copier dans le presse-papiers",
-  "credentials.oauth.close": "Fermer",
   "credentials.oauth.generatingCommand": "Génération de la commande de connexion…",
   "credentials.oauth.pairingCreateFailed": "Échec de la génération de la commande de connexion",
   "credentials.oauth.pairingExpired": "Cette commande a expiré (5 minutes). Générez-en une nouvelle pour continuer.",

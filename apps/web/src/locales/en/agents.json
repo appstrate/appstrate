@@ -233,7 +233,6 @@
   "detail.integrationUpgradeTooltip": "Extends your existing connection's permissions without removing it. The IdP will only ask for the additional permissions.",
   "missingConnections.title": "Integration connections required",
   "missingConnections.intro": "This agent depends on integrations that aren't connected (or are missing permissions). Resolve each one below, then try again.",
-  "missingConnections.close": "Close",
   "missingConnections.retry": "Re-run",
   "missingConnections.resolved": "Connection ready — re-run",
   "missingConnections.mustChoose.retry": "Run with these picks",

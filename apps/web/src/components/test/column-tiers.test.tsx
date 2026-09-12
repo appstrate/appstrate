@@ -28,6 +28,7 @@ import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
 import { useRoleColumns } from "../../pages/org-settings/role-columns.tsx";
 import { useSpaceMemberColumns } from "../../pages/org-settings/space/space-member-columns.tsx";
 import { useInvitationColumns } from "../invitation-columns.tsx";
+import { usePackageCatalogueColumns } from "../package-catalogue-columns.tsx";
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
 import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
@@ -81,6 +82,10 @@ function columnsFrom<T>(useColumns: () => DataColumn<T>[]): Track[] {
 }
 
 const SETS = {
+  packageCatalogue: () =>
+    columnsFrom(() =>
+      usePackageCatalogueColumns({ type: "agent", isActivating: false, onActivate: () => {} }),
+    ),
   userSpaces: () =>
     columnsFrom(() =>
       useUserSpaceColumns({

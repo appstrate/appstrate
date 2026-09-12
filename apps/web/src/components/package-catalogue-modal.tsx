@@ -15,14 +15,14 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PackageSearch } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useTogglePackageInstall } from "../hooks/use-library";
 import { usePackageList, type PackageType } from "../hooks/use-packages";
-import { ItemList } from "./item-list";
+import type { CardItem } from "../pages/package-list";
+import { DataTable } from "./data-table";
 import { Modal } from "./modal";
+import { usePackageCatalogueColumns } from "./package-catalogue-columns";
 import { EmptyState, ErrorState } from "./page-states";
 
 export function PackageCatalogueModal({
@@ -42,20 +42,43 @@ export function PackageCatalogueModal({
 
   const activeIds = new Set((active ?? []).map((item) => item.id));
   const query = search.trim().toLowerCase();
-  const offered = (all ?? [])
+  const offered: CardItem[] = (all ?? [])
     .filter((item) => !activeIds.has(item.id))
     .filter(
       (item) =>
         !query ||
         `${item.name ?? ""} ${item.description ?? ""} ${item.id}`.toLowerCase().includes(query),
-    );
+    )
+    .map((item) => ({
+      id: item.id,
+      displayName: item.name || item.id,
+      description: item.description,
+      type,
+      source: item.source,
+      usedByAgents: item.used_by_agents,
+    }));
+
+  const columns = usePackageCatalogueColumns({
+    type,
+    isActivating: activate.isPending,
+    onActivate: (item) => {
+      if (!spaceId) return;
+      activate.mutate(
+        { spaceId, packageId: item.id, installed: false },
+        {
+          onSuccess: () => toast.success(t("packages.installed", { name: item.displayName })),
+          onError: (err) => toast.error(getErrorMessage(err)),
+        },
+      );
+    },
+  });
 
   return (
     <Modal
       open
       onClose={onClose}
       title={t("catalogue.title")}
-      className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"
+      className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-3xl"
     >
       <div className="flex min-h-0 flex-col gap-4">
         <p className="text-muted-foreground text-sm">{t("catalogue.intro")}</p>
@@ -67,9 +90,11 @@ export function PackageCatalogueModal({
           aria-label={t("catalogue.search")}
         />
         <div className="min-h-0 overflow-y-auto">
-          <ItemList
-            items={offered}
-            itemKey={(item) => item.id}
+          <DataTable
+            label={t("catalogue.title")}
+            columns={columns}
+            rows={offered}
+            rowKey={(item) => item.id}
             isLoading={isLoading}
             isError={Boolean(error)}
             error={<ErrorState message={getErrorMessage(error)} compact />}
@@ -81,44 +106,6 @@ export function PackageCatalogueModal({
                 compact
               />
             }
-            renderItem={(item) => (
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium">{item.name || item.id}</span>
-                    {item.source === "system" && (
-                      <Badge variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
-                        {t("library.system")}
-                      </Badge>
-                    )}
-                  </div>
-                  {item.description && (
-                    <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">
-                      {item.description}
-                    </p>
-                  )}
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={!spaceId || activate.isPending}
-                  onClick={() => {
-                    if (!spaceId) return;
-                    activate.mutate(
-                      { spaceId, packageId: item.id, installed: false },
-                      {
-                        onSuccess: () =>
-                          toast.success(t("packages.installed", { name: item.name || item.id })),
-                        onError: (err) => toast.error(getErrorMessage(err)),
-                      },
-                    );
-                  }}
-                >
-                  {t("catalogue.activate")}
-                </Button>
-              </div>
-            )}
           />
         </div>
       </div>

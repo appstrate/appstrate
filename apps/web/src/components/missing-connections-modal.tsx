@@ -149,9 +149,6 @@ export function MissingConnectionsModal({
       title={t("missingConnections.title")}
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={onClose} disabled={retrying}>
-            {t("missingConnections.close")}
-          </Button>
           {showRetry && (
             <Button
               onClick={() => onRetryWithOverrides(picks)}

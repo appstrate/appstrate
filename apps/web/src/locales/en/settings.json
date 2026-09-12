@@ -709,7 +709,6 @@
   "credentials.oauth.copy": "Copy",
   "credentials.oauth.copied": "Copied!",
   "credentials.oauth.copyFailed": "Could not copy to clipboard",
-  "credentials.oauth.close": "Close",
   "credentials.oauth.generatingCommand": "Generating connection command…",
   "credentials.oauth.pairingCreateFailed": "Failed to generate connection command",
   "credentials.oauth.pairingExpired": "This command has expired (5 minutes). Generate a new one to continue.",

@@ -275,16 +275,7 @@ function CredentialFormBody({
   if (isOAuthSelected && selectedOption?.providerId) {
     return (
       <>
-        <Modal
-          open
-          onClose={oauthDismiss.requestClose}
-          title={title}
-          actions={
-            <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
-              {t("credentials.oauth.close")}
-            </Button>
-          }
-        >
+        <Modal open onClose={oauthDismiss.requestClose} title={title}>
           <div className="space-y-4">
             {!isEditing && (
               <div className="space-y-2">

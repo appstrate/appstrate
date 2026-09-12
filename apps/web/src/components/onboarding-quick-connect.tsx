@@ -23,7 +23,6 @@ import { Check, ChevronRight, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
 import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { OAuthPairingBody } from "./oauth-pairing-body";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
@@ -127,11 +126,6 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
           open
           onClose={oauthDismiss.requestClose}
           title={t("credentials.oauth.cliStageTitle")}
-          actions={
-            <Button variant="ghost" onClick={oauthDismiss.requestClose}>
-              {t("credentials.oauth.close")}
-            </Button>
-          }
         >
           <OAuthPairingBody
             providerId={entry.providerId}

@@ -516,11 +516,6 @@ function ModelForm({
           open
           onClose={oauthDismiss.requestClose}
           title={t("credentials.oauth.cliStageTitle")}
-          actions={
-            <Button variant="ghost" onClick={oauthDismiss.requestClose}>
-              {t("credentials.oauth.close")}
-            </Button>
-          }
         >
           <OAuthPairingBody
             providerId={providerId}
