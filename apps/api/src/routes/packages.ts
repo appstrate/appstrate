@@ -1298,27 +1298,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     await assertNoRunningRuns(c, rcfg, itemId);
 
-    const item = await loadOrgItemOr404(rcfg, orgId, itemId);
-
-    // Re-validate the draft manifest at the publish gate (defense in depth).
-    // Save/import already validate, but cutting a version must not trust a
-    // draft that became invalid by any path — this rejects e.g. an
-    // `integrations_configuration` entry without a matching declared
-    // dependency before it is frozen into an immutable version.
-    // STORED direction: the draft is already persisted, and a draft written
-    // before a runtime tool was retired must stay publishable.
-    // `createVersionFromDraft` applies the same drop before freezing the
-    // snapshot, so the retired id never reaches the immutable artifact. The
-    // integration-scope subset gate the create/update paths apply comes along
-    // with it — a draft must not be frozen into an immutable version with an
-    // `integrations_configuration` selection outside the integration catalog.
-    //
-    // `requireCallableTools` is ON here and NOT on the draft writes: this is
-    // where the artifact stops being editable, and freezing an empty tool
-    // selection produces a version that can only fail at boot.
-    await validateManifestForRoute(item.manifest, rcfg.cfg.type, c, "stored", {
-      requireCallableTools: true,
-    });
+    await loadOrgItemOr404(rcfg, orgId, itemId);
 
     // Parse optional version override from request body. The body itself is
     // optional (OpenAPI `requestBody.required: false` — the SPA omits it
@@ -1335,6 +1315,14 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       orgId,
       userId: user.id,
       version: versionOverride,
+      // Validate the exact snapshot that will be published, including its
+      // version override. The route's earlier read is not a coherent snapshot.
+      // Stored manifests may carry retired tools; empty callable selections
+      // remain forbidden at publish time, even when draft saves allow them.
+      validateManifest: (manifest, type) =>
+        validateManifestForRoute(manifest, type, c, "stored", {
+          requireCallableTools: true,
+        }),
     });
 
     if ("error" in result) {

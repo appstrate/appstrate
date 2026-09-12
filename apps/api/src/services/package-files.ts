@@ -8,8 +8,7 @@
  * Saves, restores and imports share mutatePackageDraftFiles below.
  */
 
-import { and, eq, sql } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
+import { and, eq } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { conflict, notFound } from "../lib/errors.ts";
@@ -17,6 +16,7 @@ import { downloadPackageFiles, uploadPackageFiles } from "./package-items/storag
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
 import { getVersionForDownload } from "./package-versions.ts";
+import { withPackageDraftLock } from "./package-draft-lock.ts";
 import {
   CONFIG_BY_TYPE,
   SYSTEM_STORAGE_NAMESPACE,
@@ -592,12 +592,9 @@ export async function mutatePackageDraftFiles(
   target: { id: string; type: PackageType; orgId: string },
   input: MutateDraftFilesInput,
 ): Promise<{ snapshot: PackageFileSnapshot; lockVersion: number }> {
-  const lockKey = `package-files:${target.id}`;
   const label = CONFIG_BY_TYPE[target.type].labelSingular;
 
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
-
+  return withPackageDraftLock(target.id, async (tx) => {
     const [row] = await tx
       .select({
         draftManifest: packages.draftManifest,
