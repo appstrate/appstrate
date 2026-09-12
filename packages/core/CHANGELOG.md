@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `createS3Storage` bounds buffered `uploadFile` / `downloadFile` operations to
   30 seconds, including SDK retries and response-body reads. The deadline
   aborts the request and cancels the body reader, releasing stalled connections.
+  Downloads retain their own timer through SDK header completion, including on
+  Bun 1.3.14 where removing a listener can disable an `AbortSignal.timeout` deadline.
   `S3StorageConfig.requestTimeoutMs` can override this bound; streaming transfers
   and presigned URLs retain their existing behavior.
 
