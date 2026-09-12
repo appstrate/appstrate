@@ -250,6 +250,40 @@ describe("materializeSkill", () => {
     ).toThrow(/Refusing archive entry/);
   });
 
+  it("refuses exactly what the platform's own predicate refuses", () => {
+    // The rule is `isSafeArchivePath` (`@appstrate/core/zip`) — the same one the
+    // draft write route enforces and `unzipArtifact` sanitizes with. A local
+    // copy of it here is what let a path the server blessed abort a whole sync,
+    // so these cases pin the two ends together.
+    for (const path of ["./notes.md", "a/./b.md", "C:/Users/x.md", "dir//x.md", "x\\y.md"]) {
+      expect(() =>
+        materializeSkill({
+          slug: "pdf-tools",
+          files: {
+            "SKILL.md": encoder.encode(CONFORMING_SKILL),
+            [path]: encoder.encode("x"),
+          },
+        }),
+      ).toThrow(/Refusing archive entry/);
+    }
+    // Positive control: the shapes it must keep accepting.
+    const out = materializeSkill({
+      slug: "pdf-tools",
+      files: {
+        "SKILL.md": encoder.encode(CONFORMING_SKILL),
+        "scripts/run.py": encoder.encode("print(1)"),
+        "docs/.keep": new Uint8Array(),
+        "notes..md": encoder.encode("y"),
+      },
+    });
+    expect(Object.keys(out).sort()).toEqual([
+      "SKILL.md",
+      "docs/.keep",
+      "notes..md",
+      "scripts/run.py",
+    ]);
+  });
+
   it("rejects an artifact with no SKILL.md", () => {
     expect(() =>
       materializeSkill({ slug: "pdf-tools", files: { "notes.md": encoder.encode("hi") } }),

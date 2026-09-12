@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePackageDetail } from "../hooks/use-packages";
@@ -23,6 +23,7 @@ import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-grou
 import { PromptEditor } from "../components/agent-editor/prompt-editor";
 import { JsonEditor } from "../components/json-editor";
 import { ContentEditor } from "../components/package-editor/content-editor";
+import { PackageFilesEditor } from "../components/package-files/package-files-editor";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
@@ -49,13 +50,19 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { SchemaField } from "../components/agent-editor/schema-section";
-import { agentSchema, skillSchema, integrationSchema } from "@appstrate/core/schemas";
+import {
+  agentSchema,
+  skillSchema,
+  integrationSchema,
+  mcpServerSchema,
+} from "@appstrate/core/schemas";
 import { AFPS_SCHEMA_URLS } from "@appstrate/core/validation";
 
 const PACKAGE_SCHEMAS: Record<string, object | undefined> = {
   agent: agentSchema,
   skill: skillSchema,
   integration: integrationSchema,
+  "mcp-server": mcpServerSchema,
 };
 
 type GenericEditorTab =
@@ -68,6 +75,7 @@ type GenericEditorTab =
   | "auths"
   | "tools"
   | "content"
+  | "files"
   | "json";
 
 // ─── Agent Editor Inner Form ────────────────────────────────────────
@@ -105,6 +113,7 @@ function AgentEditorInner({
     saveDraft,
     handleSubmit,
     isPending,
+    setPreparingFiles,
   } = useEditorState<AgentEditorState>({
     initialState,
     packageType: "agent",
@@ -116,7 +125,7 @@ function AgentEditorInner({
       if (!id) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
-      if (!s.prompt.trim()) {
+      if (!isEdit && !s.prompt.trim()) {
         return { error: t("editor.errorPrompt"), tab: "prompt" };
       }
       return null;
@@ -194,7 +203,10 @@ function AgentEditorInner({
 
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
-    { id: "prompt", label: primaryDisplayFile("agent").name },
+    {
+      id: isEdit ? "files" : "prompt",
+      label: isEdit ? t("files.tabLabel") : primaryDisplayFile("agent").name,
+    },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "integrations", label: t("editor.tabIntegrations") },
@@ -332,6 +344,19 @@ function AgentEditorInner({
         />
       )}
 
+      {isEdit && (
+        <PackageFilesEditor
+          packageId={packageId!}
+          type={"agent"}
+          active={activeTab === "files"}
+          operations={state.operations ?? []}
+          onChange={(operations) => setState((current) => ({ ...current, operations }))}
+          manifest={state.manifest}
+          disabled={isPending}
+          onBusyChange={setPreparingFiles}
+        />
+      )}
+
       <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
   );
@@ -349,15 +374,15 @@ function PackageEditorInner({
   packageId,
   isEdit,
 }: {
-  type: "skill";
+  type: "skill" | "mcp-server";
   initialState: PackageEditorState;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
+  const contentTab: GenericEditorTab = isEdit ? "files" : "content";
   const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
-
   const {
     state,
     setState,
@@ -369,30 +394,27 @@ function PackageEditorInner({
     saveDraft,
     handleSubmit,
     isPending,
+    setPreparingFiles,
   } = useEditorState<PackageEditorState>({
     initialState,
     packageType: type,
     packageId,
     isEdit,
-    toWireBody: (s) => ({
-      manifest: s.manifest,
-      content: s.content,
-    }),
+    toWireBody: (s) => ({ manifest: s.manifest, content: s.content }),
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
       if (!id) {
         return { error: t("editor.errorRequired"), tab: "general" };
       }
-      if (!s.content.trim()) {
-        return {
-          error: t("editor.errorContent", { defaultValue: "Le contenu est requis." }),
-          tab: "content",
-        };
+      if (isEdit || type !== "skill") return null;
+      const content = s.content;
+      if (!content.trim()) {
+        return { error: t("editor.errorContent"), tab: contentTab };
       }
       // The same checker the write routes run — fixed here, not via a 400.
-      const frontmatter = skillFrontmatterError(s.content);
+      const frontmatter = skillFrontmatterError(content);
       if (frontmatter) {
-        return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: "content" };
+        return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: contentTab };
       }
       return null;
     },
@@ -407,7 +429,7 @@ function PackageEditorInner({
 
   const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
-    { id: "content", label: primaryDisplayFile(type).name },
+    { id: contentTab, label: isEdit ? t("files.tabLabel") : primaryDisplayFile(type).name },
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -435,6 +457,9 @@ function PackageEditorInner({
         <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
       )}
 
+      {/* No `key`: `state.content` has exactly one writer, the editor's own
+          `onChange` — the JSON tab applies the manifest and nothing else — so
+          there is never a text to push back into a mounted Monaco. */}
       {activeTab === "content" && (
         <ContentEditor
           value={state.content}
@@ -452,6 +477,19 @@ function PackageEditorInner({
             setActiveTab("general");
           }}
           schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type]! }}
+        />
+      )}
+
+      {isEdit && (
+        <PackageFilesEditor
+          packageId={packageId!}
+          type={type}
+          active={activeTab === "files"}
+          operations={state.operations ?? []}
+          onChange={(operations) => setState((current) => ({ ...current, operations }))}
+          manifest={state.manifest}
+          disabled={isPending}
+          onBusyChange={setPreparingFiles}
         />
       )}
 
@@ -486,6 +524,7 @@ function IntegrationEditorInner({
     saveDraft,
     handleSubmit,
     isPending,
+    setPreparingFiles,
   } = useEditorState<EditorStateBase>({
     initialState,
     packageType: "integration",
@@ -520,6 +559,7 @@ function IntegrationEditorInner({
     { id: "source", label: t("integrationEditor.tabSource") },
     { id: "auths", label: t("integrationEditor.tabAuths") },
     { id: "tools", label: t("integrationEditor.tabTools") },
+    ...(isEdit ? [{ id: "files" as const, label: t("files.tabLabel") }] : []),
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -573,6 +613,19 @@ function IntegrationEditorInner({
         />
       )}
 
+      {isEdit && (
+        <PackageFilesEditor
+          packageId={packageId!}
+          type={"integration"}
+          active={activeTab === "files"}
+          operations={state.operations ?? []}
+          onChange={(operations) => setState((current) => ({ ...current, operations }))}
+          manifest={state.manifest}
+          disabled={isPending}
+          onBusyChange={setPreparingFiles}
+        />
+      )}
+
       <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
   );
@@ -580,7 +633,7 @@ function IntegrationEditorInner({
 
 // ─── Page Wrapper ───────────────────────────────────────────────────
 
-export function PackageEditorPage({ type }: { type: Exclude<PackageType, "mcp-server"> }) {
+export function PackageEditorPage({ type }: { type: PackageType }) {
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope ? `${scope}/${name}` : undefined;
   const navigate = useNavigate();
@@ -664,11 +717,15 @@ export function PackageEditorPage({ type }: { type: Exclude<PackageType, "mcp-se
   // Skill editor (agent/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 
+  // `content` is the CREATE form's single Monaco buffer and nothing else: an
+  // existing skill authors `SKILL.md` through the files editor, which reads it
+  // from the file index. Seeding it here would leave a second copy of the file
+  // in editor state, free to go stale behind every save.
   const initialState: PackageEditorState =
     isEdit && pkgDetail
       ? {
           manifest: pkgDetail.manifest ?? {},
-          content: pkgDetail.content ?? "",
+          content: "",
           lock_version: pkgDetail.lock_version,
         }
       : {
@@ -679,7 +736,7 @@ export function PackageEditorPage({ type }: { type: Exclude<PackageType, "mcp-se
   return (
     <PackageEditorInner
       key={packageId ?? "new"}
-      type="skill"
+      type={type}
       initialState={initialState}
       packageId={packageId}
       isEdit={isEdit}

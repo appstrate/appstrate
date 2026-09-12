@@ -28,6 +28,7 @@
  * rendering mode exists.
  */
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, FileWarning } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -50,9 +51,25 @@ interface FilePreviewProps {
   packageId: string;
   version: string | undefined;
   entry: PackageFileEntry;
+  /**
+   * Extra controls in the header, right of the download button. The authoring
+   * surface puts *Remplacer* and *Supprimer* here: a binary or oversized file
+   * has no editable body, so its header is the only place those two gestures
+   * can live.
+   */
+  actions?: ReactNode;
+  /** A staged file has no downloadable server representation yet. */
+  downloadPath?: string | null;
 }
 
-export function FilePreview({ id, packageId, version, entry }: FilePreviewProps) {
+export function FilePreview({
+  id,
+  packageId,
+  version,
+  entry,
+  actions,
+  downloadPath = entry.path,
+}: FilePreviewProps) {
   const { t } = useTranslation("agents");
   const { resolvedTheme } = useTheme();
   const { text, isLoading, isError } = usePackageFile(packageId, version, entry);
@@ -83,10 +100,16 @@ export function FilePreview({ id, packageId, version, entry }: FilePreviewProps)
         {/* "Télécharger le fichier", not "Télécharger": the actions dropdown
             already shows a Download-icon "Télécharger" for the WHOLE archive,
             and both are visible on this tab at the same time. */}
-        <Button variant="outline" size="sm" onClick={() => void download(entry.path)}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={downloadPath === null}
+          onClick={() => downloadPath !== null && void download(downloadPath)}
+        >
           <Download size={14} />
           {t("files.downloadFile")}
         </Button>
+        {actions}
       </div>
 
       {blocked ? (

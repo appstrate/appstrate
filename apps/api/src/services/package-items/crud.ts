@@ -17,7 +17,7 @@ import {
 } from "../../lib/package-helpers.ts";
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
-import { scopedWhere } from "../../lib/db-helpers.ts";
+import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -204,7 +204,14 @@ export async function createOrgItem(
   }
 }
 
-/** Update a package item with optimistic locking. Returns null on version mismatch (409). */
+/**
+ * Update a package item with optimistic locking. Returns null on version
+ * mismatch (409).
+ *
+ * `executor` lets a caller enlist the update in a transaction it already owns —
+ * `mutatePackageDraftFiles` writes this row and the package's ZIP under one
+ * advisory lock, and a bare `db` here would run outside both.
+ */
 export async function updateOrgItem(
   orgId: string,
   id: string,
@@ -213,8 +220,9 @@ export async function updateOrgItem(
     content: string;
   },
   expectedVersion: number,
+  executor: DbOrTx = db,
 ): Promise<Package | null> {
-  const rows = await db
+  const rows = await executor
     .update(packages)
     .set({
       draftManifest: payload.manifest,
@@ -231,46 +239,6 @@ export async function updateOrgItem(
     .returning();
 
   return rows[0] ?? null;
-}
-
-/**
- * Re-install (overwrite) an existing item's draft manifest + content.
- *
- * Distinct from {@link updateOrgItem}, which is optimistic (returns null so the
- * route surfaces a 409) for USER-facing edits where a stale `lock_version`
- * means "someone else edited, reload". A re-install is machine-driven
- * (post-install / bundle import) and last-writer-wins: it re-reads the CURRENT
- * `lock_version` and retries the update when a concurrent write bumped it, so
- * the install is never silently dropped on a lock mismatch (the previous
- * caller passed a lock_version read moments earlier and ignored the null
- * return — a concurrent edit would make the re-install a no-op). Returns the
- * updated row, or null when the item no longer exists (caller should insert).
- */
-export async function reinstallOrgItem(
-  orgId: string,
-  id: string,
-  payload: {
-    manifest: Record<string, unknown>;
-    content: string;
-  },
-): Promise<Package | null> {
-  const MAX_ATTEMPTS = 5;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const [current] = await db
-      .select({ lockVersion: packages.lockVersion })
-      .from(packages)
-      .where(scopedWhere(packages, { orgId, extra: [eq(packages.id, id)] }))
-      .limit(1);
-    if (!current) return null;
-
-    const updated = await updateOrgItem(orgId, id, payload, current.lockVersion);
-    if (updated) return updated;
-    // Lost the optimistic-lock race (a concurrent write bumped lock_version) —
-    // re-read the fresh version and retry the overwrite.
-  }
-  throw new Error(
-    `reinstallOrgItem: exceeded retry budget for '${id}' under concurrent modification`,
-  );
 }
 
 /** List items of a type accessible to a space (system + installed). */

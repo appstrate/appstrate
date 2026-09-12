@@ -25,7 +25,7 @@ import {
 import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/version-policy";
 
 import { parseScopedName } from "@appstrate/core/naming";
-import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
+import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { downloadPackageFiles } from "./package-items/storage.ts";
@@ -33,6 +33,7 @@ import { storageFolderForType, assertArchiveContentConforms } from "./package-it
 import { toISO } from "../lib/date-helpers.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
+import { withPackageDraftLock } from "./package-draft-lock.ts";
 
 // ─────────────────────────────────────────────
 // Version creation
@@ -579,20 +580,35 @@ export async function createVersionFromDraft(params: {
   orgId: string;
   userId: string;
   version?: string;
+  /** Context-dependent publish gates must validate the captured manifest. */
+  validateManifest?: (manifest: Record<string, unknown>, type: PackageType) => Promise<unknown>;
 }): Promise<CreateVersionResult> {
   const { packageId, orgId, userId } = params;
 
-  const [pkg] = await db
-    .select({
-      draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
-      type: packages.type,
-    })
-    .from(packages)
-    .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
-    .limit(1);
-
-  if (!pkg) return { error: "invalid_version" };
+  // Capture both stores while saves/imports/restores are excluded. Release the
+  // lock before context-dependent validation and immutable-version creation:
+  // those use their own DB connections, and must never nest under this lock.
+  const snapshot = await withPackageDraftLock(packageId, async (tx) => {
+    const [pkg] = await tx
+      .select({
+        draftManifest: packages.draftManifest,
+        draftContent: packages.draftContent,
+        type: packages.type,
+        lockVersion: packages.lockVersion,
+      })
+      .from(packages)
+      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+      .limit(1);
+    if (!pkg) return null;
+    const storedFiles = await downloadPackageFiles(
+      storageFolderForType(pkg.type),
+      orgId,
+      packageId,
+    );
+    return { pkg, storedFiles };
+  });
+  if (!snapshot) return { error: "invalid_version" };
+  const { pkg, storedFiles } = snapshot;
 
   const baseManifest = asRecord(pkg.draftManifest);
   const content = (pkg.draftContent ?? "") as string;
@@ -602,14 +618,6 @@ export async function createVersionFromDraft(params: {
     params.version ?? (typeof baseManifest.version === "string" ? baseManifest.version : undefined);
 
   if (!version || !isValidVersion(version)) return { error: "invalid_version" };
-
-  // If override version differs from manifest, sync the draft manifest in DB
-  if (params.version && params.version !== baseManifest.version) {
-    await db
-      .update(packages)
-      .set({ draftManifest: { ...baseManifest, version: params.version } })
-      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
-  }
 
   const manifest = { ...baseManifest, version };
 
@@ -644,15 +652,12 @@ export async function createVersionFromDraft(params: {
     });
   }
 
+  await params.validateManifest?.(finalManifest, pkg.type);
+
   // Build ZIP depending on package type
   let zipBuffer: Buffer;
   let frozenEntries: Record<string, Uint8Array> | undefined;
   if (pkg.type === "agent") {
-    const storedFiles = await downloadPackageFiles(
-      storageFolderForType(pkg.type),
-      orgId,
-      packageId,
-    );
     if (storedFiles) {
       const entries: Record<string, Uint8Array> = { ...storedFiles };
       entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
@@ -670,13 +675,12 @@ export async function createVersionFromDraft(params: {
     // mapping the upload path (`routes/packages.ts`), the deletion outbox and
     // the orphan scanner all use. A hand-rolled ternary here silently sent
     // `mcp-server` reads to `skills/`.
-    const files = await downloadPackageFiles(storageFolderForType(pkg.type), orgId, packageId);
-    if (!files) {
+    if (!storedFiles) {
       throw new Error(
         `Cannot create version for ${packageId}: package files not found in storage. Re-upload the package before creating a version.`,
       );
     }
-    const entries: Record<string, Uint8Array> = { ...files };
+    const entries: Record<string, Uint8Array> = { ...storedFiles };
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(finalManifest, null, 2));
     zipBuffer = Buffer.from(zipArtifact(entries, 6));
     frozenEntries = entries;
@@ -728,6 +732,53 @@ export async function createVersionFromDraft(params: {
   // `no_changes` above): refuse loudly instead of silently keeping the old
   // artifact — the caller must bump the version to publish the new content.
   if (result.outcome === "exists") return { error: "version_exists" };
+
+  await withPackageDraftLock(packageId, async (tx) => {
+    const [latest] = await tx
+      .select({ id: packageVersions.id })
+      .from(packageVersions)
+      .where(eq(packageVersions.packageId, packageId))
+      .orderBy(desc(packageVersions.id))
+      .limit(1);
+    // Version inserts serialize per package. An older publish must not undo
+    // the draft state finalized by a later one.
+    if (latest?.id !== result.id) return;
+
+    // A save during validation can precede the version's creation timestamp,
+    // even though its changes were not captured. Keep that newer draft dirty
+    // under the existing timestamp-based unpublished-changes contract. If this
+    // snapshot is still current, clear any dirty marker left by an older publish.
+    const publishedAt = sql`(
+      SELECT MAX(${packageVersions.createdAt}) FROM ${packageVersions}
+      WHERE ${packageVersions.packageId} = ${packageId}
+    )`;
+    await tx
+      .update(packages)
+      .set({
+        updatedAt: sql`CASE WHEN ${packages.lockVersion} = ${pkg.lockVersion}
+          THEN LEAST(${packages.updatedAt}, ${publishedAt})
+          ELSE GREATEST(${packages.updatedAt}, ${publishedAt} + interval '1 millisecond') END`,
+      })
+      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+
+    // Reflect an override only in the unchanged draft, after successful publish.
+    // Advance its editor token, but not updatedAt: this change is already published.
+    if (params.version && params.version !== baseManifest.version) {
+      await tx
+        .update(packages)
+        .set({
+          draftManifest: { ...baseManifest, version },
+          lockVersion: sql`${packages.lockVersion} + 1`,
+        })
+        .where(
+          and(
+            eq(packages.id, packageId),
+            eq(packages.orgId, orgId),
+            eq(packages.lockVersion, pkg.lockVersion),
+          ),
+        );
+    }
+  });
   return { id: result.id, version: result.version };
 }
 

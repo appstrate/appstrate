@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New subpath `@appstrate/core/package-file-operations`: `applyFileTreeOperations`,
+  `isProtectedPackageFile`, `PackageFileWriteError`, `PackageFileWriteErrorCode`
+  and `FileTreeOperation`. The browser and API share ordered file operations,
+  required-entry protection and canonical path collision checks, including
+  file/directory ancestors.
+
+- New export `PACKAGE_MANIFEST_FILE` (`@appstrate/core/package-files`): the archive entry that carries a package's manifest, `"manifest.json"`. Not a display label — it is the name two enforcement points refuse, the draft-write route (`reserved_entry`: the manifest is a projection of `packages.draft_manifest`, authored through the package `PUT`) and the editor's own path validator. Declaring it once is what keeps the client from offering a path the server rejects.
+
+- New exports `isSafeArchivePath(path)` and `ARCHIVE_MAX_FILES` (`@appstrate/core/zip`). `isSafeArchivePath` is the entry-name predicate `unzipArtifact` sanitizes with, extracted so a write path can enforce the same rule: no `..` segment, no empty segment (which covers a leading `/`, a trailing `/`, a `//` and the empty name), no `.` segment, no `\0`, no `\`, no Windows drive prefix (`C:/…`), no `__MACOSX/` prefix. One predicate, three consumers, two policies — import drops an offending entry, while the draft-write route and the CLI's `skills sync` materializer refuse it. `ARCHIVE_MAX_FILES` (10 000) is `unzipArtifact`'s entry-count default, named so a producer can check a tree against the ceiling it will be read back under.
+
 - New export `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`), the request header `X-Appstrate-Connect-Offers`, plus the matching `connectOffers?: boolean` option on `RunAndWaitClientOptions`. Set on the LAUNCH request only (never the poll), it asks the run-kickoff routes to mint a hosted-connect session per actor-actionable item of a `missing_integration_connection` 412 and return it as `connect_url` on that item, so a chat surface renders the connect card straight off the error with no second call. A minted link is a bearer capability to create a connection as the calling actor: only a caller that renders the card itself, or hands the link to the human who is that actor, may opt in — never a caller that logs, persists, or forwards its responses to a third party (the dashboard, the CLI, the GitHub Action, the scheduler and dry-run validation all leave it unset).
 
 - New export `partitionScopesByAuthCatalog` (`@appstrate/core/integration`): splits a scope list by membership of ONE auth's `scope_catalog` into `{ declared, undeclared }`, with the "an auth declaring no catalog declares no closed set" carve-out applied once. It is the single definition of catalog membership — `requiredScopesForAgent` filters its relayed scopes through `declared`, and the connect kickoffs refuse `undeclared` — replacing two independent implementations that were complements of each other.
@@ -26,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New export `reportPermissionDenial(c, required)` (`@appstrate/core/permissions`): fires the denial audit hook for a refusal decided outside `makePermissionGuard` (a disjunction of permission strings); `makePermissionGuard` now calls it.
 
 ### Changed
+
+- `createS3Storage` bounds buffered `uploadFile` / `downloadFile` operations to
+  30 seconds, including SDK retries and response-body reads. The deadline
+  aborts the request and cancels the body reader, releasing stalled connections.
+  Downloads retain their own timer through SDK header completion, including on
+  Bun 1.3.14 where removing a listener can disable an `AbortSignal.timeout` deadline.
+  `S3StorageConfig.requestTimeoutMs` can override this bound; streaming transfers
+  and presigned URLs retain their existing behavior.
 
 - `requiredScopesForAgent` (`@appstrate/core/integration`) now filters the
   agent's explicit `agentScopes` to the ones the TARGET auth's `scope_catalog`

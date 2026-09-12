@@ -4,14 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packageVersionDependencies } from "@appstrate/db/schema";
 import type { DepEntry } from "@appstrate/core/dependencies";
-
-/**
- * A Drizzle executor — either the root `db` or an open transaction handle.
- * Lets callers run dependency-index writes inside the same transaction that
- * inserts the version row, so the row and its derived index commit (or roll
- * back) atomically.
- */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /** Batch insert version dependencies. Skips duplicates. */
 export async function storeVersionDependencies(

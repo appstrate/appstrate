@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { MonacoEditor as Editor } from "./monaco";
@@ -16,12 +16,12 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
   const { t } = useTranslation(["agents", "common"]);
   const { resolvedTheme } = useTheme();
 
-  const initialJson = useMemo(() => {
-    return JSON.stringify(value, null, 2);
-    // Only compute once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+  // The seed Monaco mounts on, and nothing more: the editor owns its text from
+  // then on (`ContentEditor` carries the full reasoning — a controlled `value`
+  // is pushed back through an effect that runs a render late, and drops keys
+  // typed in between). Every call site remounts this by `key` when the manifest
+  // changes elsewhere in the editor, which is how a reset gets in.
+  const [initialJson] = useState(() => JSON.stringify(value, null, 2));
   const [jsonValue, setJsonValue] = useState(initialJson);
   const [parseError, setParseError] = useState<string | null>(null);
 
@@ -45,7 +45,7 @@ export function JsonEditor({ value, onApply, schema }: JsonEditorProps) {
         height="600px"
         language="json"
         theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-        value={jsonValue}
+        defaultValue={initialJson}
         onChange={(v) => {
           setJsonValue(v ?? "");
           setParseError(null);

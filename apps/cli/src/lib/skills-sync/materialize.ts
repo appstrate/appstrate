@@ -9,6 +9,7 @@
 import { isValidSkillName, SKILL_NAME_MAX_LENGTH } from "@appstrate/afps-shared/companion-files";
 import { extractSkillMeta } from "@appstrate/core/validation";
 import { toSlug } from "@appstrate/core/naming";
+import { isSafeArchivePath } from "@appstrate/core/zip";
 
 /**
  * Appstrate packaging, not skill content. Exported because the draft path must
@@ -68,17 +69,18 @@ export function collisionSlug(packageId: string, taken: ReadonlySet<string>): st
   }
 }
 
-/** `unzipArtifact` drops these too; the guard belongs where files are created. */
+/**
+ * The platform's own archive-entry predicate, applied where files are created.
+ *
+ * Imported rather than restated: `unzipArtifact` drops what it refuses and the
+ * draft write route answers `400` for it, so a local copy here could only
+ * diverge — and it did, refusing `.` segments and drive prefixes the platform
+ * accepted, which failed a whole sync on bytes the write route had blessed.
+ * This end keeps its own POLICY (abort, with a message naming the entry); the
+ * RULE is one.
+ */
 function assertSafeEntry(path: string): void {
-  const unsafe =
-    path.length === 0 ||
-    path.startsWith("/") ||
-    /^[a-zA-Z]:[\\/]/.test(path) ||
-    path.includes("\\") ||
-    path.includes("\0") ||
-    path.endsWith("/") ||
-    path.split("/").some((segment) => segment === ".." || segment === "." || segment === "");
-  if (unsafe) {
+  if (!isSafeArchivePath(path)) {
     throw new SkillMaterializeError(
       `Refusing archive entry "${path}": absolute, traversing, or not a file`,
       "The published artifact is malformed. Re-publish the skill from Appstrate.",

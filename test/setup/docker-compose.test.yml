@@ -50,7 +50,8 @@ services:
       retries: 15
 
   minio-test:
-    image: minio/minio:latest
+    # Official Quay image, pinned to the same server release as the tier-3 example.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     ports:
       # Mapped to 9012 (not 9000/9002) to avoid colliding with other
       # dev servers commonly running on those ports on the same host.

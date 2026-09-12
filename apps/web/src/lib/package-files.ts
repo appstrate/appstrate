@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { PACKAGE_CONTENT_FILE } from "@appstrate/core/package-files";
+import { PackageFileWriteError } from "@appstrate/core/package-file-operations";
+import { PACKAGE_CONTENT_FILE, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { PackageType } from "@appstrate/core/validation";
+import { ApiError } from "../api/errors";
 
 /**
  * A file surfaced in the package UI: the editor's content tab label, the diff
@@ -19,8 +21,6 @@ interface DisplayFile {
   source: "manifest" | "content";
 }
 
-const MANIFEST_FILE = "manifest.json";
-
 /**
  * Primary file of a package type — the editor's content tab, and the entry the
  * file explorer opens on when the artifact carries it.
@@ -37,7 +37,7 @@ const MANIFEST_FILE = "manifest.json";
 export function primaryDisplayFile(type: PackageType): DisplayFile {
   const content = PACKAGE_CONTENT_FILE[type];
   return content === null
-    ? { name: MANIFEST_FILE, source: "manifest" }
+    ? { name: PACKAGE_MANIFEST_FILE, source: "manifest" }
     : { name: content, source: "content" };
 }
 
@@ -49,4 +49,48 @@ export function primaryDisplayFile(type: PackageType): DisplayFile {
 export function companionDisplayFile(type: PackageType): DisplayFile | undefined {
   const primary = primaryDisplayFile(type);
   return primary.source === "content" ? primary : undefined;
+}
+
+/**
+ * The message an author reads when a draft-tree write is refused, keyed by the
+ * route's machine-readable `code` rather than by its status or its English
+ * `detail` — or `null` for a failure this surface does not own.
+ *
+ * `null` is the load-bearing half: the same save button sends the file batch
+ * AND the manifest, so the editor's error banner asks both translators. A
+ * blanket "saving the files failed" here would swallow the manifest's own
+ * messages, which are the specific ones.
+ *
+ * Only the refusals the editor can actually provoke are named. The two it
+ * cannot — `content_entry_immovable` and `not_found` — are deliberately absent:
+ * the tree offers no rename or delete on a pinned entry, and every path it
+ * sends comes from the index it is showing, so either one means the client's
+ * picture of the package is wrong in a way no specific sentence would help
+ * with.
+ */
+export function packageFilesErrorKey(error: unknown): string | null {
+  if (!(error instanceof ApiError) && !(error instanceof PackageFileWriteError)) return null;
+  switch (error.code) {
+    // The tree moved under this editor: the fix is to re-read it, and the
+    // buffered edits are kept so the author can save them again.
+    case "conflict":
+      return "files.errorConflict";
+    case "invalid_path":
+      return "files.errorInvalidPath";
+    case "reserved_entry":
+      return "files.errorReserved";
+    case "path_conflict":
+      return "files.errorConflictPath";
+    // `payload_too_large` is the GLOBAL body-limit middleware, which answers
+    // before the route runs: several near-1 MiB files in one import inflate
+    // ~1.37x as base64 and cross `API_BODY_LIMIT_BYTES` while every individual
+    // file is under the per-file ceiling. The author's fix is the same one —
+    // send fewer or smaller files — so it is the same sentence.
+    case "file_too_large":
+    case "tree_too_large":
+    case "payload_too_large":
+      return "files.errorTooLarge";
+    default:
+      return null;
+  }
 }

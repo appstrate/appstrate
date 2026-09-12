@@ -53,7 +53,7 @@ import type { Actor } from "@appstrate/connect";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
 import { canReadEveryRun, ownsRun } from "../lib/run-visibility.ts";
-import { isUniqueViolation } from "../lib/db-helpers.ts";
+import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -184,9 +184,6 @@ function perFileCapMessage(cap: number): string {
 function runOutputCapMessage(cap: number): string {
   return `Run output would exceed the per-run limit of ${cap} bytes`;
 }
-
-/** A Drizzle executor — either the root `db` or an open transaction handle. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Fold `bytes` back off an org's `files_bytes_used` counter, clamped at 0

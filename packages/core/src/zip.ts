@@ -88,7 +88,51 @@ export function zipArtifact(
 
 /** Default decompressed budget for `unzipArtifact` when a caller passes none. */
 const DEFAULT_MAX_DECOMPRESSED = 200 * 1024 * 1024; // 200 MB
-const DEFAULT_MAX_FILES = 10_000;
+
+/**
+ * Entry-count budget for one archive: `unzipArtifact`'s default, and therefore
+ * the ceiling every stored package archive is already read under
+ * (`unzipPackageArchive` overrides the byte budget and inherits this one).
+ *
+ * Exported because the draft write path enforces the same ceiling on the tree
+ * it is about to store: a tree that would not survive being read back is
+ * refused before it is written, rather than after.
+ */
+export const ARCHIVE_MAX_FILES = 10_000;
+
+/**
+ * Whether an archive entry name is one the platform is willing to carry.
+ *
+ * Rejects, in one pass: a `..` segment (traversal) and a `.` segment (a path
+ * that names a file already named by another entry — `./a.md` and `a.md` are
+ * the same file, and only one of them survives extraction), any EMPTY segment —
+ * which is what a leading `/` (absolute path), a trailing `/` (directory
+ * entry), a `//` and the empty name itself all produce — a `\0` or a `\`
+ * anywhere (a backslash is a separator on the extraction target and would
+ * smuggle a second path shape past the segment rules), a Windows drive prefix
+ * (`C:/…`, absolute on the extraction target while every segment looks
+ * relative), and the `__MACOSX/` metadata prefix Finder adds.
+ *
+ * ONE predicate, THREE consumers, TWO policies. Import ({@link unzipArtifact})
+ * DROPS an offending entry: an author's archive is not rejected wholesale
+ * because Finder slipped a resource fork into it. The draft write path REFUSES
+ * the request: a caller naming the path is told its path is unusable rather
+ * than being told the write succeeded and losing it silently. The CLI's
+ * `skills sync` materializer refuses too, at the point where it creates the
+ * file on disk — and it is why the `.` segment and the drive prefix are here:
+ * a path this predicate admitted but the materializer refused failed a whole
+ * skill's sync with "the published artifact is malformed", for bytes the write
+ * route had answered `200` for.
+ */
+export function isSafeArchivePath(path: string): boolean {
+  if (path.includes("\0") || path.includes("\\")) return false;
+  if (path.startsWith("__MACOSX/")) return false;
+  if (/^[a-zA-Z]:\//.test(path)) return false;
+  for (const segment of path.split("/")) {
+    if (segment === "" || segment === "." || segment === "..") return false;
+  }
+  return true;
+}
 
 /**
  * Decompress a ZIP artifact and return sanitized file entries.
@@ -115,7 +159,7 @@ export function unzipArtifact(
   try {
     rawFiles = unzipBounded(artifact, {
       maxDecompressedBytes: opts?.maxDecompressedBytes ?? DEFAULT_MAX_DECOMPRESSED,
-      maxFiles: opts?.maxFiles ?? DEFAULT_MAX_FILES,
+      maxFiles: opts?.maxFiles ?? ARCHIVE_MAX_FILES,
     });
   } catch (err) {
     if (err instanceof DecompressionLimitError) throw err; // surface bomb/limit verbatim
@@ -127,17 +171,12 @@ export function unzipArtifact(
     throw new Error(`Failed to decompress ZIP artifact: ${getErrorMessage(err)}`, { cause: err });
   }
 
-  // Sanitize: filter out path traversal, absolute paths, null bytes, backslashes, __MACOSX, and directory entries
+  // Sanitize: drop every entry whose name {@link isSafeArchivePath} refuses —
+  // traversal, `.` segments, absolute paths (leading `/` or a drive prefix),
+  // null bytes, backslashes, __MACOSX metadata and directory entries.
   const files: Record<string, Uint8Array> = {};
   for (const [key, value] of Object.entries(rawFiles)) {
-    if (
-      key.split("/").some((s) => s === "..") ||
-      key.startsWith("/") ||
-      key.includes("\0") ||
-      key.includes("\\")
-    )
-      continue;
-    if (key.startsWith("__MACOSX/") || key.endsWith("/")) continue;
+    if (!isSafeArchivePath(key)) continue;
     files[key] = value;
   }
 

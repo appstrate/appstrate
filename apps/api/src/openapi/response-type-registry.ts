@@ -277,6 +277,14 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   // generated spec type.
   PackageFileEntry: "artifact file-index item derived from ZIP entries; no shared-type",
   PackageFileIndex: "artifact file-index envelope; SPA uses the generated spec type",
+  PackageFileWriteEntry:
+    "draft-tree write op; a REQUEST shape, compared against its Zod schema by step 4, not a response",
+  PackageFileDeleteEntry:
+    "draft-tree delete op; a REQUEST shape, compared against its Zod schema by step 4, not a response",
+  PackageFileMoveEntry:
+    "draft-tree move op; a REQUEST shape, compared against its Zod schema by step 4, not a response",
+  PackageFileWriteOperation:
+    "draft-tree edit union; a REQUEST shape, compared against its Zod schema by step 4, not a response",
 };
 
 /**

@@ -1,45 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Read-only file explorer for a package's artifact.
- *
- * Single choke point FOR THE FILE-EXPLORER ROUTES: both of them (the index and
- * the content route) read through this module, in two steps —
- * {@link resolvePackageFileValidator} (cheap, DB only) then
- * {@link readPackageSnapshot} (the only thing that fetches bytes). The split is
- * what lets a conditional request for an exact version be answered from one DB
- * read, with no download. Every future optimization (a decompressed-snapshot
- * LRU, a byte-range reader, …) lands inside this module without touching a
- * route handler — which is why those two handlers never call
- * `downloadPackageFiles` / `downloadVersionZip` / `getVersionForDownload`
- * themselves. The claim is scoped to them: the download, publish and version
- * routes in `routes/packages.ts` call all three directly, and are not served
- * by this module.
- *
- * The two read modes are deliberately asymmetric:
- *
- * - **draft** — the stored ZIP is the base, but the DB draft columns
- *   (`draft_manifest` / `draft_content`) WIN over it. The editor writes the
- *   row first and re-uploads the ZIP afterwards, so the ZIP is allowed to lag;
- *   presenting its stale bytes as "the draft" would show the user something
- *   they did not write.
- * - **version** — exactly the pinned bytes, integrity-verified, no overlay. A
- *   published version is immutable by definition; a later draft edit must not
- *   be able to change what a historical version reports.
+ * Draft and immutable-version file reads, plus the serialized draft writer.
+ * Draft reads overlay DB-authoritative manifest/content on the stored ZIP;
+ * version reads return exactly the pinned bytes. Conditional read validators
+ * can avoid downloading a pinned ZIP, while draft validators hash its bytes.
+ * Saves, restores and imports share mutatePackageDraftFiles below.
  */
 
+import { and, eq } from "drizzle-orm";
+import { packages } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
-import { notFound } from "../lib/errors.ts";
-import { downloadPackageFiles } from "./package-items/storage.ts";
+import { conflict, notFound } from "../lib/errors.ts";
+import { downloadPackageFiles, uploadPackageFiles } from "./package-items/storage.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { unzipPackageArchive } from "./package-archive.ts";
 import { getVersionForDownload } from "./package-versions.ts";
-import { CONFIG_BY_TYPE, SYSTEM_STORAGE_NAMESPACE } from "./package-items/config.ts";
+import { withPackageDraftLock } from "./package-draft-lock.ts";
+import {
+  CONFIG_BY_TYPE,
+  SYSTEM_STORAGE_NAMESPACE,
+  assertArchiveContentConforms,
+} from "./package-items/config.ts";
+import { updateOrgItem } from "./package-items/crud.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import {
   PACKAGE_CONTENT_ENTRY,
   PACKAGE_FILE_INLINE_MAX_BYTES,
+  PACKAGE_MANIFEST_FILE,
 } from "@appstrate/core/package-files";
+import { ARCHIVE_MAX_FILES, PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES } from "@appstrate/core/zip";
+import {
+  applyFileTreeOperations,
+  PackageFileWriteError,
+} from "@appstrate/core/package-file-operations";
+import {
+  checkCompanionFiles,
+  companionFilesFromRecord,
+} from "@appstrate/afps-shared/companion-files";
+import { asRecord } from "@appstrate/core/safe-json";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import type { PackageType } from "@appstrate/core/validation";
 
@@ -240,8 +239,6 @@ export function fileEtag(snapshotId: string, path: string): string {
   return `"f-${snapshotId}-${pathDigest}"`;
 }
 
-const MANIFEST_FILE_NAME = "manifest.json";
-
 /**
  * Apply the DB-authoritative draft columns on top of the stored ZIP, in place.
  * Exported so the per-type overlay matrix can be asserted without a database
@@ -293,7 +290,7 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
   }
 
   if (pkg.draftManifest !== null && pkg.draftManifest !== undefined) {
-    files[MANIFEST_FILE_NAME] = encoder.encode(JSON.stringify(pkg.draftManifest, null, 2));
+    files[PACKAGE_MANIFEST_FILE] = encoder.encode(JSON.stringify(pkg.draftManifest, null, 2));
   }
 }
 
@@ -516,4 +513,215 @@ export function buildFileIndex(snapshot: PackageFileSnapshot): PackageFileEntry[
   }
 
   return entries;
+}
+
+// ─────────────────────────────────────────────
+// Draft tree writes
+// ─────────────────────────────────────────────
+
+/** One edit to a draft tree. Paths are archive-relative, `/`-separated. */
+export type PackageFileOperation =
+  | { op: "write"; path: string; bytes: Uint8Array }
+  | { op: "delete"; path: string }
+  | { op: "move"; from: string; to: string };
+
+/** Byte limits belong to persistence; path algebra is shared with the editor. */
+function assertTreeSize(files: Record<string, Uint8Array>): void {
+  const values = Object.values(files);
+  if (
+    values.length > ARCHIVE_MAX_FILES ||
+    values.reduce((sum, bytes) => sum + bytes.byteLength, 0) > PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES
+  ) {
+    throw new PackageFileWriteError(
+      "tree_too_large",
+      null,
+      "Package tree exceeds the file count or byte limit",
+    );
+  }
+}
+
+export function applyFileOperations(
+  files: Record<string, Uint8Array>,
+  operations: readonly PackageFileOperation[],
+  ctx: { type: PackageType },
+): Record<string, Uint8Array> {
+  const converted = operations.map((operation) => {
+    if (operation.op !== "write") return operation;
+    if (operation.bytes.byteLength > PACKAGE_FILE_INLINE_MAX_BYTES)
+      throw new PackageFileWriteError(
+        "file_too_large",
+        operation.path,
+        "File exceeds the 1 MiB editing limit",
+      );
+    return { op: "write" as const, path: operation.path, value: operation.bytes };
+  });
+  const result = applyFileTreeOperations(files, converted, ctx.type);
+  assertTreeSize(result);
+  return result;
+}
+
+export type MutateDraftFilesInput = {
+  /** Authoring requires a token; imports may deliberately replace a draft. */
+  precondition: { lockVersion: number } | { imported: true; lockVersion?: number };
+  /** Manifest to persist with this write. Defaults to the row's current draft. */
+  manifest?: Record<string, unknown>;
+  /**
+   * `packages.draft_content` to persist. Defaults to the resulting tree's
+   * content entry, decoded — which is what the column IS for a type whose entry
+   * is a real file. A type whose `content` is a manifest copy (`integration`,
+   * `mcp-server`) resolves the column on its own terms and passes it here; see
+   * {@link resolveDraftContent}.
+   */
+  draftContent?: string;
+  /** File edits must preserve executable references; manifest-only drafts may be incomplete. */
+  validateBundle?: boolean;
+} & (
+  | { mutate: (files: Record<string, Uint8Array>) => Record<string, Uint8Array>; replace?: never }
+  | { replace: Record<string, Uint8Array>; mutate?: never }
+);
+
+/**
+ * Serialize draft edits, restores and imports through one row/ZIP write.
+ * Imports have already validated their root and preserve immutable dependency
+ * bytes. They may replace the draft deliberately; authoring requires its token.
+ * Storage failure rolls the row back. A successful upload followed by a failed
+ * DB commit can still leave ancillary bytes ahead of the row: object storage
+ * and PostgreSQL do not share a transaction.
+ */
+export async function mutatePackageDraftFiles(
+  target: { id: string; type: PackageType; orgId: string },
+  input: MutateDraftFilesInput,
+): Promise<{ snapshot: PackageFileSnapshot; lockVersion: number }> {
+  const label = CONFIG_BY_TYPE[target.type].labelSingular;
+
+  return withPackageDraftLock(target.id, async (tx) => {
+    const [row] = await tx
+      .select({
+        draftManifest: packages.draftManifest,
+        draftContent: packages.draftContent,
+        lockVersion: packages.lockVersion,
+      })
+      .from(packages)
+      .where(and(eq(packages.id, target.id), eq(packages.orgId, target.orgId)))
+      .limit(1);
+    if (!row) throw notFound(`${label} '${target.id}' not found`);
+
+    const source: PackageFileSource = {
+      id: target.id,
+      type: target.type,
+      orgId: target.orgId,
+      draftManifest: row.draftManifest,
+      draftContent: row.draftContent,
+    };
+
+    if (
+      input.precondition.lockVersion !== undefined &&
+      input.precondition.lockVersion !== row.lockVersion
+    ) {
+      throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
+    }
+    // A full import/restore can repair an unreadable old ZIP without opening it.
+    const mutated = input.replace
+      ? { ...input.replace }
+      : input.mutate(
+          (
+            await readPackageSnapshot(source, {
+              kind: "draft",
+              snapshotId: null,
+              yanked: false,
+            })
+          ).files,
+        );
+    // The bytes ABOUT TO BE STORED, not the ones the caller sent: a write that
+    // leaves the content entry unparseable is refused before either store moves.
+    if (input.manifest)
+      mutated[PACKAGE_MANIFEST_FILE] = new TextEncoder().encode(
+        JSON.stringify(input.manifest, null, 2),
+      );
+    const entry = PACKAGE_CONTENT_ENTRY[target.type];
+    const contentBytes = entry ? mutated[entry.path] : undefined;
+    let content: string;
+    try {
+      // Content columns are text. Authoring must never replace malformed bytes
+      // with U+FFFD when the next read overlays the DB copy onto the archive.
+      content = contentBytes
+        ? new TextDecoder("utf-8", {
+            ignoreBOM: true,
+            fatal: !("imported" in input.precondition),
+          }).decode(contentBytes)
+        : entry
+          ? ""
+          : (row.draftContent ?? "");
+    } catch {
+      throw new PackageFileWriteError(
+        "invalid_bundle",
+        entry?.path ?? null,
+        "Package content must be valid UTF-8 text",
+      );
+    }
+    if (!("imported" in input.precondition)) {
+      assertArchiveContentConforms(target.type, mutated, "file");
+      assertTreeSize(mutated);
+      if (entry?.required && !content.trim()) {
+        throw new PackageFileWriteError(
+          "content_entry_immovable",
+          entry.path,
+          "Required content cannot be empty",
+        );
+      }
+      // Reuse the archive parser's reference check on the resulting tree;
+      // the route already validated the manifest, so no ZIP round-trip is needed.
+      if (input.validateBundle) {
+        const violation = checkCompanionFiles(
+          input.manifest ?? asRecord(row.draftManifest),
+          companionFilesFromRecord(mutated),
+        );
+        if (violation) throw new PackageFileWriteError("invalid_bundle", null, violation.message);
+      }
+    }
+
+    const draftContent = input.draftContent ?? content;
+
+    const updated = await updateOrgItem(
+      target.orgId,
+      target.id,
+      { manifest: input.manifest ?? asRecord(row.draftManifest), content: draftContent },
+      row.lockVersion,
+      tx,
+    );
+    if (!updated) {
+      throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
+    }
+
+    const stored = { ...mutated };
+    if (!CONFIG_BY_TYPE[target.type].manifestIsStoredFile) delete stored[PACKAGE_MANIFEST_FILE];
+    await uploadPackageFiles(
+      CONFIG_BY_TYPE[target.type].storageFolder,
+      target.orgId,
+      target.id,
+      stored,
+    );
+
+    // What the next read will produce: the stored tree with the overlay of the
+    // row we just wrote. Building it from the UPDATED row is what makes the
+    // returned `snapshotId` — and the ETag derived from it — the one a
+    // subsequent conditional request presents.
+    const files = { ...stored };
+    applyDraftOverlay(files, {
+      ...source,
+      draftManifest: updated.draftManifest,
+      draftContent: updated.draftContent,
+    });
+
+    logger.info("Package draft tree written", {
+      packageId: target.id,
+      fileCount: Object.keys(stored).length,
+      lockVersion: updated.lockVersion,
+    });
+
+    return {
+      snapshot: { files, snapshotId: draftSnapshotId(files) },
+      lockVersion: updated.lockVersion,
+    };
+  });
 }

@@ -16,7 +16,7 @@ import { splitPackageRef } from "../../lib/package-paths";
 import { primaryDisplayFile } from "../../lib/package-files";
 import { pickActiveEntry, type PackageFileEntry } from "../../lib/package-file-tree";
 import { LoadingState, ErrorState, EmptyState } from "../page-states";
-import { ReadOnlyFileTree } from "./read-only-file-tree";
+import { FileTree } from "./file-tree";
 import { FilePreview } from "./file-preview";
 
 interface FileExplorerProps {
@@ -70,13 +70,13 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
-      <ReadOnlyFileTree
+      <FileTree
         entries={entries}
         selectedPath={activeEntry.path}
         onSelect={setSelectedPath}
         label={t("files.treeLabel")}
         controlsId={previewId}
-        className="border-border bg-card max-h-[560px] rounded-lg border p-1"
+        className="border-border bg-card max-h-[560px] rounded-lg border"
       />
       <FilePreview id={previewId} packageId={packageId} version={version} entry={activeEntry} />
     </div>

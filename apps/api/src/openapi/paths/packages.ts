@@ -63,6 +63,15 @@ function versionRestoreResponseSchema(detailRef: string) {
   };
 }
 
+const fileOperationsProperty = {
+  type: "array",
+  minItems: 1,
+  maxItems: 200,
+  items: { $ref: "#/components/schemas/PackageFileWriteOperation" },
+  description:
+    "Ordered file edits saved with the manifest under the same lock_version. A stale draft returns 409 without applying the batch. All package types support this field. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations.",
+} as const;
+
 export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
@@ -1060,6 +1069,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -1085,6 +1095,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {
@@ -1261,6 +1283,7 @@ export const packagesPaths = {
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -1282,6 +1305,12 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "409": {
           description:
             "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
@@ -2008,6 +2037,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -2029,6 +2059,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {
@@ -2435,6 +2477,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -2456,6 +2499,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {
