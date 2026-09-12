@@ -1477,6 +1477,22 @@ and each carries what the UI does in the meantime.
    served catalog (the space roles already have one, `GET /api/roles`) would
    remove the drift.
 
+7. **Two things are called a catalogue.** The organisation's catalogue (this
+   panel) lists what the ORG already owns and this space has not activated,
+   read from `GET /api/library`. The integrations page has a second one that
+   lists what the PRODUCT ships and the org has not installed at all, read from
+   `GET /api/integrations`. They are different reads, they act at different
+   levels (activate in a space vs install in the org), and they now look
+   identical, which is a trap. Either the org catalogue grows a "not yet in the
+   organisation" section for every package type, or the integrations one is
+   renamed so the two words stop competing.
+
+8. **Nothing tells the catalogue what a space would gain.** The library says
+   where a package is installed, not what runs or what uses it, so the panel
+   drops the activity filter and the run state. A per-package usage count
+   across the org (how many spaces run it, when it last ran) is what would make
+   choosing between twenty candidates possible.
+
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
 Everything below this block is either done or older context. The open blocks
