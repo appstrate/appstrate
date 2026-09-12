@@ -1302,5 +1302,7 @@
   "userDetail.spacesSection": "Espaces",
   "userDetail.noSpaces": "Cette personne n’entre dans aucun espace.",
   "userDetail.noSpacesHint": "Ajoutez-la depuis la page Membres d’un espace.",
-  "userDetail.joinedAt": "Arrivé le {{date}}"
+  "userDetail.joinedAt": "Arrivé le {{date}}",
+  "packages.install": "Installer dans cet espace",
+  "packages.installed": "« {{name}} » est actif dans cet espace."
 }

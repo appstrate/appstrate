@@ -3535,9 +3535,9 @@ export const connectionTest: Json200<"/api/models/{id}/test", "post"> = {
 export const library: Json200<"/api/library", "get"> = {
   object: "library",
   spaces: [
-    { id: APP_ID, name: "Production", isDefault: true },
-    { id: "app_compta", name: "Comptabilité", isDefault: false },
-    { id: "app_veille", name: "Veille", isDefault: false },
+    { id: "app_lab_default", name: "Default", isDefault: true },
+    { id: APP_ID, name: "Production", isDefault: false },
+    { id: "app_lab_sandbox", name: "Bac à sable", isDefault: false },
   ],
   packages: {
     agent: [
@@ -3547,23 +3547,26 @@ export const library: Json200<"/api/library", "get"> = {
         name: "Compta trimestrielle",
         description: "Pipeline de comptabilité trimestrielle.",
         source: "local",
-        installed_in: [APP_ID, "app_compta"],
+        installed_in: ["app_lab_default", APP_ID],
       },
       {
         type: "agent" as const,
-        id: "@tractr/wiki-brain",
+        id: "@default/wiki-brain",
         name: "Wiki-brain",
         description: "Mémoire proactive par personne.",
         source: "system",
-        installed_in: [APP_ID],
+        installed_in: ["app_lab_default"],
       },
       {
+        // Absent from the space the lab opens in, so the detail page can offer
+        // to install it there — the action the library used to be the only
+        // place for.
         type: "agent" as const,
-        id: "@tractr/analyse-recurrence",
+        id: "@tractr/analyse-recurrence-articles-tastet",
         name: "Analyse de récurrence des articles Tastet",
         description: "Détecte le potentiel de récurrence éditoriale.",
         source: "local",
-        installed_in: ["app_veille"],
+        installed_in: [APP_ID, "app_lab_sandbox"],
       },
     ],
     skill: [
@@ -3573,7 +3576,15 @@ export const library: Json200<"/api/library", "get"> = {
         name: "compta-references",
         description: "Références et scripts pour la comptabilité Tractr.",
         source: "local",
-        installed_in: ["app_compta"],
+        installed_in: ["app_lab_default", APP_ID],
+      },
+      {
+        type: "skill" as const,
+        id: "@default/triage-sentiment",
+        name: "triage-sentiment",
+        description: "Trie les demandes entrantes par sentiment.",
+        source: "local",
+        installed_in: [APP_ID],
       },
     ],
     integration: [
@@ -3583,7 +3594,7 @@ export const library: Json200<"/api/library", "get"> = {
         name: "Google Drive",
         description: "Fichiers, documents et dossiers partagés.",
         source: "system",
-        installed_in: [APP_ID, "app_compta", "app_veille"],
+        installed_in: ["app_lab_default", APP_ID, "app_lab_sandbox"],
       },
       {
         type: "integration" as const,
@@ -3594,8 +3605,6 @@ export const library: Json200<"/api/library", "get"> = {
         installed_in: [],
       },
     ],
-    // The library page has three tabs; MCP servers are in the response shape
-    // but not on screen, so the group is present and empty.
     "mcp-server": [],
   },
 };

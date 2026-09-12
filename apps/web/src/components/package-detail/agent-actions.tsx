@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { schemaHasFileFields } from "@appstrate/core/form";
@@ -119,6 +121,20 @@ export function AgentActions({
                 : t("detail.deleteConfirm", { name: detail.display_name }),
           })
         }
+        canInstall={!!currentSpaceId && !isInstalledInCurrentSpace && detail.source !== "system"}
+        onInstall={() => {
+          if (!currentSpaceId) return;
+          uninstallMutation.mutate(
+            { spaceId: currentSpaceId, packageId, installed: false },
+            {
+              onSuccess: () =>
+                toast.success(
+                  t("packages.installed", { name: detail.display_name, ns: "settings" }),
+                ),
+              onError: (err) => toast.error(getErrorMessage(err)),
+            },
+          );
+        }}
         canUninstall={isInstalledInCurrentSpace && detail.source !== "system"}
         onUninstall={() =>
           setConfirmState({

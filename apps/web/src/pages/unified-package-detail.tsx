@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useState, useEffect } from "react";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { toast } from "sonner";
 import { useParams, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -461,6 +462,20 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                             ns: "settings",
                           }),
                   });
+                }}
+                canInstall={!!currentSpaceId && !isInstalledInCurrentSpace && source !== "system"}
+                onInstall={() => {
+                  if (!currentSpaceId) return;
+                  uninstallMutation.mutate(
+                    { spaceId: currentSpaceId, packageId, installed: false },
+                    {
+                      onSuccess: () =>
+                        toast.success(
+                          t("packages.installed", { name: displayName, ns: "settings" }),
+                        ),
+                      onError: (err) => toast.error(getErrorMessage(err)),
+                    },
+                  );
                 }}
                 canUninstall={isInstalledInCurrentSpace && source !== "system"}
                 onUninstall={() => {

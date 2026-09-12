@@ -1302,5 +1302,7 @@
   "userDetail.spacesSection": "Spaces",
   "userDetail.noSpaces": "This person reaches no space.",
   "userDetail.noSpacesHint": "Add them from a space’s Members page.",
-  "userDetail.joinedAt": "Joined {{date}}"
+  "userDetail.joinedAt": "Joined {{date}}",
+  "packages.install": "Install in this space",
+  "packages.installed": "“{{name}}” is active in this space."
 }

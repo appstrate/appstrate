@@ -13,6 +13,7 @@ import {
   CalendarPlus,
   Trash2,
   PackageMinus,
+  PackagePlus,
   PowerOff,
   SlidersHorizontal,
 } from "lucide-react";
@@ -64,7 +65,9 @@ interface PackageActionsDropdownProps {
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
-  // Uninstall from current space
+  // Install into / uninstall from the current space
+  canInstall?: boolean;
+  onInstall?: () => void;
   canUninstall?: boolean;
   onUninstall?: () => void;
   // Integration-specific: deactivate in the current space (non-destructive —
@@ -101,6 +104,8 @@ export function PackageActionsDropdown({
   onRunWithOptions,
   canDeletePackage,
   onDeletePackage,
+  canInstall,
+  onInstall,
   canUninstall,
   onUninstall,
   canDeactivate,
@@ -123,10 +128,15 @@ export function PackageActionsDropdown({
   const canRead = can(`${resource}:read`);
   const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
   const canDelete = can(`${resource}:delete`);
-  // Deactivating / uninstalling an integration is the same route pair as
+  // Deactivating an integration is the same route pair as
   // `integrations:uninstall`; the props say whether the action EXISTS here.
   const showDeactivate = !!canDeactivate && can("integrations:uninstall") && !!onDeactivate;
-  const showUninstall = !!canUninstall && can("integrations:uninstall") && !!onUninstall;
+  // Putting a package in a space, or taking it out, is the type's OWN
+  // permission — `agents:configure` for an agent, `skills:write` for a skill.
+  // Asking `integrations:uninstall` here hid a skill's uninstall from whoever
+  // could actually do it.
+  const showInstall = !!canInstall && can(PACKAGE_PERMISSIONS[type].install) && !!onInstall;
+  const showUninstall = !!canUninstall && can(PACKAGE_PERMISSIONS[type].uninstall) && !!onUninstall;
   const showDelete = !isBuiltIn && isOwned && canDelete;
   const hasAgentBuildActions = isAgent && (isMutable || (canWrite && !isOwned && Boolean(onFork)));
   const hasAgentExecutionActions =
@@ -141,6 +151,7 @@ export function PackageActionsDropdown({
     Boolean(
       (hasRuns && onDeleteRuns) ||
       (hasMemories && onDeleteMemories) ||
+      (showInstall && onInstall) ||
       (showUninstall && onUninstall) ||
       (showDelete && onDeleteAgent),
     );
@@ -268,7 +279,13 @@ export function PackageActionsDropdown({
                     {t("detail.clearMemories")}
                   </DropdownMenuItem>
                 )}
-                {canUninstall && onUninstall && (
+                {showInstall && onInstall && (
+                  <DropdownMenuItem onSelect={onInstall}>
+                    <PackagePlus size={14} />
+                    {t("packages.install", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {showUninstall && onUninstall && (
                   <DropdownMenuItem
                     onSelect={onUninstall}
                     className="text-destructive focus:text-destructive"
@@ -318,7 +335,7 @@ export function PackageActionsDropdown({
                 {t("fork.button")}
               </DropdownMenuItem>
             )}
-            {(showDeactivate || showUninstall || showDelete) && (
+            {(showDeactivate || showInstall || showUninstall || showDelete) && (
               <>
                 <DropdownMenuSeparator />
                 {canDeactivate && onDeactivate && (
@@ -327,7 +344,13 @@ export function PackageActionsDropdown({
                     {t("integrations.btn.deactivate", { ns: "settings" })}
                   </DropdownMenuItem>
                 )}
-                {canUninstall && onUninstall && (
+                {showInstall && onInstall && (
+                  <DropdownMenuItem onSelect={onInstall}>
+                    <PackagePlus size={14} />
+                    {t("packages.install", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {showUninstall && onUninstall && (
                   <DropdownMenuItem
                     onSelect={onUninstall}
                     className="text-destructive focus:text-destructive"
