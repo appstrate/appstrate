@@ -8,9 +8,9 @@ type Features = Parameters<typeof buildSettingsNavigation>[0]["features"];
 const ALL_FEATURES: Features = { oidc: true, billing: true, webhooks: true };
 const NO_FEATURES: Features = { oidc: false, billing: false, webhooks: false };
 
-function destinations(features: Features, granted: string[]) {
+function destinations(features: Features, granted: string[], canAuthorPackage = false) {
   const can = (permission: string) => granted.includes(permission);
-  return buildSettingsNavigation({ can, features }).flatMap((section) =>
+  return buildSettingsNavigation({ can, canAuthorPackage, features }).flatMap((section) =>
     section.items.filter((item) => item.show !== false).map((item) => item.to),
   );
 }
@@ -47,8 +47,10 @@ describe("unified settings navigation", () => {
       "/org-settings/mcp-access",
     ]);
 
-    // Authoring somewhere is what the library is for.
-    expect(destinations(ALL_FEATURES, ["skills:write"])).toContain("/org-settings/library");
+    // Authoring somewhere is what the library is for — anywhere, not only in
+    // the space the caller happens to stand in.
+    expect(destinations(ALL_FEATURES, [], true)).toContain("/org-settings/library");
+    expect(destinations(ALL_FEATURES, ["skills:write"])).not.toContain("/org-settings/library");
 
     // Writing is what the infrastructure screens are for.
     const admin = destinations(ALL_FEATURES, ["org:settings", "spaces:write", "models:write"]);

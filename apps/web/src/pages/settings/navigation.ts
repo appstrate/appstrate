@@ -45,6 +45,13 @@ interface SettingsNavigationOptions {
    * read-only page.
    */
   can: (permission: GateablePermission) => boolean;
+  /**
+   * Whether the caller authors packages in ANY space they can enter. The
+   * library spans spaces, so the CURRENT space's permissions are the wrong
+   * question: someone who builds in another space would lose the screen that
+   * installs into it.
+   */
+  canAuthorPackage: boolean;
   features: {
     oidc: boolean;
     billing: boolean;
@@ -54,6 +61,7 @@ interface SettingsNavigationOptions {
 
 export function buildSettingsNavigation({
   can,
+  canAuthorPackage,
   features,
 }: SettingsNavigationOptions): UnifiedSettingsSection[] {
   return [
@@ -91,11 +99,7 @@ export function buildSettingsNavigation({
           labelKey: "orgSettings.tabLibrary",
           // The library installs packages into spaces: it is for whoever
           // authors one somewhere.
-          show:
-            can("agents:write") ||
-            can("skills:write") ||
-            can("mcp-servers:write") ||
-            can("integrations:install"),
+          show: canAuthorPackage,
         },
         {
           to: "/org-settings/models",

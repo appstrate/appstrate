@@ -142,6 +142,14 @@ function ScopeNavigation({
   );
 }
 
+/** Writing any package type, which is what installing one into a space is for. */
+const PACKAGE_AUTHORING = [
+  "agents:write",
+  "skills:write",
+  "mcp-servers:write",
+  "integrations:install",
+];
+
 export function UnifiedSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const isMobile = useIsMobile();
@@ -184,8 +192,15 @@ export function UnifiedSettingsLayout() {
     [],
   );
 
+  // Authoring rights are per space, and the library crosses every space the
+  // caller can enter: it is offered when ANY of them grants one.
+  const canAuthorPackage = applications.some((space) =>
+    PACKAGE_AUTHORING.some((permission) => space.permissions.includes(permission)),
+  );
+
   const sections = buildSettingsNavigation({
     can,
+    canAuthorPackage,
     features: {
       oidc: !!features.oidc,
       billing: !!features.billing,
