@@ -81,6 +81,17 @@ describe("unified settings navigation", () => {
     expect(withoutModules).toContain("/workspace-settings/general");
   });
 
+  it("keeps a space screen for whoever can act on it", () => {
+    // An operator manages end-users; a viewer, who only reads them, is not
+    // sent to a screen where every control is dead.
+    expect(destinations(ALL_FEATURES, ["end-users:write"])).toContain(
+      "/workspace-settings/end-users",
+    );
+    expect(destinations(ALL_FEATURES, ["end-users:read"])).not.toContain(
+      "/workspace-settings/end-users",
+    );
+  });
+
   it("opens webhooks on either level's read permission", () => {
     expect(destinations(ALL_FEATURES, ["org-webhooks:read"])).toContain(
       "/workspace-settings/webhooks",

@@ -177,7 +177,9 @@ export function buildSettingsNavigation({
           to: "/workspace-settings/end-users",
           icon: Users,
           labelKey: "endUsers.pageTitle",
-          show: can("end-users:read"),
+          // Operations, not authoring: an operator manages them, a viewer only
+          // reads them, and a screen with nothing to do on it is noise.
+          show: can("end-users:write"),
         },
         {
           to: "/workspace-settings/webhooks",

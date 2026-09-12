@@ -1435,6 +1435,48 @@ So the strategy the reference itself suggests:
 
 ## Open
 
+### QUESTIONS FOR THE API AND THE PRODUCT (raised by the RBAC pass, 12 September 2026)
+
+Not UI work: each one is a decision or an endpoint that belongs to whoever owns
+the server. They are written here because the screens are where they surfaced,
+and each carries what the UI does in the meantime.
+
+1. **A `spaces` field on the org member.** The Users table answers "which
+   spaces does this person reach" with one request PER SPACE, because the
+   member object does not carry them (`useSpaceMembershipsByUser`). Fine for a
+   handful of spaces, wrong for an org with twenty. A field on the member, or a
+   `GET /api/orgs/{orgId}/members?include=spaces`, replaces the loop.
+
+2. **Should a plain member read the org directory and the role catalog?** The
+   server grants `members:read` and `roles:read` to `member`, so Users and
+   Roles show for them. Defensible (knowing who is in the org), but it is a
+   product call, not an interface one. The menu follows the permission.
+
+3. **Nobody but a space admin sees who else is in their space.**
+   `space-members:read` exists only in the `admin` preset, so an operator
+   cannot see a colleague. If a member should at least see the names, that is
+   a new permission or a narrowed endpoint.
+
+4. **Sharing (#1437) and the library will both put a package in a team
+   space.** Once personal spaces and package sharing land, a package reaches a
+   team space either through the library's checkbox or through an accepted
+   offer. Unchecking the box must not silently undo an accepted share, and the
+   matrix needs to say which column is the package's HOME space, since that
+   column no longer means the same thing as the others. Personal spaces are
+   private even from org admins, so they never appear as a column.
+
+5. **No ownership transfer.** `owner` is the creator and nothing can grant it:
+   invitations and role changes are limited to `admin`, `member`, `guest`, and
+   no route moves it. If the creator leaves, nobody can rename or delete the
+   org, and nobody can manage the admins (an admin manages only members and
+   guests). A transfer action is missing.
+
+6. **The org-role matrix is a hand-written mirror.** `ORG_ROLE_PERMISSIONS`
+   lives in `apps/api/src/lib/permissions.ts`, which the browser bundle must
+   not import, so `pages/org-settings/org-role-columns.tsx` restates it. A
+   served catalog (the space roles already have one, `GET /api/roles`) would
+   remove the drift.
+
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
 Everything below this block is either done or older context. The open blocks
