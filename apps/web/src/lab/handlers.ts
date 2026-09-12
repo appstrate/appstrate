@@ -724,6 +724,32 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    // The agent catalogue reads the package family, not `/api/agents`, which
+    // answers for the current space only.
+    pattern: /^\/api\/packages\/agents$/,
+    handler: (url, s, headers) => {
+      const rows = list(f.agents.data, s, f.heavyAgents);
+      const scoped =
+        url.searchParams.get("active") === "true" ? activeHere(rows, "agent", headers) : rows;
+      return {
+        status: 200,
+        body: {
+          object: "list",
+          hasMore: false,
+          // The package family names its rows `name`, where `/api/agents` says
+          // `display_name`: answering with the wrong shape showed raw ids.
+          data: scoped.map((agent) => ({
+            id: agent.id,
+            name: agent.display_name,
+            description: agent.description,
+            source: agent.source,
+          })),
+        },
+      };
+    },
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/packages\/skills$/,
     handler: (url, s, headers) => {
       const rows = list(f.skills.data, s);

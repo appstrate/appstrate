@@ -13,7 +13,6 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppWindow } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Button } from "@appstrate/ui/components/button";
 import {
   Select,
   SelectContent,
@@ -105,11 +104,6 @@ export function UserDetailModal({
       onClose={onClose}
       title={member.displayName || member.email || member.userId}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"
-      actions={
-        <Button type="button" variant="outline" onClick={onClose}>
-          {t("btn.close", { ns: "common" })}
-        </Button>
-      }
     >
       <div className="flex min-h-0 flex-col gap-6 overflow-y-auto">
         <p className="text-muted-foreground text-sm">

@@ -297,11 +297,6 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
       onClose={onClose}
       title={spaceRoleLabel(role, t) ?? role.name}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-lg"
-      actions={
-        <Button type="button" variant="outline" onClick={onClose}>
-          {t("btn.close", { ns: "common" })}
-        </Button>
-      }
     >
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
         {description && <p className="text-muted-foreground text-sm">{description}</p>}

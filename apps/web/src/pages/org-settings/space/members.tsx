@@ -465,11 +465,7 @@ function AddSpaceMemberModal({
       }}
       title={t("spaceMembers.addTitle")}
       actions={
-        invitationToken ? (
-          <Button type="button" onClick={onClose}>
-            {t("btn.close", { ns: "common" })}
-          </Button>
-        ) : (
+        invitationToken ? undefined : (
           <>
             <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
               {t("btn.cancel", { ns: "common" })}

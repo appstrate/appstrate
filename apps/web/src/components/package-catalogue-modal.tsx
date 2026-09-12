@@ -56,11 +56,6 @@ export function PackageCatalogueModal({
       onClose={onClose}
       title={t("catalogue.title")}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"
-      actions={
-        <Button type="button" variant="outline" onClick={onClose}>
-          {t("btn.close", { ns: "common" })}
-        </Button>
-      }
     >
       <div className="flex min-h-0 flex-col gap-4">
         <p className="text-muted-foreground text-sm">{t("catalogue.intro")}</p>

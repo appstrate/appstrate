@@ -328,22 +328,21 @@ export function EndUserDetailModal({
         onClose={handleClose}
         title={endUser.name || endUser.email || t("spaces.endUserDetail")}
         actions={
-          <>
-            {can("end-users:delete") && (
-              <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
-                {t("common:btn.delete")}
-              </Button>
-            )}
-            <div className="flex-1" />
-            {can("end-users:write") && (
-              <Button variant="outline" onClick={startEditing}>
-                {t("common:btn.edit")}
-              </Button>
-            )}
-            <Button variant="outline" onClick={handleClose}>
-              {t("common:btn.close")}
-            </Button>
-          </>
+          can("end-users:delete") || can("end-users:write") ? (
+            <>
+              {can("end-users:delete") && (
+                <Button variant="destructive" size="sm" onClick={() => setConfirmOpen(true)}>
+                  {t("common:btn.delete")}
+                </Button>
+              )}
+              <div className="flex-1" />
+              {can("end-users:write") && (
+                <Button variant="outline" onClick={startEditing}>
+                  {t("common:btn.edit")}
+                </Button>
+              )}
+            </>
+          ) : undefined
         }
       >
         <div className="space-y-4">
