@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `createS3Storage` bounds buffered `uploadFile` / `downloadFile` operations to
+  30 seconds, including SDK retries and response-body reads. The deadline
+  aborts the request and cancels the body reader, releasing stalled connections.
+  `S3StorageConfig.requestTimeoutMs` can override this bound; streaming transfers
+  and presigned URLs retain their existing behavior.
+
 - `requiredScopesForAgent` (`@appstrate/core/integration`) now filters the
   agent's explicit `agentScopes` to the ones the TARGET auth's `scope_catalog`
   declares, instead of unioning them verbatim into every auth's requirement.

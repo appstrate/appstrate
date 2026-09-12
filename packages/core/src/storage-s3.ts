@@ -31,6 +31,8 @@ export interface S3StorageConfig {
   region: string;
   /** Custom endpoint URL for S3-compatible services (MinIO, R2). Enables path-style access. */
   endpoint?: string;
+  /** Deadline for buffered object GET/PUT, including retries and body reads. Default: 30 seconds. */
+  requestTimeoutMs?: number;
   /**
    * Public endpoint used for presigned URLs. When set, `createUploadUrl()`
    * presigns direct-to-bucket PUT URLs against it — bytes bypass the
@@ -69,6 +71,7 @@ type S3Error = { name?: string; $metadata?: { httpStatusCode?: number } };
  * @returns A Storage instance backed by S3
  */
 export function createS3Storage(config: S3StorageConfig): Storage {
+  const requestTimeoutMs = config.requestTimeoutMs ?? 30_000;
   const client = new S3Client({
     region: config.region,
     ...(config.endpoint ? { endpoint: config.endpoint, forcePathStyle: true } : {}),
@@ -137,6 +140,7 @@ export function createS3Storage(config: S3StorageConfig): Storage {
             // exclusivity for security should not use such backends.
             ...(opts?.exclusive ? { IfNoneMatch: "*" } : {}),
           }),
+          { abortSignal: AbortSignal.timeout(requestTimeoutMs) },
         );
       } catch (err: unknown) {
         if (opts?.exclusive) {
@@ -224,14 +228,44 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     },
 
     async downloadFile(bucket, path) {
+      const signal = AbortSignal.timeout(requestTimeoutMs);
       try {
         const res = await client.send(
           new GetObjectCommand({
             Bucket: config.bucket,
             Key: makeKey(bucket, path),
           }),
+          { abortSignal: signal },
         );
-        return new Uint8Array(await res.Body!.transformToByteArray());
+        // SDK request completion only covers the headers. Propagate the same
+        // deadline into the body stream so a stalled body cancels its socket.
+        const reader = res.Body!.transformToWebStream().getReader();
+        const abort = () => {
+          void reader.cancel(signal.reason).catch(() => {});
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+        try {
+          const chunks: Uint8Array[] = [];
+          let size = 0;
+          while (true) {
+            const { value, done } = await reader.read();
+            signal.throwIfAborted();
+            if (done) break;
+            chunks.push(value);
+            size += value.byteLength;
+          }
+          const bytes = new Uint8Array(size);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          return bytes;
+        } finally {
+          signal.removeEventListener("abort", abort);
+          reader.releaseLock();
+        }
       } catch (e: unknown) {
         const err = e as S3Error;
         if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {

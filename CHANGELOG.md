@@ -19,6 +19,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   same persistence function. Limits: 200 operations, 1 MiB per written file,
   50 MB and 10,000 entries per resulting tree; larger files can be imported
   in an archive.
+  Import refuses path collisions without discarding local edits; explicit
+  replacement works for text and binary files. Publication captures the row
+  and ZIP under the draft lock before validating either, and version overrides
+  cannot overwrite a newer draft or reuse an old editor token. Concurrent edits
+  remain marked as unpublished; a published version override does not. Buffered S3
+  requests have a 30-second deadline, including response-body reads.
 
 - **Two-layer RBAC — an org role, and a role per space.** Organization roles
   gain **`guest`**: an org identity with no implicit reach into any space, for
