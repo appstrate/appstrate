@@ -28,6 +28,7 @@ import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
 import { useRoleColumns } from "../../pages/org-settings/role-columns.tsx";
 import { useSpaceMemberColumns } from "../../pages/org-settings/space/space-member-columns.tsx";
 import { useInvitationColumns } from "../invitation-columns.tsx";
+import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
 import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
@@ -80,6 +81,16 @@ function columnsFrom<T>(useColumns: () => DataColumn<T>[]): Track[] {
 }
 
 const SETS = {
+  userSpaces: () =>
+    columnsFrom(() =>
+      useUserSpaceColumns({
+        editable: () => true,
+        roleValue: () => "preset:viewer",
+        roleOptions: [],
+        isChangingRole: false,
+        onChangeRole: () => {},
+      }),
+    ),
   roles: () =>
     columnsFrom(() =>
       useRoleColumns({ canDelete: () => true, isDeleting: false, onDelete: () => {} }),

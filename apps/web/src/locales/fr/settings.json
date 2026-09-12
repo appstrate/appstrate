@@ -1297,5 +1297,10 @@
   "roles.tabOrg": "Rôles d’organisation",
   "roles.tabSpace": "Rôles d’espace",
   "orgSettings.roleHint.owner": "A créé l’organisation et garde le dernier mot : seul à pouvoir la renommer, la supprimer et gérer les administrateurs.",
-  "orgSettings.spacesColumn": "Espaces"
+  "orgSettings.spacesColumn": "Espaces",
+  "userDetail.colSpace": "Espace",
+  "userDetail.spacesSection": "Espaces",
+  "userDetail.noSpaces": "Cette personne n’entre dans aucun espace.",
+  "userDetail.noSpacesHint": "Ajoutez-la depuis la page Membres d’un espace.",
+  "userDetail.joinedAt": "Arrivé le {{date}}"
 }

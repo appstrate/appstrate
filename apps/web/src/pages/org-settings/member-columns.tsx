@@ -97,22 +97,26 @@ export function useMemberColumns({
           );
         }
         return (
-          <Select
-            value={member.role}
-            onValueChange={(v) => onChangeRole(member.userId, v as AssignableOrgRole)}
-            disabled={isChangingRole}
-          >
-            <SelectTrigger className="h-7 w-full text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ORG_ROLE_DISPLAY_ORDER.filter((r) => roles.includes(r)).map((r) => (
-                <SelectItem key={r} value={r}>
-                  {t(roleI18nKey(r))}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          // The row's stretched link paints over its cells: a control has to
+          // raise itself to stay clickable.
+          <span className="relative z-10 block">
+            <Select
+              value={member.role}
+              onValueChange={(v) => onChangeRole(member.userId, v as AssignableOrgRole)}
+              disabled={isChangingRole}
+            >
+              <SelectTrigger className="h-7 w-full text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ORG_ROLE_DISPLAY_ORDER.filter((r) => roles.includes(r)).map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {t(roleI18nKey(r))}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </span>
         );
       },
     },

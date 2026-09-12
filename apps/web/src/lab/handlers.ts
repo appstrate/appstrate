@@ -551,9 +551,15 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/spaces\/[^/]+\/members$/,
-    handler: (_u, scenario) => ({
+    // Answers for the space that was ASKED for: a roster identical everywhere
+    // would hide the very thing these screens exist to show.
+    handler: (url, scenario) => ({
       status: 200,
-      body: { object: "list", hasMore: false, data: list(f.spaceMembers, scenario) },
+      body: {
+        object: "list",
+        hasMore: false,
+        data: list(f.membersOfSpace(url.pathname.split("/")[3] ?? ""), scenario),
+      },
     }),
   },
   {

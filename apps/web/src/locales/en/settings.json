@@ -1297,5 +1297,10 @@
   "roles.tabOrg": "Organization roles",
   "roles.tabSpace": "Space roles",
   "orgSettings.roleHint.owner": "Created the organization and has the last word: the only one who can rename or delete it and manage admins.",
-  "orgSettings.spacesColumn": "Spaces"
+  "orgSettings.spacesColumn": "Spaces",
+  "userDetail.colSpace": "Space",
+  "userDetail.spacesSection": "Spaces",
+  "userDetail.noSpaces": "This person reaches no space.",
+  "userDetail.noSpacesHint": "Add them from a space’s Members page.",
+  "userDetail.joinedAt": "Joined {{date}}"
 }

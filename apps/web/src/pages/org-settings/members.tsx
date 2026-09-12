@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toast } from "sonner";
-import { useQueries } from "@tanstack/react-query";
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { $api, type components } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useOrgOnlyScope } from "../../hooks/use-org-scope";
-import { useSpaces } from "../../hooks/use-spaces";
+import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -24,6 +23,7 @@ import { PageActionsMenu } from "../../components/page-actions-menu";
 import { InvitationsTable } from "../../components/invitations-table";
 import { OrgInvitationForm } from "../../components/org-invitation-form";
 import { useMemberColumns } from "./member-columns";
+import { UserDetailModal } from "./user-detail-modal";
 import { useState } from "react";
 import {
   assignableRolesForMember,
@@ -40,6 +40,8 @@ export function OrgSettingsMembersPage() {
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
   const invite = useModalParam("invite");
+  const userParam = useModalParam("user");
+  const location = useLocation();
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
@@ -85,33 +87,10 @@ export function OrgSettingsMembersPage() {
     });
   };
 
-  // Which spaces a person actually reaches is the question this table could
-  // not answer. Only an owner or admin can ask it: they are admin in every
-  // space, so every member list answers them. One request per space, which is
-  // what the API offers today — a `spaces` field on the member would replace
-  // this loop.
+  // Which spaces a person reaches, and as what: one shared query set for the
+  // column and for the detail, so opening a person costs nothing more.
   const seesEverySpace = (ORG_ROLES_WITH_FULL_ACCESS as readonly string[]).includes(orgRole ?? "");
-  const { data: spaces } = useSpaces(seesEverySpace);
-  const scope = useOrgOnlyScope();
-  const spaceMemberships = useQueries({
-    queries: (seesEverySpace ? (spaces ?? []) : []).map((space) => ({
-      ...$api.queryOptions("get", "/api/spaces/{id}/members", {
-        params: { path: { id: space.id }, header: scope.header },
-      }),
-      enabled: scope.enabled,
-      select: (envelope: { data: { userId: string }[] }) => ({
-        space: space.name,
-        userIds: envelope.data.map((member) => member.userId),
-      }),
-    })),
-  });
-  const spacesByUser = new Map<string, string[]>();
-  for (const query of spaceMemberships) {
-    if (!query.data) continue;
-    for (const userId of query.data.userIds) {
-      spacesByUser.set(userId, [...(spacesByUser.get(userId) ?? []), query.data.space]);
-    }
-  }
+  const { byUser: spacesByUser } = useSpaceMembershipsByUser(seesEverySpace);
 
   const memberColumns = useMemberColumns({
     assignableRoles: (member) =>
@@ -134,8 +113,12 @@ export function OrgSettingsMembersPage() {
     isRemoving: removeMemberMutation.isPending,
     onChangeRole: handleRoleChange,
     onRemove: handleRemove,
-    spaces: seesEverySpace ? (member) => spacesByUser.get(member.userId) ?? [] : undefined,
+    spaces: seesEverySpace
+      ? (member) => (spacesByUser.get(member.userId) ?? []).map(({ space }) => space.name)
+      : undefined,
   });
+
+  const openedUser = members.find((member) => member.userId === userParam.value);
 
   // Below the hooks: an early return above `useMemberColumns` would change
   // the hook order between a loading render and a loaded one.
@@ -184,10 +167,34 @@ export function OrgSettingsMembersPage() {
         columns={memberColumns}
         rows={members}
         rowKey={(member) => member.userId}
+        rowHref={(member) => `?user=${encodeURIComponent(member.userId)}`}
+        rowState={() => location.state}
+        rowLabel={(member) => member.displayName || member.email || member.userId}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState message={getErrorMessage(error)} compact />}
       />
+
+      {openedUser && (
+        <UserDetailModal
+          key={openedUser.userId}
+          member={openedUser}
+          memberships={spacesByUser.get(openedUser.userId) ?? []}
+          showSpaces={seesEverySpace}
+          assignableRoles={
+            orgRole && canChangeRole
+              ? assignableRolesForMember({
+                  actorRole: orgRole,
+                  targetRole: openedUser.role,
+                  isSelf: openedUser.userId === user?.id,
+                })
+              : []
+          }
+          isChangingOrgRole={changeRoleMutation.isPending}
+          onChangeOrgRole={(role) => handleRoleChange(openedUser.userId, role)}
+          onClose={userParam.close}
+        />
+      )}
 
       {orgId && <InvitationsTable orgId={orgId} invitations={invitations} />}
 

@@ -260,6 +260,19 @@ export const spaces: Json200<"/api/spaces", "get"> = {
   data: spacesByOrg[ORG_ID]!,
 };
 
+/** Who reaches which space: Julie only where she was seated, Camille through the open spaces. */
+export function membersOfSpace(spaceId: string): SpaceMember[] {
+  if (spaceId === "app_lab_sandbox")
+    return spaceMembers.filter((member) => member.org_role !== "guest");
+  if (spaceId === APP_ID)
+    return spaceMembers.map((member) =>
+      member.email === "julie@cabinet-martin.fr"
+        ? { ...member, role: { kind: "preset", key: "viewer", name: "viewer" } }
+        : member,
+    );
+  return spaceMembers;
+}
+
 export const availableApiKeyScopes: Json200<"/api/api-keys/available-scopes", "get"> = {
   object: "list",
   hasMore: false,
@@ -361,6 +374,10 @@ type SpaceMember = Json200<"/api/spaces/{id}/members", "get">["data"][number];
  * One person per way of reaching a space: org owner and admin through their
  * org role, a member through the space being open (on its default role), and a
  * guest through an explicit seat on a custom role.
+ *
+ * The roster DIFFERS per space (`membersOfSpace`), because a person's access is
+ * a per-space fact: a guest seated in one space and absent from another is the
+ * thing every screen about access is trying to show.
  */
 export const spaceMembers: SpaceMember[] = [
   {
