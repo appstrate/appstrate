@@ -21,13 +21,28 @@ export function PackageCard({
   unreadCount,
   actions,
   autoInstalled,
-}: CardItem) {
+  showRun = true,
+  onOpen,
+}: CardItem & {
+  /**
+   * Whether an agent card offers to run it. False in the catalogue: a package
+   * this space has not activated cannot be run from here, and the button was
+   * the reason those cards were a row taller than the rest.
+   */
+  showRun?: boolean;
+  /** Read it in place instead of navigating — what the catalogue's rows do. */
+  onOpen?: () => void;
+}) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const href = packageDetailPath(type, id);
   const navigate = useNavigate();
 
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (window.getSelection()?.toString()) return;
+    if (onOpen && !e.metaKey && !e.ctrlKey) {
+      onOpen();
+      return;
+    }
     if (e.metaKey || e.ctrlKey) {
       window.open(href, "_blank");
     } else {
@@ -61,7 +76,7 @@ export function PackageCard({
             </span>
           )}
           {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
-          {type === "agent" && (
+          {type === "agent" && showRun && (
             <div onClick={(e) => e.stopPropagation()}>
               <RunAgentButton
                 packageId={id}
@@ -73,7 +88,12 @@ export function PackageCard({
           )}
         </div>
       </div>
-      <p className="text-muted-foreground mt-1 line-clamp-2 flex-1 text-xs">{description || ""}</p>
+      {/* Two lines RESERVED, not "up to two": a grid whose rows are a line
+          taller here and a line shorter there reads as broken, and the cost is
+          one empty line on the shortest card. */}
+      <p className="text-muted-foreground mt-1 line-clamp-2 min-h-8 flex-1 text-xs">
+        {description || ""}
+      </p>
       <ScrollArea className="mt-2 w-full">
         <div className="flex gap-1">
           {keywords?.map((kw) => (
@@ -94,7 +114,9 @@ export function PackageCard({
       </ScrollArea>
       {actions && (
         <div
-          className="border-border mt-3 flex items-center justify-between gap-2 border-t pt-3"
+          // `min-h-8` so a footer carrying a button and one carrying a line of
+          // text are the same height, which is what kept the rows ragged.
+          className="border-border mt-3 flex min-h-8 items-center justify-between gap-2 border-t pt-3"
           onClick={(e) => e.stopPropagation()}
         >
           {actions}

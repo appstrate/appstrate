@@ -1321,5 +1321,10 @@
   "catalogue.everywhere": "Partout",
   "catalogue.activateIn": "Activer dans {{space}}",
   "catalogue.thisSpace": "cet espace",
-  "catalogue.appstrateKind": "Appstrate · {{kind}}"
+  "catalogue.originSelector": "Provenance du catalogue",
+  "catalogue.filter.where": "Activation",
+  "catalogue.filter.here": "Actif dans {{space}}",
+  "catalogue.filter.elsewhere": "Actif dans un autre espace",
+  "catalogue.filter.nowhere": "Nulle part",
+  "catalogue.origin": "Provenance"
 }

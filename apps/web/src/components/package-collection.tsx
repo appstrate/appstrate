@@ -34,6 +34,7 @@ import type { CardItem } from "../pages/package-list";
 /** Stable empties: a fresh literal in a default would remount the table set. */
 const NO_COLUMNS: DataColumn<CardItem>[] = [];
 const NO_IDS: string[] = [];
+const NO_FILTERS: FilterSpec[] = [];
 
 /** Name, description and keywords — everything a card puts on screen. */
 function matches(item: CardItem, query: string): boolean {
@@ -72,6 +73,13 @@ export interface PackageCollectionProps {
    * where it draws the same distinction as tabs, so it is never asked twice.
    */
   originFilter?: boolean;
+  /**
+   * Dimensions the CALLER filters on. It has already narrowed `items`; the bar
+   * only draws these, next to the ones this component owns.
+   */
+  extraFilters?: FilterSpec[];
+  /** Whether an agent card offers its run button. A catalogue's cannot. */
+  cardRun?: boolean;
   /** Drawn at the right end of the bar, where a list's actions always are. */
   actions?: ReactNode;
   /** Above the bar: what this collection is, and any tabs that narrow it. */
@@ -105,6 +113,8 @@ export function PackageCollection({
   placement = "page",
   activityFilter = true,
   originFilter = true,
+  extraFilters = NO_FILTERS,
+  cardRun = true,
   actions,
   header,
   rowAction,
@@ -170,8 +180,13 @@ export function PackageCollection({
           },
         ]
       : []),
+    ...extraFilters,
   ];
-  const filtering = Boolean(query) || origins.length > 0 || activities.length > 0;
+  const filtering =
+    Boolean(query) ||
+    origins.length > 0 ||
+    activities.length > 0 ||
+    extraFilters.some((filter) => filter.values.length > 0);
 
   // An empty list, a search that matched nothing, and a request that failed are
   // three different sentences, and the body says whichever applies IN PLACE —
@@ -221,7 +236,13 @@ export function PackageCollection({
         <CardGrid
           items={shown}
           itemKey={(item) => item.id}
-          renderCard={(item) => <PackageCard {...item} />}
+          renderCard={(item) => (
+            <PackageCard
+              {...item}
+              showRun={cardRun}
+              onOpen={rowAction ? () => rowAction(item) : undefined}
+            />
+          )}
           isLoading={isLoading}
           isError={Boolean(error)}
           empty={emptyBody}

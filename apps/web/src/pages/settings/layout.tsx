@@ -17,13 +17,6 @@ import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { client } from "../../api/client";
 import { AppVersion } from "../../components/app-version";
@@ -31,6 +24,7 @@ import { SettingsHeading } from "../../components/settings/settings-heading";
 import { SettingsPageActionTargetsProvider } from "../../components/settings/settings-page-actions";
 import { RailLink } from "../../components/settings/rail-link";
 import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
+import { ContextSelector } from "../../components/settings/context-selector";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useSpaces } from "../../hooks/use-spaces";
@@ -53,43 +47,6 @@ import {
   type UnifiedSettingsSection,
 } from "./navigation";
 import { useSettingsSections } from "./use-settings-sections";
-
-interface ContextSelectorProps {
-  value: string;
-  label: string;
-  disabled?: boolean;
-  options: { id: string; name: string }[];
-  onValueChange: (value: string) => void;
-}
-
-const contextSelectorTriggerClass = [
-  "relative h-11 border-transparent bg-transparent py-0 shadow-none",
-  "before:pointer-events-none before:absolute before:inset-x-0 before:inset-y-0.5",
-  "before:rounded-md before:border before:border-input before:bg-background before:shadow-sm",
-  "[&>span]:relative [&>span]:z-10 [&>svg]:relative [&>svg]:z-10",
-  "md:h-9 md:border-input md:bg-background md:py-2 md:shadow-sm md:before:hidden",
-].join(" ");
-
-function ContextSelector({ value, label, disabled, options, onValueChange }: ContextSelectorProps) {
-  return (
-    <Select value={value} disabled={disabled} onValueChange={onValueChange}>
-      <SelectTrigger
-        className={contextSelectorTriggerClass}
-        aria-label={label}
-        data-settings-context-selector
-      >
-        <SelectValue placeholder={label} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((option) => (
-          <SelectItem key={option.id} value={option.id}>
-            {option.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
 
 interface ScopeNavigationProps {
   section: UnifiedSettingsSection;

@@ -1321,5 +1321,10 @@
   "catalogue.everywhere": "Everywhere",
   "catalogue.activateIn": "Activate in {{space}}",
   "catalogue.thisSpace": "this space",
-  "catalogue.appstrateKind": "Appstrate · {{kind}}"
+  "catalogue.originSelector": "Catalogue source",
+  "catalogue.filter.where": "Activation",
+  "catalogue.filter.here": "Active in {{space}}",
+  "catalogue.filter.elsewhere": "Active in another space",
+  "catalogue.filter.nowhere": "Nowhere",
+  "catalogue.origin": "Source"
 }

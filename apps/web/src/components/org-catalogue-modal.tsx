@@ -42,6 +42,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useOrg } from "../hooks/use-org";
 import { useAllIntegrations } from "../hooks/use-integrations";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
 import { useModalParam } from "../hooks/use-modal-param";
@@ -52,12 +53,14 @@ import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
 import { PanelDialog } from "./panel-dialog";
 import { PackageCollection } from "./package-collection";
+import type { FilterSpec } from "./list-toolbar";
 import {
   useCatalogueActivateColumn,
   useCatalogueActiveColumn,
   useCatalogueSelectColumn,
   type CatalogueRowState,
 } from "./catalogue-columns";
+import { ContextSelector } from "./settings/context-selector";
 import { RailButton } from "./settings/rail-link";
 import { RailGroup, RailHeader } from "./settings/rail-shell";
 import { SettingsHeading } from "./settings/settings-heading";
@@ -97,6 +100,7 @@ export function OrgCatalogueModal({
   const { t } = useTranslation(["settings", "agents", "common"]);
   const allowed = useCatalogueKinds();
   const spaceId = useCurrentSpaceId();
+  const { currentOrg } = useOrg();
   const { data: library, isLoading, error } = useLibrary();
   const activate = useTogglePackageInstall();
   const list = useLocalListParams();
@@ -121,6 +125,7 @@ export function OrgCatalogueModal({
     // With no installable kind at all the panel would not have been opened.
     "agent";
   const kind = KINDS.find((k) => k.type === active)!;
+  const orgName = currentOrg?.name ?? t("catalogue.originOrg");
   const spaceName =
     library?.spaces.find((space) => space.id === spaceId)?.name ?? t("catalogue.thisSpace");
 
@@ -131,12 +136,12 @@ export function OrgCatalogueModal({
     (integrations ?? []).map((row) => [row.id, Boolean(row.active)] as const),
   );
 
-  const rows = (library?.packages[active] ?? []).filter((item) =>
+  const all = (library?.packages[active] ?? []).filter((item) =>
     fromAppstrate ? item.source === "system" : item.source !== "system",
   );
 
   const stateById = new Map<string, CatalogueRowState>(
-    rows.map((item) => {
+    all.map((item) => {
       const everywhere = active !== "integration" && item.source === "system";
       const activeHere =
         active === "integration"
@@ -155,6 +160,34 @@ export function OrgCatalogueModal({
   const canActivate = (item: CardItem) => {
     const state = stateOf(item);
     return !state.everywhere && !state.activeHere;
+  };
+
+  // Now that the panel shows what is already on, "where does this run?" is the
+  // dimension worth narrowing — not origin, which the rail decides, and not
+  // activity, which the library cannot answer.
+  const wheres = list.values("where", ["here", "elsewhere", "nowhere"] as const);
+  const rows = all.filter((item) => {
+    if (wheres.length === 0) return true;
+    const state = stateById.get(item.id);
+    if (!state) return false;
+    const here = state.activeHere || state.everywhere;
+    const elsewhere = state.everywhere || state.activeIn.some((name) => name !== spaceName);
+    return (
+      (wheres.includes("here") && here) ||
+      (wheres.includes("elsewhere") && elsewhere) ||
+      (wheres.includes("nowhere") && !here && !elsewhere)
+    );
+  });
+  const whereFilter: FilterSpec = {
+    id: "where",
+    label: t("catalogue.filter.where"),
+    values: wheres,
+    options: [
+      { value: "here", label: t("catalogue.filter.here", { space: spaceName }) },
+      { value: "elsewhere", label: t("catalogue.filter.elsewhere") },
+      { value: "nowhere", label: t("catalogue.filter.nowhere") },
+    ],
+    onChange: list.setValues("where"),
   };
 
   const activateOne = (item: { id: string; displayName: string }) => {
@@ -183,11 +216,24 @@ export function OrgCatalogueModal({
       type: active,
       source: item.source as CardItem["source"],
     };
-    // What the table puts in its last column, a card carries itself.
-    return view === "cards" && canActivate(row)
-      ? {
-          ...row,
-          actions: (
+    if (view !== "cards") return row;
+    // What the table puts in its last two columns, a card carries in a footer
+    // it ALWAYS has: same line, same height, whatever the row's state — a card
+    // that grows a footer only when it can be activated made every grid a
+    // ragged one.
+    const state = stateOf(row);
+    return {
+      ...row,
+      actions: (
+        <>
+          <span className="text-muted-foreground truncate text-xs">
+            {state.everywhere
+              ? t("catalogue.everywhere")
+              : state.activeIn.length > 0
+                ? state.activeIn.join(" · ")
+                : t("catalogue.activeNowhere")}
+          </span>
+          {canActivate(row) ? (
             <Button
               type="button"
               variant="outline"
@@ -197,9 +243,16 @@ export function OrgCatalogueModal({
             >
               {t("catalogue.activate")}
             </Button>
-          ),
-        }
-      : row;
+          ) : (
+            !state.everywhere && (
+              <span className="text-muted-foreground shrink-0 text-xs">
+                {t("catalogue.activeHere")}
+              </span>
+            )
+          )}
+        </>
+      ),
+    };
   });
 
   const activatable = offered.filter(canActivate).map((item) => item.id);
@@ -235,64 +288,81 @@ export function OrgCatalogueModal({
     onSelect(nextOrigin, nextType);
   };
 
-  const groupRows = (groupOrigin: CatalogueOrigin, entries: typeof KINDS) =>
-    entries.map((entry) => (
-      <RailButton
-        key={`${groupOrigin}-${entry.type}`}
-        icon={entry.icon}
-        label={t(entry.titleKey)}
-        active={groupOrigin === (fromAppstrate ? "appstrate" : "org") && entry.type === active}
-        onClick={() => show(groupOrigin, entry.type)}
-      />
-    ));
+  // One group, never two: the kinds are the same four words under either
+  // origin, and a rail that lists them twice makes the reader compare two
+  // identical lists to find the difference. The origin is a SELECTOR at the
+  // head of the group, exactly where the settings rail puts the organisation
+  // and the workspace it is showing.
+  const originOptions = [
+    { id: "org", name: orgName },
+    ...(appstrateKinds.length > 0
+      ? [{ id: "appstrate", name: t("catalogue.originAppstrate") }]
+      : []),
+  ];
+  const selector = (
+    <ContextSelector
+      value={fromAppstrate ? "appstrate" : "org"}
+      label={t("catalogue.originSelector")}
+      options={originOptions}
+      onValueChange={(next) => {
+        const nextOrigin = next as CatalogueOrigin;
+        const entries = nextOrigin === "appstrate" ? appstrateKinds : kinds;
+        show(
+          nextOrigin,
+          entries.some((k) => k.type === active) ? active : (entries[0]?.type ?? active),
+        );
+      }}
+    />
+  );
+  const kindRows = visibleKinds.map((entry) => (
+    <RailButton
+      key={entry.type}
+      icon={entry.icon}
+      label={t(entry.titleKey)}
+      active={entry.type === active}
+      onClick={() => show(fromAppstrate ? "appstrate" : "org", entry.type)}
+    />
+  ));
 
-  // The settings rail, to the pixel: same header, same group headings, same
-  // rows — and the same shape, one titled group per scope.
+  // The settings rail, to the pixel: same header, same titled group, same
+  // selector at its head, same rows.
   const rail = (
     <div className="flex h-full flex-col">
       <RailHeader icon={LibraryBig} title={t("catalogue.title")} />
       <div className="flex-1">
-        <RailGroup title={t("catalogue.originOrg")}>
-          <nav className="mt-1.5 flex flex-col gap-0.5" aria-label={t("catalogue.originOrg")}>
-            {groupRows("org", kinds)}
+        <RailGroup title={t("catalogue.origin")}>
+          {selector}
+          <nav className="mt-1.5 flex flex-col gap-0.5" aria-label={t("catalogue.kinds")}>
+            {kindRows}
           </nav>
         </RailGroup>
-        {appstrateKinds.length > 0 && (
-          <RailGroup title={t("catalogue.originAppstrate")} separated>
-            <nav
-              className="mt-1.5 flex flex-col gap-0.5"
-              aria-label={t("catalogue.originAppstrate")}
-            >
-              {groupRows("appstrate", appstrateKinds)}
-            </nav>
-          </RailGroup>
-        )}
       </div>
     </div>
   );
 
   const mobileNav = (
-    <nav aria-label={t("catalogue.kinds")} className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
-      {[
-        ...kinds.map((entry) => ["org", entry] as const),
-        ...appstrateKinds.map((entry) => ["appstrate", entry] as const),
-      ].map(([groupOrigin, entry]) => (
-        <Button
-          key={`${groupOrigin}-${entry.type}`}
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-pressed={groupOrigin === origin && entry.type === active}
-          className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
-          onClick={() => show(groupOrigin, entry.type)}
-        >
-          <entry.icon className="size-4 shrink-0" />
-          {groupOrigin === "appstrate"
-            ? t("catalogue.appstrateKind", { kind: t(entry.titleKey) })
-            : t(entry.titleKey)}
-        </Button>
-      ))}
-    </nav>
+    <div>
+      {selector}
+      <nav
+        aria-label={t("catalogue.kinds")}
+        className="-mx-1 mt-2 flex gap-1 overflow-x-auto px-1 pb-1"
+      >
+        {visibleKinds.map((entry) => (
+          <Button
+            key={entry.type}
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-pressed={entry.type === active}
+            className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
+            onClick={() => show(fromAppstrate ? "appstrate" : "org", entry.type)}
+          >
+            <entry.icon className="size-4 shrink-0" />
+            {t(entry.titleKey)}
+          </Button>
+        ))}
+      </nav>
+    </div>
   );
 
   return (
@@ -343,6 +413,9 @@ export function OrgCatalogueModal({
           // is the rail here, so the bar keeps no filter of its own.
           activityFilter={false}
           originFilter={false}
+          extraFilters={[whereFilter]}
+          // A package this space has not activated cannot be run from here.
+          cardRun={false}
           // A tick is a table affordance; in cards, each card carries its own
           // deed instead, which is why the bulk action follows the view.
           leadingColumns={view === "table" ? [selectColumn] : []}
