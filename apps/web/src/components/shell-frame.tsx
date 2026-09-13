@@ -91,7 +91,7 @@ export function ShellSidebar({
                   <span>{t("nav.catalogue")}</span>
                 </button>
               ) : (
-                <Link to={`/catalogue/${catalogueKinds[0]}`} state={openAsModal(location)}>
+                <Link to={`/catalogue/org/${catalogueKinds[0]}`} state={openAsModal(location)}>
                   <LibraryBig />
                   <span>{t("nav.catalogue")}</span>
                 </Link>

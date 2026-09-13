@@ -29,6 +29,7 @@ export function CataloguePreview({
   type,
   spaces,
   isActivating,
+  canActivate,
   onActivate,
   onBack,
 }: {
@@ -36,6 +37,8 @@ export function CataloguePreview({
   type: PackageType;
   spaces: LibrarySpace[];
   isActivating: boolean;
+  /** False when it already runs here, or runs everywhere by being a system one. */
+  canActivate: boolean;
   onActivate: () => void;
   onBack: () => void;
 }) {
@@ -52,10 +55,12 @@ export function CataloguePreview({
       <div className="flex min-h-9 items-start justify-between gap-4">
         <SettingsHeading className="mb-0" title={item.name || item.id} />
         <div className="flex shrink-0 items-center gap-2">
-          <Button type="button" disabled={isActivating} onClick={onActivate}>
-            {isActivating && <Spinner />}
-            {t("catalogue.activate")}
-          </Button>
+          {canActivate && (
+            <Button type="button" disabled={isActivating} onClick={onActivate}>
+              {isActivating && <Spinner />}
+              {t("catalogue.activate")}
+            </Button>
+          )}
         </div>
       </div>
 

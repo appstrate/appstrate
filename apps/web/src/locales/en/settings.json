@@ -1309,12 +1309,17 @@
   "catalogue.activateSelection_other": "Activate selection ({{count}})",
   "catalogue.kinds": "Kinds of items",
   "packages.type.agents": "Agents",
-  "catalogue.originTabs": "Where it comes from",
   "catalogue.originOrg": "Organisation",
   "catalogue.originAppstrate": "Appstrate",
   "catalogue.back": "Back to the catalogue",
   "catalogue.activeIn": "Active in",
   "catalogue.activeNowhere": "No space yet",
   "catalogue.identifier": "Identifier",
-  "catalogue.openFullPage": "Open the full page"
+  "catalogue.openFullPage": "Open the full page",
+  "catalogue.column.activeIn": "Active in",
+  "catalogue.activeHere": "Active here",
+  "catalogue.everywhere": "Everywhere",
+  "catalogue.activateIn": "Activate in {{space}}",
+  "catalogue.thisSpace": "this space",
+  "catalogue.appstrateKind": "Appstrate · {{kind}}"
 }

@@ -1077,7 +1077,7 @@ export function App() {
               }
             />
             <Route
-              path="/catalogue/:type"
+              path="/catalogue/:origin/:type"
               element={
                 <LazyRoute>
                   <CataloguePage />

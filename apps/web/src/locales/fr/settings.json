@@ -1309,12 +1309,17 @@
   "catalogue.activateSelection_other": "Activer la sélection ({{count}})",
   "catalogue.kinds": "Types d'éléments",
   "packages.type.agents": "Agents",
-  "catalogue.originTabs": "Provenance",
   "catalogue.originOrg": "Organisation",
   "catalogue.originAppstrate": "Appstrate",
   "catalogue.back": "Retour au catalogue",
   "catalogue.activeIn": "Actif dans",
   "catalogue.activeNowhere": "Aucun espace pour le moment",
   "catalogue.identifier": "Identifiant",
-  "catalogue.openFullPage": "Ouvrir la fiche complète"
+  "catalogue.openFullPage": "Ouvrir la fiche complète",
+  "catalogue.column.activeIn": "Actif dans",
+  "catalogue.activeHere": "Actif ici",
+  "catalogue.everywhere": "Partout",
+  "catalogue.activateIn": "Activer dans {{space}}",
+  "catalogue.thisSpace": "cet espace",
+  "catalogue.appstrateKind": "Appstrate · {{kind}}"
 }

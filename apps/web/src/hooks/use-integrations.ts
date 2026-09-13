@@ -130,7 +130,7 @@ export function useIntegrations() {
  * default first page as a complete catalogue would make the toolbar lie as
  * soon as an organisation crosses that boundary.
  */
-export function useAllIntegrations() {
+export function useAllIntegrations(options?: { enabled?: boolean }) {
   const scope = useOrgScope();
   return useQuery({
     queryKey: [
@@ -138,7 +138,9 @@ export function useAllIntegrations() {
       "/api/integrations",
       { params: { query: { limit: 100, offset: 0 }, header: scope.header } },
     ],
-    enabled: scope.enabled,
+    // Off by default for callers that only need it in one of their states —
+    // the catalogue asks only while its integrations tab is the one on screen.
+    enabled: scope.enabled && (options?.enabled ?? true),
     queryFn: async (): Promise<IntegrationSummaryWire[]> => {
       const all: IntegrationSummaryWire[] = [];
       const limit = 100;

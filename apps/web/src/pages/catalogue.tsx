@@ -11,12 +11,12 @@
  */
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { PackageType } from "@appstrate/core/validation";
-import { OrgCatalogueModal } from "../components/org-catalogue-modal";
+import { OrgCatalogueModal, type CatalogueOrigin } from "../components/org-catalogue-modal";
 import { modalReturnTarget, useBackgroundLocation } from "../lib/modal-route";
 import { useCatalogueKinds } from "../hooks/use-catalogue-kinds";
 
 export function CataloguePage() {
-  const { type } = useParams();
+  const { origin, type } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const background = useBackgroundLocation();
@@ -32,9 +32,10 @@ export function CataloguePage() {
 
   return (
     <OrgCatalogueModal
+      origin={origin ?? "org"}
       type={type ?? ""}
-      onTypeChange={(next: PackageType) =>
-        navigate(`/catalogue/${next}`, { replace: true, state: location.state })
+      onSelect={(nextOrigin: CatalogueOrigin, nextType: PackageType) =>
+        navigate(`/catalogue/${nextOrigin}/${nextType}`, { replace: true, state: location.state })
       }
       onClose={close}
     />

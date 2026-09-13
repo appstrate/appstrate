@@ -84,7 +84,7 @@ export function ItemTab({
             <PageActionsMenu>
               {canActivate && (
                 <DropdownMenuItem asChild data-page-action="catalogue">
-                  <Link to={`/catalogue/${type}`} state={openAsModal(location)}>
+                  <Link to={`/catalogue/org/${type}`} state={openAsModal(location)}>
                     <LibraryBig />
                     {t("catalogue.browse")}
                   </Link>

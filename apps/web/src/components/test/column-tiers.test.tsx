@@ -30,8 +30,9 @@ import { useSpaceMemberColumns } from "../../pages/org-settings/space/space-memb
 import { useInvitationColumns } from "../invitation-columns.tsx";
 import {
   useCatalogueActivateColumn,
+  useCatalogueActiveColumn,
   useCatalogueSelectColumn,
-} from "../package-catalogue-columns.tsx";
+} from "../catalogue-columns.tsx";
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
 import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
@@ -86,18 +87,30 @@ function columnsFrom<T>(useColumns: () => DataColumn<T>[]): Track[] {
 
 const SETS = {
   // Composed exactly as `OrgCatalogueModal` composes it: the tick, the list's
-  // own set minus what a catalogue cannot answer, and the one deed.
-  packageCatalogue: () =>
-    columnsFrom(() => [
+  // own set minus what a catalogue cannot answer, then where it already runs
+  // and the one deed.
+  packageCatalogue: () => {
+    const state = { activeIn: [], activeHere: false, everywhere: false };
+    return columnsFrom(() => [
       useCatalogueSelectColumn({
         selected: new Set<string>(),
         allSelected: false,
+        selectable: () => true,
         onToggle: () => {},
         onToggleAll: () => {},
       }),
-      ...usePackageColumns("agent").filter((c) => c.id !== "state" && c.id !== "actions"),
-      useCatalogueActivateColumn({ isActivating: false, onActivate: () => {} }),
-    ]),
+      ...usePackageColumns("agent").filter(
+        (c) => c.id !== "state" && c.id !== "actions" && c.id !== "source",
+      ),
+      useCatalogueActiveColumn(() => state),
+      useCatalogueActivateColumn({
+        spaceName: "Default",
+        isActivating: false,
+        stateOf: () => state,
+        onActivate: () => {},
+      }),
+    ]);
+  },
   userSpaces: () =>
     columnsFrom(() =>
       useUserSpaceColumns({
