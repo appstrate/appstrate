@@ -238,7 +238,7 @@ export function OrgCatalogueModal({
         <>
           <span className="text-muted-foreground truncate text-xs">
             {state.everywhere
-              ? t("catalogue.everywhere")
+              ? t("catalogue.allSpaces")
               : state.activeIn.length > 0
                 ? state.activeIn.join(" · ")
                 : t("catalogue.activeNowhere")}

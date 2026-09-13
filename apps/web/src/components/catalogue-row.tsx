@@ -15,6 +15,7 @@ import type { CardItem } from "../pages/package-list";
 /** "Installé ici", "Préinstallé" or "Non installé" — said as a status, not left to a missing button. */
 export function CatalogueStatusBadge({ state }: { state: CatalogueRowState }) {
   const { t } = useTranslation("settings");
+  if (state.everywhere) return <UIBadge variant="secondary">{t("catalogue.everywhere")}</UIBadge>;
   if (state.activeHere) {
     return (
       <UIBadge variant="success" className="gap-1">
@@ -23,7 +24,6 @@ export function CatalogueStatusBadge({ state }: { state: CatalogueRowState }) {
       </UIBadge>
     );
   }
-  if (state.everywhere) return <UIBadge variant="secondary">{t("catalogue.everywhere")}</UIBadge>;
   return <UIBadge variant="outline">{t("catalogue.notInstalled")}</UIBadge>;
 }
 

@@ -1330,5 +1330,6 @@
   "catalogue.column.status": "Status",
   "catalogue.notInstalled": "Not installed",
   "catalogue.moreActions": "Actions for {{name}}",
-  "catalogue.viewDetail": "View details"
+  "catalogue.viewDetail": "View details",
+  "catalogue.allSpaces": "Every space"
 }

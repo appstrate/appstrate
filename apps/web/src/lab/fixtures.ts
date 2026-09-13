@@ -3690,7 +3690,7 @@ export const library: Json200<"/api/library", "get"> = {
         name: "GitHub Git (MCP server)",
         description: "Serveur MCP git adossé à l’intégration GitHub.",
         source: "system",
-        installed_in: ["app_lab_default"],
+        installed_in: [],
       },
       {
         id: "@tractr/qbo-mcp",

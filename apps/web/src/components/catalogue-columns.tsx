@@ -91,7 +91,7 @@ export function useCatalogueActiveColumn(
     cell: (item) => {
       const state = stateOf(item);
       if (state.everywhere) {
-        return <span className="text-muted-foreground text-xs">{t("catalogue.everywhere")}</span>;
+        return <span className="text-muted-foreground text-xs">{t("catalogue.allSpaces")}</span>;
       }
       if (state.activeIn.length === 0) {
         return <span className="text-muted-foreground/50">—</span>;
