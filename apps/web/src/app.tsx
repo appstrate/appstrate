@@ -147,9 +147,9 @@ const OrgSettingsProxiesPage = lazy(() =>
 const OrgSettingsOAuthPage = lazy(() =>
   import("./pages/org-settings/oauth").then((m) => ({ default: m.OrgSettingsOAuthPage })),
 );
-const OrgSettingsMcpAccessPage = lazy(() =>
-  import("./pages/org-settings/mcp-access").then((m) => ({
-    default: m.OrgSettingsMcpAccessPage,
+const PreferencesMcpAccessPage = lazy(() =>
+  import("./pages/preferences/mcp-access").then((m) => ({
+    default: m.PreferencesMcpAccessPage,
   })),
 );
 const OrgSettingsBillingPage = lazy(() =>
@@ -450,7 +450,6 @@ export function App() {
           </RequirePermission>
         }
       />
-      <Route path="mcp-access" element={<OrgSettingsMcpAccessPage />} />
       <Route
         path="billing"
         element={
@@ -1099,6 +1098,7 @@ export function App() {
               <Route path="security" element={<PreferencesSecurityPage />} />
               <Route path="devices" element={<PreferencesDevicesPage />} />
               <Route path="connections" element={<PreferencesConnectionsPage />} />
+              <Route path="mcp-access" element={<PreferencesMcpAccessPage />} />
             </Route>
             {features.webhooks && (
               <>

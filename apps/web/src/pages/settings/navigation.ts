@@ -10,7 +10,6 @@ import {
   Laptop,
   Library,
   LayoutGrid,
-  Plug,
   Settings,
   Shield,
   ShieldCheck,
@@ -125,11 +124,6 @@ export function buildSettingsNavigation({
           icon: Laptop,
           labelKey: "orgSettings.tabCliSessions",
           show: features.oidc && can("cli-sessions:read"),
-        },
-        {
-          to: "/org-settings/mcp-access",
-          icon: Plug,
-          labelKey: "orgSettings.tabMcpAccess",
         },
         {
           to: "/org-settings/billing",

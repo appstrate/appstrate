@@ -23,14 +23,16 @@ describe("unified settings navigation", () => {
   it("offers an organisation entry only to someone who can act there", () => {
     // A guest holds `org:read`, `spaces:read`, `models:read` and `proxies:read`
     // so its runs work — none of which is a reason to open an administration
-    // screen. Only the personal destination survives.
+    // screen. Nothing survives, and the shell then draws no Settings entry at
+    // all: connecting one's own MCP client moved to the profile, which is what
+    // this list used to keep alive for them.
     const guest = destinations(ALL_FEATURES, [
       "org:read",
       "spaces:read",
       "models:read",
       "proxies:read",
     ]);
-    expect(guest).toEqual(["/org-settings/mcp-access"]);
+    expect(guest).toEqual([]);
 
     // A member adds the directory and the role catalog, and nothing else.
     const member = destinations(ALL_FEATURES, [
@@ -41,11 +43,7 @@ describe("unified settings navigation", () => {
       "members:read",
       "roles:read",
     ]);
-    expect(member).toEqual([
-      "/org-settings/members",
-      "/org-settings/roles",
-      "/org-settings/mcp-access",
-    ]);
+    expect(member).toEqual(["/org-settings/members", "/org-settings/roles"]);
 
     // Authoring somewhere is what the library is for — anywhere, not only in
     // the space the caller happens to stand in.

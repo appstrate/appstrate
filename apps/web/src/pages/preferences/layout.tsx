@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { User, Palette, Shield, Plug, Laptop } from "lucide-react";
+import { User, Palette, Shield, Plug, Laptop, Blocks } from "lucide-react";
 import { SettingsLayout } from "../../components/settings-layout";
 import { useAuth } from "../../hooks/use-auth";
 
@@ -36,6 +36,11 @@ export function PreferencesLayout() {
               to: "/preferences/connections",
               icon: Plug,
               label: t("preferences.tabConnections"),
+            },
+            {
+              to: "/preferences/mcp-access",
+              icon: Blocks,
+              label: t("orgSettings.tabMcpAccess"),
             },
           ],
         },
