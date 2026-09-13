@@ -48,6 +48,8 @@ import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
 import { useModalParam } from "../hooks/use-modal-param";
 import { useCatalogueKinds } from "../hooks/use-catalogue-kinds";
 import { useLocalListParams } from "../lib/list-params";
+import { canInstall } from "../lib/catalogue-install";
+import { integrationKind, localServerOf } from "../lib/integration-collection";
 import { usePackageViewStore } from "../stores/list-view-store";
 import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
@@ -58,6 +60,8 @@ import type { FilterSpec } from "./list-toolbar";
 import {
   useCatalogueActionsColumn,
   useCatalogueActiveColumn,
+  useCatalogueKindColumn,
+  useCatalogueUsedByColumn,
   useCatalogueOriginColumn,
   useCatalogueStatusColumn,
   useCatalogueSelectColumn,
@@ -133,25 +137,54 @@ export function OrgCatalogueModal({
   const spaceName =
     library?.spaces.find((space) => space.id === spaceId)?.name ?? t("catalogue.thisSpace");
 
-  // Only the integrations view needs the resolved activation, and only it pays
-  // for the request.
-  const { data: integrations } = useAllIntegrations({ enabled: active === "integration" });
-  const activeHereById = new Map(
-    (integrations ?? []).map((row) => [row.id, Boolean(row.active)] as const),
-  );
+  // Integrations resolve their activation server-side, and a local MCP server
+  // is only ever run by one: both views read the integrations, the others do
+  // not pay for the request.
+  const needsIntegrations = active === "integration" || active === "mcp-server";
+  const { data: integrations } = useAllIntegrations({ enabled: needsIntegrations });
+  const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
+  const spaces = library?.spaces ?? [];
+
+  /** Installed here and elsewhere, for one integration, from both reads. */
+  const integrationState = (id: string) => {
+    const activeHere = Boolean(integrationById.get(id)?.active);
+    const libraryRow = library?.packages.integration.find((row) => row.id === id);
+    const activeIn = spaces
+      .filter(
+        (space) =>
+          Boolean(libraryRow?.installed_in.includes(space.id)) ||
+          (space.id === spaceId && activeHere),
+      )
+      .map((space) => space.name);
+    return { activeHere, activeIn };
+  };
 
   const ofKind = library?.packages[active] ?? [];
   const stateById = new Map<string, CatalogueRowState>(
     ofKind.map((item) => {
-      const everywhere = active !== "integration" && item.source === "system";
-      const activeHere =
-        active === "integration"
-          ? (activeHereById.get(item.id) ?? false)
-          : Boolean(spaceId && item.installed_in.includes(spaceId));
-      const activeIn = (library?.spaces ?? [])
-        .filter(
-          (space) => item.installed_in.includes(space.id) || (space.id === spaceId && activeHere),
-        )
+      if (active === "integration") {
+        return [item.id, { ...integrationState(item.id), everywhere: false }] as const;
+      }
+      if (active === "mcp-server") {
+        // A local MCP server is installed exactly where the integration that
+        // runs it is: that is the only state an agent can feel.
+        const runners = (integrations ?? []).filter((row) => localServerOf(row) === item.id);
+        const via = runners[0];
+        const state = via ? integrationState(via.id) : { activeHere: false, activeIn: [] };
+        return [
+          item.id,
+          {
+            ...state,
+            everywhere: false,
+            via: via ? { id: via.id, name: via.manifest.display_name ?? via.id } : undefined,
+            usedBy: runners.map((row) => row.manifest.display_name ?? row.id),
+          },
+        ] as const;
+      }
+      const everywhere = item.source === "system";
+      const activeHere = Boolean(spaceId && item.installed_in.includes(spaceId));
+      const activeIn = spaces
+        .filter((space) => item.installed_in.includes(space.id))
         .map((space) => space.name);
       return [item.id, { activeIn, activeHere, everywhere }] as const;
     }),
@@ -167,10 +200,7 @@ export function OrgCatalogueModal({
   });
   const stateOf = (item: CardItem): CatalogueRowState =>
     stateById.get(item.id) ?? { activeIn: [], activeHere: false, everywhere: false };
-  const canActivate = (item: CardItem) => {
-    const state = stateOf(item);
-    return !state.everywhere && !state.activeHere;
-  };
+  const canActivate = (item: CardItem) => canInstall(item, stateOf(item));
 
   // Now that the panel shows what is already on, "where does this run?" is the
   // dimension worth narrowing — not origin, which the rail decides, and not
@@ -202,8 +232,11 @@ export function OrgCatalogueModal({
 
   const activateOne = (item: { id: string; displayName: string }) => {
     if (!spaceId) return;
+    // A local MCP server installs through the integration that runs it.
+    const via = stateById.get(item.id)?.via;
+    const target = via ? { id: via.id, displayName: via.name } : item;
     activate.mutate(
-      { spaceId, packageId: item.id, installed: false },
+      { spaceId, packageId: target.id, installed: false },
       {
         onSuccess: () => {
           setSelected((prev) => {
@@ -211,7 +244,7 @@ export function OrgCatalogueModal({
             next.delete(item.id);
             return next;
           });
-          toast.success(t("packages.installed", { name: item.displayName }));
+          toast.success(t("packages.installed", { name: target.displayName }));
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       },
@@ -280,6 +313,11 @@ export function OrgCatalogueModal({
   const originColumn = useCatalogueOriginColumn(orgName);
   const statusColumn = useCatalogueStatusColumn(stateOf);
   const activeColumn = useCatalogueActiveColumn(stateOf);
+  const usedByColumn = useCatalogueUsedByColumn(stateOf);
+  const kindColumn = useCatalogueKindColumn((item) => {
+    const row = integrationById.get(item.id);
+    return row ? integrationKind(row) : undefined;
+  });
   const actionsColumn = useCatalogueActionsColumn({
     spaceName,
     isActivating: activate.isPending,
@@ -430,6 +468,8 @@ export function OrgCatalogueModal({
           dropColumns={CATALOGUE_DROPS}
           trailingColumns={[
             ...(fromAppstrate ? [] : [originColumn]),
+            ...(active === "integration" ? [kindColumn] : []),
+            ...(active === "mcp-server" ? [usedByColumn] : []),
             statusColumn,
             activeColumn,
             actionsColumn,

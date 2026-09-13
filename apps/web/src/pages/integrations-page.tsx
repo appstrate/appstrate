@@ -16,6 +16,7 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
+  INTEGRATION_KINDS,
   INTEGRATION_ORIGINS,
   INTEGRATION_STATUSES,
   filterIntegrations,
@@ -73,7 +74,7 @@ export function IntegrationsPage() {
   const { data, isLoading, error } = useAllIntegrations();
   const location = useLocation();
   const navigate = useNavigate();
-  const list = useListParams(["status", "origin"]);
+  const list = useListParams(["status", "origin", "kind"]);
   const view = useIntegrationViewStore((state) => state.view);
   const setView = useIntegrationViewStore((state) => state.setView);
   const visibility = useColumnVisibility("integrations");
@@ -82,6 +83,7 @@ export function IntegrationsPage() {
 
   const statuses = list.values("status", INTEGRATION_STATUSES);
   const origins = list.values("origin", INTEGRATION_ORIGINS);
+  const kinds = list.values("kind", INTEGRATION_KINDS);
   const query = list.search;
 
   const organizationIntegrations = useMemo(
@@ -89,10 +91,11 @@ export function IntegrationsPage() {
     [data],
   );
   const shown = useMemo(
-    () => filterIntegrations(organizationIntegrations, { query, statuses, origins }),
-    [organizationIntegrations, query, statuses, origins],
+    () => filterIntegrations(organizationIntegrations, { query, statuses, origins, kinds }),
+    [organizationIntegrations, query, statuses, origins, kinds],
   );
-  const filtering = query.trim() !== "" || statuses.length > 0 || origins.length > 0;
+  const filtering =
+    query.trim() !== "" || statuses.length > 0 || origins.length > 0 || kinds.length > 0;
 
   const openIntegration = (integration: IntegrationSummaryWire) =>
     navigate(`/integrations/${integration.id}`);
@@ -157,6 +160,16 @@ export function IntegrationsPage() {
               { value: "system", label: t("integrations.origin.system") },
               { value: "custom", label: t("integrations.origin.custom") },
             ],
+          },
+          {
+            id: "kind",
+            label: t("integrations.filter.kind"),
+            values: kinds,
+            onChange: list.setValues("kind"),
+            options: INTEGRATION_KINDS.map((kind) => ({
+              value: kind,
+              label: t(`integrations.kind.${kind}`),
+            })),
           },
         ]}
         onReset={list.reset}

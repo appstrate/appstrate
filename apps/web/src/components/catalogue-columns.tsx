@@ -15,6 +15,7 @@ import { Checkbox } from "@appstrate/ui/components/checkbox";
 import type { DataColumn } from "./data-table";
 import { CatalogueRowMenu, CatalogueStatusBadge } from "./catalogue-row";
 import type { CardItem } from "../pages/package-list";
+import type { IntegrationKind } from "../lib/integration-collection";
 
 /** What the catalogue knows about one row beyond the package itself. */
 export interface CatalogueRowState {
@@ -27,6 +28,14 @@ export interface CatalogueRowState {
    * agent, skill or MCP server is. An integration is not: it has a real switch.
    */
   everywhere: boolean;
+  /**
+   * For a local MCP server: the integration that runs it. Installing a server
+   * on its own changes nothing an agent can do — its tools arrive through the
+   * integration — so the catalogue installs THAT, and says so.
+   */
+  via?: { id: string; name: string };
+  /** For a local MCP server: every integration that runs it. */
+  usedBy?: string[];
 }
 
 export function useCatalogueSelectColumn({
@@ -175,5 +184,47 @@ export function useCatalogueActionsColumn({
         onOpen={onOpen}
       />
     ),
+  };
+}
+
+/** The integrations that run a local MCP server — its only way into a run. */
+export function useCatalogueUsedByColumn(
+  stateOf: (item: CardItem) => CatalogueRowState,
+): DataColumn<CardItem> {
+  const { t } = useTranslation("settings");
+  return {
+    id: "usedBy",
+    header: t("catalogue.column.usedBy"),
+    width: "minmax(140px,1fr)",
+    tier: 2,
+    cell: (item) => {
+      const names = stateOf(item).usedBy ?? [];
+      return (
+        <span className="text-muted-foreground truncate text-xs">
+          {names.length > 0 ? names.join(" · ") : t("catalogue.usedByNone")}
+        </span>
+      );
+    },
+  };
+}
+
+/** API directe, MCP distant, MCP local — how an integration reaches its service. */
+export function useCatalogueKindColumn(
+  kindOf: (item: CardItem) => IntegrationKind | undefined,
+): DataColumn<CardItem> {
+  const { t } = useTranslation("settings");
+  return {
+    id: "kind",
+    header: t("catalogue.column.kind"),
+    width: "104px",
+    tier: 2,
+    cell: (item) => {
+      const kind = kindOf(item);
+      return (
+        <span className="text-muted-foreground text-xs">
+          {kind ? t(`integrations.kind.${kind}`) : "—"}
+        </span>
+      );
+    },
   };
 }

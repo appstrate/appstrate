@@ -7,7 +7,11 @@ import type { DataColumn } from "../components/data-table";
 import { IntegrationIcon } from "../components/integration-icon";
 import { TableRowActions } from "../components/table-row-actions";
 import type { IntegrationSummaryWire } from "../hooks/use-integrations";
-import { integrationOrigin, integrationStatus } from "../lib/integration-collection";
+import {
+  integrationKind,
+  integrationOrigin,
+  integrationStatus,
+} from "../lib/integration-collection";
 
 /** One comparable integration fact per column. */
 export function useIntegrationListColumns({
@@ -43,6 +47,19 @@ export function useIntegrationListColumns({
               ? "integrations.origin.system"
               : "integrations.origin.custom",
           )}
+        </span>
+      ),
+    },
+    {
+      id: "kind",
+      header: t("integrations.col.kind"),
+      width: "112px",
+      // Tier three: next to the version, as a fact about how it is built. The
+      // filter carries it at every width.
+      tier: 3,
+      cell: (integration) => (
+        <span className="text-muted-foreground text-xs">
+          {t(`integrations.kind.${integrationKind(integration)}`)}
         </span>
       ),
     },

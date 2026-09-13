@@ -1507,6 +1507,22 @@ and each carries what the UI does in the meantime.
    across the org (how many spaces run it, when it last ran) is what would make
    choosing between twenty candidates possible.
 
+10. **An agent's MCP-server dependencies are never delivered.** A skill
+    listed in `dependencies.skills` is resolved and copied into the run
+    (`bundle-assembly.ts`, `depTypes: ["skills"]`). A server listed in
+    `dependencies.mcp_servers` is stored, validated and displayed, and nothing
+    else: an agent's MCP tools arrive only through an integration installed in
+    the space. The editor lets someone add GitHub Git as a dependency and the
+    agent page then shows it, while the agent has no git tool. Either the run
+    resolves it (by requiring the integration that runs it) or the editor stops
+    offering it.
+
+11. **The runtime docs list three sandbox images; the code has five.**
+    `docs/architecture/INTEGRATIONS_RUNTIME.md` names node, python and binary;
+    `integration-runtime-adapter-docker.ts` builds node, bun, python, uv and
+    binary. The server page already shows a server's runtime, so the product
+    can say what it supports; the doc should say the same.
+
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
 Everything below this block is either done or older context. The open blocks

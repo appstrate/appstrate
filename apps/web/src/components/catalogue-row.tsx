@@ -9,6 +9,7 @@ import { Check, Download, Eye } from "lucide-react";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { CatalogueRowState } from "./catalogue-columns";
+import { canInstall } from "../lib/catalogue-install";
 import { TableRowActions } from "./table-row-actions";
 import type { CardItem } from "../pages/package-list";
 
@@ -48,10 +49,12 @@ export function CatalogueRowMenu({
       menuLabel={t("catalogue.moreActions", { name: item.displayName })}
       isPending={isActivating}
     >
-      {!state.everywhere && !state.activeHere && (
+      {canInstall(item, state) && (
         <DropdownMenuItem onSelect={() => onActivate(item)}>
           <Download />
-          {t("catalogue.activateIn", { space: spaceName })}
+          {state.via
+            ? t("catalogue.installIntegration", { name: state.via.name, space: spaceName })
+            : t("catalogue.activateIn", { space: spaceName })}
         </DropdownMenuItem>
       )}
       <DropdownMenuItem onSelect={() => onOpen(item)}>

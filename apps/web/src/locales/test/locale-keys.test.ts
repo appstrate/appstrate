@@ -172,6 +172,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
+  "integrations.kind.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationKind()
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()

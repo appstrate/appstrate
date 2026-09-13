@@ -2926,6 +2926,10 @@ export const integrations: Json200<"/api/integrations", "get"> = {
         display_name: "Gmail",
         description: "Chercher, lire et envoyer des courriels au nom de l'employé connecté.",
         version: "1.8.2",
+        source: {
+          kind: "remote",
+          remote: { url: "https://gmail.mcp.appstrate.dev/mcp", transport: "streamable-http" },
+        },
         keywords: ["courriel", "google"],
       },
     },
@@ -2938,15 +2942,21 @@ export const integrations: Json200<"/api/integrations", "get"> = {
         display_name: "ClickUp",
         description: "Tâches, listes et suivi du temps.",
         version: "0.9.0",
+        source: {
+          kind: "remote",
+          remote: { url: "https://mcp.clickup.com/mcp", transport: "streamable-http" },
+        },
         keywords: ["tâches", "temps"],
       },
     },
     {
-      id: "@tractr/qbo-mcp",
+      // The integration Olivier built: it runs the local @tractr/qbo-mcp server.
+      id: "@tractr/quickbooks-online",
       orgId: "org_tractr",
       source: "local",
       active: true,
       manifest: {
+        source: { kind: "local", server: { name: "@tractr/qbo-mcp", version: "^1.0.0" } },
         display_name: "QuickBooks Online",
         description:
           "Comptabilité : factures, dépenses, comptes à recevoir. Lecture seule, 69 outils.",
@@ -2969,7 +2979,28 @@ export const integrations: Json200<"/api/integrations", "get"> = {
       orgId: "org_tractr",
       source: "system",
       active: false,
-      manifest: { display_name: "Notion", description: "Pages et bases.", version: "3.0.1" },
+      manifest: {
+        display_name: "Notion",
+        description: "Pages et bases.",
+        version: "3.0.1",
+        source: {
+          kind: "remote",
+          remote: { url: "https://mcp.notion.com/mcp", transport: "streamable-http" },
+        },
+      },
+    },
+    {
+      // The one local integration Appstrate ships: it runs @appstrate/github-git-mcp.
+      id: "@appstrate/github-git",
+      orgId: "org_tractr",
+      source: "system",
+      active: false,
+      manifest: {
+        display_name: "GitHub Git",
+        description: "Cloner, committer, pousser et ouvrir des PR sur GitHub.",
+        version: "1.0.2",
+        source: { kind: "local", server: { name: "@appstrate/github-git-mcp", version: "^1.0.0" } },
+      },
     },
   ],
 };
@@ -3663,7 +3694,7 @@ export const library: Json200<"/api/library", "get"> = {
         installed_in: ["app_lab_default", APP_ID],
       },
       {
-        id: "@tractr/qbo-mcp",
+        id: "@tractr/quickbooks-online",
         name: "QuickBooks Online",
         description: "Comptabilité QuickBooks en lecture.",
         source: "local",
@@ -3680,6 +3711,13 @@ export const library: Json200<"/api/library", "get"> = {
         id: "@appstrate/notion",
         name: "Notion",
         description: "Pages et bases.",
+        source: "system",
+        installed_in: [],
+      },
+      {
+        id: "@appstrate/github-git",
+        name: "GitHub Git",
+        description: "Cloner, committer, pousser et ouvrir des PR sur GitHub.",
         source: "system",
         installed_in: [],
       },
