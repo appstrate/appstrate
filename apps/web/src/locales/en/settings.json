@@ -1321,9 +1321,9 @@
   "catalogue.thisSpace": "this space",
   "catalogue.originSelector": "Provided by",
   "catalogue.filter.where": "Installation",
-  "catalogue.filter.here": "Installed in {{space}}",
+  "catalogue.filter.here": "Installed in the active space ({{space}})",
   "catalogue.filter.elsewhere": "Installed in another space",
-  "catalogue.filter.nowhere": "Nowhere",
+  "catalogue.filter.nowhere": "Installed in no space",
   "catalogue.origin": "Provided by",
   "catalogue.sourceOrg": "{{name}} (organisation)",
   "catalogue.sourceSystem": "Appstrate (system)"

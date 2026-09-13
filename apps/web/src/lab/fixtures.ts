@@ -641,7 +641,7 @@ export const runs: Run[] = [
   makeRun({
     id: "run_04",
     status: "success",
-    packageId: "@default/wiki-brain",
+    packageId: "@tractr/wiki-brain",
     agent_scope: "@default",
     agent_name: "wiki-brain",
     schedule_name: "Tous les matins à 7 h",
@@ -681,7 +681,7 @@ export const runs: Run[] = [
   makeRun({
     id: "run_06",
     status: "success",
-    packageId: "@default/wiki-brain",
+    packageId: "@tractr/wiki-brain",
     agent_scope: "@default",
     agent_name: "wiki-brain",
     userId: "user_lab_2",
@@ -809,15 +809,15 @@ export const agents: Json200<"/api/agents", "get"> = {
       },
     },
     {
-      id: "@default/wiki-brain",
+      id: "@tractr/wiki-brain",
       icon: "brain",
       color: "violet",
       display_name: "Wiki-brain",
       description: "Mémoire proactive par personne : capte, range et rappelle ce qui compte.",
-      author: "Appstrate",
+      author: "Tractr",
       keywords: ["mémoire"],
-      source: "system",
-      scope: "@default",
+      source: "local",
+      scope: "@tractr",
       version: "0.3.1",
       type: "agent",
       running_runs: 0,
@@ -948,7 +948,7 @@ export const schedules: Json200<"/api/schedules", "get"> = {
   data: [
     makeSchedule({
       id: "sch_01",
-      packageId: "@default/wiki-brain",
+      packageId: "@tractr/wiki-brain",
       name: "Tous les matins à 7 h",
       version_override: "0.3.0",
       last_run_number: 96,
@@ -979,7 +979,7 @@ export const schedules: Json200<"/api/schedules", "get"> = {
     // Never fired, and run by someone else.
     makeSchedule({
       id: "sch_04",
-      packageId: "@default/wiki-brain",
+      packageId: "@tractr/wiki-brain",
       name: "Rappel du vendredi",
       cron_expression: "0 16 * * 5",
       userId: "user_lab_2",
@@ -1156,12 +1156,12 @@ export const skills: Json200<"/api/packages/skills", "get"> = {
       updatedAt: ago(3_000),
     },
     {
-      id: "@default/triage-sentiment",
+      id: "@tractr/triage-sentiment",
       name: "triage-sentiment",
       description: "Classe un message entrant par intention et par urgence, puis le route.",
-      source: "system",
-      orgId: null,
-      created_by: null,
+      source: "local",
+      orgId: ORG_ID,
+      created_by: USER_ID,
       used_by_agents: 1,
       version: "0.3.1",
       auto_installed: true,
@@ -1179,7 +1179,7 @@ export const skills: Json200<"/api/packages/skills", "get"> = {
       used_by_agents: 0,
       version: "0.9.0",
       auto_installed: false,
-      forked_from: "@default/triage-sentiment",
+      forked_from: "@tractr/triage-sentiment",
       createdAt: ago(40_000),
       updatedAt: ago(1_500),
     },
@@ -1191,14 +1191,14 @@ export const mcpServers: Json200<"/api/packages/mcp-servers", "get"> = {
   hasMore: false,
   data: [
     {
-      id: "@appstrate/gdrive-mcp",
-      name: "gdrive-mcp",
-      description: "Serveur MCP Google Drive : recherche, lecture, dépôt de fichiers.",
+      id: "@appstrate/github-git-mcp",
+      name: "github-git-mcp",
+      description: "Serveur MCP git : cloner, committer, pousser et ouvrir une PR GitHub.",
       source: "system",
       orgId: null,
       created_by: null,
-      used_by_agents: 3,
-      version: "2.1.0",
+      used_by_agents: 1,
+      version: "1.0.1",
       auto_installed: true,
       forked_from: null,
       createdAt: ago(200_000),
@@ -1250,18 +1250,18 @@ export const comptaReferencesSkillDetail: Json200<"/api/packages/skills/{scope}/
 };
 
 export const triageSentimentSkillDetail: Json200<"/api/packages/skills/{scope}/{name}", "get"> = {
-  id: "@default/triage-sentiment",
-  orgId: null,
+  id: "@tractr/triage-sentiment",
+  orgId: ORG_ID,
   name: "triage-sentiment",
   description: "Classe un message entrant par intention et par urgence, puis le route.",
   content:
     "# Triage sentiment\n\nClasser chaque message par intention, sentiment et urgence sans inventer de contexte.",
-  source: "system",
-  created_by: null,
-  auto_installed: true,
+  source: "local",
+  created_by: USER_ID,
+  auto_installed: false,
   version: "0.3.1",
   manifest: {},
-  manifest_name: "@default/triage-sentiment",
+  manifest_name: "@tractr/triage-sentiment",
   version_count: 1,
   has_unarchived_changes: false,
   forked_from: null,
@@ -1286,7 +1286,7 @@ export const wikiBrainSkillDetail: Json200<"/api/packages/skills/{scope}/{name}"
   manifest_name: "@tractr/wiki-brain-method",
   version_count: 2,
   has_unarchived_changes: true,
-  forked_from: "@default/triage-sentiment",
+  forked_from: "@tractr/triage-sentiment",
   agents: [],
   createdAt: skills.data[2]!.createdAt,
   updatedAt: skills.data[2]!.updatedAt,
@@ -1297,36 +1297,41 @@ const driveToolCatalog = [
   { name: "drive_read_file", description: "Lire le contenu d'un fichier." },
   { name: "drive_upload", description: "Déposer un fichier dans un dossier." },
 ];
-const driveMcpTools = [
-  ...driveToolCatalog,
-  { name: "drive_delete", description: "Supprimer définitivement un fichier." },
+// The tools of `scripts/system-packages/mcp-server-github-git-1.0.1`, the one
+// MCP server Appstrate actually ships.
+const githubGitTools = [
+  { name: "git_clone", description: "Cloner un dépôt dans l’espace de travail du run." },
+  { name: "git_commit", description: "Committer les fichiers modifiés." },
+  { name: "git_push", description: "Pousser la branche vers GitHub." },
+  { name: "github_open_pr", description: "Ouvrir une pull request." },
 ];
 
-export const gdriveMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{name}", "get"> = {
-  id: "@appstrate/gdrive-mcp",
-  orgId: null,
-  name: "gdrive-mcp",
-  description: "Serveur MCP Google Drive : recherche, lecture, dépôt de fichiers.",
-  content: null,
-  source: "system",
-  created_by: null,
-  auto_installed: true,
-  version: "2.1.0",
-  manifest: {
-    name: "@appstrate/gdrive-mcp",
-    version: "2.1.0",
-    type: "mcp-server",
-    server: { type: "node", entry_point: "src/server.ts" },
-    tools: driveMcpTools,
-  },
-  manifest_name: "@appstrate/gdrive-mcp",
-  version_count: 3,
-  has_unarchived_changes: false,
-  forked_from: null,
-  agents: [{ id: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" }],
-  createdAt: mcpServers.data[0]!.createdAt,
-  updatedAt: mcpServers.data[0]!.updatedAt,
-};
+export const githubGitMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{name}", "get"> =
+  {
+    id: "@appstrate/github-git-mcp",
+    orgId: null,
+    name: "github-git-mcp",
+    description: "Serveur MCP git : cloner, committer, pousser et ouvrir une PR GitHub.",
+    content: null,
+    source: "system",
+    created_by: null,
+    auto_installed: true,
+    version: "1.0.1",
+    manifest: {
+      name: "@appstrate/github-git-mcp",
+      version: "1.0.1",
+      type: "mcp-server",
+      server: { type: "bun", entry_point: "src/server.ts" },
+      tools: githubGitTools,
+    },
+    manifest_name: "@appstrate/github-git-mcp",
+    version_count: 1,
+    has_unarchived_changes: false,
+    forked_from: null,
+    agents: [{ id: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" }],
+    createdAt: mcpServers.data[0]!.createdAt,
+    updatedAt: mcpServers.data[0]!.updatedAt,
+  };
 
 export const qboMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{name}", "get"> = {
   id: "@tractr/qbo-mcp",
@@ -1360,7 +1365,7 @@ export const skillDetails = [
   wikiBrainSkillDetail,
 ];
 
-export const mcpServerDetails = [gdriveMcpServerDetail, qboMcpServerDetail];
+export const mcpServerDetails = [githubGitMcpServerDetail, qboMcpServerDetail];
 
 type PackageFileIndex = Json200<"/api/packages/{scope}/{name}/files", "get">;
 
@@ -1447,8 +1452,8 @@ export const triageSentimentSkillFiles: Json200<"/api/packages/{scope}/{name}/fi
   skillFileIndex(triageSentimentSkillDetail.content ?? "");
 export const wikiBrainSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
   skillFileIndex(wikiBrainSkillDetail.content ?? "");
-export const gdriveMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
-  mcpServerFileIndex(gdriveMcpServerDetail.manifest);
+export const githubGitMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
+  mcpServerFileIndex(githubGitMcpServerDetail.manifest);
 export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> = {
   entries: [
     {
@@ -1487,7 +1492,7 @@ export const packageFileIndexes: Record<string, PackageFileIndex> = {
   [comptaReferencesSkillDetail.id]: comptaReferencesSkillFiles,
   [triageSentimentSkillDetail.id]: triageSentimentSkillFiles,
   [wikiBrainSkillDetail.id]: wikiBrainSkillFiles,
-  [gdriveMcpServerDetail.id]: gdriveMcpServerFiles,
+  [githubGitMcpServerDetail.id]: githubGitMcpServerFiles,
   [qboMcpServerDetail.id]: qboMcpServerFiles,
 };
 
@@ -1513,7 +1518,7 @@ export const mcpServerVersionInfoById: Record<
   string,
   Json200<"/api/packages/mcp-servers/{scope}/{name}/versions/info", "get">
 > = {
-  [gdriveMcpServerDetail.id]: {
+  [githubGitMcpServerDetail.id]: {
     latest_published_version: "2.1.0",
     active_version: "2.1.0",
   },
@@ -1741,7 +1746,7 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
     dependencies: {
       skills: { "@tractr/compta-references": "1.4.0" },
       mcp_servers: {
-        "@appstrate/gdrive-mcp": "2.1.0",
+        "@appstrate/github-git-mcp": "2.1.0",
         "@tractr/qbo-mcp": "1.0.0",
       },
       integrations: { "@appstrate/google-drive": "2.1.0" },
@@ -1802,7 +1807,7 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
   dependencies: {
     skills: [{ id: "@tractr/compta-references", version: "1.4.0" }],
     mcp_servers: [
-      { id: "@appstrate/gdrive-mcp", version: "2.1.0" },
+      { id: "@appstrate/github-git-mcp", version: "1.0.1" },
       { id: "@tractr/qbo-mcp", version: "1.0.0" },
     ],
     integrations: [
@@ -3160,7 +3165,7 @@ export const integrationDetail: IntegrationDetail = {
   ...integrationAuthLabDetail,
   manifest: {
     ...integrationAuthLabDetail.manifest,
-    source: { kind: "local", server: { name: "@appstrate/gdrive-mcp", version: "2.1.0" } },
+    source: { kind: "local", server: { name: "@appstrate/google-drive", version: "2.1.0" } },
     hidden_tools: ["drive_delete"],
     tools_policy: {
       drive_upload: { required_scopes: { drive: ["https://www.googleapis.com/auth/drive.file"] } },
@@ -3194,7 +3199,13 @@ function mutableTool<T extends IntegrationToolCatalogEntry>(tool: T) {
   };
 }
 for (const [detail, mcpServerTools] of [
-  [integrationDetail, driveMcpTools],
+  [
+    integrationDetail,
+    [
+      ...driveToolCatalog,
+      { name: "drive_delete", description: "Supprimer définitivement un fichier." },
+    ],
+  ],
   [integrationAuthLabDetail, undefined],
 ] as const) {
   const surface = resolveIntegrationToolSurface({
@@ -3565,10 +3576,10 @@ export const library: Json200<"/api/library", "get"> = {
         installed_in: ["app_lab_default", APP_ID],
       },
       {
-        id: "@default/wiki-brain",
+        id: "@tractr/wiki-brain",
         name: "Wiki-brain",
         description: "Mémoire proactive par personne.",
-        source: "system",
+        source: "local",
         installed_in: ["app_lab_default"],
       },
       // Absent from the space the lab opens in, so the catalogue has something
@@ -3611,10 +3622,10 @@ export const library: Json200<"/api/library", "get"> = {
         installed_in: ["app_lab_default", APP_ID],
       },
       {
-        id: "@default/triage-sentiment",
+        id: "@tractr/triage-sentiment",
         name: "triage-sentiment",
         description: "Trie les demandes entrantes par sentiment.",
-        source: "system",
+        source: "local",
         installed_in: ["app_lab_default", APP_ID],
       },
       {
@@ -3645,9 +3656,9 @@ export const library: Json200<"/api/library", "get"> = {
     ].map((pkg) => ({ ...pkg, type: "integration" as const })),
     "mcp-server": [
       {
-        id: "@appstrate/gdrive-mcp",
-        name: "Google Drive MCP",
-        description: "Serveur MCP Drive.",
+        id: "@appstrate/github-git-mcp",
+        name: "GitHub Git (MCP server)",
+        description: "Serveur MCP git adossé à l’intégration GitHub.",
         source: "system",
         installed_in: ["app_lab_default"],
       },

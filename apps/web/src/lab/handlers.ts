@@ -1012,7 +1012,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: (url, scenario) => {
       const packageId = agentPackageId(url);
       const nominal =
-        packageId === "@default/wiki-brain"
+        packageId === "@tractr/wiki-brain"
           ? f.agentDiagnosticsWarnings
           : packageId === "@tractr/analyse-recurrence-articles-tastet"
             ? f.agentDiagnosticsBlocking
