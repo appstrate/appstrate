@@ -3,16 +3,13 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Boxes, LibraryBig, Plus, Search, SearchX } from "lucide-react";
+import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { CardGrid } from "../components/card-grid";
 import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
-import { PanelDialog } from "../components/panel-dialog";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { IntegrationIcon } from "../components/integration-icon";
 import { PageActionsMenu } from "../components/page-actions-menu";
@@ -21,36 +18,19 @@ import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
   INTEGRATION_ORIGINS,
   INTEGRATION_STATUSES,
-  catalogueFilterSearch,
-  catalogueSearch,
   filterIntegrations,
   integrationOrigin,
   integrationStatus,
-  isCatalogueIntegration,
   isOrganizationIntegration,
-  readCatalogueFilters,
-  type IntegrationStatus,
 } from "../lib/integration-collection";
 import { useListParams } from "../lib/list-params";
+import { openAsModal } from "../lib/modal-route";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useAllIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useIntegrationViewStore } from "../stores/list-view-store";
 import { useIntegrationListColumns } from "./integration-list-columns";
-
-function catalogueDepth(state: unknown): number {
-  if (!state || typeof state !== "object" || !("catalogueDepth" in state)) return 0;
-  const depth = (state as { catalogueDepth?: unknown }).catalogueDepth;
-  return typeof depth === "number" && Number.isInteger(depth) && depth > 0 ? depth : 0;
-}
-
-function withCatalogueDepth(state: unknown, depth: number): Record<string, unknown> {
-  return {
-    ...(state && typeof state === "object" ? state : {}),
-    catalogueDepth: depth,
-  };
-}
 
 function IntegrationCard({ integration }: { integration: IntegrationSummaryWire }) {
   const { t } = useTranslation("settings");
@@ -87,144 +67,6 @@ function IntegrationCard({ integration }: { integration: IntegrationSummaryWire 
   );
 }
 
-function CataloguePanel({
-  integrations,
-  isLoading,
-  error,
-  query,
-  statuses,
-  onQueryChange,
-  onStatusesChange,
-  onReset,
-  onClose,
-}: {
-  integrations: IntegrationSummaryWire[];
-  isLoading: boolean;
-  error: unknown;
-  query: string;
-  statuses: IntegrationStatus[];
-  onQueryChange: (query: string) => void;
-  onStatusesChange: (statuses: IntegrationStatus[]) => void;
-  onReset: () => void;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-
-  const shown = useMemo(
-    () => filterIntegrations(integrations, { query, statuses }),
-    [integrations, query, statuses],
-  );
-  const filtering = query.trim() !== "" || statuses.length > 0;
-  const selectedStatus = statuses.length === 1 ? statuses[0] : "all";
-  const statusOptions: Array<{ value: IntegrationStatus; label: string }> = [
-    { value: "active", label: t("integrations.badge.active") },
-    { value: "inactive", label: t("integrations.badge.inactive") },
-  ];
-  const statusNavigation: Array<{
-    value: "all" | IntegrationStatus;
-    label: string;
-    statuses: IntegrationStatus[];
-  }> = [
-    { value: "all", label: t("integrations.catalogue.all"), statuses: [] },
-    ...statusOptions.map(({ value, label }) => ({ value, label, statuses: [value] })),
-  ];
-
-  const rail = (
-    <div data-catalogue-controls="rail" className="flex min-h-full flex-col p-5">
-      <div className="flex items-center gap-2">
-        <LibraryBig className="text-muted-foreground size-5 shrink-0" />
-        <h2 className="font-semibold">{t("integrations.catalogue.title")}</h2>
-      </div>
-      <p className="text-muted-foreground mt-2 text-sm">
-        {t("integrations.catalogue.description")}
-      </p>
-
-      <div className="relative mt-5">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
-        <Input
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder={t("integrations.search.placeholder")}
-          className="[[data-slot=dialog-content]_&]:bg-background pl-9"
-        />
-      </div>
-
-      <nav aria-label={t("integrations.catalogue.statusNavigation")} className="mt-3 space-y-1">
-        {statusNavigation.map((item) => (
-          <Button
-            key={item.value}
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-pressed={selectedStatus === item.value}
-            className="aria-pressed:bg-accent w-full justify-start px-3"
-            onClick={() => onStatusesChange(item.statuses)}
-          >
-            {item.label}
-          </Button>
-        ))}
-      </nav>
-    </div>
-  );
-
-  return (
-    <PanelDialog title={t("integrations.catalogue.title")} rail={rail} onClose={onClose}>
-      <div data-catalogue-controls="mobile" className="md:hidden">
-        <div className="mb-5 pr-10">
-          <h2 className="text-lg font-semibold">{t("integrations.catalogue.title")}</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {t("integrations.catalogue.description")}
-          </p>
-        </div>
-
-        <ListToolbar
-          search={{
-            value: query,
-            onChange: onQueryChange,
-            placeholder: t("integrations.search.placeholder"),
-          }}
-          filters={[
-            {
-              id: "status",
-              label: t("integrations.filter.status"),
-              values: statuses,
-              onChange: (values) => onStatusesChange(values as IntegrationStatus[]),
-              options: statusOptions,
-            },
-          ]}
-          onReset={onReset}
-          placement="panel"
-        />
-      </div>
-
-      {/* The desktop rail owns every catalogue control. This clear strip keeps
-          the card collection below the dialog close control. */}
-      <div aria-hidden className="hidden h-6 md:block" />
-
-      <CardGrid
-        items={shown}
-        itemKey={(integration) => integration.id}
-        renderCard={(integration) => <IntegrationCard integration={integration} />}
-        isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState message={error instanceof Error ? error.message : undefined} compact />}
-        empty={
-          <EmptyState
-            icon={filtering ? SearchX : Boxes}
-            compact
-            message={
-              filtering ? t("integrations.empty.filtered") : t("integrations.catalogue.empty")
-            }
-          />
-        }
-      />
-      <ListFooter
-        count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
-      />
-    </PanelDialog>
-  );
-}
-
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
@@ -246,7 +88,6 @@ export function IntegrationsPage() {
     () => (data ?? []).filter(isOrganizationIntegration),
     [data],
   );
-  const catalogueIntegrations = useMemo(() => (data ?? []).filter(isCatalogueIntegration), [data]);
   const shown = useMemo(
     () => filterIntegrations(organizationIntegrations, { query, statuses, origins }),
     [organizationIntegrations, query, statuses, origins],
@@ -257,52 +98,6 @@ export function IntegrationsPage() {
     navigate(`/integrations/${integration.id}`);
   const allColumns = useIntegrationListColumns({ onOpen: openIntegration });
   const columns = visibleColumns(allColumns, visibility.hidden);
-  const catalogueOpen = new URLSearchParams(location.search).get("catalogue") === "1";
-  const catalogueFilters = readCatalogueFilters(location.search);
-  const historyDepth = catalogueDepth(location.state);
-
-  const setCatalogueFilters = (
-    next: { query: string; statuses: IntegrationStatus[] },
-    replace: boolean,
-  ) => {
-    navigate(
-      {
-        pathname: location.pathname,
-        search: catalogueFilterSearch(location.search, next),
-        hash: location.hash,
-      },
-      {
-        replace,
-        state: replace ? location.state : withCatalogueDepth(location.state, historyDepth + 1),
-      },
-    );
-  };
-
-  const closeCatalogue = () => {
-    if (historyDepth > 0) {
-      navigate(-historyDepth);
-      return;
-    }
-    navigate(
-      {
-        pathname: location.pathname,
-        search: catalogueSearch(location.search, false),
-        hash: location.hash,
-      },
-      { replace: true },
-    );
-  };
-
-  const openCatalogue = () =>
-    navigate(
-      {
-        pathname: location.pathname,
-        search: catalogueSearch(location.search, true),
-        hash: location.hash,
-      },
-      { state: withCatalogueDepth(location.state, 1) },
-    );
-
   const empty = (
     <EmptyState
       icon={filtering ? SearchX : Boxes}
@@ -320,10 +115,14 @@ export function IntegrationsPage() {
         wrapActions
         actions={
           <PageActionsMenu>
-            <DropdownMenuItem data-page-action="catalogue" onSelect={openCatalogue}>
-              <LibraryBig />
-              {t("integrations.catalogue.browse")}
-            </DropdownMenuItem>
+            {can("integrations:install") && (
+              <DropdownMenuItem asChild data-page-action="catalogue">
+                <Link to="/catalogue/integration" state={openAsModal(location)}>
+                  <LibraryBig />
+                  {t("catalogue.browse")}
+                </Link>
+              </DropdownMenuItem>
+            )}
             {can("integrations:write") && (
               <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
                 <Plus />
@@ -405,27 +204,6 @@ export function IntegrationsPage() {
           onClose={creation.close}
           onManual={() => navigate("/integrations/new")}
           onChat={creation.openChat}
-        />
-      )}
-
-      {catalogueOpen && (
-        <CataloguePanel
-          integrations={catalogueIntegrations}
-          isLoading={isLoading}
-          error={error}
-          query={catalogueFilters.query}
-          statuses={catalogueFilters.statuses}
-          onQueryChange={(nextQuery) =>
-            setCatalogueFilters({ query: nextQuery, statuses: catalogueFilters.statuses }, true)
-          }
-          onStatusesChange={(nextStatuses) =>
-            setCatalogueFilters(
-              { query: catalogueFilters.query, statuses: nextStatuses },
-              historyDepth === 0,
-            )
-          }
-          onReset={() => setCatalogueFilters({ query: "", statuses: [] }, historyDepth === 0)}
-          onClose={closeCatalogue}
         />
       )}
     </div>

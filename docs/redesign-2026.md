@@ -1477,7 +1477,18 @@ and each carries what the UI does in the meantime.
    served catalog (the space roles already have one, `GET /api/roles`) would
    remove the drift.
 
-7. **Two things are called a catalogue.** The organisation's catalogue (this
+7. **Installing an integration has no organisation level, only a space.**
+   `POST /api/integrations/{id}/activate` is documented, in the route file
+   itself, as "activate in current space", and deactivating removes the
+   `space_packages` row: it is the same deed as `POST /api/spaces/{id}/packages`
+   by another name. So the catalogue's Organisation / Appstrate pair says where
+   a package COMES FROM, and cannot say "add to the organisation" versus "add to
+   this space" — there is nothing behind the first verb. Whether an
+   organisation-level install should exist (one place to approve an integration,
+   then spaces draw on it) is a product question, and it is the same question as
+   the personal-space and sharing work.
+
+8. **Two things were called a catalogue.** The organisation's catalogue (this
    panel) lists what the ORG already owns and this space has not activated,
    read from `GET /api/library`. The integrations page has a second one that
    lists what the PRODUCT ships and the org has not installed at all, read from
@@ -1487,7 +1498,10 @@ and each carries what the UI does in the meantime.
    organisation" section for every package type, or the integrations one is
    renamed so the two words stop competing.
 
-8. **Nothing tells the catalogue what a space would gain.** The library says
+   RESOLVED, 13 September 2026: there is one catalogue. The integrations page
+   lost its own panel and its action opens `/catalogue/integration`.
+
+9. **Nothing tells the catalogue what a space would gain.** The library says
    where a package is installed, not what runs or what uses it, so the panel
    drops the activity filter and the run state. A per-package usage count
    across the org (how many spaces run it, when it last ran) is what would make
