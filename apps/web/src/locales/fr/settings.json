@@ -1326,5 +1326,9 @@
   "catalogue.filter.nowhere": "Installé dans aucun espace",
   "catalogue.origin": "Fourni par",
   "catalogue.sourceOrg": "{{name}} (organisation)",
-  "catalogue.sourceSystem": "Appstrate (système)"
+  "catalogue.sourceSystem": "Appstrate (système)",
+  "catalogue.column.status": "Statut",
+  "catalogue.notInstalled": "Non installé",
+  "catalogue.moreActions": "Actions pour {{name}}",
+  "catalogue.viewDetail": "Voir le détail"
 }

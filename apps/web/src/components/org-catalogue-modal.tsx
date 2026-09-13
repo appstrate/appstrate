@@ -51,12 +51,15 @@ import { useLocalListParams } from "../lib/list-params";
 import { usePackageViewStore } from "../stores/list-view-store";
 import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
+import { CatalogueRowMenu, CatalogueStatusBadge } from "./catalogue-row";
 import { PanelDialog } from "./panel-dialog";
 import { PackageCollection } from "./package-collection";
 import type { FilterSpec } from "./list-toolbar";
 import {
-  useCatalogueActivateColumn,
+  useCatalogueActionsColumn,
   useCatalogueActiveColumn,
+  useCatalogueOriginColumn,
+  useCatalogueStatusColumn,
   useCatalogueSelectColumn,
   type CatalogueRowState,
 } from "./catalogue-columns";
@@ -76,10 +79,11 @@ const KINDS: Array<{ type: PackageType; icon: typeof Layers; titleKey: string }>
 ];
 
 /**
- * Columns the catalogue drops. `source` goes because the rail now says it, and
- * saying it twice costs the width the "active in" column needs.
+ * Columns the catalogue drops. `source` gives way to the catalogue's own origin
+ * column, which names the provider instead of badging only one side, and
+ * `keywords` goes because the library carries none: it was a column of dashes.
  */
-const CATALOGUE_DROPS = ["state", "actions", "source"];
+const CATALOGUE_DROPS = ["state", "actions", "source", "keywords"];
 
 function isPackageType(value: string): value is PackageType {
   return KINDS.some((kind) => kind.type === value);
@@ -136,12 +140,9 @@ export function OrgCatalogueModal({
     (integrations ?? []).map((row) => [row.id, Boolean(row.active)] as const),
   );
 
-  const all = (library?.packages[active] ?? []).filter((item) =>
-    fromAppstrate ? item.source === "system" : item.source !== "system",
-  );
-
+  const ofKind = library?.packages[active] ?? [];
   const stateById = new Map<string, CatalogueRowState>(
-    all.map((item) => {
+    ofKind.map((item) => {
       const everywhere = active !== "integration" && item.source === "system";
       const activeHere =
         active === "integration"
@@ -155,6 +156,15 @@ export function OrgCatalogueModal({
       return [item.id, { activeIn, activeHere, everywhere }] as const;
     }),
   );
+  // Appstrate lists everything it provides, installed or not. The organisation
+  // lists what the org HAS: its own packages, plus what it installed from
+  // Appstrate — which is why Gmail, installed here, belongs in both.
+  const all = ofKind.filter((item) => {
+    if (fromAppstrate) return item.source === "system";
+    if (item.source !== "system") return true;
+    const state = stateById.get(item.id);
+    return Boolean(state && !state.everywhere && (state.activeHere || state.activeIn.length > 0));
+  });
   const stateOf = (item: CardItem): CatalogueRowState =>
     stateById.get(item.id) ?? { activeIn: [], activeHere: false, everywhere: false };
   const canActivate = (item: CardItem) => {
@@ -233,23 +243,17 @@ export function OrgCatalogueModal({
                 ? state.activeIn.join(" · ")
                 : t("catalogue.activeNowhere")}
           </span>
-          {canActivate(row) ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={activate.isPending}
-              onClick={() => activateOne(row)}
-            >
-              {t("catalogue.activate")}
-            </Button>
-          ) : (
-            !state.everywhere && (
-              <span className="text-muted-foreground shrink-0 text-xs">
-                {t("catalogue.activeHere")}
-              </span>
-            )
-          )}
+          <span className="flex shrink-0 items-center gap-1">
+            <CatalogueStatusBadge state={state} />
+            <CatalogueRowMenu
+              item={row}
+              state={state}
+              spaceName={spaceName}
+              isActivating={activate.isPending}
+              onActivate={activateOne}
+              onOpen={(item) => preview.open(item.id)}
+            />
+          </span>
         </>
       ),
     };
@@ -273,12 +277,15 @@ export function OrgCatalogueModal({
       }),
     onToggleAll: () => setSelected(allSelected ? new Set() : new Set(activatable)),
   });
+  const originColumn = useCatalogueOriginColumn(orgName);
+  const statusColumn = useCatalogueStatusColumn(stateOf);
   const activeColumn = useCatalogueActiveColumn(stateOf);
-  const activateColumn = useCatalogueActivateColumn({
+  const actionsColumn = useCatalogueActionsColumn({
     spaceName,
     isActivating: activate.isPending,
     stateOf,
     onActivate: activateOne,
+    onOpen: (item) => preview.open(item.id),
   });
 
   const show = (nextOrigin: CatalogueOrigin, nextType: PackageType) => {
@@ -421,7 +428,12 @@ export function OrgCatalogueModal({
           // deed instead, which is why the bulk action follows the view.
           leadingColumns={view === "table" ? [selectColumn] : []}
           dropColumns={CATALOGUE_DROPS}
-          trailingColumns={[activeColumn, activateColumn]}
+          trailingColumns={[
+            ...(fromAppstrate ? [] : [originColumn]),
+            statusColumn,
+            activeColumn,
+            actionsColumn,
+          ]}
           rowAction={(item) => preview.open(item.id)}
           actions={
             view === "table" && picked.length > 0 ? (

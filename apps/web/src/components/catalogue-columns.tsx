@@ -11,9 +11,9 @@
  * runs, and the button names the space it would add.
  */
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import type { DataColumn } from "./data-table";
+import { CatalogueRowMenu, CatalogueStatusBadge } from "./catalogue-row";
 import type { CardItem } from "../pages/package-list";
 
 /** What the catalogue knows about one row beyond the package itself. */
@@ -87,7 +87,7 @@ export function useCatalogueActiveColumn(
     header: t("catalogue.column.activeIn"),
     width: "minmax(140px,1fr)",
     // The other spaces are context, not the deed: they wait for the width.
-    tier: 2,
+    tier: 3,
     cell: (item) => {
       const state = stateOf(item);
       if (state.everywhere) {
@@ -105,48 +105,75 @@ export function useCatalogueActiveColumn(
   };
 }
 
-export function useCatalogueActivateColumn({
+/**
+ * Who provides it, in the organisation view only: that view now holds the org's
+ * own packages AND what it installed from Appstrate, so the row must say which.
+ */
+export function useCatalogueOriginColumn(orgName: string): DataColumn<CardItem> {
+  const { t } = useTranslation("settings");
+  return {
+    id: "origin",
+    header: t("catalogue.origin"),
+    width: "128px",
+    tier: 3,
+    cell: (item) => (
+      <span className="text-muted-foreground truncate text-xs">
+        {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
+      </span>
+    ),
+  };
+}
+
+export function useCatalogueStatusColumn(
+  stateOf: (item: CardItem) => CatalogueRowState,
+): DataColumn<CardItem> {
+  const { t } = useTranslation("settings");
+
+  return {
+    id: "status",
+    header: t("catalogue.column.status"),
+    width: "112px",
+    // Tier two: whether it is on HERE is the question every catalogue row is
+    // read for, and it used to be an absence (no button) rather than a word.
+    // Tier one holds the name and the "…" menu, whose items already say it.
+    tier: 2,
+    cell: (item) => <CatalogueStatusBadge state={stateOf(item)} />,
+  };
+}
+
+/**
+ * The row's deeds, behind the table's standard "…" menu rather than a button
+ * in every row: installing is one deed among the preview's, the bulk action is
+ * the tick, and a column of identical buttons read as the table's content.
+ */
+export function useCatalogueActionsColumn({
   spaceName,
   isActivating,
   stateOf,
   onActivate,
+  onOpen,
 }: {
   spaceName: string;
   isActivating: boolean;
   stateOf: (item: CardItem) => CatalogueRowState;
   onActivate: (item: CardItem) => void;
+  onOpen: (item: CardItem) => void;
 }): DataColumn<CardItem> {
-  const { t } = useTranslation("settings");
-
   return {
-    id: "activate",
+    id: "actions",
     header: "",
-    width: "112px",
+    width: "48px",
     align: "end",
-    // Tier ONE, unlike a list's row action: this column is both the deed and
-    // the answer to "is it already on here?", which is the whole question a
-    // catalogue row raises. Name plus this one is 300px, inside the budget.
     control: true,
-    cell: (item) => {
-      const state = stateOf(item);
-      if (state.everywhere) return null;
-      if (state.activeHere) {
-        return <span className="text-muted-foreground text-xs">{t("catalogue.activeHere")}</span>;
-      }
-      return (
-        <span className="relative z-10">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={isActivating}
-            title={t("catalogue.activateIn", { space: spaceName })}
-            onClick={() => onActivate(item)}
-          >
-            {t("catalogue.activate")}
-          </Button>
-        </span>
-      );
-    },
+    cell: (item) => (
+      <CatalogueRowMenu
+        item={item}
+        state={stateOf(item)}
+        spaceName={spaceName}
+        isActivating={isActivating}
+        onActivate={onActivate}
+        onOpen={onOpen}
+      />
+    ),
   };
 }

@@ -29,9 +29,11 @@ import { useRoleColumns } from "../../pages/org-settings/role-columns.tsx";
 import { useSpaceMemberColumns } from "../../pages/org-settings/space/space-member-columns.tsx";
 import { useInvitationColumns } from "../invitation-columns.tsx";
 import {
-  useCatalogueActivateColumn,
+  useCatalogueActionsColumn,
   useCatalogueActiveColumn,
+  useCatalogueOriginColumn,
   useCatalogueSelectColumn,
+  useCatalogueStatusColumn,
 } from "../catalogue-columns.tsx";
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
@@ -100,14 +102,18 @@ const SETS = {
         onToggleAll: () => {},
       }),
       ...usePackageColumns("agent").filter(
-        (c) => c.id !== "state" && c.id !== "actions" && c.id !== "source",
+        (c) => !["state", "actions", "source", "keywords"].includes(c.id),
       ),
+      // The organisation view, the wider of the two.
+      useCatalogueOriginColumn("Tractr"),
+      useCatalogueStatusColumn(() => state),
       useCatalogueActiveColumn(() => state),
-      useCatalogueActivateColumn({
+      useCatalogueActionsColumn({
         spaceName: "Default",
         isActivating: false,
         stateOf: () => state,
         onActivate: () => {},
+        onOpen: () => {},
       }),
     ]);
   },

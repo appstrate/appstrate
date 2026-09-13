@@ -3653,6 +3653,36 @@ export const library: Json200<"/api/library", "get"> = {
         source: "system",
         installed_in: [],
       },
+      // The org's own integrations, which the integrations list shows as
+      // active in the space the lab opens in.
+      {
+        id: "@appstrate/clickup",
+        name: "ClickUp",
+        description: "Tâches et listes de l’espace de travail.",
+        source: "local",
+        installed_in: ["app_lab_default", APP_ID],
+      },
+      {
+        id: "@tractr/qbo-mcp",
+        name: "QuickBooks Online",
+        description: "Comptabilité QuickBooks en lecture.",
+        source: "local",
+        installed_in: ["app_lab_default"],
+      },
+      {
+        id: "@appstrate/slack",
+        name: "Slack",
+        description: "Messages et canaux.",
+        source: "system",
+        installed_in: [],
+      },
+      {
+        id: "@appstrate/notion",
+        name: "Notion",
+        description: "Pages et bases.",
+        source: "system",
+        installed_in: [],
+      },
     ].map((pkg) => ({ ...pkg, type: "integration" as const })),
     "mcp-server": [
       {
