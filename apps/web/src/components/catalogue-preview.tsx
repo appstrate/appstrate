@@ -21,6 +21,7 @@ import { Button } from "@appstrate/ui/components/button";
 import type { PackageType } from "@appstrate/core/validation";
 import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
 import { packageDetailPath } from "../lib/package-paths";
+import { useOrg } from "../hooks/use-org";
 import { SettingsHeading } from "./settings/settings-heading";
 import { Spinner } from "./spinner";
 
@@ -43,6 +44,7 @@ export function CataloguePreview({
   onBack: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
+  const { currentOrg } = useOrg();
   const installedIn = spaces.filter((space) => item.installed_in.includes(space.id));
 
   return (
@@ -69,16 +71,16 @@ export function CataloguePreview({
       <dl className="mt-6 space-y-4 text-sm">
         <div>
           <dt className="text-muted-foreground text-xs tracking-wide uppercase">
-            {t("list.column.source", { ns: "agents" })}
+            {t("catalogue.origin")}
           </dt>
           <dd className="mt-1 flex items-center gap-1.5">
             {item.source === "system" ? (
               <>
                 <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
-                {t("list.badgeBuiltIn", { ns: "agents" })}
+                {t("catalogue.sourceSystem")}
               </>
             ) : (
-              t("catalogue.originOrg")
+              t("catalogue.sourceOrg", { name: currentOrg?.name ?? "" })
             )}
           </dd>
         </div>

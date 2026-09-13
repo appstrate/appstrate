@@ -125,7 +125,7 @@ export function OrgCatalogueModal({
     // With no installable kind at all the panel would not have been opened.
     "agent";
   const kind = KINDS.find((k) => k.type === active)!;
-  const orgName = currentOrg?.name ?? t("catalogue.originOrg");
+  const orgName = currentOrg?.name ?? "";
   const spaceName =
     library?.spaces.find((space) => space.id === spaceId)?.name ?? t("catalogue.thisSpace");
 
@@ -294,10 +294,11 @@ export function OrgCatalogueModal({
   // head of the group, exactly where the settings rail puts the organisation
   // and the workspace it is showing.
   const originOptions = [
-    { id: "org", name: orgName },
-    ...(appstrateKinds.length > 0
-      ? [{ id: "appstrate", name: t("catalogue.originAppstrate") }]
-      : []),
+    // The name, then what it is: "Tractr (organisation)", "Appstrate (système)".
+    // The label is what keeps an org that happens to be called something odd
+    // from reading like a second vendor.
+    { id: "org", name: t("catalogue.sourceOrg", { name: orgName }) },
+    ...(appstrateKinds.length > 0 ? [{ id: "appstrate", name: t("catalogue.sourceSystem") }] : []),
   ];
   const selector = (
     <ContextSelector
