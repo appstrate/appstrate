@@ -41,8 +41,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useLibrary, useTogglePackageInstall, type LibraryPackageItem } from "../hooks/use-library";
 import { useModalParam } from "../hooks/use-modal-param";
-import { usePermissions } from "../hooks/use-permissions";
-import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
+import { useCatalogueKinds } from "../hooks/use-catalogue-kinds";
 import { useLocalListParams } from "../lib/list-params";
 import { usePackageViewStore } from "../stores/list-view-store";
 import type { CardItem } from "../pages/package-list";
@@ -81,7 +80,7 @@ export function OrgCatalogueModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
-  const { can } = usePermissions();
+  const allowed = useCatalogueKinds();
   const spaceId = useCurrentSpaceId();
   const { data: library, isLoading, error } = useLibrary();
   const activate = useTogglePackageInstall();
@@ -93,7 +92,7 @@ export function OrgCatalogueModal({
   // The read has an address of its own: reload lands on it, Back leaves it.
   const preview = useModalParam("package");
 
-  const kinds = KINDS.filter((kind) => can(PACKAGE_PERMISSIONS[kind.type].install));
+  const kinds = KINDS.filter((kind) => allowed.includes(kind.type));
   const active =
     (isPackageType(type) && kinds.some((k) => k.type === type) ? type : kinds[0]?.type) ??
     // With no installable kind at all the panel would not have been opened.

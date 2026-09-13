@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { LibraryBig, Plug, Plus, Upload, Wrench } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -12,10 +12,9 @@ import { packageNewPath } from "../lib/package-paths";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
+import { openAsModal } from "../lib/modal-route";
 import { usePermissions } from "../hooks/use-permissions";
-import { useModalParam } from "../hooks/use-modal-param";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
-import { OrgCatalogueModal } from "../components/org-catalogue-modal";
 
 type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
 
@@ -51,11 +50,11 @@ export function ItemTab({
   const { can } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   // Creating and importing are writes on the package type, as their routes are.
   const canCreate = can(type === "skill" ? "skills:write" : "mcp-servers:write");
   const creation = useCreationHandoff(type, canCreate);
   const canActivate = can(PACKAGE_PERMISSIONS[type].install);
-  const catalogue = useModalParam("catalogue");
 
   const presentation = TYPE_PRESENTATION[type];
   const typeLabel = t(presentation.typeKey);
@@ -84,12 +83,11 @@ export function ItemTab({
           canCreate || canActivate ? (
             <PageActionsMenu>
               {canActivate && (
-                <DropdownMenuItem
-                  data-page-action="catalogue"
-                  onSelect={() => catalogue.open(type)}
-                >
-                  <LibraryBig />
-                  {t("catalogue.browse")}
+                <DropdownMenuItem asChild data-page-action="catalogue">
+                  <Link to={`/catalogue/${type}`} state={openAsModal(location)}>
+                    <LibraryBig />
+                    {t("catalogue.browse")}
+                  </Link>
                 </DropdownMenuItem>
               )}
               {canCreate && (
@@ -110,13 +108,6 @@ export function ItemTab({
         title={title}
         breadcrumbs={[{ label: title }]}
       />
-      {catalogue.value !== null && canActivate && (
-        <OrgCatalogueModal
-          type={catalogue.value}
-          onTypeChange={catalogue.open}
-          onClose={catalogue.close}
-        />
-      )}
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
       {creation.isOpen && (
         <CreationHandoffModal

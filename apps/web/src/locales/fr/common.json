@@ -131,5 +131,6 @@
   "viewAs.stopped.view_as_forbidden": "Prévisualisation arrêtée : vous n'avez plus le droit de prévisualiser ce rôle.",
   "viewAs.stopped.view_as_not_found": "Prévisualisation arrêtée : l'espace ou le rôle prévisualisé n'existe plus.",
   "viewAs.stopped.generic": "Prévisualisation arrêtée.",
-  "nav.chat": "Chat"
+  "nav.chat": "Chat",
+  "nav.catalogue": "Catalogue"
 }

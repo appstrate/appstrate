@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ReactNode, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { Layers, LibraryBig, Plus, type LucideIcon, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
@@ -15,11 +15,10 @@ import { PackageCollection } from "../components/package-collection";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { ImportModal } from "../components/import-modal";
 import { usePermissions } from "../hooks/use-permissions";
-import { OrgCatalogueModal } from "../components/org-catalogue-modal";
-import { useModalParam } from "../hooks/use-modal-param";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
+import { openAsModal } from "../lib/modal-route";
 
 export interface CardItem {
   id: string;
@@ -109,9 +108,9 @@ export function PackageList() {
   const { can } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const creation = useCreationHandoff("agent", can("agents:write"));
   const canActivate = can(PACKAGE_PERMISSIONS.agent.install);
-  const catalogue = useModalParam("catalogue");
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
@@ -141,12 +140,11 @@ export function PackageList() {
           can("agents:write") || canActivate ? (
             <PageActionsMenu>
               {canActivate && (
-                <DropdownMenuItem
-                  data-page-action="catalogue"
-                  onSelect={() => catalogue.open("agent")}
-                >
-                  <LibraryBig />
-                  {t("catalogue.browse", { ns: "settings" })}
+                <DropdownMenuItem asChild data-page-action="catalogue">
+                  <Link to="/catalogue/agent" state={openAsModal(location)}>
+                    <LibraryBig />
+                    {t("catalogue.browse", { ns: "settings" })}
+                  </Link>
                 </DropdownMenuItem>
               )}
               {can("agents:write") && (
@@ -165,13 +163,6 @@ export function PackageList() {
           ) : undefined
         }
       />
-      {catalogue.value !== null && canActivate && (
-        <OrgCatalogueModal
-          type={catalogue.value}
-          onTypeChange={catalogue.open}
-          onClose={catalogue.close}
-        />
-      )}
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
       {creation.isOpen && (
         <CreationHandoffModal

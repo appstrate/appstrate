@@ -124,6 +124,9 @@ const UnifiedSettingsLayout = lazy(() =>
     default: m.UnifiedSettingsLayout,
   })),
 );
+const CataloguePage = lazy(() =>
+  import("./pages/catalogue").then((m) => ({ default: m.CataloguePage })),
+);
 const SettingsIndexRedirect = lazy(() =>
   import("./pages/settings/layout").then((m) => ({
     default: m.SettingsIndexRedirect,
@@ -363,7 +366,7 @@ export function App() {
   // float over, so the dashboard stands in. The surface is then a modal in
   // every case, which removes the second, page-shaped rendering of it that
   // otherwise had to exist and had to be kept looking like the first.
-  const OVERLAY_PREFIXES = ["/org-settings", "/workspace-settings", "/preferences"];
+  const OVERLAY_PREFIXES = ["/org-settings", "/workspace-settings", "/preferences", "/catalogue"];
   const isOverlayPath = OVERLAY_PREFIXES.some((p) => location.pathname.startsWith(p));
   const modalBackground =
     explicitBackground ??
@@ -1064,6 +1067,24 @@ export function App() {
             {/* `/org-settings/app/*` moved out when workspace settings became
                 their own surface; these URLs are in bookmarks and docs. */}
             <Route path="/org-settings/app/:tab" element={<RedirectAppSettings />} />
+            {/* The catalogue is a destination like settings, not a per-list
+                modal: one address, reachable from the navigation. */}
+            <Route
+              path="/catalogue"
+              element={
+                <LazyRoute>
+                  <CataloguePage />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/catalogue/:type"
+              element={
+                <LazyRoute>
+                  <CataloguePage />
+                </LazyRoute>
+              }
+            />
             <Route
               path="/preferences"
               element={

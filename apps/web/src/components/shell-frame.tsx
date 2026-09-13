@@ -12,9 +12,8 @@
  */
 
 import type { ReactNode } from "react";
-import { usePermissions } from "../hooks/use-permissions";
 import { Link, useLocation } from "react-router-dom";
-import { Menu, PanelLeft, Search, Settings } from "lucide-react";
+import { LibraryBig, Menu, PanelLeft, Search, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavUser } from "@/components/nav-user";
 import { OrgSwitcher } from "@/components/org-switcher";
@@ -22,6 +21,8 @@ import { NotificationBell } from "@/components/notification-bell";
 import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { openAsModal } from "@/lib/modal-route";
+import { useCatalogueKinds } from "@/hooks/use-catalogue-kinds";
+import { useSettingsSections } from "@/pages/settings/use-settings-sections";
 import { cn } from "@appstrate/ui/cn";
 import {
   Sidebar,
@@ -44,8 +45,12 @@ export function ShellSidebar({
   contentClassName?: string;
 }) {
   const { t } = useTranslation();
-  const { can } = usePermissions();
   const location = useLocation();
+  // Two organisation-wide destinations, and each is drawn only when it holds
+  // something: settings when its own rail lists an entry for this caller, the
+  // catalogue when there is a kind of package they may activate.
+  const settingsSections = useSettingsSections();
+  const catalogueKinds = useCatalogueKinds();
   // The page route tree deliberately renders the modal's background location.
   // The address bar is therefore the source of truth for this one global
   // destination while settings are open.
@@ -53,6 +58,7 @@ export function ShellSidebar({
     window.location.pathname.startsWith("/org-settings") ||
     window.location.pathname.startsWith("/workspace-settings") ||
     window.location.pathname.startsWith("/preferences");
+  const catalogueActive = window.location.pathname.startsWith("/catalogue");
 
   return (
     <Sidebar collapsible="icon">
@@ -76,9 +82,26 @@ export function ShellSidebar({
           inside the context switcher. It sits above the user boundary and
           represents the settings overlay as the active destination. */}
       <SidebarFooter className="gap-0 p-0">
-        {/* Gated like every other destination: a caller without `org:read`
-            lands on a wall of 403s, so the entry is simply absent. */}
-        <SidebarMenu className="px-2 pb-2" hidden={!can("org:read")}>
+        <SidebarMenu className="px-2 pb-2" hidden={catalogueKinds.length === 0}>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={catalogueActive} tooltip={t("nav.catalogue")}>
+              {catalogueActive ? (
+                <button type="button">
+                  <LibraryBig />
+                  <span>{t("nav.catalogue")}</span>
+                </button>
+              ) : (
+                <Link to={`/catalogue/${catalogueKinds[0]}`} state={openAsModal(location)}>
+                  <LibraryBig />
+                  <span>{t("nav.catalogue")}</span>
+                </Link>
+              )}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        {/* Gated on what the surface actually holds: the rail decides. A caller
+            whose settings rail lists nothing has no settings to open. */}
+        <SidebarMenu className="px-2 pb-2" hidden={settingsSections.length === 0}>
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={settingsActive} tooltip={t("nav.settings")}>
               {settingsActive ? (
