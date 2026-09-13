@@ -191,3 +191,24 @@ export function buildSettingsNavigation({
     },
   ];
 }
+
+/** The rail as drawn: entries the caller cannot use are gone, empty sections too. */
+export function visibleSettingsSections(
+  options: SettingsNavigationOptions,
+): UnifiedSettingsSection[] {
+  return buildSettingsNavigation(options)
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => item.show !== false),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+/**
+ * Where the overlay opens. The first entry of the rail, NOT a fixed path:
+ * `/org-settings/general` is readable by a guest (`org:read`) and listed for
+ * nobody but an admin, so the fixed redirect opened a page its own menu hid.
+ */
+export function firstSettingsPath(sections: UnifiedSettingsSection[]): string | undefined {
+  return sections[0]?.items[0]?.to;
+}

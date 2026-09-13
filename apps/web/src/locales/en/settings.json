@@ -1304,8 +1304,7 @@
   "userDetail.joinedAt": "Joined {{date}}",
   "packages.install": "Install in this space",
   "packages.installed": "“{{name}}” is active in this space.",
-  "catalogue.title": "Organization catalogue",
-  "catalogue.intro": "What the organization has that is not active in this space.",
+  "catalogue.title": "Catalogue",
   "catalogue.browse": "Browse the catalogue",
   "catalogue.activate": "Activate here",
   "catalogue.empty": "Everything is already active in this space.",
@@ -1316,5 +1315,13 @@
   "catalogue.activateSelection_one": "Activate selection ({{count}})",
   "catalogue.activateSelection_other": "Activate selection ({{count}})",
   "catalogue.kinds": "Kinds of items",
-  "packages.type.agents": "Agents"
+  "packages.type.agents": "Agents",
+  "catalogue.originTabs": "Where it comes from",
+  "catalogue.originOrg": "Organisation",
+  "catalogue.originAppstrate": "Appstrate",
+  "catalogue.back": "Back to the catalogue",
+  "catalogue.activeIn": "Active in",
+  "catalogue.activeNowhere": "No space yet",
+  "catalogue.identifier": "Identifier",
+  "catalogue.openFullPage": "Open the full page"
 }

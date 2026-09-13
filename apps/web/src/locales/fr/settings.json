@@ -1304,8 +1304,7 @@
   "userDetail.joinedAt": "Arrivé le {{date}}",
   "packages.install": "Installer dans cet espace",
   "packages.installed": "« {{name}} » est actif dans cet espace.",
-  "catalogue.title": "Catalogue de l’organisation",
-  "catalogue.intro": "Ce que l’organisation possède et qui n’est pas actif dans cet espace.",
+  "catalogue.title": "Catalogue",
   "catalogue.browse": "Parcourir le catalogue",
   "catalogue.activate": "Activer ici",
   "catalogue.empty": "Tout est déjà actif dans cet espace.",
@@ -1316,5 +1315,13 @@
   "catalogue.activateSelection_one": "Activer la sélection ({{count}})",
   "catalogue.activateSelection_other": "Activer la sélection ({{count}})",
   "catalogue.kinds": "Types d'éléments",
-  "packages.type.agents": "Agents"
+  "packages.type.agents": "Agents",
+  "catalogue.originTabs": "Provenance",
+  "catalogue.originOrg": "Organisation",
+  "catalogue.originAppstrate": "Appstrate",
+  "catalogue.back": "Retour au catalogue",
+  "catalogue.activeIn": "Actif dans",
+  "catalogue.activeNowhere": "Aucun espace pour le moment",
+  "catalogue.identifier": "Identifiant",
+  "catalogue.openFullPage": "Ouvrir la fiche complète"
 }

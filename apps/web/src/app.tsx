@@ -16,7 +16,6 @@ import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
 import { useBackgroundLocation } from "./lib/modal-route";
-import { NavigateKeepingState } from "./components/navigate-keeping-state";
 import { RedirectAppSettings } from "./components/redirect-app-settings";
 import { ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
@@ -123,6 +122,11 @@ const OnboardingWaitingStep = lazy(() =>
 const UnifiedSettingsLayout = lazy(() =>
   import("./pages/settings/layout").then((m) => ({
     default: m.UnifiedSettingsLayout,
+  })),
+);
+const SettingsIndexRedirect = lazy(() =>
+  import("./pages/settings/layout").then((m) => ({
+    default: m.SettingsIndexRedirect,
   })),
 );
 const OrgSettingsGeneralPage = lazy(() =>
@@ -370,7 +374,7 @@ export function App() {
   // overlay tree below when settings are opened over another screen.
   const orgSettingsRoutes = (
     <>
-      <Route index element={<NavigateKeepingState to="general" />} />
+      <Route index element={<SettingsIndexRedirect />} />
       <Route
         path="general"
         element={
@@ -460,7 +464,7 @@ export function App() {
   // subsection of it.
   const workspaceSettingsRoutes = (
     <>
-      <Route index element={<NavigateKeepingState to="general" />} />
+      <Route index element={<SettingsIndexRedirect />} />
       <Route
         path="general"
         element={

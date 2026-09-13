@@ -67,8 +67,17 @@ export interface PackageCollectionProps {
    * rather than a filter that would silently empty the table.
    */
   activityFilter?: boolean;
+  /**
+   * Whether the bar offers the origin dimension. The catalogue turns it off
+   * where it draws the same distinction as tabs, so it is never asked twice.
+   */
+  originFilter?: boolean;
   /** Drawn at the right end of the bar, where a list's actions always are. */
   actions?: ReactNode;
+  /** Above the bar: what this collection is, and any tabs that narrow it. */
+  header?: ReactNode;
+  /** Open a row in place rather than on its own page. */
+  rowAction?: (item: CardItem) => void;
   /** Ahead of the name: the catalogue's tick. */
   leadingColumns?: DataColumn<CardItem>[];
   /** After the rest: the catalogue's per-row deed. */
@@ -95,7 +104,10 @@ export function PackageCollection({
   onViewChange,
   placement = "page",
   activityFilter = true,
+  originFilter = true,
   actions,
+  header,
+  rowAction,
   leadingColumns = NO_COLUMNS,
   trailingColumns = NO_COLUMNS,
   dropColumns = NO_IDS,
@@ -124,16 +136,20 @@ export function PackageCollection({
   });
 
   const filters: FilterSpec[] = [
-    {
-      id: "origin",
-      label: t("list.filter.origin"),
-      values: origins,
-      options: [
-        { value: "local", label: t("list.filter.local") },
-        { value: "system", label: t("list.filter.system") },
-      ],
-      onChange: list.setValues("origin"),
-    },
+    ...(originFilter
+      ? [
+          {
+            id: "origin",
+            label: t("list.filter.origin"),
+            values: origins,
+            options: [
+              { value: "local", label: t("list.filter.local") },
+              { value: "system", label: t("list.filter.system") },
+            ],
+            onChange: list.setValues("origin"),
+          },
+        ]
+      : []),
     ...(activityFilter
       ? [
           {
@@ -174,6 +190,7 @@ export function PackageCollection({
 
   return (
     <>
+      {header}
       <ListToolbar
         placement={placement}
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
@@ -189,6 +206,7 @@ export function PackageCollection({
       {view === "table" ? (
         <PackagesTable
           items={shown}
+          rowAction={rowAction}
           columns={[
             ...leadingColumns,
             ...visibleColumns(baseColumns, visibility.hidden),

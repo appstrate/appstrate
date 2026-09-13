@@ -142,11 +142,18 @@ export function usePackageColumns(holds?: PackageType): DataColumn<CardItem>[] {
 export function PackagesTable({
   items,
   columns,
+  rowAction,
   ...state
 }: {
   items: CardItem[];
   /** From {@link usePackageColumns}, minus whatever the reader hid. */
   columns: DataColumn<CardItem>[];
+  /**
+   * Read the package HERE rather than on its own page. The catalogue does
+   * this: its page would throw away the panel and claim a space the package is
+   * not in. When set it replaces the row's link, never doubles it.
+   */
+  rowAction?: (item: CardItem) => void;
 } & CollectionState) {
   const { t } = useTranslation(["agents", "common"]);
 
@@ -159,7 +166,8 @@ export function PackagesTable({
       columns={columns}
       rows={items}
       rowKey={(item) => item.id}
-      rowHref={(item) => packageDetailPath(item.type, item.id)}
+      rowHref={rowAction ? undefined : (item) => packageDetailPath(item.type, item.id)}
+      rowAction={rowAction}
       rowLabel={(item) => item.displayName}
       columnMode="scroll"
       {...state}

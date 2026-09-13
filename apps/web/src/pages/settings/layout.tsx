@@ -14,7 +14,6 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Settings, X } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
@@ -31,9 +30,9 @@ import { AppVersion } from "../../components/app-version";
 import { SettingsHeading } from "../../components/settings/settings-heading";
 import { SettingsPageActionTargetsProvider } from "../../components/settings/settings-page-actions";
 import { RailLink } from "../../components/settings/rail-link";
+import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { PanelDialog } from "../../components/panel-dialog";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useSpaceSwitcher, useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
@@ -49,10 +48,11 @@ import {
 } from "../../lib/settings-context";
 import { useBreadcrumbStore } from "../../stores/breadcrumb-store";
 import {
-  buildSettingsNavigation,
+  firstSettingsPath,
   type UnifiedSettingsNavItem,
   type UnifiedSettingsSection,
 } from "./navigation";
+import { useSettingsSections } from "./use-settings-sections";
 
 interface ContextSelectorProps {
   value: string;
@@ -111,19 +111,11 @@ function ScopeNavigation({
   onNavigate,
 }: ScopeNavigationProps) {
   return (
-    <section
+    <RailGroup
       data-settings-scope={section.scope}
-      className={cn(
-        "px-3 py-3",
-        section.scope === "workspace" && "border-t-sidebar-border border-t",
-      )}
+      title={label(section.labelKey)}
+      separated={section.scope === "workspace"}
     >
-      <div
-        data-settings-scope-title
-        className="text-muted-foreground mb-1.5 text-[0.7rem] font-semibold tracking-[0.06em] uppercase"
-      >
-        {label(section.labelKey)}
-      </div>
       {contextSelector}
       <nav className="mt-1.5 flex flex-col gap-0.5" aria-label={label(section.labelKey)}>
         {section.items.map((item) => (
@@ -138,17 +130,9 @@ function ScopeNavigation({
           />
         ))}
       </nav>
-    </section>
+    </RailGroup>
   );
 }
-
-/** Writing any package type, which is what installing one into a space is for. */
-const PACKAGE_AUTHORING = [
-  "agents:write",
-  "skills:write",
-  "mcp-servers:write",
-  "integrations:install",
-];
 
 export function UnifiedSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
@@ -162,7 +146,6 @@ export function UnifiedSettingsLayout() {
   const spaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const { can } = usePermissions();
-  const { features } = useAppConfig();
   const shouldOpenMobileNavigationOnEntry =
     isMobile &&
     background !== null &&
@@ -192,26 +175,7 @@ export function UnifiedSettingsLayout() {
     [],
   );
 
-  // Authoring rights are per space, and the library crosses every space the
-  // caller can enter: it is offered when ANY of them grants one.
-  const canAuthorPackage = applications.some((space) =>
-    PACKAGE_AUTHORING.some((permission) => space.permissions.includes(permission)),
-  );
-
-  const sections = buildSettingsNavigation({
-    can,
-    canAuthorPackage,
-    features: {
-      oidc: !!features.oidc,
-      billing: !!features.billing,
-      webhooks: !!features.webhooks,
-    },
-  })
-    .map((section) => ({
-      ...section,
-      items: section.items.filter((item) => item.show !== false),
-    }))
-    .filter((section) => section.items.length > 0);
+  const sections = useSettingsSections();
 
   const allItems = sections.flatMap((section) => section.items);
   const activeItem =
@@ -373,10 +337,7 @@ export function UnifiedSettingsLayout() {
 
   const rail = (
     <div className="flex h-full flex-col">
-      <div className="border-sidebar-border flex min-h-14 items-center gap-2 border-b pr-1.5 pl-4 text-sm font-semibold">
-        <Settings className="text-muted-foreground size-4" />
-        {label("unifiedSettings.title")}
-      </div>
+      <RailHeader icon={Settings} title={label("unifiedSettings.title")} />
       <div className="flex-1">
         {sections.map((section) => (
           <ScopeNavigation
@@ -503,4 +464,16 @@ export function UnifiedSettingsLayout() {
       </div>
     </PanelDialog>
   );
+}
+
+/**
+ * `/org-settings` and `/workspace-settings` land on the first entry the rail
+ * actually lists for this caller, not on a hard-coded `general`.
+ */
+export function SettingsIndexRedirect() {
+  const sections = useSettingsSections();
+  const path = firstSettingsPath(sections);
+  // No entry at all: nothing in settings is for this caller, so leave.
+  if (!path) return <NavigateKeepingState to="/" />;
+  return <NavigateKeepingState to={path} />;
 }
