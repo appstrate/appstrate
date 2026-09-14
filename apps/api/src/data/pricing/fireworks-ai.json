@@ -1175,6 +1175,36 @@
       "cacheRead": 0.044
     }
   },
+  "accounts/fireworks/models/deepseek-v4p1-flash": {
+    "label": "Accounts/fireworks/models/deepseek V4p1 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": 393216,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.22,
+      "output": 0.66,
+      "cacheRead": 0.007
+    }
+  },
   "accounts/fireworks/models/devstral-small-2505": {
     "label": "Accounts/fireworks/models/devstral Small 2505",
     "contextWindow": 131072,
@@ -5930,6 +5960,36 @@
       "input": 1.74,
       "output": 3.48,
       "cacheRead": 0.145
+    }
+  },
+  "deepseek-v4p1-flash": {
+    "label": "Deepseek V4p1 Flash",
+    "contextWindow": 1048576,
+    "maxTokens": 393216,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.22,
+      "output": 0.66,
+      "cacheRead": 0.007
     }
   },
   "glm-4p7": {

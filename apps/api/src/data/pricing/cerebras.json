@@ -148,6 +148,35 @@
       "output": 0.8
     }
   },
+  "qwen-3.8-27b": {
+    "label": "Qwen 3.8 27b",
+    "contextWindow": 65536,
+    "maxTokens": 32768,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 0.99,
+      "output": 1.49
+    }
+  },
   "zai-glm-4.6": {
     "label": "Zai Glm 4.6",
     "contextWindow": 128000,
