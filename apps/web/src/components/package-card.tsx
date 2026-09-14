@@ -21,6 +21,7 @@ export function PackageCard({
   unreadCount,
   actions,
   autoInstalled,
+  installed,
 }: CardItem) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const href = packageDetailPath(type, id);
@@ -63,11 +64,18 @@ export function PackageCard({
           {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
           {type === "agent" && (
             <div onClick={(e) => e.stopPropagation()}>
+              {/* Listed here is not runnable here: the index follows the
+                  placement rule (homed here, offered here, or system) while the
+                  launch routes want an installation in this space. Say which of
+                  the two is missing on the control itself — the card is the
+                  only place the user learns it before clicking. */}
               <RunAgentButton
                 packageId={id}
                 variant="ghost"
                 size="icon"
                 className="text-muted-foreground hover:text-primary size-7"
+                disabled={installed === false}
+                disabledTitle={t("detail.titleNotInstalled")}
               />
             </div>
           )}

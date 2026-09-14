@@ -14,7 +14,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List all agents",
       description:
-        "Returns all agents (system + user-imported) with running run counts. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
+        "Returns the agents READABLE from the space named by `X-Space-Id`, with running run counts — the placement rule: homed in that space, offered to it, or a system agent. Reading is not running: an agent placed here but not activated here carries `installed: false` and the launch routes refuse it until `POST /api/spaces/{spaceId}/packages` installs it. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -53,6 +53,7 @@ export const agentsPaths = {
                     version: "1.2.0",
                     type: "agent",
                     running_runs: 1,
+                    installed: true,
                     dependencies: {
                       skills: {},
                       mcp_servers: {},
@@ -71,6 +72,7 @@ export const agentsPaths = {
                     version: "2.0.0",
                     type: "agent",
                     running_runs: 0,
+                    installed: true,
                     dependencies: {
                       skills: { "@appstrate/summarize": "^1.0.0" },
                       mcp_servers: { "@appstrate/filesystem-mcp": "^1.0.0" },

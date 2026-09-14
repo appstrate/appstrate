@@ -178,6 +178,14 @@ async function skillIndexIds(headers: Record<string, string>): Promise<string[]>
   return body.data.map((pkg) => pkg.id);
 }
 
+/** Ids on the agents INDEX page — `GET /api/agents`, the same per-space read. */
+async function agentIndexIds(headers: Record<string, string>): Promise<string[]> {
+  const res = await app.request("/api/agents", { headers });
+  expect(res.status, await res.clone().text()).toBe(200);
+  const body = (await res.json()) as { data: { id: string }[] };
+  return body.data.map((agent) => agent.id);
+}
+
 /** Ids of the skills available to this caller in the current space. */
 async function librarySkillIds(headers: Record<string, string>): Promise<string[]> {
   const res = await app.request(`/api/spaces/${headers["X-Space-Id"]}/library`, {
@@ -249,11 +257,25 @@ describe("write authority follows the home", () => {
 describe("the home is a read grant", () => {
   // Homed in Alpha, placed ONLY in Beta — the shape that was writable and
   // unreadable at the same time: the home authorized the `PUT`, and every read
-  // gate asked for a placement the home did not have.
+  // gate asked for a placement the home did not have. The agent is the same
+  // shape in its purest form: homed in Alpha, installed in NO space at all.
   beforeEach(async () => {
     await db
       .delete(spacePackages)
       .where(and(eq(spacePackages.packageId, ID), eq(spacePackages.spaceId, alphaId)));
+    await seedAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      homeSpaceId: alphaId,
+      draftManifest: {
+        name: AGENT,
+        version: "0.1.0",
+        type: "agent",
+        description: "Homed here, installed nowhere",
+      },
+      draftContent: "Do the thing.",
+    });
   });
 
   it("opens the detail, the library and the file explorer at home", async () => {
@@ -270,7 +292,29 @@ describe("the home is a read grant", () => {
     // the SPA's Skills / Agents / MCP servers navigation is built on: a package
     // homed here and installed nowhere used to vanish from it while staying
     // editable — write authority without a way to reach the thing.
+    //
+    // `GET /api/agents` is that page for agents and answers the SAME rule — it
+    // read the INSTALLED set until the two were folded into one SQL builder, so
+    // an agent homed here and installed nowhere was editable from a page that
+    // did not list it.
     expect(await skillIndexIds(alpha)).toContain(ID);
+    expect(await agentIndexIds(alpha)).toContain(AGENT);
+  });
+
+  it("says on the agents index that a placement is not an activation", async () => {
+    // The row is READ here and cannot RUN here: the launch gate is an installed
+    // `space_packages` row, which this agent has in no space. Both facts travel
+    // on the row so a launcher greys its own control out rather than
+    // discovering the refusal on click.
+    const res = await app.request("/api/agents", { headers: alpha });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as { data: { id: string; installed: boolean }[] };
+    expect(body.data.find((agent) => agent.id === AGENT)?.installed).toBe(false);
+
+    await seedInstalledPackage(alphaId, AGENT);
+    const after = await app.request("/api/agents", { headers: alpha });
+    const afterBody = (await after.json()) as { data: { id: string; installed: boolean }[] };
+    expect(afterBody.data.find((agent) => agent.id === AGENT)?.installed).toBe(true);
   });
 
   it("opens nothing in a space that is neither the home nor a placement", async () => {
@@ -279,6 +323,7 @@ describe("the home is a read grant", () => {
     await expectProblem(await filesOf(gamma), 404);
     expect(await librarySkillIds(gamma)).not.toContain(ID);
     expect(await skillIndexIds(gamma)).not.toContain(ID);
+    expect(await agentIndexIds(gamma)).not.toContain(AGENT);
   });
 
   // The home opens READS. Running is a separate gate — `hasPackageAccess`, an
@@ -289,19 +334,8 @@ describe("the home is a read grant", () => {
     let agentHeaders: Record<string, string>;
 
     beforeEach(async () => {
-      await seedAgent({
-        id: AGENT,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        homeSpaceId: alphaId,
-        draftManifest: {
-          name: AGENT,
-          version: "0.1.0",
-          type: "agent",
-          description: "Homed here, installed nowhere",
-        },
-        draftContent: "Do the thing.",
-      });
+      // The agent itself is seeded by the enclosing describe — the same row
+      // whose READS that block asserts, so the two halves cannot drift.
       await seedDefaultOrgModel(ctx);
       agentHeaders = { ...owner(), "Content-Type": "application/json" };
     });

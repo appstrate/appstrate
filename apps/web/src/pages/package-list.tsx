@@ -27,6 +27,15 @@ export interface CardItem {
   unreadCount?: number;
   actions?: ReactNode;
   autoInstalled?: boolean;
+  /**
+   * Agent cards only: whether the agent is activated in the current space
+   * (`AgentListItem.installed`). The index lists what this space READS — homed
+   * here, offered here, or system — and a run needs an installation on top, so
+   * `false` greys the card's launch control out with the reason rather than
+   * letting the click come back a 404. `undefined` where the list does not
+   * carry the fact (non-agent cards), which reads as "runnable".
+   */
+  installed?: boolean;
 }
 
 interface PackageTabProps {
@@ -112,6 +121,7 @@ export function PackageList() {
     runningRuns: f.running_runs,
     keywords: f.keywords,
     unreadCount: unreadCounts?.[f.id],
+    installed: f.installed,
   }));
 
   return (

@@ -523,6 +523,14 @@ export interface AgentListItem extends BasePackageListItem {
   type: PackageType;
   /** Always emitted by the agent-list mapper (`@scope` or null). */
   scope: string | null;
+  /**
+   * Whether the agent is activated in the space this listing was read from —
+   * an installed `space_packages` row, or a system package. The list itself is
+   * the READ rule (homed here, offered here, or system), which a run does not
+   * follow: `false` means the launch routes refuse it here until somebody
+   * installs it through `POST /api/spaces/{spaceId}/packages`.
+   */
+  installed: boolean;
 }
 
 export interface AgentDetail {

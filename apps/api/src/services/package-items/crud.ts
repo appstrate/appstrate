@@ -243,37 +243,56 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
-/** List items of a type accessible to a space (system + installed). */
+/**
+ * Placement, in SQL — the same rule `placementGrantsRead` states in memory
+ * (`lib/package-access.ts`, RBAC spec §6.9, §6.10): a package is readable from
+ * a space when it is a SYSTEM package (readable everywhere), when it is SHARED
+ * there, or when that space is its HOME. Exactly two placements, plus the
+ * system escape.
+ *
+ * Without the home half a package this space governs but has uninstalled
+ * disappears from its own type's index page while staying editable — write
+ * without read; without the share half a package offered to this space is
+ * invisible on the page the recipient would go looking for it. An INSTALLATION
+ * is not a third placement: it only ever exists where one of these two already
+ * holds, so reading it here would state nothing the rule does not.
+ *
+ * Expects `packageShares` LEFT JOINed on (package, `spaceId`) — the share half
+ * is `packageShares.packageId IS NOT NULL`, so a query that omits the join
+ * silently loses it. The org boundary (`orgOrSystemFilter`) and the shadow
+ * filter (`notEphemeralFilter`) are the caller's, as everywhere else.
+ *
+ * It lives here rather than beside `placementGrantsRead` because
+ * `lib/package-access.ts` already reaches `services/space-packages.ts`
+ * transitively (through `services/organizations.ts`); importing it back would
+ * close that cycle. Its two callers are `listOrgItems` below and
+ * `listReadablePackages` in `services/space-packages.ts`.
+ */
+export function placementReadFilter(spaceId: string) {
+  return or(
+    eq(packages.source, "system"),
+    isNotNull(packageShares.packageId),
+    eq(packages.homeSpaceId, spaceId),
+  );
+}
+
+/** List items of a type readable from a space — the placement rule, per type. */
 export async function listOrgItems(
   orgId: string,
   cfg: PackageTypeConfig,
   spaceId: string,
   opts?: { activeOnly?: boolean },
 ) {
-  // Default: catalogue view — system packages (always visible) + org packages
-  // installed in this space. `activeOnly` narrows to packages that are actually
-  // active in THIS space: an enabled `space_packages` row, dropping the
-  // "system always shows" branch. Used by the agent editor's integration
-  // picker so it only offers usable integrations (server-side filter — the
-  // full catalogue can be large).
-  // The catalogue branch mirrors `placementGrantsRead` (`lib/package-access.ts`,
-  // RBAC spec §6.9, §6.10): shared here OR homed here — the two placements, in
-  // SQL. Without the home half a package this space governs but has uninstalled
-  // disappears from its own type's index page while staying editable — write
-  // without read; without the share half a package offered to this space is
-  // invisible on the page the recipient would go looking for it. An
-  // INSTALLATION is not a third placement any more: it only ever exists where
-  // one of these two already holds, so reading it here would state nothing the
-  // rule does not — and would restate the term decision 1 removed.
-  // `activeOnly` stays install-only: neither a home nor an offer is a usable
-  // instance.
-  const installFilter = opts?.activeOnly
+  // Default: the catalogue view — {@link placementReadFilter}, the placement
+  // rule this page is a reader of. `activeOnly` narrows to packages actually
+  // active in THIS space: an enabled `space_packages` row, dropping the "system
+  // always shows" branch. Used by the agent editor's integration picker so it
+  // only offers usable integrations (server-side filter — the full catalogue
+  // can be large). `activeOnly` stays install-only: neither a home nor an offer
+  // is a usable instance.
+  const placementFilter = opts?.activeOnly
     ? and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true))
-    : or(
-        eq(packages.source, "system"),
-        isNotNull(packageShares.packageId),
-        eq(packages.homeSpaceId, spaceId),
-      );
+    : placementReadFilter(spaceId);
   // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
   // projected: the list mapper never reads it, and it is by far the largest
   // column on the row.
@@ -306,7 +325,7 @@ export async function listOrgItems(
         orgOrSystemFilter(orgId),
         eq(packages.type, cfg.type),
         notEphemeralFilter(),
-        installFilter,
+        placementFilter,
       ),
     )
     .orderBy(

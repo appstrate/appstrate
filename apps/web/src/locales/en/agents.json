@@ -17,6 +17,7 @@
   "detail.titleEmptyPrompt": "Agent prompt is empty",
   "detail.titleMissingSkill": "A required skill is not installed",
   "detail.titleNeverPublished": "This agent has no published version. Only its author may run the working copy — ask them to publish one.",
+  "detail.titleNotInstalled": "This agent is not installed in this space. Install it from its page to run it here.",
   "detail.draftReadOnly": "No published version: you are reading the author's work in progress. It cannot be run until a version is published.",
   "detail.tabRuns": "Runs",
   "detail.tabSchedules": "Schedules",

@@ -190,6 +190,19 @@ const takeUpOffer = (headers: Headers, packageId: string, spaceId?: string) =>
     body: JSON.stringify({ packageId }),
   });
 
+/** Rows on the agents INDEX page — `GET /api/agents`, read from one space. */
+async function agentIndexRows(headers: Headers): Promise<{ id: string; installed: boolean }[]> {
+  const res = await app.request("/api/agents", { headers });
+  expect(res.status, await res.clone().text()).toBe(200);
+  return ((await res.json()) as { data: { id: string; installed: boolean }[] }).data;
+}
+
+const agentIndexIds = async (headers: Headers) =>
+  (await agentIndexRows(headers)).map((agent) => agent.id);
+
+const agentIndexRow = async (headers: Headers, packageId: string) =>
+  (await agentIndexRows(headers)).find((agent) => agent.id === packageId);
+
 /** The current space package view. */
 async function library(headers: Headers): Promise<{
   packages: Record<string, { id: string; installed_in: string[] }[]>;
@@ -553,6 +566,22 @@ describe("offered is not activated", () => {
       headers: recipient.headers(),
     });
     expect(detail.status, await detail.clone().text()).toBe(200);
+  });
+
+  it("lists the offer on the recipient's agents index, and nowhere else", async () => {
+    // The index page reads the PLACEMENT rule, so an offer is on it before it
+    // is taken up — the recipient has to see the agent to decide. `installed`
+    // is the second half: readable here, not runnable here yet. `teamMember`
+    // reads neither the home nor the offer and must not learn the id exists.
+    const listed = await agentIndexIds(recipient.headers());
+    expect(listed).toContain(AGENT);
+    const mine = await agentIndexRow(recipient.headers(), AGENT);
+    expect(mine?.installed).toBe(false);
+
+    expect(await agentIndexIds(teamMember.headers(teamId))).not.toContain(AGENT);
+
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
+    expect((await agentIndexRow(recipient.headers(), AGENT))?.installed).toBe(true);
   });
 
   it("refuses the run until the recipient installs it", async () => {

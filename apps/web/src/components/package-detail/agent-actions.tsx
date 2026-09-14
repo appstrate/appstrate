@@ -47,7 +47,7 @@ export function AgentActions({
   const deleteAgent = useDeleteAgent();
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
-  const uninstallMutation = useTogglePackageInstall();
+  const installToggle = useTogglePackageInstall();
   const runAgent = useRunAgent(packageId);
   const currentSpaceId = useCurrentSpaceId();
   const { isInstalledInCurrentSpace } = usePackageInstallState(packageId);
@@ -77,7 +77,7 @@ export function AgentActions({
         break;
       case "uninstallAgent":
         if (!currentSpaceId) return;
-        uninstallMutation.mutate(
+        installToggle.mutate(
           { spaceId: currentSpaceId, packageId, installed: true },
           { onSuccess },
         );
@@ -113,6 +113,17 @@ export function AgentActions({
             label: t("detail.deleteConfirm", { name: detail.display_name }),
           })
         }
+        // The agents index lists what this space READS — an agent homed here or
+        // offered here and activated nowhere is on it, and running it needs an
+        // installation. This is the door: the same `POST
+        // /api/spaces/{spaceId}/packages` the library and the offers section
+        // call, reached from the page the index links to.
+        canInstall={!isInstalledInCurrentSpace && detail.source !== "system"}
+        onInstall={() => {
+          if (!currentSpaceId) return;
+          installToggle.mutate({ spaceId: currentSpaceId, packageId, installed: false });
+        }}
+        installPending={installToggle.isPending}
         canUninstall={isInstalledInCurrentSpace && detail.source !== "system"}
         onUninstall={() =>
           setConfirmState({
@@ -189,7 +200,7 @@ export function AgentActions({
           deleteAgent.isPending ||
           deleteRuns.isPending ||
           deleteAllMemories.isPending ||
-          uninstallMutation.isPending
+          installToggle.isPending
         }
       />
     </>

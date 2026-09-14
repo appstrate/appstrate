@@ -169,6 +169,7 @@
   "packages.deleteConfirm": "Delete {{type}} \"{{name}}\"? This will permanently remove it from the organization. It will be removed from all spaces.",
   "packages.uninstall": "Uninstall",
   "packages.uninstallConfirm": "Uninstall \"{{name}}\" from this space? You can reinstall it later from this space’s packages.",
+  "packages.install": "Install in this space",
   "packages.detailNotFound": "Item not found.",
   "schedules.title": "Schedules",
   "schedules.empty": "No schedules.",

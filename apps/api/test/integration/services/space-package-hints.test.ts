@@ -13,7 +13,7 @@
  *     `items.length` with `truncated` true;
  *   - the enabled filter applied to the page but not the count → a disabled
  *     install is asserted absent from `total` as well as from `items`;
- *   - a different total order than `listAccessiblePackages` (system first,
+ *   - a different total order than `listReadablePackages` (system first,
  *     then id — load-bearing for the prompt cache) → the page's ids are
  *     asserted in that order, with a system package seeded to lead it.
  */

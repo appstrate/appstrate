@@ -19,7 +19,7 @@ import { validateAgainstSchema } from "../services/schema.ts";
 import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import {
-  listAccessiblePackages,
+  listReadablePackages,
   updateInstalledPackage,
   getInstalledPackageSettings,
   hasPackageAccess,
@@ -198,9 +198,11 @@ export function createAgentsRouter() {
     const scope = getSpaceScope(c);
     const summaryOnly = agentReadIsSummary(c);
 
-    // Single query: system packages + installed packages via LEFT JOIN
+    // Single query: the placement rule (homed here ∨ offered here ∨ system) via
+    // LEFT JOIN — what this space READS. Running is a second question, answered
+    // per row by `installed`.
     const [rows, runningCounts] = await Promise.all([
-      listAccessiblePackages(scope, "agent"),
+      listReadablePackages(scope, "agent"),
       getRunningRunCounts(scope, runVisibilityFilter(c)),
     ]);
 
@@ -229,6 +231,11 @@ export function createAgentsRouter() {
           integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },
         running_runs: runningCounts[row.id] ?? 0,
+        // Readable here is not runnable here: an agent homed in this space and
+        // installed in none of them is listed and refused a run. Saying so on
+        // the row is what lets a launcher grey its own control out instead of
+        // discovering the refusal on click.
+        installed: row.installed,
         source: row.source ?? "local",
         // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
         // list output is directly usable as `{scope}` path-param input — one

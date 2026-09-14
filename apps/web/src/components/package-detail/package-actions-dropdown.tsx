@@ -13,6 +13,7 @@ import {
   CalendarPlus,
   Trash2,
   PackageMinus,
+  PackagePlus,
   PowerOff,
   SlidersHorizontal,
   FolderInput,
@@ -97,7 +98,14 @@ interface PackageActionsDropdownProps {
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
-  // Uninstall from current space
+  // Install into / uninstall from the current space — the same door in both
+  // directions (`POST` / `DELETE /api/spaces/{spaceId}/packages…`). Install is
+  // offered because the index page lists what the space READS: a package homed
+  // here or offered here and activated nowhere is reachable, and this is where
+  // its reader turns that into a run.
+  canInstall?: boolean;
+  onInstall?: () => void;
+  installPending?: boolean;
   canUninstall?: boolean;
   onUninstall?: () => void;
   // Integration-specific: deactivate in the current space (non-destructive —
@@ -135,6 +143,9 @@ export function PackageActionsDropdown({
   runBlockedReason,
   canDeletePackage,
   onDeletePackage,
+  canInstall,
+  onInstall,
+  installPending,
   canUninstall,
   onUninstall,
   canDeactivate,
@@ -169,6 +180,11 @@ export function PackageActionsDropdown({
   // `integrations:uninstall`; the props say whether the action EXISTS here.
   const showDeactivate = !!canDeactivate && can("integrations:uninstall") && !!onDeactivate;
   const showUninstall = !!canUninstall && can("integrations:uninstall") && !!onUninstall;
+  // Its own resource, unlike the two lines above: installing an agent is
+  // `agents:configure`, a skill `skills:write` — the table the install route
+  // enforces (`PACKAGE_PERMISSIONS`).
+  const showInstall =
+    !!canInstall && can(PACKAGE_PERMISSIONS[type].install) && !!onInstall && !showUninstall;
   const showDelete = !isBuiltIn && isOwned && canDelete;
 
   // The manifest is no longer reachable from here, and does not need to be:
@@ -323,10 +339,16 @@ export function PackageActionsDropdown({
             </>
           )}
 
-          {/* ── Deactivate / Uninstall / Delete ── */}
-          {(showDeactivate || showUninstall || showDelete) && (
+          {/* ── Install / Deactivate / Uninstall / Delete ── */}
+          {(showInstall || showDeactivate || showUninstall || showDelete) && (
             <>
               <DropdownMenuSeparator />
+              {showInstall && (
+                <DropdownMenuItem onSelect={onInstall} disabled={installPending}>
+                  <PackagePlus size={14} />
+                  {t("packages.install", { ns: "settings" })}
+                </DropdownMenuItem>
+              )}
               {showDeactivate && (
                 <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
                   <PowerOff size={14} />

@@ -465,6 +465,25 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **`GET /api/agents` lists what the placement rule reads (home ∨ shared), no
+  longer the installed set; running still requires an installation.** The
+  skills, integrations and mcp-servers index already asked the placement
+  question and the agents index still asked the installation one, so an agent
+  homed in a space and installed in none was editable from a page that did not
+  list it — and an agent merely offered to a recipient was invisible until they
+  had taken the offer up. One SQL builder (`placementReadFilter`) now answers
+  for both index pages, beside the in-memory `placementGrantsRead` it mirrors,
+  and the agents listing is named for what it returns (`listReadablePackages`).
+  Reading is still not running: `AgentListItem` carries the new required field
+  `installed`, and the SPA greys the card's launch control out with that reason
+  instead of letting the click come back a 404. The launch routes, the
+  `requireAgent()` family and the caller-context hints the chat and `get_me`
+  serve are unchanged — all four keep asking for an installed `space_packages`
+  row, because an agent runs with the credentials of the space that activated
+  it. An agent's detail page gains the matching **Installer dans cet espace**
+  action, the same `POST /api/spaces/{spaceId}/packages` door the library and
+  the offers section already call.
+
 - **BREAKING: every read of a package answers with ONE definition.** The file
   explorer — `GET /api/packages/{scope}/{name}/files` and `…/files/content` —
   and the detail pages of skills, integrations and mcp-servers —

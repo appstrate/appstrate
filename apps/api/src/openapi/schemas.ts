@@ -506,8 +506,8 @@ export const schemas = {
   },
   AgentListItem: {
     type: "object",
-    // `running_runs`/`dependencies`/`scope`/`keywords`/`version` are always
-    // emitted by the GET /api/agents mapper. `display_name`/`description`/
+    // `running_runs`/`dependencies`/`scope`/`keywords`/`version`/`installed` are
+    // always emitted by the GET /api/agents mapper. `display_name`/`description`/
     // `schema_version`/`author` stay optional (manifest-derived, may be absent);
     // `forked_from` is not emitted by the list endpoint (shared-type optional).
     required: [
@@ -519,6 +519,7 @@ export const schemas = {
       "scope",
       "keywords",
       "version",
+      "installed",
     ],
     properties: {
       id: { type: "string" },
@@ -540,6 +541,11 @@ export const schemas = {
         enum: ["agent", "skill", "mcp-server", "integration"],
       },
       running_runs: { type: "integer" },
+      installed: {
+        type: "boolean",
+        description:
+          "Whether the agent is activated in the space this listing was read from (an installed `space_packages` row, or a system package). The listing itself follows the READ rule — homed in this space, offered to it, or system — which a RUN does not: when this is `false` the launch routes answer `404 agent_not_found` here until somebody installs it through `POST /api/spaces/{spaceId}/packages`. Always emitted.",
+      },
       dependencies: {
         type: "object",
         // `integrations` — which SaaS the agent talks to — is emitted to every
