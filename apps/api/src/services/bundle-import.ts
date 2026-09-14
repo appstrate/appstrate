@@ -477,6 +477,7 @@ export async function importBundle(
 
     try {
       await postInstallPackage({
+        create: false,
         packageType: parsedZip.type,
         packageId,
         orgId: scope.orgId,
@@ -484,6 +485,7 @@ export async function importBundle(
         content: parsedZip.content,
         files: parsedZip.files,
         zipBuffer: Buffer.from(getReconstructedPackage()),
+        draftManifest: parsedZip.manifest,
         version,
         homeSpaceId: scope.spaceId,
       });

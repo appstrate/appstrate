@@ -17,6 +17,14 @@ import { logger } from "./logger.ts";
 /** The transaction handle passed to a `db.transaction` callback. */
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+/**
+ * A Drizzle executor — the root `db`, or a transaction handle a caller already
+ * owns. A service function taking one lets its writes join the caller's
+ * transaction and commit (or roll back) with it, and defaults to `db` when
+ * there is no transaction to join.
+ */
+export type DbOrTx = typeof db | DbTransaction;
+
 // --- Scoped WHERE builder ---
 
 /**

@@ -16,24 +16,67 @@ import { validationFailed } from "../../lib/errors.ts";
 export interface PackageTypeConfig {
   type: PackageType;
   storageFolder: "agents" | "skills" | "integrations" | "mcp-servers";
-  label: string;
+  /**
+   * How this type names ONE of its packages in a message a user reads ("Skill
+   * '@acme/x' not found", "Skill was modified concurrently").
+   *
+   * Stated per entry, never derived from a plural by dropping a letter: a label
+   * whose singular is not the plural minus one character breaks that silently,
+   * in error text, where nothing type-checks it.
+   */
+  labelSingular: string;
   /** Producer-side check for this type's authored content, run by every path that WRITES it. */
   validateContent?: (content: string) => CompanionFileViolation | null;
+  /**
+   * Whether `manifest.json` is a STORED file of this type's archive.
+   *
+   * For `agent` / `skill` it is not: the row owns the manifest, the file
+   * explorer's overlay materializes it (`applyDraftOverlay`), publish rebuilds
+   * it from the row and the draft-run catalog synthesizes it — so a second copy
+   * in the ZIP can only go stale. Every write of such a package's tree drops it
+   * before uploading.
+   *
+   * For `integration` / `mcp-server` it IS the editor's storage sink
+   * (`storageFileName`, `routes/packages.ts`) and the bundle's portable
+   * manifest, so it is stored like any other file.
+   *
+   * A fact of the TYPE, exactly like `storageFolder` is, so it is declared
+   * here rather than derived per request at a call site: every writer of one
+   * package's tree must agree about whether the manifest belongs in it, and an
+   * option each writer computes for itself is an agreement nothing enforces.
+   */
+  manifestIsStoredFile: boolean;
 }
 
 export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
-  agent: { type: "agent", storageFolder: "agents", label: "Agents" },
+  agent: {
+    type: "agent",
+    storageFolder: "agents",
+    labelSingular: "Agent",
+    manifestIsStoredFile: false,
+  },
   skill: {
     type: "skill",
     storageFolder: "skills",
-    label: "Skills",
+    labelSingular: "Skill",
     validateContent: checkSkillMarkdown,
+    manifestIsStoredFile: false,
   },
   // Phase 1.0 — INTEGRATIONS_PROPOSAL §4.1.
-  integration: { type: "integration", storageFolder: "integrations", label: "Integrations" },
+  integration: {
+    type: "integration",
+    storageFolder: "integrations",
+    labelSingular: "Integration",
+    manifestIsStoredFile: true,
+  },
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages referenced by an
   // integration's `source.kind: "local"`.
-  "mcp-server": { type: "mcp-server", storageFolder: "mcp-servers", label: "MCP Servers" },
+  "mcp-server": {
+    type: "mcp-server",
+    storageFolder: "mcp-servers",
+    labelSingular: "MCP Server",
+    manifestIsStoredFile: true,
+  },
 };
 
 /** 400 with the violation reason as the machine-readable `code`. */

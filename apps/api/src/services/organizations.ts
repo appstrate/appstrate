@@ -20,7 +20,7 @@ import {
 } from "@appstrate/db/schema";
 import { and, eq, inArray, notInArray, count, sql } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
-import { scopedWhere } from "../lib/db-helpers.ts";
+import { scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 import { countInProgressRuns, orgRunConcurrencyLockKey } from "./state/runs.ts";
 import { removeScheduleJobs } from "./scheduler.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
@@ -31,9 +31,6 @@ import { deleteSpaceMembershipsInOrg } from "./space-members.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, provisionOrg } from "@appstrate/db/provision-org";
 import type { RevokedSpaceAssignment } from "./space-members.ts";
-
-/** Accepts either the base client or an open transaction handle. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 interface OrgResult {
   id: string;

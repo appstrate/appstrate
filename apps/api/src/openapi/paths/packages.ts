@@ -76,6 +76,15 @@ function versionRestoreResponseSchema(detailRef: string) {
 const PACKAGE_MUTATION_AUTHORITY =
   " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.";
 
+const fileOperationsProperty = {
+  type: "array",
+  minItems: 1,
+  maxItems: 200,
+  items: { $ref: "#/components/schemas/PackageFileWriteOperation" },
+  description:
+    "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations.",
+} as const;
+
 export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
@@ -742,6 +751,7 @@ export const packagesPaths = {
               // file is (`agent`, `skill`) — the handler refuses a blank one.
               required: ["manifest", "content"],
               properties: {
+                operations: fileOperationsProperty,
                 manifest: {
                   type: "object",
                   additionalProperties: true,
@@ -778,6 +788,22 @@ export const packagesPaths = {
           $ref: "#/components/responses/ValidationError",
           description:
             "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "A file operation refers to a missing file.",
+        },
+        "409": {
+          description: "A package with this name already exists.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "File or resulting package exceeds the editing limits.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1084,6 +1110,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -1109,6 +1136,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {
@@ -1202,6 +1241,7 @@ export const packagesPaths = {
               // file is (`agent`, `skill`) — the handler refuses a blank one.
               required: ["manifest", "content"],
               properties: {
+                operations: fileOperationsProperty,
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: {
                   type: "string",
@@ -1224,6 +1264,22 @@ export const packagesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "A file operation refers to a missing file.",
+        },
+        "409": {
+          description: "A package with this name already exists.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "File or resulting package exceeds the editing limits.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1289,6 +1345,7 @@ export const packagesPaths = {
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -1310,6 +1367,12 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "409": {
           description:
             "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
@@ -1954,6 +2017,7 @@ export const packagesPaths = {
               type: "object",
               required: ["manifest"],
               properties: {
+                operations: fileOperationsProperty,
                 manifest: {
                   type: "object",
                   additionalProperties: true,
@@ -1981,6 +2045,22 @@ export const packagesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "A file operation refers to a missing file.",
+        },
+        "409": {
+          description: "A package with this name already exists.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "File or resulting package exceeds the editing limits.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -2277,6 +2357,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -2298,6 +2379,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {
@@ -2713,6 +2806,7 @@ export const packagesPaths = {
                   description: "Package manifest",
                 },
                 content: { type: "string" },
+                operations: fileOperationsProperty,
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
               additionalProperties: false,
@@ -2734,6 +2828,18 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description: "Draft was changed concurrently; reload before retrying",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "Written file or resulting tree exceeds its byte/count limit",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
     delete: {

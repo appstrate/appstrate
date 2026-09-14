@@ -158,6 +158,39 @@ export async function createAgent(
   return res.json();
 }
 
+// ─── Skills (Packages) ──────────────────────────
+
+/**
+ * Create a skill whose draft tree the files editor then authors.
+ *
+ * `SKILL.md` carries real frontmatter because every route that writes a
+ * skill's content runs the same producer check on it: a body without an inline
+ * `name:` and a `description:` is refused, so a placeholder here would fail the
+ * create rather than the assertion under test.
+ */
+export async function createSkill(
+  client: ApiClient,
+  scope: string,
+  name: string,
+): Promise<{ id: string }> {
+  const content = `---\nname: ${name}\ndescription: E2E test skill ${name}.\n---\n\nBody.\n`;
+  const manifest = {
+    schema_version: "0.1",
+    name: `${scope}/${name}`,
+    display_name: `Test Skill ${name}`,
+    version: "0.1.0",
+    type: "skill",
+    description: `E2E test skill ${name}`,
+  };
+
+  const res = await client.post("/packages/skills", { manifest, content });
+
+  if (res.status() !== 201 && res.status() !== 200) {
+    throw new Error(`Create skill failed (${res.status()}): ${await res.text()}`);
+  }
+  return res.json();
+}
+
 /**
  * Create an agent declaring an `input` schema — needed to test per-space
  * isolation of the editor's stored input values. The values a `PUT

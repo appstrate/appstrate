@@ -187,7 +187,12 @@ export function PackageActionsDropdown({
       />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="icon" data-testid="package-actions-trigger">
+          <Button
+            variant="outline"
+            size="icon"
+            data-testid="package-actions-trigger"
+            aria-label={t("package.actions")}
+          >
             <MoreHorizontal size={16} />
           </Button>
         </DropdownMenuTrigger>

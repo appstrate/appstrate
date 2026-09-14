@@ -176,6 +176,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   runbook for 0063-0065 and both scripts is `scripts/migration/README.md` →
   "Personal spaces & sharing rollout".
 
+- **One file editor for agents, skills, integrations and MCP servers.** The
+  Files tab stages creation, text editing, upload, replacement, rename and
+  deletion until Save. Manifest and files are saved through the existing
+  package `PUT`, using one `lock_version`; a stale draft is refused in full
+  and local changes remain available. Controls lock during saving.
+  Required content files remain protected, and executable file edits validate
+  their bundle references. Path checks and file operations are shared by the
+  browser and API. Draft saves, restores and imports serialize through the
+  same persistence function. Limits: 200 operations, 1 MiB per written file,
+  50 MB and 10,000 entries per resulting tree; larger files can be imported
+  in an archive.
+  Import refuses path collisions without discarding local edits; explicit
+  replacement works for text and binary files. Publication captures the row
+  and ZIP under the draft lock before validating either, and version overrides
+  cannot overwrite a newer draft or reuse an old editor token. Concurrent edits
+  remain marked as unpublished; a published version override does not. Buffered S3
+  requests have a 30-second deadline, including response-body reads.
+  Agent, skill and integration creation forms support the same local file tree.
+  New drafts become visible only after their first archive upload succeeds;
+  a storage failure leaves the name available for retry. Archive creation shares
+  this lifecycle, and an import losing a concurrent creation cannot overwrite it.
+
 - **Two-layer RBAC — an org role, and a role per space.** Organization roles
   gain **`guest`**: an org identity with no implicit reach into any space, for
   outside collaborators. Every space now carries a **visibility** (`open`,
@@ -353,6 +375,17 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   Read `home_writable`, never the id, to decide whether to offer an edit: the
   dashboard now does exactly that, and its client-side derivation of write
   authority is gone.
+
+- **One archive-path rule, everywhere a package's files are written or read
+  back.** Importing a ZIP already dropped an entry named with a `..` segment, an
+  empty segment (`dir//file`, a leading or trailing `/`), a backslash, a `\0` or
+  the `__MACOSX/` prefix; it now also drops one carrying a `.` segment
+  (`./notes.md`) or a Windows drive prefix (`C:/notes.md`). Those two were
+  already refused by `appstrate skills sync` when it writes the file to disk, so
+  a package could hold a path the platform accepted and the CLI called
+  malformed — which failed the whole sync, not just that entry. The write route
+  refuses the same set outright (`400`), and the CLI reads the rule from the
+  platform instead of restating it.
 
 - **`runs:read` now means the runs you launched, and nothing else.** Your manual
   runs and the runs of your own schedules — not a colleague's, not an
@@ -914,6 +947,21 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Fixed
 
+- **Restore MinIO image pulls for CI, development and self-hosting.** Compose
+  files use the official `quay.io/minio` repositories after Docker Hub stopped
+  serving the referenced images. Existing release tags are preserved and all
+  references pin verified multi-platform digests. The test fixture replaces
+  `latest` with the server release already used by the Tier 3 example.
+- **Typing fast into a Monaco pane no longer drops characters.** The agent
+  prompt editor, the package JSON tab and the new file editor fed Monaco a
+  controlled `value` from React state, and `@monaco-editor/react` applies a
+  controlled value as an after-commit effect that rewrites the whole model when
+  it differs from the editor's text. Under React's batching, a keystroke that
+  landed between `onChange` and the render carrying it was overwritten by the
+  older string, silently and with `onChange` suppressed — `print(1)` typed on a
+  loaded machine arrived as `prin1)`. Every authoring pane now seeds Monaco once
+  (`defaultValue`) and receives text it did not type as a remount, keyed by
+  what changed it (another file, a discarded draft, a re-read server copy).
 - **Idempotent run retries enforce current permissions and input visibility.**
   The request fingerprint includes its method, URL and body; using the same key
   for a different route or version returns `422 idempotency_conflict` without

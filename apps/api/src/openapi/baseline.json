@@ -14993,6 +14993,15 @@
                 "type": "object",
                 "required": ["manifest", "content"],
                 "properties": {
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "manifest": {
                     "type": "object",
                     "additionalProperties": true,
@@ -15037,6 +15046,30 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "A file operation refers to a missing file."
+          },
+          "409": {
+            "description": "A package with this name already exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or resulting package exceeds the editing limits.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -15513,6 +15546,15 @@
                   "content": {
                     "type": "string"
                   },
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "lock_version": {
                     "type": "integer",
                     "description": "Optimistic lock version"
@@ -15555,6 +15597,26 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Draft was changed concurrently; reload before retrying",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Written file or resulting tree exceeds its byte/count limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -15689,6 +15751,15 @@
                 "type": "object",
                 "required": ["manifest", "content"],
                 "properties": {
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
                   },
@@ -15730,6 +15801,30 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "A file operation refers to a missing file."
+          },
+          "409": {
+            "description": "A package with this name already exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or resulting package exceeds the editing limits.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -15829,6 +15924,15 @@
                   "content": {
                     "type": "string"
                   },
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "lock_version": {
                     "type": "integer",
                     "description": "Optimistic lock version"
@@ -15873,6 +15977,16 @@
           },
           "409": {
             "description": "Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Written file or resulting tree exceeds its byte/count limit",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -16849,6 +16963,15 @@
                 "type": "object",
                 "required": ["manifest"],
                 "properties": {
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "manifest": {
                     "type": "object",
                     "additionalProperties": true,
@@ -16892,6 +17015,30 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "A file operation refers to a missing file."
+          },
+          "409": {
+            "description": "A package with this name already exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or resulting package exceeds the editing limits.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -17363,6 +17510,15 @@
                   "content": {
                     "type": "string"
                   },
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "lock_version": {
                     "type": "integer",
                     "description": "Optimistic lock version"
@@ -17404,6 +17560,26 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Draft was changed concurrently; reload before retrying",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Written file or resulting tree exceeds its byte/count limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -18051,6 +18227,15 @@
                   "content": {
                     "type": "string"
                   },
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "lock_version": {
                     "type": "integer",
                     "description": "Optimistic lock version"
@@ -18092,6 +18277,26 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Draft was changed concurrently; reload before retrying",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Written file or resulting tree exceeds its byte/count limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -26331,6 +26536,92 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "PackageFileWriteOperation": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PackageFileWriteEntry"
+          },
+          {
+            "$ref": "#/components/schemas/PackageFileDeleteEntry"
+          },
+          {
+            "$ref": "#/components/schemas/PackageFileMoveEntry"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "op",
+          "mapping": {
+            "write": "#/components/schemas/PackageFileWriteEntry",
+            "delete": "#/components/schemas/PackageFileDeleteEntry",
+            "move": "#/components/schemas/PackageFileMoveEntry"
+          }
+        }
+      },
+      "PackageFileWriteEntry": {
+        "type": "object",
+        "required": ["op", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "write"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Archive-relative path to write. Creates the entry or replaces it; parent directories are implicit (a path is just a name containing `/`)."
+          },
+          "text": {
+            "type": "string",
+            "description": "File content, stored as its UTF-8 encoding. Mutually exclusive with `bytes_base64`; exactly one of the two is required."
+          },
+          "bytes_base64": {
+            "type": "string",
+            "description": "File content as standard base64 (URL-safe base64 is refused). Mutually exclusive with `text`; exactly one of the two is required."
+          }
+        }
+      },
+      "PackageFileDeleteEntry": {
+        "type": "object",
+        "required": ["op", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "delete"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Entry to remove. A path the tree does not hold is a `404`."
+          }
+        }
+      },
+      "PackageFileMoveEntry": {
+        "type": "object",
+        "required": ["op", "from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "move"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Entry to rename. A path the tree does not hold is a `404`."
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "New path. A move NEVER overwrites: a destination that is already taken is a `400 path_conflict`, so a rename cannot carry off a file the operation does not name. To replace, `delete` the destination earlier in the same batch."
           }
         }
       }

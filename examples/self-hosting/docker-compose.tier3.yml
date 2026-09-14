@@ -65,11 +65,11 @@ services:
   # proxying is unsupported, minio/minio#7857) and set S3_PUBLIC_ENDPOINT
   # on the appstrate service.
   minio:
-    # Pinned to a verified RELEASE tag so `docker compose pull` doesn't
+    # Pinned to a verified RELEASE tag and digest so `docker compose pull` doesn't
     # drag in a silently-incompatible server binary. Bump in lockstep
     # with `minio/mc` below when refreshing — the client's `mc ready`
     # probe is the healthcheck and the two must agree on wire format.
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     networks:
       - appstrate-data
     command: server /data
@@ -91,7 +91,7 @@ services:
     # Pinned alongside minio/minio so the client's `mc ready` probe and
     # bucket creation can't diverge from the server binary on an
     # unattended `docker compose pull`.
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     networks:
       - appstrate-data
     restart: "no"

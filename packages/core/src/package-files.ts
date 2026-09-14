@@ -35,6 +35,19 @@ import type { PackageType } from "./validation.ts";
  */
 export const PACKAGE_FILE_INLINE_MAX_BYTES = 1_048_576;
 
+/**
+ * The archive entry that carries a package's manifest.
+ *
+ * It is a name two ENFORCEMENT points refuse, not merely a label. The draft
+ * write route answers `reserved_entry` for it — the manifest is a projection of
+ * `packages.draft_manifest`, authored through the package `PUT` and validated by
+ * `validateManifestForRoute`, so a second unvalidated copy must not reach the
+ * tree — and the editor's path validator refuses it before the request leaves
+ * the browser. A disagreement between the two spellings is a path the client
+ * offers and the server rejects, or worse the reverse.
+ */
+export const PACKAGE_MANIFEST_FILE = "manifest.json";
+
 /** One package type's primary-content entry: which file, and whether it is mandatory. */
 export interface PackageContentEntry {
   /** Archive path of the entry, at the bundle root. */

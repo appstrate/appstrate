@@ -55,7 +55,7 @@ services:
 
   # ─── MinIO (S3-compatible) — Tier 3 ────────────────────────
   minio:
-    image: minio/minio:RELEASE.2025-03-12T18-04-18Z
+    image: quay.io/minio/minio:RELEASE.2025-03-12T18-04-18Z@sha256:46b3009bf7041eefbd90bd0d2b38c6ddc24d20a35d609551a1802c558c1c958f
     profiles: ["full"]
     command: server /data
     ports:
@@ -75,7 +75,7 @@ services:
       retries: 10
 
   minio-init:
-    image: minio/mc:RELEASE.2025-03-12T17-29-24Z
+    image: quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z@sha256:470f5546b596e16c7816b9c3fa7a78ce4076bb73c2c73f7faeec0c8043923123
     profiles: ["full"]
     restart: "no"
     depends_on:
