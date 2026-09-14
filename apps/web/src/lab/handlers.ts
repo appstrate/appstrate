@@ -367,12 +367,18 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     method: "GET",
     pattern: /^\/api\/integrations\/[^/]+\/[^/]+$/,
     handler: (url, scenario) => {
-      const technical = genericPackageId(url) === "@lab/auth-methods";
+      const id = genericPackageId(url);
+      const technical = id === "@lab/auth-methods";
       const detail = technical ? f.integrationAuthLabDetail : f.integrationDetail;
+      // Every other integration borrows Google Drive's auths, but keeps its
+      // own name, activation and source: the lab used to open Google Drive
+      // whatever row was clicked.
+      const row = f.integrations.data.find((integration) => integration.id === id);
       return {
         status: 200,
         body: {
           ...detail,
+          ...(row ? { id: row.id, active: row.active } : {}),
           manifest: technical
             ? {
                 ...detail.manifest,
@@ -380,7 +386,9 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
                 description:
                   "Scénarios techniques de démonstration, pas une intégration de production.",
               }
-            : detail.manifest,
+            : row
+              ? { ...detail.manifest, ...row.manifest }
+              : detail.manifest,
           auths: detail.auths.map((auth) => {
             const connections =
               auth.auth_key === f.INTEGRATION_AUTH_KEY
@@ -508,7 +516,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
               source: "local",
               agents: [],
             }
-          : f.integrationPackage,
+          : integrationPackageFor(typedPackageId(url)),
     }),
   },
   {
@@ -1380,4 +1388,20 @@ export function resolveHandler(
     };
   }
   return response;
+}
+
+/** The package row behind an integration, named after the integration asked for. */
+function integrationPackageFor(id: string) {
+  const row = f.integrations.data.find((integration) => integration.id === id);
+  if (!row || row.id === f.integrationPackage.id) return f.integrationPackage;
+  return {
+    ...f.integrationPackage,
+    id: row.id,
+    name: row.id.split("/")[1] ?? row.id,
+    orgId: row.source === "system" ? null : f.ORG_ID,
+    source: row.source,
+    description: row.manifest?.description ?? "",
+    version: row.manifest?.version ?? f.integrationPackage.version,
+    manifest: { ...f.integrationPackage.manifest, ...row.manifest },
+  };
 }

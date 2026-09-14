@@ -1523,7 +1523,7 @@ export const mcpServerVersionInfoById: Record<
     active_version: "1.0.1",
   },
   [qboMcpServerDetail.id]: {
-    latest_published_version: "0.9.0",
+    latest_published_version: "1.0.0",
     active_version: "1.0.0",
   },
 };
