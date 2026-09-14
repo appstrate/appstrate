@@ -39,7 +39,7 @@ import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
 import { AgentMapView } from "../../modules/agent-map/agent-map-view";
-import { AgentFilesView } from "./agent-files-view";
+import { PackageFilesView } from "../package-files/package-files-view";
 import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
 import { AgentDiagnosticsDialog, AgentDiagnosticsIssueBadge } from "./agent-diagnostics-dialog";
 import {
@@ -563,7 +563,8 @@ export function AgentOverviewTab({
 
   if (surface === "files") {
     return (
-      <AgentFilesView
+      <PackageFilesView
+        type="agent"
         packageId={packageId}
         initialVersion={version}
         currentManifest={currentManifest}

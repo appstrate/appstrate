@@ -890,7 +890,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
           ? f.integrationFiles
           : packageId === "@lab/auth-methods"
             ? f.integrationAuthLabFiles
-            : f.packageFileIndexes[packageId];
+            : (f.packageFileIndexes[packageId] ?? integrationManifestIndex(packageId));
       return files ? { status: 200, body: files } : { status: 404, body: {} };
     },
   },
@@ -1453,6 +1453,15 @@ function integrationPackageFor(id: string): typeof f.integrationPackage {
     changedIntegrationPackages.get(id) ??
     (integrationPackageBase(id) as typeof f.integrationPackage)
   );
+}
+
+/** Any other integration's bundle: its manifest, as the archive would hold it. */
+function integrationManifestIndex(id: string) {
+  if (!f.integrations.data.some((integration) => integration.id === id)) return undefined;
+  const inline = `${JSON.stringify(integrationPackageFor(id).manifest, null, 2)}\n`;
+  return {
+    entries: [{ path: "manifest.json", size: inline.length, media_kind: "text" as const, inline }],
+  };
 }
 
 function integrationPackageBase(id: string) {

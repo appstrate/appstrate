@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * The files of a package, for every type: what its AFPS bundle holds, then the
+ * packages it depends on.
+ *
+ * One explorer, because a skill, an integration and a local MCP server are
+ * AFPS bundles exactly as an agent is. The tree says so: `Bundle AFPS/` is the
+ * archive itself (manifest.json, the type's main file, references/, scripts/),
+ * `Dépendances/` what runs beside it (an agent's skills, the local server an
+ * integration launches), shown only when there is something to show.
+ */
 import { useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -33,18 +43,20 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
+import type { PackageType } from "@appstrate/core/validation";
 import { client, $api, ApiError } from "../../api/client";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { usePackageDetail, usePackageVersions, useVersionDetail } from "../../hooks/use-packages";
 import { type PackageFileEntry, type TreeNode } from "../../lib/package-file-tree";
+import { primaryDisplayFile } from "../../lib/package-files";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
 import { ErrorState, LoadingState } from "../page-states";
-import { FilePreview } from "../package-files/file-preview";
-import { ReadOnlyFileTree } from "../package-files/read-only-file-tree";
-import { usePackageFileDownload } from "../package-files/use-package-file";
-import { AgentDetailPaneHeader, AgentDetailSplit } from "./agent-detail-split";
+import { FilePreview } from "./file-preview";
+import { ReadOnlyFileTree } from "./read-only-file-tree";
+import { usePackageFileDownload } from "./use-package-file";
+import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 
 interface PackageReference {
   id: string;
@@ -83,19 +95,31 @@ function dependencyReferences(
   }));
 }
 
+/** The local MCP server an integration launches: its one runtime dependency. */
+function localServerReference(manifest: Record<string, unknown> | undefined): PackageReference[] {
+  const source = manifest?.source;
+  if (!isRecord(source) || source.kind !== "local" || !isRecord(source.server)) return [];
+  const { name, version } = source.server;
+  if (typeof name !== "string") return [];
+  return [{ id: name, version: typeof version === "string" ? version : null, type: "mcp-server" }];
+}
+
 function packageFolderName(packageId: string): string {
   return packageId.slice(packageId.lastIndexOf("/") + 1);
 }
 
-export function AgentFilesView({
+export function PackageFilesView({
+  type,
   packageId,
   initialVersion,
   currentManifest,
   currentContent,
   editHref,
 }: {
+  type: PackageType;
   packageId: string;
   initialVersion?: string | undefined;
+  /** The draft the page is editing, when it holds one; else the stored draft is read. */
   currentManifest?: Record<string, unknown> | undefined;
   currentContent?: string | null | undefined;
   /**
@@ -112,14 +136,18 @@ export function AgentFilesView({
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<SelectedItem | null>(null);
 
-  const { data: versions } = usePackageVersions("agent", packageId);
+  const { data: versions } = usePackageVersions(type, packageId);
+  const { data: storedDraft } = usePackageDetail(
+    type,
+    currentManifest || selectedVersion !== "draft" ? undefined : packageId,
+  );
   const { data: selectedVersionDetail } = useVersionDetail(
-    "agent",
+    type,
     packageId,
     selectedVersion === "draft" ? undefined : selectedVersion,
   );
   const { data: compareVersionDetail } = useVersionDetail(
-    "agent",
+    type,
     packageId,
     compareVersion ?? undefined,
   );
@@ -136,10 +164,14 @@ export function AgentFilesView({
     { enabled: scope.enabled },
   );
 
-  const manifest = selectedVersion === "draft" ? currentManifest : selectedVersionDetail?.manifest;
+  const draftManifest = currentManifest ?? storedDraft?.manifest;
+  const manifest = selectedVersion === "draft" ? draftManifest : selectedVersionDetail?.manifest;
   const skills = useMemo(() => dependencyReferences(manifest, "skills", "skill"), [manifest]);
   const mcpServers = useMemo(
-    () => dependencyReferences(manifest, "mcp_servers", "mcp-server"),
+    () => [
+      ...dependencyReferences(manifest, "mcp_servers", "mcp-server"),
+      ...localServerReference(manifest),
+    ],
     [manifest],
   );
   const skillIndexes = useQueries({
@@ -175,7 +207,7 @@ export function AgentFilesView({
           { params: { path: splitPackageRef(server.id), header: scope.header } },
         );
         if (detailError) throw detailError;
-        if (detail.source !== "local" || !isRecord(detail.manifest)) return null;
+        if (!isRecord(detail.manifest)) return null;
         const serverManifest = detail.manifest.server;
         if (!isRecord(serverManifest) || typeof serverManifest.entry_point !== "string")
           return null;
@@ -243,8 +275,9 @@ export function AgentFilesView({
     () => new Map(visibleFiles.map((file) => [file.treeEntry.path, file])),
     [visibleFiles],
   );
+  const mainFile = `Bundle AFPS/${primaryDisplayFile(type).name}`;
   const defaultFile =
-    visibleFiles.find((file) => file.treeEntry.path === "Bundle AFPS/prompt.md") ?? visibleFiles[0];
+    visibleFiles.find((file) => file.treeEntry.path === mainFile) ?? visibleFiles[0];
   const activeSelection =
     selected ?? (defaultFile ? { kind: "file" as const, file: defaultFile } : null);
   const selectedDependency =
@@ -277,7 +310,7 @@ export function AgentFilesView({
   };
 
   return (
-    <div className="bg-card overflow-hidden" data-agent-files>
+    <div className="bg-card overflow-hidden" data-package-files>
       <AgentDetailSplit
         railClassName="flex min-h-[610px] flex-col text-left"
         rail={
@@ -316,9 +349,8 @@ export function AgentFilesView({
                   entries={visibleFiles.map((file) => file.treeEntry)}
                   directories={[
                     "Bundle AFPS",
-                    "Dépendances",
-                    "Dépendances/Skills",
-                    "Dépendances/Serveurs MCP",
+                    ...(skills.length > 0 ? ["Dépendances", "Dépendances/Skills"] : []),
+                    ...(mcpServers.length > 0 ? ["Dépendances", "Dépendances/Serveurs MCP"] : []),
                   ]}
                   initialCollapsedPaths={["Dépendances/Skills", "Dépendances/Serveurs MCP"]}
                   selectedPath={
@@ -333,7 +365,7 @@ export function AgentFilesView({
                   onSelectNode={(node) => {
                     if (node.kind === "dir") selectPath(node.path, node);
                   }}
-                  label="Fichiers de l’agent"
+                  label={t("agents:files.treeLabel")}
                   controlsId="agent-file-preview"
                   className="h-full w-full p-1 text-left"
                 />
@@ -461,10 +493,13 @@ export function AgentFilesView({
       >
         {compareVersionDetail ? (
           <DiffTab
-            type="agent"
+            type={type}
             latestVersion={compareVersionDetail}
-            currentManifest={currentManifest}
-            currentContent={currentContent}
+            currentManifest={draftManifest}
+            currentContent={
+              currentContent ??
+              (storedDraft && "content" in storedDraft ? storedDraft.content : null)
+            }
           />
         ) : (
           <LoadingState />
@@ -491,22 +526,13 @@ function SelectionHeader({
   return (
     <AgentDetailPaneHeader className="flex-wrap gap-3 text-left max-xl:h-auto max-xl:py-2">
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-1 overflow-hidden font-mono text-xs">
-          {pathParts.map((part, index) => (
-            <span key={`${part}-${index}`} className="flex min-w-0 items-center gap-1">
-              {index > 0 && <span className="text-muted-foreground">/</span>}
-              <span
-                className={
-                  index === pathParts.length - 1
-                    ? "truncate font-semibold"
-                    : "text-muted-foreground shrink-0"
-                }
-              >
-                {part}
-              </span>
-            </span>
-          ))}
-        </div>
+        {/* One truncating line: the folders read as context, the file as the subject. */}
+        <p className="truncate font-mono text-xs" title={path}>
+          {pathParts.length > 1 && (
+            <span className="text-muted-foreground">{pathParts.slice(0, -1).join(" / ")} / </span>
+          )}
+          <span className="font-semibold">{pathParts[pathParts.length - 1]}</span>
+        </p>
       </div>
       <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5 max-lg:w-full">
         {dependency && (

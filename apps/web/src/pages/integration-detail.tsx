@@ -15,7 +15,7 @@ import {
   IntegrationFunctioning,
   IntegrationMap,
 } from "../components/package-detail/integration-structure";
-import { FileExplorer } from "../components/package-files/file-explorer";
+import { PackageFilesView } from "../components/package-files/package-files-view";
 import { CallbackUrlHint } from "../components/package-detail/callback-url-hint";
 
 /** Keep legacy fragments readable after moving files into settings. */
@@ -778,9 +778,9 @@ function IntegrationSettings({
       ) : active === "versions" ? (
         <PackageVersionsSection type="integration" packageId={packageId} isOwned={isOwned} />
       ) : active === "files" ? (
-        <FileExplorer
-          packageId={packageId}
+        <PackageFilesView
           type="integration"
+          packageId={packageId}
           editHref={
             definition
               ? (path) => {
@@ -807,7 +807,7 @@ function IntegrationSettings({
               packageId={packageId}
               renderPanel={(section, openPanel) => {
                 if (section === "files")
-                  return <FileExplorer packageId={packageId} type="integration" />;
+                  return <PackageFilesView type="integration" packageId={packageId} />;
                 if (section === "tools") return <IntegrationTools detail={detail} />;
                 if (section === "functioning") return <IntegrationGeneral detail={detail} />;
                 if (section.startsWith("connections:"))

@@ -20,7 +20,7 @@ import type { SkillDefinitionSection } from "../../pages/package-editor";
 import { primaryDisplayFile } from "../../lib/package-files";
 import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { LoadingState } from "../page-states";
-import { FileExplorer } from "../package-files/file-explorer";
+import { PackageFilesView } from "../package-files/package-files-view";
 import { RailLink } from "../settings/rail-link";
 import { PackageVersionsSection } from "./package-versions-section";
 
@@ -156,10 +156,10 @@ export function PackageSettingsView({
           )}
         </Suspense>
       ) : (
-        <FileExplorer
-          packageId={packageId}
+        <PackageFilesView
           type={type}
-          version={version}
+          packageId={packageId}
+          initialVersion={version}
           editHref={
             editable
               ? (path) =>
