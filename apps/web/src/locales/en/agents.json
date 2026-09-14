@@ -865,7 +865,6 @@
   "editor.editFile": "Edit {{name}}",
   "detail.settings.exploreGroup": "Explore",
   "editor.editManifestLink": "Edit the AFPS manifest",
-  "editor.tabContent": "Content",
   "editor.fileEmpty": "This file is empty.",
   "mcpServerEditor.description.general": "The server's name, description and identity. How it runs and its tools are set in the manifest.",
   "editor.resourceAdd": "Add",
@@ -906,5 +905,11 @@
   "editor.toolsNone": "No tool",
   "editor.toolsEdit": "Edit allowed tools",
   "editor.toolsTitle": "Allowed tools: {{name}}",
-  "detail.settings.versions": "Versions"
+  "detail.settings.versions": "Versions",
+  "editor.description.skillContent": "The SKILL.md file: its header (name, description) and the instructions the agent loads.",
+  "integrationEditor.description.content": "Optional documentation, handed to the agent with the integration's tools.",
+  "editor.bundleFiles": "Other bundle files",
+  "editor.bundleFilesHint": "Read-only here: each one opens in Explorer › Files.",
+  "editor.bundleFileColumn": "File",
+  "editor.bundleSizeColumn": "Size"
 }

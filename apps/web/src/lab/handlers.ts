@@ -967,14 +967,24 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     method: "PUT",
     pattern: /^\/api\/packages\/integrations\/[^/]+\/[^/]+$/,
     handler: (url, scenario, _headers, body) => {
-      const update = body as { manifest?: Record<string, unknown>; lock_version?: number } | null;
+      const update = body as {
+        manifest?: Record<string, unknown>;
+        content?: string;
+        lock_version?: number;
+      } | null;
       if (!update?.manifest || typeof update.lock_version !== "number") {
         return { status: 400, body: {} };
       }
       const packageId = typedPackageId(url);
+      const current = integrationPackageFor(packageId);
       const updated = {
-        ...integrationPackageFor(packageId),
+        ...current,
         manifest: update.manifest,
+        // As the API does: a manifest copy never overwrites a real document.
+        content:
+          update.content === undefined || update.content.trim().startsWith("{")
+            ? current.content
+            : update.content,
         lock_version: update.lock_version + 1,
       } as typeof f.integrationPackage;
       if (scenario !== "error") changedIntegrationPackages.set(packageId, updated);
@@ -1458,9 +1468,22 @@ function integrationPackageFor(id: string): typeof f.integrationPackage {
 /** Any other integration's bundle: its manifest, as the archive would hold it. */
 function integrationManifestIndex(id: string) {
   if (!f.integrations.data.some((integration) => integration.id === id)) return undefined;
-  const inline = `${JSON.stringify(integrationPackageFor(id).manifest, null, 2)}\n`;
+  const pkg = integrationPackageFor(id);
+  const inline = `${JSON.stringify(pkg.manifest, null, 2)}\n`;
   return {
-    entries: [{ path: "manifest.json", size: inline.length, media_kind: "text" as const, inline }],
+    entries: [
+      { path: "manifest.json", size: inline.length, media_kind: "text" as const, inline },
+      ...(pkg.content
+        ? [
+            {
+              path: "INTEGRATION.md",
+              size: pkg.content.length,
+              media_kind: "text" as const,
+              inline: pkg.content,
+            },
+          ]
+        : []),
+    ],
   };
 }
 
@@ -1475,6 +1498,8 @@ function integrationPackageBase(id: string) {
     source: row.source,
     description: row.manifest?.description ?? "",
     version: row.manifest?.version ?? f.integrationPackage.version,
+    // Its own document, not Google Drive's: none until one is written.
+    content: null,
     // A manifest carries its own id; the editor refuses to save without it.
     manifest: { ...f.integrationPackage.manifest, ...row.manifest, name: row.id },
   };

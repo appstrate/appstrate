@@ -115,6 +115,7 @@ export function PackageFilesView({
   currentManifest,
   currentContent,
   editHref,
+  initialPath,
 }: {
   type: PackageType;
   packageId: string;
@@ -128,6 +129,8 @@ export function PackageFilesView({
    * nothing edits, or a reader who may not.
    */
   editHref?: (path: string) => string | undefined;
+  /** A bundle file to open on, when a link sent the reader to it; else the main file. */
+  initialPath?: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const scope = useOrgScope();
@@ -275,7 +278,7 @@ export function PackageFilesView({
     () => new Map(visibleFiles.map((file) => [file.treeEntry.path, file])),
     [visibleFiles],
   );
-  const mainFile = `Bundle AFPS/${primaryDisplayFile(type).name}`;
+  const mainFile = `Bundle AFPS/${initialPath ?? primaryDisplayFile(type).name}`;
   const defaultFile =
     visibleFiles.find((file) => file.treeEntry.path === mainFile) ?? visibleFiles[0];
   const activeSelection =

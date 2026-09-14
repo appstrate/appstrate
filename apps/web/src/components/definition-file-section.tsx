@@ -13,12 +13,30 @@
  *
  * The modal has an address (`?edit=1`), so the explorer can send a reader
  * straight to editing a file.
+ *
+ * A bundle holds more than its main file (a skill's references/, scripts/).
+ * Those are not edited here and not previewed twice: the section lists them,
+ * flat, each one a way into Explorer › Fichiers, where they are read.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { Braces, Pencil } from "lucide-react";
+import { formatBytes } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@appstrate/ui/components/table";
+import { $api } from "../api/client";
 import { useModalParam } from "../hooks/use-modal-param";
+import { useOrgScope } from "../hooks/use-org-scope";
+import { splitPackageRef } from "../lib/package-paths";
+import { SettingsHeading } from "./settings/settings-heading";
 import { JsonEditor } from "./json-editor";
 import { Modal } from "./modal";
 import { Markdown } from "./markdown";
@@ -29,12 +47,15 @@ export function DefinitionFileSection({
   hint,
   value,
   onApply,
+  bundle,
 }: {
   /** The file's name in the package, shown on the reader and the modal. */
   fileName: string;
   hint?: string;
   value: string;
   onApply: (value: string) => void;
+  /** The package whose other files are listed, and where each one is read. */
+  bundle?: { packageId: string; filesHref: (path: string) => string };
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const editing = useModalParam("edit");
@@ -69,6 +90,7 @@ export function DefinitionFileSection({
         </div>
       </div>
       {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
+      {bundle && <BundleFileList {...bundle} exclude={fileName} />}
 
       {editing.value !== null && (
         <Modal
@@ -87,6 +109,64 @@ export function DefinitionFileSection({
         </Modal>
       )}
     </div>
+  );
+}
+
+/** The bundle's other files, flat and read-only: each opens in Explorer › Fichiers. */
+function BundleFileList({
+  packageId,
+  filesHref,
+  exclude,
+}: {
+  packageId: string;
+  filesHref: (path: string) => string;
+  exclude: string;
+}) {
+  const { t } = useTranslation("agents");
+  const scope = useOrgScope();
+  const { data } = $api.useQuery(
+    "get",
+    "/api/packages/{scope}/{name}/files",
+    { params: { path: splitPackageRef(packageId), header: scope.header } },
+    { enabled: scope.enabled },
+  );
+  // The manifest is what the forms edit; the main file is the reader above.
+  const files = (data?.entries ?? [])
+    .filter((entry) => entry.path !== exclude && entry.path !== "manifest.json")
+    .sort((a, b) => a.path.localeCompare(b.path));
+  if (files.length === 0) return null;
+  return (
+    <section className="pt-5">
+      <SettingsHeading
+        level="group"
+        title={t("editor.bundleFiles")}
+        description={t("editor.bundleFilesHint")}
+      />
+      <div className="overflow-hidden rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("editor.bundleFileColumn")}</TableHead>
+              <TableHead className="w-24 text-right">{t("editor.bundleSizeColumn")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {files.map((entry) => (
+              <TableRow key={entry.path}>
+                <TableCell className="font-mono text-xs">
+                  <Link to={filesHref(entry.path)} className="hover:underline">
+                    {entry.path}
+                  </Link>
+                </TableCell>
+                <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                  {formatBytes(entry.size)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
   );
 }
 

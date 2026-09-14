@@ -58,7 +58,9 @@ export function PackageSettingsView({
   const navigate = useNavigate();
   const editable = canEditDefinition && Boolean(detail) && version === undefined;
 
-  const requested = new URLSearchParams(location.search).get("packageSettings");
+  const params = new URLSearchParams(location.search);
+  const requested = params.get("packageSettings");
+  const requestedFile = params.get("file") ?? undefined;
   const sections: SkillDefinitionSection[] =
     type === "skill" ? ["general", "content"] : ["general"];
   const active: PackageSettingsSection =
@@ -68,14 +70,20 @@ export function PackageSettingsView({
         ? (requested as SkillDefinitionSection)
         : "files";
 
-  const sectionHref = (section: PackageSettingsSection, modal?: "edit" | "editManifest") => {
+  const sectionHref = (
+    section: PackageSettingsSection,
+    modal?: "edit" | "editManifest",
+    file?: string,
+  ) => {
     const search = new URLSearchParams(location.search);
     if (section === "files") search.delete("packageSettings");
     else search.set("packageSettings", section);
-    // A modal belongs to the section it was opened in.
+    // A modal, or the file a link opened, belongs to the section it was opened in.
     search.delete("edit");
     search.delete("editManifest");
+    search.delete("file");
     if (modal) search.set(modal, "1");
+    if (file) search.set("file", file);
     const query = search.toString();
     return `${location.pathname}${query ? `?${query}` : ""}#settings`;
   };
@@ -107,7 +115,13 @@ export function PackageSettingsView({
             items: [
               { id: "general" as const, icon: IdCard, label: t("editor.tabIdentity") },
               ...(type === "skill"
-                ? [{ id: "content" as const, icon: FileText, label: t("editor.tabContent") }]
+                ? [
+                    {
+                      id: "content" as const,
+                      icon: FileText,
+                      label: primaryDisplayFile("skill").name,
+                    },
+                  ]
                 : []),
             ],
           },
@@ -150,6 +164,7 @@ export function PackageSettingsView({
               detail={detail}
               section={active}
               onSection={(next) => void navigate(sectionHref(next))}
+              filesHref={(path) => sectionHref("files", undefined, path)}
             />
           ) : (
             <McpServerDefinitionEditor detail={detail} />
@@ -157,9 +172,11 @@ export function PackageSettingsView({
         </Suspense>
       ) : (
         <PackageFilesView
+          key={requestedFile}
           type={type}
           packageId={packageId}
           initialVersion={version}
+          initialPath={requestedFile}
           editHref={
             editable
               ? (path) =>

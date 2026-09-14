@@ -12,6 +12,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
+import { integrationDocument, integrationWireContent } from "../lib/integration-document";
 import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
 import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
@@ -517,6 +518,7 @@ function PackageEditorInner({
   presentation = "page",
   tab,
   onTabRequest,
+  filesHref,
 }: {
   type: "skill";
   initialState: PackageEditorState;
@@ -526,6 +528,8 @@ function PackageEditorInner({
   presentation?: "page" | "embedded";
   tab?: GenericEditorTab;
   onTabRequest?: (tab: GenericEditorTab) => void;
+  /** Where the bundle's other files are read: Explorer › Fichiers, on that file. */
+  filesHref?: (path: string) => string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
@@ -596,10 +600,8 @@ function PackageEditorInner({
       id: "general",
       label: presentation === "page" ? t("editor.tabGeneral") : t("editor.tabIdentity"),
     },
-    {
-      id: "content",
-      label: presentation === "page" ? primaryDisplayFile(type).name : t("editor.tabContent"),
-    },
+    // Named after its file, as the Agent Skills standard names it.
+    { id: "content", label: primaryDisplayFile(type).name },
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -623,6 +625,11 @@ function PackageEditorInner({
       }
       hideSubmitBar={presentation === "page" && activeTab === "json"}
       presentation={presentation}
+      activeDescription={
+        presentation === "embedded" && activeTab === "content"
+          ? t("editor.description.skillContent")
+          : undefined
+      }
       isDirty={isDirty}
       onDiscardChanges={discardChanges}
     >
@@ -641,6 +648,7 @@ function PackageEditorInner({
             fileName={primaryDisplayFile(type).name}
             value={state.content}
             onApply={(content) => setState((s) => ({ ...s, content }))}
+            bundle={packageId && filesHref ? { packageId, filesHref } : undefined}
           />
         ) : (
           <ContentEditor
@@ -687,7 +695,7 @@ function IntegrationEditorInner({
   tab,
   onTabRequest,
 }: {
-  initialState: EditorStateBase;
+  initialState: PackageEditorState;
   packageId: string | undefined;
   isEdit: boolean;
   /** A page to create; embedded in the integration's Définition to edit. */
@@ -716,16 +724,17 @@ function IntegrationEditorInner({
     saveDraft,
     handleSubmit,
     isPending,
-  } = useEditorState<EditorStateBase>({
+  } = useEditorState<PackageEditorState>({
     initialState,
     packageType: "integration",
     packageId,
     isEdit,
-    // The manifest is the source of truth; `manifest.json` storage content
-    // mirrors it for export/bundle portability (runtime reads the DB manifest).
+    // `content` is the optional INTEGRATION.md; without one it is the manifest
+    // text, which the API refreshes its fallback from. Either way the API
+    // rebuilds `manifest.json` from the manifest itself.
     toWireBody: (s) => ({
       manifest: s.manifest,
-      content: JSON.stringify(s.manifest, null, 2),
+      content: integrationWireContent(s.manifest, s.content),
     }),
     validate: (s) => {
       const { id } = getManifestName(s.manifest);
@@ -748,6 +757,7 @@ function IntegrationEditorInner({
     source: t("integrationEditor.description.source"),
     auths: t("integrationEditor.description.auths"),
     tools: t("integrationEditor.description.tools"),
+    content: t("integrationEditor.description.content"),
     json: t("editor.description.json"),
   };
 
@@ -783,6 +793,7 @@ function IntegrationEditorInner({
           ? t("integrationEditor.tabTools")
           : t("integrationEditor.tabToolPolicies"),
     },
+    { id: "content", label: INTEGRATION_DOCUMENT },
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -849,11 +860,26 @@ function IntegrationEditorInner({
         />
       )}
 
+      {activeTab === "content" &&
+        (presentation === "embedded" ? (
+          <DefinitionFileSection
+            fileName={INTEGRATION_DOCUMENT}
+            value={state.content}
+            onApply={(content) => setState((s) => ({ ...s, content }))}
+          />
+        ) : (
+          <ContentEditor
+            value={state.content}
+            onChange={(content) => setState((s) => ({ ...s, content }))}
+            language="markdown"
+          />
+        ))}
+
       {presentation === "embedded" && (
         <ManifestEditEntry
           value={state.manifest}
           schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
-          showLink
+          showLink={activeTab !== "content"}
           onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
         />
       )}
@@ -874,7 +900,11 @@ function IntegrationEditorInner({
   );
 }
 
-export type IntegrationDefinitionSection = "general" | "source" | "auths" | "tools" | "json";
+export type IntegrationDefinitionSection =
+  "general" | "source" | "auths" | "tools" | "content" | "json";
+
+/** An integration's optional companion document, named as the bundle names it. */
+const INTEGRATION_DOCUMENT = "INTEGRATION.md";
 
 /** An integration's definition, edited inside its settings — see `AgentDefinitionEditor`. */
 export function IntegrationDefinitionEditor({
@@ -889,7 +919,11 @@ export function IntegrationDefinitionEditor({
   return (
     <IntegrationEditorInner
       key={`${detail.id}:${detail.lock_version}`}
-      initialState={{ manifest: detail.manifest ?? {}, lock_version: detail.lock_version }}
+      initialState={{
+        manifest: detail.manifest ?? {},
+        content: integrationDocument(detail.content),
+        lock_version: detail.lock_version,
+      }}
       packageId={detail.id}
       isEdit
       presentation="embedded"
@@ -906,10 +940,12 @@ export function SkillDefinitionEditor({
   detail,
   section,
   onSection,
+  filesHref,
 }: {
   detail: OrgPackageItemDetail;
   section: SkillDefinitionSection;
   onSection: (section: SkillDefinitionSection) => void;
+  filesHref: (path: string) => string;
 }) {
   return (
     <PackageEditorInner
@@ -925,6 +961,7 @@ export function SkillDefinitionEditor({
       presentation="embedded"
       tab={section}
       onTabRequest={(next) => onSection(next as SkillDefinitionSection)}
+      filesHref={filesHref}
     />
   );
 }
@@ -1083,13 +1120,14 @@ export function PackageEditorPage({ type }: { type: Exclude<PackageType, "mcp-se
   // authors `remote`/`none` sources.
   if (type === "integration") {
     const intDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
-    const initialState: EditorStateBase =
+    const initialState: PackageEditorState =
       isEdit && intDetail
         ? {
             manifest: intDetail.manifest ?? {},
+            content: integrationDocument(intDetail.content),
             lock_version: intDetail.lock_version,
           }
-        : { manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email) };
+        : { manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email), content: "" };
 
     return (
       <IntegrationEditorInner

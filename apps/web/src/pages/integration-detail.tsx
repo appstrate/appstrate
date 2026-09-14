@@ -43,6 +43,7 @@ import {
   Wrench,
   Workflow,
   History,
+  FileText,
   IdCard,
   Server,
 } from "lucide-react";
@@ -131,6 +132,7 @@ const DEFINITION_RAIL: Record<string, IntegrationDefinitionSection> = {
   source: "source",
   "auth-methods": "auths",
   "tool-policies": "tools",
+  documentation: "content",
 };
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 
@@ -716,6 +718,8 @@ function IntegrationSettings({
               label: t("integrationEditor.tabToolPolicies", { ns: "agents" }),
               icon: ShieldCheck,
             },
+            // Named after its file, like a skill's SKILL.md.
+            { id: "documentation", label: "INTEGRATION.md", icon: FileText },
           ]
         : [{ id: "functioning", label: t("integration.structure.functioning"), icon: Plug }],
     },
@@ -784,10 +788,16 @@ function IntegrationSettings({
           editHref={
             definition
               ? (path) => {
-                  if (path !== "manifest.json") return undefined;
+                  const section =
+                    path === "manifest.json"
+                      ? { rail: "identity", modal: "editManifest" }
+                      : path === "INTEGRATION.md"
+                        ? { rail: "documentation", modal: "edit" }
+                        : null;
+                  if (!section) return undefined;
                   const search = new URLSearchParams(location.search);
-                  search.set("integrationSettings", "identity");
-                  search.set("editManifest", "1");
+                  search.set("integrationSettings", section.rail);
+                  search.set(section.modal, "1");
                   return `?${search.toString()}#configuration`;
                 }
               : undefined
