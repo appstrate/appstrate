@@ -36,7 +36,6 @@
  */
 
 import { and, eq, type SQL } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import type { StorageDeletionJobInput } from "./storage-deletion.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
@@ -46,9 +45,7 @@ import {
   packageItemOwnerNamespace,
   storageFolderForType,
 } from "./package-items/config.ts";
-
-/** A Drizzle executor — either the root `db` or an open transaction handle. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /**
  * Every package object matching a predicate over `packages`, as outbox jobs.

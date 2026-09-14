@@ -8,10 +8,7 @@ import { eq, and, lt, lte, gt, desc } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { getAppConfig } from "../lib/app-config.ts";
 import { sendEmail } from "./email.ts";
-import { isUniqueViolation, scopedWhere } from "../lib/db-helpers.ts";
-
-/** Accepts either the base client or an open transaction handle. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+import { isUniqueViolation, scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 
 function generateToken(): string {
   return crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");

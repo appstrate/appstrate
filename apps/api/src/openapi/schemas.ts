@@ -803,6 +803,86 @@ export const schemas = {
       },
     },
   },
+  // The three edits a draft-tree batch is made of. Named rather than inline so
+  // `PackageFileWriteOperation`'s discriminator can actually select one — a
+  // discriminator over inline branches selects nothing.
+  PackageFileWriteEntry: {
+    type: "object",
+    required: ["op", "path"],
+    additionalProperties: false,
+    properties: {
+      op: { type: "string", const: "write" },
+      path: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        description:
+          "Archive-relative path to write. Creates the entry or replaces it; parent directories are implicit (a path is just a name containing `/`).",
+      },
+      text: {
+        type: "string",
+        description:
+          "File content, stored as its UTF-8 encoding. Mutually exclusive with `bytes_base64`; exactly one of the two is required.",
+      },
+      bytes_base64: {
+        type: "string",
+        description:
+          "File content as standard base64 (URL-safe base64 is refused). Mutually exclusive with `text`; exactly one of the two is required.",
+      },
+    },
+  },
+  PackageFileDeleteEntry: {
+    type: "object",
+    required: ["op", "path"],
+    additionalProperties: false,
+    properties: {
+      op: { type: "string", const: "delete" },
+      path: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        description: "Entry to remove. A path the tree does not hold is a `404`.",
+      },
+    },
+  },
+  PackageFileMoveEntry: {
+    type: "object",
+    required: ["op", "from", "to"],
+    additionalProperties: false,
+    properties: {
+      op: { type: "string", const: "move" },
+      from: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        description: "Entry to rename. A path the tree does not hold is a `404`.",
+      },
+      to: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        description:
+          "New path. A move NEVER overwrites: a destination that is already taken is a `400 path_conflict`, so a rename cannot carry off a file the operation does not name. To replace, `delete` the destination earlier in the same batch.",
+      },
+    },
+  },
+  // One edit to a draft file tree. The batch applies these IN ORDER, so a
+  // `move` followed by a `write` on the new path is one request.
+  PackageFileWriteOperation: {
+    oneOf: [
+      { $ref: "#/components/schemas/PackageFileWriteEntry" },
+      { $ref: "#/components/schemas/PackageFileDeleteEntry" },
+      { $ref: "#/components/schemas/PackageFileMoveEntry" },
+    ],
+    discriminator: {
+      propertyName: "op",
+      mapping: {
+        write: "#/components/schemas/PackageFileWriteEntry",
+        delete: "#/components/schemas/PackageFileDeleteEntry",
+        move: "#/components/schemas/PackageFileMoveEntry",
+      },
+    },
+  },
   Run: {
     type: "object",
     // Every field a run response carries unconditionally. The list/detail/

@@ -5626,6 +5626,15 @@ export interface components {
              */
             deleting_at: string | null;
         };
+        PackageFileDeleteEntry: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "delete";
+            /** @description Entry to remove. A path the tree does not hold is a `404`. */
+            path: string;
+        };
         PackageFileEntry: {
             /** @description Path inside the artifact, relative and normalized (e.g. `skills/a/SKILL.md`) */
             path: string;
@@ -5643,6 +5652,31 @@ export interface components {
             /** @description Files in the artifact, sorted by `path`. */
             entries: components["schemas"]["PackageFileEntry"][];
         };
+        PackageFileMoveEntry: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "move";
+            /** @description Entry to rename. A path the tree does not hold is a `404`. */
+            from: string;
+            /** @description New path. A move NEVER overwrites: a destination that is already taken is a `400 path_conflict`, so a rename cannot carry off a file the operation does not name. To replace, `delete` the destination earlier in the same batch. */
+            to: string;
+        };
+        PackageFileWriteEntry: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "write";
+            /** @description Archive-relative path to write. Creates the entry or replaces it; parent directories are implicit (a path is just a name containing `/`). */
+            path: string;
+            /** @description File content, stored as its UTF-8 encoding. Mutually exclusive with `bytes_base64`; exactly one of the two is required. */
+            text?: string;
+            /** @description File content as standard base64 (URL-safe base64 is refused). Mutually exclusive with `text`; exactly one of the two is required. */
+            bytes_base64?: string;
+        };
+        PackageFileWriteOperation: components["schemas"]["PackageFileWriteEntry"] | components["schemas"]["PackageFileDeleteEntry"] | components["schemas"]["PackageFileMoveEntry"];
         PackageVersionDetail: {
             /** @description Version row id */
             id: number;
@@ -15772,6 +15806,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
                     manifest: components["schemas"]["AgentManifest"];
                     /** @description Agent prompt (markdown). Must not be blank. */
                     content: string;
@@ -15793,6 +15829,26 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description A file operation refers to a missing file. */
+            404: components["responses"]["NotFound"];
+            /** @description A package with this name already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description File or resulting package exceeds the editing limits. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getAgentPackage: {
@@ -15855,6 +15911,8 @@ export interface operations {
                 "application/json": {
                     manifest?: components["schemas"]["AgentManifest"];
                     content?: string;
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -15878,6 +15936,15 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /** @description Concurrent modification or agent in use. RFC 9457 problem+json with `code` one of `conflict`, `agent_in_use`, or `no_changes`. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Written file or resulting tree exceeds its byte/count limit */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16448,6 +16515,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
                     /** @description Integration package manifest (AFPS). The package ID is derived from `manifest.name`. */
                     manifest: {
                         [key: string]: unknown;
@@ -16472,6 +16541,26 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description A file operation refers to a missing file. */
+            404: components["responses"]["NotFound"];
+            /** @description A package with this name already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description File or resulting package exceeds the editing limits. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getIntegrationPackage: {
@@ -16534,6 +16623,8 @@ export interface operations {
                         [key: string]: unknown;
                     };
                     content?: string;
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -16555,6 +16646,24 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Draft was changed concurrently; reload before retrying */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Written file or resulting tree exceeds its byte/count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     deleteIntegrationPackage: {
@@ -16980,6 +17089,8 @@ export interface operations {
                         [key: string]: unknown;
                     };
                     content?: string;
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -17001,6 +17112,24 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Draft was changed concurrently; reload before retrying */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Written file or resulting tree exceeds its byte/count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     deleteMcpServerPackage: {
@@ -17360,6 +17489,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
                     /** @description Skill package manifest (AFPS). The package ID is derived from `manifest.name`. */
                     manifest: {
                         [key: string]: unknown;
@@ -17385,6 +17516,26 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description A file operation refers to a missing file. */
+            404: components["responses"]["NotFound"];
+            /** @description A package with this name already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description File or resulting package exceeds the editing limits. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getSkill: {
@@ -17447,6 +17598,8 @@ export interface operations {
                         [key: string]: unknown;
                     };
                     content?: string;
+                    /** @description Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations. */
+                    operations?: components["schemas"]["PackageFileWriteOperation"][];
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -17469,6 +17622,24 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description Draft was changed concurrently; reload before retrying */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Written file or resulting tree exceeds its byte/count limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     deleteSkill: {

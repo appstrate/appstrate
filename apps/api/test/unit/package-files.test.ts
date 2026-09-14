@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure-logic half of the package file explorer: the per-type draft overlay,
- * media-kind classification, the inline budgets, index determinism, and ETag
- * stability. No DB, no storage — `readPackageSnapshot` is covered by the
+ * Pure-logic half of the package draft tree: the per-type draft overlay,
+ * media-kind classification, the inline budgets, index determinism, ETag
+ * stability, and the operation algebra a write applies. No DB, no storage —
+ * `readPackageSnapshot` and `mutatePackageDraftFiles` are covered by the
  * integration suite.
  */
 
+import {
+  PackageFileWriteError,
+  type PackageFileWriteErrorCode,
+} from "@appstrate/core/package-file-operations";
 import { describe, it, expect } from "bun:test";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import { ARCHIVE_MAX_FILES, PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES } from "@appstrate/core/zip";
 import {
   applyDraftOverlay,
+  applyFileOperations,
+  type PackageFileOperation,
   buildFileIndex,
   draftSnapshotId,
   indexEtag,
@@ -575,5 +583,451 @@ describe("indexEtag / fileEtag", () => {
 
   it("is stable for the same (snapshot, path) pair", () => {
     expect(fileEtag("pv-x", "a.md")).toBe(fileEtag("pv-x", "a.md"));
+  });
+});
+
+// ─────────────────────────────────────────────
+// applyFileOperations
+// ─────────────────────────────────────────────
+
+/**
+ * The operation algebra a draft-tree write applies. Every rejection code has a
+ * case here, because each one is a 4xx a client branches on, and the batch is
+ * atomic: a refused operation must leave the caller's map exactly as it found
+ * it, whatever the earlier operations of the same batch already did.
+ */
+
+function tree(files: Record<string, string | Uint8Array>): Record<string, Uint8Array> {
+  const out: Record<string, Uint8Array> = {};
+  for (const [path, value] of Object.entries(files)) {
+    out[path] = typeof value === "string" ? encoder.encode(value) : value;
+  }
+  return out;
+}
+
+function texts(files: Record<string, Uint8Array>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(files).map(([path, bytes]) => [path, decoder.decode(bytes)]),
+  );
+}
+
+function apply(
+  files: Record<string, string | Uint8Array>,
+  ops: PackageFileOperation[],
+  type: PackageType = "skill",
+): Record<string, Uint8Array> {
+  return applyFileOperations(tree(files), ops, { type });
+}
+
+/** Assert the batch is refused with exactly this code and this path. */
+function expectRefusal(
+  run: () => unknown,
+  code: PackageFileWriteErrorCode,
+  path: string | null,
+): void {
+  let thrown: unknown;
+  try {
+    run();
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(PackageFileWriteError);
+  const error = thrown as PackageFileWriteError;
+  expect({ code: error.code, path: error.path }).toEqual({ code, path });
+}
+
+const SKILL = "---\nname: s\ndescription: d\n---\n";
+
+describe("applyFileOperations — the operations", () => {
+  it("writes a new file and overwrites an existing one", () => {
+    const result = apply({ "SKILL.md": SKILL, "docs/old.md": "old" }, [
+      { op: "write", path: "scripts/run.py", bytes: encoder.encode("print(1)") },
+      { op: "write", path: "docs/old.md", bytes: encoder.encode("new") },
+    ]);
+
+    expect(texts(result)).toEqual({
+      "SKILL.md": SKILL,
+      "docs/old.md": "new",
+      "scripts/run.py": "print(1)",
+    });
+  });
+
+  it("deletes and moves", () => {
+    const result = apply({ "SKILL.md": SKILL, "a.md": "A", "b.md": "B" }, [
+      { op: "delete", path: "a.md" },
+      { op: "move", from: "b.md", to: "docs/b.md" },
+    ]);
+
+    expect(texts(result)).toEqual({ "SKILL.md": SKILL, "docs/b.md": "B" });
+  });
+
+  it("carries the exact bytes through — a BOM is not stripped", () => {
+    const bom = encoder.encode("﻿# titre");
+    const result = apply({ "SKILL.md": SKILL }, [{ op: "write", path: "doc.md", bytes: bom }]);
+
+    expect(Array.from(result["doc.md"]!)).toEqual(Array.from(bom));
+  });
+
+  it("never mutates the map it was given", () => {
+    const before = tree({ "SKILL.md": SKILL, "a.md": "A" });
+    const snapshot = texts(before);
+
+    applyFileOperations(
+      before,
+      [
+        { op: "write", path: "b.md", bytes: encoder.encode("B") },
+        { op: "delete", path: "a.md" },
+        { op: "move", from: "SKILL.md", to: "SKILL.md" },
+      ],
+      { type: "agent" },
+    );
+
+    expect(texts(before)).toEqual(snapshot);
+  });
+
+  it("applies operations IN ORDER — move, then write the freed path", () => {
+    const result = apply({ "SKILL.md": SKILL, "notes.md": "kept" }, [
+      { op: "move", from: "notes.md", to: "archive/notes.md" },
+      { op: "write", path: "notes.md", bytes: encoder.encode("fresh") },
+    ]);
+
+    expect(texts(result)).toEqual({
+      "SKILL.md": SKILL,
+      "archive/notes.md": "kept",
+      "notes.md": "fresh",
+    });
+  });
+
+  it("deletes a file the same batch created", () => {
+    const result = apply({ "SKILL.md": SKILL }, [
+      { op: "write", path: "tmp.md", bytes: encoder.encode("scratch") },
+      { op: "delete", path: "tmp.md" },
+    ]);
+
+    expect(texts(result)).toEqual({ "SKILL.md": SKILL });
+  });
+
+  it("moves a file onto itself without losing it", () => {
+    const result = apply({ "SKILL.md": SKILL, "a.md": "A" }, [
+      { op: "move", from: "a.md", to: "a.md" },
+    ]);
+
+    expect(texts(result)).toEqual({ "SKILL.md": SKILL, "a.md": "A" });
+  });
+
+  it("replaces a file through delete-then-move, the caller having said so", () => {
+    const result = apply({ "SKILL.md": SKILL, "a.md": "A", "b.md": "B" }, [
+      { op: "delete", path: "b.md" },
+      { op: "move", from: "a.md", to: "b.md" },
+    ]);
+
+    expect(texts(result)).toEqual({ "SKILL.md": SKILL, "b.md": "A" });
+  });
+});
+
+describe("applyFileOperations — the refusals", () => {
+  it("invalid_path: every shape isSafeArchivePath refuses", () => {
+    for (const path of [
+      "../escape.md",
+      "/abs.md",
+      "dir//x.md",
+      "dir/",
+      "",
+      "a\\b.md",
+      "n\0.md",
+      // A `.` segment and a drive prefix: the CLI's `skills sync` materializer
+      // refuses both when it writes the file, so a `200` here would publish a
+      // skill whose sync aborts with "the artifact is malformed".
+      "./notes.md",
+      "a/./b.md",
+      "C:/x.md",
+    ]) {
+      expectRefusal(
+        () => apply({ "SKILL.md": SKILL }, [{ op: "write", path, bytes: encoder.encode("x") }]),
+        "invalid_path",
+        path,
+      );
+    }
+  });
+
+  it("invalid_path: on a move's source AND on its destination", () => {
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "a.md": "A" }, [{ op: "move", from: "a.md", to: "../a.md" }]),
+      "invalid_path",
+      "../a.md",
+    );
+    expectRefusal(
+      () => apply({ "SKILL.md": SKILL }, [{ op: "move", from: "../a.md", to: "a.md" }]),
+      "invalid_path",
+      "../a.md",
+    );
+  });
+
+  it("reserved_entry: manifest.json cannot be written, deleted or moved", () => {
+    const files = { "SKILL.md": SKILL, "manifest.json": "{}", "a.md": "A" };
+    const batches: PackageFileOperation[][] = [
+      [{ op: "write", path: "manifest.json", bytes: encoder.encode("{}") }],
+      [{ op: "delete", path: "manifest.json" }],
+      [{ op: "move", from: "manifest.json", to: "m.json" }],
+      [{ op: "move", from: "a.md", to: "manifest.json" }],
+    ];
+    for (const ops of batches)
+      expectRefusal(() => apply(files, ops), "reserved_entry", "manifest.json");
+  });
+
+  it("content_entry_immovable: the type's content entry cannot be deleted or renamed", () => {
+    expectRefusal(
+      () => apply({ "SKILL.md": SKILL }, [{ op: "delete", path: "SKILL.md" }]),
+      "content_entry_immovable",
+      "SKILL.md",
+    );
+    expectRefusal(
+      () => apply({ "SKILL.md": SKILL }, [{ op: "move", from: "SKILL.md", to: "s.md" }]),
+      "content_entry_immovable",
+      "SKILL.md",
+    );
+    // Per type: an agent's entry is prompt.md, and SKILL.md is an ordinary file there.
+    expectRefusal(
+      () => apply({ "prompt.md": "p" }, [{ op: "delete", path: "prompt.md" }], "agent"),
+      "content_entry_immovable",
+      "prompt.md",
+    );
+    expect(
+      texts(
+        apply(
+          { "prompt.md": "p", "SKILL.md": SKILL },
+          [{ op: "delete", path: "SKILL.md" }],
+          "agent",
+        ),
+      ),
+    ).toEqual({ "prompt.md": "p" });
+  });
+
+  it("not_found: deleting or moving something that is not there", () => {
+    expectRefusal(
+      () => apply({ "SKILL.md": SKILL }, [{ op: "delete", path: "ghost.md" }]),
+      "not_found",
+      "ghost.md",
+    );
+    expectRefusal(
+      () => apply({ "SKILL.md": SKILL }, [{ op: "move", from: "ghost.md", to: "a.md" }]),
+      "not_found",
+      "ghost.md",
+    );
+    // Order matters here too: the delete above ran, so the move source is gone.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "a.md": "A" }, [
+          { op: "delete", path: "a.md" },
+          { op: "move", from: "a.md", to: "b.md" },
+        ]),
+      "not_found",
+      "a.md",
+    );
+  });
+
+  it("path_conflict: a move never overwrites — and leaves the caller's map alone", () => {
+    const before = tree({ "SKILL.md": SKILL, "a.md": "A", "b.md": "B" });
+    const snapshot = texts(before);
+
+    expectRefusal(
+      () =>
+        applyFileOperations(before, [{ op: "move", from: "a.md", to: "b.md" }], { type: "skill" }),
+      "path_conflict",
+      "b.md",
+    );
+    expect(texts(before)).toEqual(snapshot);
+
+    // The destination of an earlier operation counts as taken too.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "a.md": "A", "c.md": "C" }, [
+          { op: "move", from: "c.md", to: "b.md" },
+          { op: "move", from: "a.md", to: "b.md" },
+        ]),
+      "path_conflict",
+      "b.md",
+    );
+
+    // The content entry always exists and cannot be deleted, so it is not a
+    // reachable destination: it is authored with a write.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": "stale", "next.md": SKILL }, [
+          { op: "move", from: "next.md", to: "SKILL.md" },
+        ]),
+      "path_conflict",
+      "SKILL.md",
+    );
+  });
+
+  it("path_conflict: a file cannot shadow a directory, nor a directory a file", () => {
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, scripts: "I am a file" }, [
+          { op: "write", path: "scripts/run.py", bytes: encoder.encode("x") },
+        ]),
+      "path_conflict",
+      "scripts/run.py",
+    );
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "scripts/run.py": "x" }, [
+          { op: "write", path: "scripts", bytes: encoder.encode("I am a file") },
+        ]),
+      "path_conflict",
+      "scripts",
+    );
+    // A move lands on the same rule, at the destination.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "scripts/run.py": "x", "a.md": "A" }, [
+          { op: "move", from: "a.md", to: "scripts" },
+        ]),
+      "path_conflict",
+      "scripts",
+    );
+  });
+
+  it("path_conflict is scoped to what the batch creates — a stored ZIP may already shadow", () => {
+    // Negative control for the rule above: a package whose archive holds both
+    // `a` and `a/b` stays editable everywhere else.
+    const result = apply({ "SKILL.md": SKILL, a: "file", "a/b": "under" }, [
+      { op: "write", path: "c.md", bytes: encoder.encode("C") },
+    ]);
+
+    expect(Object.keys(result).sort()).toEqual(["SKILL.md", "a", "a/b", "c.md"]);
+
+    // And the file that shadows is itself still SAVEABLE: overwriting a path the
+    // tree already holds adds no name, so it cannot introduce the conflict. The
+    // author of such a package could otherwise never save `a` again.
+    const overwritten = apply({ "SKILL.md": SKILL, a: "file", "a/b": "under" }, [
+      { op: "write", path: "a", bytes: encoder.encode("edited") },
+    ]);
+    expect(texts(overwritten).a).toBe("edited");
+  });
+
+  it("path_conflict: a name that is indistinct from another on the target filesystem", () => {
+    // `skills sync` materializes onto APFS/NTFS, where these pairs are one file:
+    // the later one by sort order wins, so the `SKILL.md` the platform gated is
+    // not the `SKILL.md` the runtime loads.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL }, [
+          { op: "write", path: "skill.md", bytes: encoder.encode("x") },
+        ]),
+      "path_conflict",
+      "skill.md",
+    );
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "Docs/a.md": "A" }, [
+          { op: "write", path: "docs/a.md", bytes: encoder.encode("x") },
+        ]),
+      "path_conflict",
+      "docs/a.md",
+    );
+    // NFD `é` (e + U+0301) beside its NFC twin — the same filename, written by
+    // two editors on two platforms.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "e\u0301tude.md": "A" }, [
+          { op: "write", path: "\u00e9tude.md", bytes: encoder.encode("x") },
+        ]),
+      "path_conflict",
+      "\u00e9tude.md",
+    );
+    // A move lands on the same rule, at the destination.
+    expectRefusal(
+      () =>
+        apply({ "SKILL.md": SKILL, "Notes.md": "N", "a.md": "A" }, [
+          { op: "move", from: "a.md", to: "notes.md" },
+        ]),
+      "path_conflict",
+      "notes.md",
+    );
+
+    // Negative controls. Writing the SAME path twice in one batch is one name,
+    // not two; and a package whose stored ZIP already holds an indistinct pair
+    // stays editable, exactly as it does for directory shadowing.
+    expect(
+      texts(
+        apply({ "SKILL.md": SKILL }, [
+          { op: "write", path: "a.md", bytes: encoder.encode("1") },
+          { op: "write", path: "a.md", bytes: encoder.encode("2") },
+        ]),
+      )["a.md"],
+    ).toBe("2");
+    expect(
+      Object.keys(
+        apply({ "SKILL.md": SKILL, "A.md": "A", "a.md": "a" }, [
+          { op: "write", path: "c.md", bytes: encoder.encode("C") },
+        ]),
+      ).sort(),
+    ).toEqual(["A.md", "SKILL.md", "a.md", "c.md"]);
+  });
+
+  it("file_too_large: one written file above the inline ceiling", () => {
+    const oversized = new Uint8Array(PACKAGE_FILE_INLINE_MAX_BYTES + 1);
+    expectRefusal(
+      () => apply({ "SKILL.md": SKILL }, [{ op: "write", path: "big.bin", bytes: oversized }]),
+      "file_too_large",
+      "big.bin",
+    );
+
+    // The ceiling is inclusive: exactly the limit is accepted.
+    const atLimit = new Uint8Array(PACKAGE_FILE_INLINE_MAX_BYTES);
+    expect(
+      apply({ "SKILL.md": SKILL }, [{ op: "write", path: "big.bin", bytes: atLimit }])["big.bin"]!
+        .byteLength,
+    ).toBe(PACKAGE_FILE_INLINE_MAX_BYTES);
+  });
+
+  it("tree_too_large: past the entry count the archive is read back under", () => {
+    const files: Record<string, Uint8Array> = { "SKILL.md": encoder.encode(SKILL) };
+    for (let i = 0; i < ARCHIVE_MAX_FILES - 1; i++) files[`f/${i}.txt`] = new Uint8Array(0);
+    expect(Object.keys(files).length).toBe(ARCHIVE_MAX_FILES);
+
+    expectRefusal(
+      () => apply(files, [{ op: "write", path: "one-too-many.txt", bytes: new Uint8Array(0) }]),
+      "tree_too_large",
+      null,
+    );
+  });
+
+  it("tree_too_large: past the decompressed byte budget", () => {
+    const files = {
+      "SKILL.md": encoder.encode(SKILL),
+      "big.bin": new Uint8Array(PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES),
+    };
+
+    expectRefusal(
+      () => apply(files, [{ op: "write", path: "one.txt", bytes: encoder.encode("!") }]),
+      "tree_too_large",
+      null,
+    );
+  });
+
+  it("leaves the caller's map untouched when it refuses mid-batch", () => {
+    const before = tree({ "SKILL.md": SKILL, "a.md": "A" });
+    const snapshot = texts(before);
+
+    expectRefusal(
+      () =>
+        applyFileOperations(
+          before,
+          [
+            { op: "write", path: "b.md", bytes: encoder.encode("B") },
+            { op: "delete", path: "a.md" },
+            { op: "delete", path: "SKILL.md" },
+          ],
+          { type: "skill" },
+        ),
+      "content_entry_immovable",
+      "SKILL.md",
+    );
+
+    expect(texts(before)).toEqual(snapshot);
   });
 });

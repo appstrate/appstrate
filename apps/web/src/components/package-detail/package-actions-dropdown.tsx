@@ -129,7 +129,7 @@ export function PackageActionsDropdown({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon">
+        <Button variant="outline" size="icon" aria-label={t("package.actions")}>
           <MoreHorizontal size={16} />
         </Button>
       </DropdownMenuTrigger>

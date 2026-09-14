@@ -75,6 +75,7 @@ import { user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { cliRefreshToken, deviceCode, oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
+import type { DbOrTx } from "../../../lib/db-helpers.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -1068,8 +1069,6 @@ async function revokeFamily(familyId: string, reason: string): Promise<void> {
   // admitted just before the revocation can still reach run creation.
   runnerDeviceNameCache.invalidate(familyId);
 }
-
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Persist a refresh-token row inside a caller-supplied Drizzle transaction.

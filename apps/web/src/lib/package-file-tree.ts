@@ -10,11 +10,24 @@
  * coverable at all — and it keeps the React layer to "draw these rows".
  */
 
-import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
+import {
+  PACKAGE_FILE_INLINE_MAX_BYTES,
+  PACKAGE_MANIFEST_FILE,
+} from "@appstrate/core/package-files";
+import {
+  isProtectedPackageFile,
+  applyFileTreeOperations,
+  PackageFileWriteError,
+} from "@appstrate/core/package-file-operations";
+import { isSafeArchivePath } from "@appstrate/core/zip";
+import type { PackageType } from "@appstrate/core/validation";
 import type { components } from "../api/schema";
 
 /** One real file in the artifact, as returned by `GET .../files`. */
 export type PackageFileEntry = components["schemas"]["PackageFileEntry"];
+
+/** One staged file edit carried by the package PUT's `operations` field. */
+export type PackageFileWriteOperation = components["schemas"]["PackageFileWriteOperation"];
 
 /**
  * Stable, unique row identity.
@@ -270,11 +283,11 @@ function typeAhead(rows: readonly TreeRow[], index: number, key: string): TreeFo
  * that drops the selected file falls back silently, and no re-render can
  * clobber a selection the user made.
  */
-export function pickActiveEntry(
-  entries: readonly PackageFileEntry[],
+export function pickActiveEntry<T extends PackageFileEntry>(
+  entries: readonly T[],
   selectedPath: string | null,
   primaryFileName: string,
-): PackageFileEntry | null {
+): T | null {
   return (
     (selectedPath === null ? undefined : entries.find((e) => e.path === selectedPath)) ??
     entries.find((e) => e.path === primaryFileName) ??
@@ -343,6 +356,86 @@ export function languageForPath(path: string): string {
   // `dot <= 0` covers both "no extension" and dotfiles like `.gitignore`.
   if (dot <= 0) return "plaintext";
   return LANGUAGE_BY_EXTENSION[base.slice(dot + 1).toLowerCase()] ?? "plaintext";
+}
+
+/**
+ * Whether an entry is one the draft write route refuses to move or delete —
+ * the tree therefore offers it no rename and no delete affordance.
+ *
+ * Two entries qualify, for two different reasons, and both come from the
+ * server's own rules (`applyFileOperations`): `manifest.json` is a projection
+ * of the package's draft manifest, authored on the JSON tab and answered
+ * `reserved_entry` here; the type's content entry (`SKILL.md`, `prompt.md`) is
+ * what makes the package a package of that type, and is answered
+ * `content_entry_immovable`. The content entry is still WRITABLE — it is the
+ * file the editor opens on — while `manifest.json` is not.
+ */
+export function isPinnedEntry(type: PackageType, path: string): boolean {
+  return isProtectedPackageFile(type, path);
+}
+
+/**
+ * Why a path the author typed cannot be created in this tree, or `null` when it
+ * can.
+ *
+ * Restates the write route's refusals so a mistyped path is answered while the
+ * dialog is still open instead of by a `400` after a round trip. The server
+ * stays the authority: it runs the same rules under the lock, against the tree
+ * as it is at that instant rather than against the index this client read.
+ *
+ * - `invalid` — {@link isSafeArchivePath} refuses the shape (`invalid_path`).
+ * - `reserved` — it names the manifest (`reserved_entry`).
+ * - `exists` — the tree already holds it. A `write` would silently overwrite,
+ *   which is not what "new file" or "rename" mean; both dialogs refuse it.
+ * - `conflict` — it would make one path both a file and a directory
+ *   (`path_conflict`), in either direction.
+ */
+export type NewPathRejection = "invalid" | "reserved" | "exists" | "conflict";
+
+export const NEW_PATH_ERROR_KEYS: Record<NewPathRejection, string> = {
+  invalid: "files.errorInvalidPath",
+  reserved: "files.errorReserved",
+  exists: "files.errorExists",
+  conflict: "files.errorConflictPath",
+};
+
+export function validateNewPath(
+  entries: readonly PackageFileEntry[],
+  path: string,
+): NewPathRejection | null {
+  if (!isSafeArchivePath(path)) return "invalid";
+  if (path === PACKAGE_MANIFEST_FILE) return "reserved";
+
+  if (entries.some((entry) => entry.path === path)) return "exists";
+  try {
+    applyFileTreeOperations(
+      Object.fromEntries(entries.map((entry) => [entry.path, entry])),
+      [{ op: "write", path, value: { path, size: 0, media_kind: "text" } }],
+      "skill",
+    );
+  } catch (error) {
+    if (error instanceof PackageFileWriteError) {
+      if (error.code === "invalid_path") return "invalid";
+      if (error.code === "reserved_entry") return "reserved";
+      if (error.code === "path_conflict") return "conflict";
+    }
+    throw error;
+  }
+
+  return null;
+}
+
+/**
+ * The structural action a key press asks of the focused file row, or `null`.
+ *
+ * Pure, and here rather than inline in the tree, for the same reason
+ * {@link nextTreeFocus} is: the rows are virtualized, so no DOM-less render
+ * ever produces one to press a key on.
+ */
+export function fileActionForKey(key: string): "rename" | "delete" | null {
+  if (key === "F2") return "rename";
+  if (key === "Delete") return "delete";
+  return null;
 }
 
 /** Last path segment — the preview header's title and the download filename. */
