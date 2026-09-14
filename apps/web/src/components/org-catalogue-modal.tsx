@@ -37,7 +37,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Boxes, Layers, LibraryBig, Plug, Wrench } from "lucide-react";
+import { Boxes, Layers, LibraryBig, Wrench } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import type { PackageType } from "@appstrate/core/validation";
@@ -49,7 +49,14 @@ import { useModalParam } from "../hooks/use-modal-param";
 import { useCatalogueKinds } from "../hooks/use-catalogue-kinds";
 import { useLocalListParams } from "../lib/list-params";
 import { canInstall } from "../lib/catalogue-install";
-import { integrationKind, localServerOf } from "../lib/integration-collection";
+import {
+  INTEGRATION_EXECUTIONS,
+  integrationExecution,
+  integrationProtocol,
+  type IntegrationExecution,
+} from "../lib/integration-collection";
+import { Tabs } from "@appstrate/ui/components/tabs";
+import { DetailTabsList, DetailTabsTrigger } from "./agent-detail/agent-local-tabs";
 import { usePackageViewStore } from "../stores/list-view-store";
 import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
@@ -60,8 +67,7 @@ import type { FilterSpec } from "./list-toolbar";
 import {
   useCatalogueActionsColumn,
   useCatalogueActiveColumn,
-  useCatalogueKindColumn,
-  useCatalogueUsedByColumn,
+  useCatalogueProtocolColumn,
   useCatalogueOriginColumn,
   useCatalogueStatusColumn,
   useCatalogueSelectColumn,
@@ -78,7 +84,8 @@ export type CatalogueOrigin = "org" | "appstrate";
 const KINDS: Array<{ type: PackageType; icon: typeof Layers; titleKey: string }> = [
   { type: "agent", icon: Layers, titleKey: "packages.type.agents" },
   { type: "skill", icon: Wrench, titleKey: "packages.type.skills" },
-  { type: "mcp-server", icon: Plug, titleKey: "packages.type.mcp-servers" },
+  // No local MCP servers: a server is the engine of a local integration, never
+  // installed on its own — the integration is what this panel installs.
   { type: "integration", icon: Boxes, titleKey: "packages.type.integrations" },
 ];
 
@@ -137,11 +144,9 @@ export function OrgCatalogueModal({
   const spaceName =
     library?.spaces.find((space) => space.id === spaceId)?.name ?? t("catalogue.thisSpace");
 
-  // Integrations resolve their activation server-side, and a local MCP server
-  // is only ever run by one: both views read the integrations, the others do
-  // not pay for the request.
-  const needsIntegrations = active === "integration" || active === "mcp-server";
-  const { data: integrations } = useAllIntegrations({ enabled: needsIntegrations });
+  // Integrations resolve their activation server-side, and only their view
+  // pays for the request.
+  const { data: integrations } = useAllIntegrations({ enabled: active === "integration" });
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
   const spaces = library?.spaces ?? [];
 
@@ -165,22 +170,6 @@ export function OrgCatalogueModal({
       if (active === "integration") {
         return [item.id, { ...integrationState(item.id), everywhere: false }] as const;
       }
-      if (active === "mcp-server") {
-        // A local MCP server is installed exactly where the integration that
-        // runs it is: that is the only state an agent can feel.
-        const runners = (integrations ?? []).filter((row) => localServerOf(row) === item.id);
-        const via = runners[0];
-        const state = via ? integrationState(via.id) : { activeHere: false, activeIn: [] };
-        return [
-          item.id,
-          {
-            ...state,
-            everywhere: false,
-            via: via ? { id: via.id, name: via.manifest.display_name ?? via.id } : undefined,
-            usedBy: runners.map((row) => row.manifest.display_name ?? row.id),
-          },
-        ] as const;
-      }
       const everywhere = item.source === "system";
       const activeHere = Boolean(spaceId && item.installed_in.includes(spaceId));
       const activeIn = spaces
@@ -192,7 +181,14 @@ export function OrgCatalogueModal({
   // Appstrate lists everything it provides, installed or not. The organisation
   // lists what the org HAS: its own packages, plus what it installed from
   // Appstrate — which is why Gmail, installed here, belongs in both.
+  // Integrations split by execution, as on their page: remote (API or hosted
+  // MCP) or local (an MCP server run in the sandbox).
+  const [execution, setExecution] = useState<IntegrationExecution>("remote");
   const all = ofKind.filter((item) => {
+    if (active === "integration") {
+      const row = integrationById.get(item.id);
+      if (row && integrationExecution(row) !== execution) return false;
+    }
     if (fromAppstrate) return item.source === "system";
     if (item.source !== "system") return true;
     const state = stateById.get(item.id);
@@ -232,9 +228,7 @@ export function OrgCatalogueModal({
 
   const activateOne = (item: { id: string; displayName: string }) => {
     if (!spaceId) return;
-    // A local MCP server installs through the integration that runs it.
-    const via = stateById.get(item.id)?.via;
-    const target = via ? { id: via.id, displayName: via.name } : item;
+    const target = item;
     activate.mutate(
       { spaceId, packageId: target.id, installed: false },
       {
@@ -313,10 +307,9 @@ export function OrgCatalogueModal({
   const originColumn = useCatalogueOriginColumn(orgName);
   const statusColumn = useCatalogueStatusColumn(stateOf);
   const activeColumn = useCatalogueActiveColumn(stateOf);
-  const usedByColumn = useCatalogueUsedByColumn(stateOf);
-  const kindColumn = useCatalogueKindColumn((item) => {
+  const protocolColumn = useCatalogueProtocolColumn((item) => {
     const row = integrationById.get(item.id);
-    return row ? integrationKind(row) : undefined;
+    return row ? integrationProtocol(row) : undefined;
   });
   const actionsColumn = useCatalogueActionsColumn({
     spaceName,
@@ -450,7 +443,29 @@ export function OrgCatalogueModal({
           list={list}
           view={view}
           onViewChange={setView}
-          header={<SettingsHeading className="mb-4" title={t(kind.titleKey)} />}
+          header={
+            <>
+              <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
+              {active === "integration" && (
+                <Tabs
+                  className="mb-4"
+                  value={execution}
+                  onValueChange={(next) => {
+                    setSelected(new Set());
+                    setExecution(next as IntegrationExecution);
+                  }}
+                >
+                  <DetailTabsList aria-label={t("integrations.execution.label")}>
+                    {INTEGRATION_EXECUTIONS.map((value) => (
+                      <DetailTabsTrigger key={value} value={value}>
+                        {t(`integrations.execution.${value}`)}
+                      </DetailTabsTrigger>
+                    ))}
+                  </DetailTabsList>
+                </Tabs>
+              )}
+            </>
+          }
           // The page's own bar, not a panel variant of it: same icon-only
           // filter and column buttons, in the same place, at the same size.
           placement="page"
@@ -468,8 +483,7 @@ export function OrgCatalogueModal({
           dropColumns={CATALOGUE_DROPS}
           trailingColumns={[
             ...(fromAppstrate ? [] : [originColumn]),
-            ...(active === "integration" ? [kindColumn] : []),
-            ...(active === "mcp-server" ? [usedByColumn] : []),
+            ...(active === "integration" && execution === "remote" ? [protocolColumn] : []),
             statusColumn,
             activeColumn,
             actionsColumn,

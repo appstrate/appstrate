@@ -8,7 +8,6 @@ import {
   Activity,
   Calendar,
   Wrench,
-  Plug,
   Loader2,
   Boxes,
   MessageSquare,
@@ -91,9 +90,8 @@ export function NavOrg() {
       ? [{ path: "/agents", label: t("nav.agents"), icon: Layers }]
       : []),
     ...(can("skills:read") ? [{ path: "/skills", label: t("nav.skills"), icon: Wrench }] : []),
-    ...(can("mcp-servers:read")
-      ? [{ path: "/mcp-servers", label: t("nav.mcpServers"), icon: Plug }]
-      : []),
+    // No "local MCP servers" entry: a server is the engine of a local
+    // integration and reached from it, never used on its own.
     ...(can("integrations:read")
       ? [{ path: "/integrations", label: t("nav.integrations"), icon: Boxes }]
       : []),

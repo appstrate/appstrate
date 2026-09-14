@@ -7,6 +7,8 @@ import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
+import { Tabs } from "@appstrate/ui/components/tabs";
+import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { CardGrid } from "../components/card-grid";
 import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
@@ -16,15 +18,18 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
-  INTEGRATION_KINDS,
+  INTEGRATION_EXECUTIONS,
   INTEGRATION_ORIGINS,
+  INTEGRATION_PROTOCOLS,
+  integrationExecution,
+  type IntegrationExecution,
   INTEGRATION_STATUSES,
   filterIntegrations,
   integrationOrigin,
   integrationStatus,
   isOrganizationIntegration,
 } from "../lib/integration-collection";
-import { useListParams } from "../lib/list-params";
+import { readList, useListParams } from "../lib/list-params";
 import { openAsModal } from "../lib/modal-route";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useAllIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
@@ -74,7 +79,7 @@ export function IntegrationsPage() {
   const { data, isLoading, error } = useAllIntegrations();
   const location = useLocation();
   const navigate = useNavigate();
-  const list = useListParams(["status", "origin", "kind"]);
+  const list = useListParams(["status", "origin", "protocol"]);
   const view = useIntegrationViewStore((state) => state.view);
   const setView = useIntegrationViewStore((state) => state.setView);
   const visibility = useColumnVisibility("integrations");
@@ -83,7 +88,18 @@ export function IntegrationsPage() {
 
   const statuses = list.values("status", INTEGRATION_STATUSES);
   const origins = list.values("origin", INTEGRATION_ORIGINS);
-  const kinds = list.values("kind", INTEGRATION_KINDS);
+  // The execution is a tab, not a filter: it splits the collection in two
+  // kinds of object, and the columns that make sense differ between them.
+  const execution: IntegrationExecution =
+    list.params.get("execution") === "local" ? "local" : "remote";
+  const protocolParam = list.params.get("protocol");
+  const protocols = useMemo(
+    () =>
+      execution === "remote"
+        ? readList(protocolParam, INTEGRATION_PROTOCOLS)
+        : ([] as (typeof INTEGRATION_PROTOCOLS)[number][]),
+    [execution, protocolParam],
+  );
   const query = list.search;
 
   const organizationIntegrations = useMemo(
@@ -91,15 +107,26 @@ export function IntegrationsPage() {
     [data],
   );
   const shown = useMemo(
-    () => filterIntegrations(organizationIntegrations, { query, statuses, origins, kinds }),
-    [organizationIntegrations, query, statuses, origins, kinds],
+    () =>
+      filterIntegrations(organizationIntegrations, {
+        query,
+        statuses,
+        origins,
+        executions: [execution],
+        protocols,
+      }),
+    [organizationIntegrations, query, statuses, origins, execution, protocols],
   );
   const filtering =
-    query.trim() !== "" || statuses.length > 0 || origins.length > 0 || kinds.length > 0;
+    query.trim() !== "" || statuses.length > 0 || origins.length > 0 || protocols.length > 0;
+  const countOf = (value: IntegrationExecution) =>
+    organizationIntegrations.filter((row) => integrationExecution(row) === value).length;
 
   const openIntegration = (integration: IntegrationSummaryWire) =>
     navigate(`/integrations/${integration.id}`);
-  const allColumns = useIntegrationListColumns({ onOpen: openIntegration });
+  const allColumns = useIntegrationListColumns({ onOpen: openIntegration }).filter((column) =>
+    execution === "local" ? column.id !== "protocol" : column.id !== "server",
+  );
   const columns = visibleColumns(allColumns, visibility.hidden);
   const empty = (
     <EmptyState
@@ -138,6 +165,24 @@ export function IntegrationsPage() {
         <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>
       </PageHeader>
 
+      <Tabs
+        className="mb-4"
+        value={execution}
+        // One URL update: two in the same tick read the same location and the
+        // second would undo the first (see `useListParams`). A protocol filter
+        // left in the URL is simply not applied on the local tab.
+        onValueChange={(next) => list.setValues("execution")(next === "local" ? ["local"] : [])}
+      >
+        <DetailTabsList aria-label={t("integrations.execution.label")}>
+          {INTEGRATION_EXECUTIONS.map((value) => (
+            <DetailTabsTrigger key={value} value={value}>
+              {t(`integrations.execution.${value}`)}
+              <span className="text-muted-foreground ml-1.5 tabular-nums">{countOf(value)}</span>
+            </DetailTabsTrigger>
+          ))}
+        </DetailTabsList>
+      </Tabs>
+
       <ListToolbar
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={[
@@ -161,16 +206,20 @@ export function IntegrationsPage() {
               { value: "custom", label: t("integrations.origin.custom") },
             ],
           },
-          {
-            id: "kind",
-            label: t("integrations.filter.kind"),
-            values: kinds,
-            onChange: list.setValues("kind"),
-            options: INTEGRATION_KINDS.map((kind) => ({
-              value: kind,
-              label: t(`integrations.kind.${kind}`),
-            })),
-          },
+          ...(execution === "remote"
+            ? [
+                {
+                  id: "protocol",
+                  label: t("integrations.filter.protocol"),
+                  values: protocols,
+                  onChange: list.setValues("protocol"),
+                  options: INTEGRATION_PROTOCOLS.map((protocol) => ({
+                    value: protocol,
+                    label: t(`integrations.protocol.${protocol}`),
+                  })),
+                },
+              ]
+            : []),
         ]}
         onReset={list.reset}
         columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}

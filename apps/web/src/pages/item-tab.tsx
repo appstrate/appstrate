@@ -84,7 +84,11 @@ export function ItemTab({
             <PageActionsMenu>
               {canActivate && (
                 <DropdownMenuItem asChild data-page-action="catalogue">
-                  <Link to={`/catalogue/org/${type}`} state={openAsModal(location)}>
+                  <Link
+                    // A local MCP server is installed through its integration.
+                    to={`/catalogue/org/${type === "mcp-server" ? "integration" : type}`}
+                    state={openAsModal(location)}
+                  >
                     <LibraryBig />
                     {t("catalogue.browse")}
                   </Link>

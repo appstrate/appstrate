@@ -5,25 +5,53 @@ import type { IntegrationSummaryWire } from "../hooks/use-integrations";
 export const INTEGRATION_STATUSES = ["active", "inactive"] as const;
 export const INTEGRATION_ORIGINS = ["system", "custom"] as const;
 /**
- * How an integration reaches its service — the manifest's `source.kind`, named
- * for people: the platform calls the API itself (`none`), a hosted MCP server
- * answers at a URL (`remote`), or a local MCP server package runs in the
- * sandbox (`local`).
+ * Two attributes of how an integration reaches its service, read off the
+ * manifest's `source.kind` — not a choice anyone makes while adding one.
+ *
+ * - **Execution**: nothing runs on our side (`remote`), or a local MCP server
+ *   package runs in the sandbox (`local`).
+ * - **Protocol**, which only varies when remote: the platform calls the
+ *   service's API itself (`api`, `source.kind: "none"`), or a hosted MCP server
+ *   answers at a URL (`mcp`, `"remote"`). A local integration is always MCP.
  */
-export const INTEGRATION_KINDS = ["api", "mcp-remote", "mcp-local"] as const;
+export const INTEGRATION_EXECUTIONS = ["remote", "local"] as const;
+export const INTEGRATION_PROTOCOLS = ["api", "mcp"] as const;
 
 export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
 export type IntegrationOrigin = (typeof INTEGRATION_ORIGINS)[number];
-export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
+export type IntegrationExecution = (typeof INTEGRATION_EXECUTIONS)[number];
+export type IntegrationProtocol = (typeof INTEGRATION_PROTOCOLS)[number];
+
+function sourceKind(integration: Pick<IntegrationSummaryWire, "manifest">): string | undefined {
+  return (integration.manifest as { source?: { kind?: string } }).source?.kind;
+}
+
+export function integrationExecution(
+  integration: Pick<IntegrationSummaryWire, "manifest">,
+): IntegrationExecution {
+  return sourceKind(integration) === "local" ? "local" : "remote";
+}
 
 /** A manifest with no `source` predates the field and has no MCP backing. */
-export function integrationKind(
+export function integrationProtocol(
   integration: Pick<IntegrationSummaryWire, "manifest">,
-): IntegrationKind {
-  const kind = (integration.manifest as { source?: { kind?: string } }).source?.kind;
-  if (kind === "local") return "mcp-local";
-  if (kind === "remote") return "mcp-remote";
-  return "api";
+): IntegrationProtocol {
+  const kind = sourceKind(integration);
+  return kind === "local" || kind === "remote" ? "mcp" : "api";
+}
+
+/** The local server package and version range a local integration runs. */
+export function localServerRef(
+  integration: Pick<IntegrationSummaryWire, "manifest">,
+): { name: string; version?: string } | undefined {
+  const source = (
+    integration.manifest as {
+      source?: { kind?: string; server?: { name?: string; version?: string } };
+    }
+  ).source;
+  return source?.kind === "local" && source.server?.name
+    ? { name: source.server.name, version: source.server.version }
+    : undefined;
 }
 
 /** The local MCP server package a `mcp-local` integration runs, if any. */
@@ -75,12 +103,14 @@ export function filterIntegrations(
     query,
     statuses,
     origins,
-    kinds,
+    executions,
+    protocols,
   }: {
     query: string;
     statuses?: IntegrationStatus[];
     origins?: IntegrationOrigin[];
-    kinds?: IntegrationKind[];
+    executions?: IntegrationExecution[];
+    protocols?: IntegrationProtocol[];
   },
 ): IntegrationSummaryWire[] {
   return integrations.filter((integration) => {
@@ -88,7 +118,8 @@ export function filterIntegrations(
     const origin = integrationOrigin(integration);
     if (statuses?.length && !statuses.includes(status)) return false;
     if (origins?.length && !origins.includes(origin)) return false;
-    if (kinds?.length && !kinds.includes(integrationKind(integration))) return false;
+    if (executions?.length && !executions.includes(integrationExecution(integration))) return false;
+    if (protocols?.length && !protocols.includes(integrationProtocol(integration))) return false;
     return integrationMatchesQuery(integration, query);
   });
 }

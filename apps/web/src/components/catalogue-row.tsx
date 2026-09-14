@@ -52,9 +52,7 @@ export function CatalogueRowMenu({
       {canInstall(item, state) && (
         <DropdownMenuItem onSelect={() => onActivate(item)}>
           <Download />
-          {state.via
-            ? t("catalogue.installIntegration", { name: state.via.name, space: spaceName })
-            : t("catalogue.activateIn", { space: spaceName })}
+          {t("catalogue.activateIn", { space: spaceName })}
         </DropdownMenuItem>
       )}
       <DropdownMenuItem onSelect={() => onOpen(item)}>

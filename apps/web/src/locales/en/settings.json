@@ -1332,13 +1332,13 @@
   "catalogue.moreActions": "Actions for {{name}}",
   "catalogue.viewDetail": "View details",
   "catalogue.allSpaces": "Every space",
-  "integrations.col.kind": "Type",
-  "integrations.filter.kind": "Type",
-  "integrations.kind.api": "Direct API",
-  "integrations.kind.mcp-remote": "Remote MCP",
-  "integrations.kind.mcp-local": "Local MCP",
-  "catalogue.column.usedBy": "Used by",
-  "catalogue.usedByNone": "No integration",
-  "catalogue.installIntegration": "Install the {{name}} integration in {{space}}",
-  "catalogue.column.kind": "Type"
+  "integrations.col.protocol": "Protocol",
+  "integrations.filter.protocol": "Protocol",
+  "integrations.col.server": "Server",
+  "integrations.protocol.api": "API",
+  "integrations.protocol.mcp": "MCP",
+  "integrations.execution.label": "Execution",
+  "integrations.execution.remote": "Remote",
+  "integrations.execution.local": "Local",
+  "catalogue.column.protocol": "Protocol"
 }

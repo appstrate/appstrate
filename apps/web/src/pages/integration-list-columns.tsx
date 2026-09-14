@@ -8,8 +8,9 @@ import { IntegrationIcon } from "../components/integration-icon";
 import { TableRowActions } from "../components/table-row-actions";
 import type { IntegrationSummaryWire } from "../hooks/use-integrations";
 import {
-  integrationKind,
   integrationOrigin,
+  integrationProtocol,
+  localServerRef,
   integrationStatus,
 } from "../lib/integration-collection";
 
@@ -51,17 +52,31 @@ export function useIntegrationListColumns({
       ),
     },
     {
-      id: "kind",
-      header: t("integrations.col.kind"),
-      width: "112px",
-      // Tier three: next to the version, as a fact about how it is built. The
-      // filter carries it at every width.
+      // Remote tab only: API or MCP. A local integration is always MCP.
+      id: "protocol",
+      header: t("integrations.col.protocol"),
+      width: "88px",
       tier: 3,
       cell: (integration) => (
         <span className="text-muted-foreground text-xs">
-          {t(`integrations.kind.${integrationKind(integration)}`)}
+          {t(`integrations.protocol.${integrationProtocol(integration)}`)}
         </span>
       ),
+    },
+    {
+      // Local tab only: the server package the sandbox runs.
+      id: "server",
+      header: t("integrations.col.server"),
+      width: "minmax(140px,1fr)",
+      tier: 3,
+      cell: (integration) => {
+        const server = localServerRef(integration);
+        return (
+          <span className="text-muted-foreground truncate font-mono text-xs">
+            {server ? `${server.name}${server.version ? ` ${server.version}` : ""}` : "—"}
+          </span>
+        );
+      },
     },
     {
       id: "version",
