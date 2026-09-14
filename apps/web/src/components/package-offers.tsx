@@ -7,6 +7,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { ApiError } from "../api/errors";
 import {
   useSpaceLibrary,
   useTogglePackageInstall,
@@ -60,6 +61,17 @@ export function SharedWithMe({
   const { data: accessibleSpaces } = useSpaces();
   if (shared.length === 0) return null;
   const spaceName = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
+  /**
+   * The one refusal the recipient can do nothing about. `POST …/shares` turns a
+   * person away when the package has nothing published, so this survives only
+   * as a race — the `latest` was deleted after the offer was made. The server's
+   * sentence tells the AUTHOR to publish; said to a recipient who owns nothing
+   * here, it would be an instruction they cannot follow.
+   */
+  const acceptError = (err: unknown) =>
+    err instanceof ApiError && err.code === "package_has_no_version"
+      ? t("library.shared.noVersion")
+      : getErrorMessage(err);
   /** The install grant in the OFFERED space — the target of this row's button. */
   const canInstallThere = (spaceId: string, type: string) =>
     accessibleSpaces
@@ -104,7 +116,7 @@ export function SharedWithMe({
                     { params: { path: splitPackageRef(offer.id) } },
                     {
                       onSuccess: () => toast.success(t("library.shared.added")),
-                      onError: (err) => toast.error(getErrorMessage(err)),
+                      onError: (err) => toast.error(acceptError(err)),
                     },
                   )
                 }

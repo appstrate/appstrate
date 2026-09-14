@@ -53,6 +53,7 @@ import {
   getMatchingDistTags,
   listPackageVersions,
   getVersionInfo,
+  getLatestVersionId,
   getLatestVersionCreatedAt,
   computeHasUnpublishedChanges,
   createVersionFromDraft,
@@ -1939,6 +1940,26 @@ export function createPackagesRouter() {
       await makePermissionGuard("members:read")(c, async () => {});
       const membership = await getOrgMember(orgId, target.user_id);
       if (!membership) throw notFound(`User '${target.user_id}' not found in this organization`);
+      // An offer to a PERSON is an offer into their personal space, and an
+      // install there is always PINNED (plan decision 6, enforced in
+      // `resolvePersonalSpaceInstall`). A package with nothing published has no
+      // pin to take, so the offer would be one the recipient can never accept.
+      // Refusing HERE puts the refusal on the only principal who can clear it —
+      // the author, in the act they are performing — instead of on a recipient
+      // three screens away who cannot publish anything. Checked BEFORE
+      // `ensurePersonalSpaceFor`, so a refused offer provisions nothing.
+      //
+      // A TEAM target takes no pin and is deliberately not gated: an
+      // installation there resolves `version_pin ?? draft`, so the package runs
+      // from the dashboard without a publication (`run-agent-button.tsx`).
+      // The accept path keeps its own copy of this refusal — a `latest` can be
+      // deleted between the offer and the accept.
+      if ((await getLatestVersionId(packageId)) === null) {
+        throw conflict(
+          "package_has_no_version",
+          `Package '${packageId}' has no published version to offer — publish one first, since a personal space always runs a pinned version.`,
+        );
+      }
       const space = await ensurePersonalSpaceFor(orgId, target.user_id);
       spaceId = space.id;
       recipientUserId = target.user_id;

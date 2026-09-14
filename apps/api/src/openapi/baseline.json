@@ -16581,7 +16581,7 @@
         "operationId": "sharePackage",
         "tags": ["Packages"],
         "summary": "Share a package with a person or a space",
-        "description": "Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST …/shares/accept`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. Idempotent: sharing the same pair twice answers 200 with the same entry.",
+        "description": "Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST …/shares/accept`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. A `user` target additionally requires the package to have a published version (`409 package_has_no_version`): a personal space always installs at a pin, so an offer with nothing to pin could never be accepted — a `space` target takes no pin and carries no such requirement. Idempotent: sharing the same pair twice answers 200 with the same entry.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16645,7 +16645,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The target space is the package's own home (`share_target_is_home`). RFC 9457 problem+json.",
+            "description": "The target space is the package's own home (`share_target_is_home`), or the package has no published version to offer a person (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -23171,8 +23171,8 @@
       "get": {
         "operationId": "getLibrary",
         "tags": ["Library"],
-        "summary": "List readable packages with accessible-space install state",
-        "description": "Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.",
+        "summary": "Organization library (owners and admins)",
+        "description": "Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23370,6 +23370,224 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/spaces/{spaceId}/library": {
+      "get": {
+        "operationId": "getSpaceLibrary",
+        "tags": ["Library"],
+        "summary": "Discover packages and pending shares for a space",
+        "description": "Accessible to readers of the target space. Returns readable package candidates (including packages readable in other accessible spaces for a team destination), but installation state and pending shares only for this space. Each package type requires read permission in the target space. Installation remains subject to the target space permissions. Personal spaces remain private and API keys remain pinned to their space.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "name": "spaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Library snapshot.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["object", "spaces", "packages", "shared"],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["library"]
+                    },
+                    "spaces": {
+                      "type": "array",
+                      "description": "Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first.",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "name", "isDefault"],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Space id (`spc_…`)."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "packages": {
+                      "type": "object",
+                      "description": "Packages grouped by type. Every group is always present (possibly empty).",
+                      "required": ["agent", "skill", "mcp-server", "integration"],
+                      "properties": {
+                        "agent": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        },
+                        "skill": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        },
+                        "mcp-server": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        },
+                        "integration": {
+                          "$ref": "#/components/schemas/LibraryPackageList"
+                        }
+                      }
+                    },
+                    "shared": {
+                      "type": "array",
+                      "description": "Packages OFFERED to a space the caller reads and not installed there — \"shared with me\", i.e. the offers still waiting on a decision. An accepted offer leaves this list and appears as an installation in `packages`. Empty for a caller nobody has shared anything with.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "type",
+                          "source",
+                          "name",
+                          "description",
+                          "space_id",
+                          "personal",
+                          "shared_by"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Package id (`@scope/name`)."
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": ["agent", "skill", "mcp-server", "integration"]
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "space_id": {
+                            "type": "string",
+                            "description": "The space the package is offered to (`spc_…`) — always one the caller reads, so no private id is disclosed."
+                          },
+                          "personal": {
+                            "type": "boolean",
+                            "description": "The offered space is the caller's OWN personal space, i.e. `POST /api/packages/{scope}/{name}/shares/accept` applies. When false the offer targets a team space and is installed through `POST /api/spaces/{spaceId}/packages` by someone holding the type's install grant there."
+                          },
+                          "shared_by": {
+                            "type": ["object", "null"],
+                            "description": "Who shared it. `null` once that account is gone.",
+                            "required": ["user_id", "name"],
+                            "properties": {
+                              "user_id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "object": "library",
+                  "spaces": [
+                    {
+                      "id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                      "name": "Default",
+                      "isDefault": true
+                    },
+                    {
+                      "id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                      "name": "Staging",
+                      "isDefault": false
+                    }
+                  ],
+                  "packages": {
+                    "agent": [
+                      {
+                        "id": "pkg_inbox_triage",
+                        "type": "agent",
+                        "source": "local",
+                        "name": "Inbox Triage",
+                        "description": "Sorts incoming Gmail threads into priority buckets.",
+                        "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                        "home_writable": true,
+                        "home_shareable": true,
+                        "installed_in": ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+                        "update_available": false
+                      }
+                    ],
+                    "skill": [],
+                    "mcp-server": [],
+                    "integration": [
+                      {
+                        "id": "pkg_gmail",
+                        "type": "integration",
+                        "source": "system",
+                        "name": "Gmail",
+                        "description": "Google Mail OAuth integration.",
+                        "home_space_id": null,
+                        "home_writable": false,
+                        "home_shareable": false,
+                        "installed_in": [
+                          "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                          "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
+                        ],
+                        "update_available": false
+                      }
+                    ]
+                  },
+                  "shared": [
+                    {
+                      "id": "@acme/weekly-digest",
+                      "type": "agent",
+                      "source": "local",
+                      "name": "Weekly Digest",
+                      "description": "Summarises the week's threads.",
+                      "space_id": "spc_9a1b3c5d-7e9f-4a1b-8c3d-5e7f9a1b3c5d",
+                      "personal": true,
+                      "shared_by": {
+                        "user_id": "usr_1",
+                        "name": "Alex"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -24624,6 +24842,92 @@
               "$ref": "#/components/schemas/PackageFileEntry"
             },
             "description": "Files in the artifact, sorted by `path`."
+          }
+        }
+      },
+      "PackageFileWriteEntry": {
+        "type": "object",
+        "required": ["op", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "write"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Archive-relative path to write. Creates the entry or replaces it; parent directories are implicit (a path is just a name containing `/`)."
+          },
+          "text": {
+            "type": "string",
+            "description": "File content, stored as its UTF-8 encoding. Mutually exclusive with `bytes_base64`; exactly one of the two is required."
+          },
+          "bytes_base64": {
+            "type": "string",
+            "description": "File content as standard base64 (URL-safe base64 is refused). Mutually exclusive with `text`; exactly one of the two is required."
+          }
+        }
+      },
+      "PackageFileDeleteEntry": {
+        "type": "object",
+        "required": ["op", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "delete"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Entry to remove. A path the tree does not hold is a `404`."
+          }
+        }
+      },
+      "PackageFileMoveEntry": {
+        "type": "object",
+        "required": ["op", "from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "move"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "Entry to rename. A path the tree does not hold is a `404`."
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "New path. A move NEVER overwrites: a destination that is already taken is a `400 path_conflict`, so a rename cannot carry off a file the operation does not name. To replace, `delete` the destination earlier in the same batch."
+          }
+        }
+      },
+      "PackageFileWriteOperation": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PackageFileWriteEntry"
+          },
+          {
+            "$ref": "#/components/schemas/PackageFileDeleteEntry"
+          },
+          {
+            "$ref": "#/components/schemas/PackageFileMoveEntry"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "op",
+          "mapping": {
+            "write": "#/components/schemas/PackageFileWriteEntry",
+            "delete": "#/components/schemas/PackageFileDeleteEntry",
+            "move": "#/components/schemas/PackageFileMoveEntry"
           }
         }
       },
@@ -26536,92 +26840,6 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
-          }
-        }
-      },
-      "PackageFileWriteOperation": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/PackageFileWriteEntry"
-          },
-          {
-            "$ref": "#/components/schemas/PackageFileDeleteEntry"
-          },
-          {
-            "$ref": "#/components/schemas/PackageFileMoveEntry"
-          }
-        ],
-        "discriminator": {
-          "propertyName": "op",
-          "mapping": {
-            "write": "#/components/schemas/PackageFileWriteEntry",
-            "delete": "#/components/schemas/PackageFileDeleteEntry",
-            "move": "#/components/schemas/PackageFileMoveEntry"
-          }
-        }
-      },
-      "PackageFileWriteEntry": {
-        "type": "object",
-        "required": ["op", "path"],
-        "additionalProperties": false,
-        "properties": {
-          "op": {
-            "type": "string",
-            "const": "write"
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1024,
-            "description": "Archive-relative path to write. Creates the entry or replaces it; parent directories are implicit (a path is just a name containing `/`)."
-          },
-          "text": {
-            "type": "string",
-            "description": "File content, stored as its UTF-8 encoding. Mutually exclusive with `bytes_base64`; exactly one of the two is required."
-          },
-          "bytes_base64": {
-            "type": "string",
-            "description": "File content as standard base64 (URL-safe base64 is refused). Mutually exclusive with `text`; exactly one of the two is required."
-          }
-        }
-      },
-      "PackageFileDeleteEntry": {
-        "type": "object",
-        "required": ["op", "path"],
-        "additionalProperties": false,
-        "properties": {
-          "op": {
-            "type": "string",
-            "const": "delete"
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1024,
-            "description": "Entry to remove. A path the tree does not hold is a `404`."
-          }
-        }
-      },
-      "PackageFileMoveEntry": {
-        "type": "object",
-        "required": ["op", "from", "to"],
-        "additionalProperties": false,
-        "properties": {
-          "op": {
-            "type": "string",
-            "const": "move"
-          },
-          "from": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1024,
-            "description": "Entry to rename. A path the tree does not hold is a `404`."
-          },
-          "to": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1024,
-            "description": "New path. A move NEVER overwrites: a destination that is already taken is a `400 path_conflict`, so a rename cannot carry off a file the operation does not name. To replace, `delete` the destination earlier in the same batch."
           }
         }
       }

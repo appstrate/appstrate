@@ -100,6 +100,7 @@
   "library.shared.added": "Added to your space.",
   "library.shared.inSpace": "Offered in the “{{space}}” space",
   "library.shared.by": "Shared by {{name}}",
+  "library.shared.noVersion": "This package no longer has a published version. Ask its author to publish one.",
   "library.updateAvailable": "Update available",
   "library.updateApply": "Update",
   "library.updateApplied": "Updated to the latest version.",

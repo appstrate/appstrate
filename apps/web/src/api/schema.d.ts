@@ -3527,7 +3527,7 @@ export interface paths {
         put?: never;
         /**
          * Share a package with a person or a space
-         * @description Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST …/shares/accept`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. Idempotent: sharing the same pair twice answers 200 with the same entry.
+         * @description Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST …/shares/accept`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. A `user` target additionally requires the package to have a published version (`409 package_has_no_version`): a personal space always installs at a pin, so an offer with nothing to pin could never be accepted — a `space` target takes no pin and carries no such requirement. Idempotent: sharing the same pair twice answers 200 with the same entry.
          */
         post: operations["sharePackage"];
         delete?: never;
@@ -18601,7 +18601,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The target space is the package's own home (`share_target_is_home`). RFC 9457 problem+json. */
+            /** @description The target space is the package's own home (`share_target_is_home`), or the package has no published version to offer a person (`package_has_no_version` — publish one, then share). RFC 9457 problem+json. */
             409: {
                 headers: {
                     [name: string]: unknown;

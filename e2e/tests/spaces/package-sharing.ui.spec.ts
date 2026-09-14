@@ -220,6 +220,85 @@ test("an offer opens in its destination space and accepting refreshes an already
   }
 });
 
+test("a draft-only agent is published from the share dialog itself, then offered", async ({
+  request,
+  browser,
+  browserCtx,
+  apiClient,
+  orgOnlyClient,
+}) => {
+  const orgId = browserCtx.org.orgId;
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = `unpublished-${Date.now().toString(36)}`;
+
+  // `POST /packages/agents` mints the manifest's `0.1.0` on creation, so the
+  // draft-only shape this test needs is made by deleting it again — the same
+  // state an author reaches when that best-effort snapshot was skipped
+  // (an incomplete manifest at creation time) and they never published since.
+  await createAgent(apiClient, scope, name);
+  const dropped = await apiClient.delete(`/packages/agents/${scope}/${name}/versions/0.1.0`);
+  expect(dropped.status(), await dropped.text()).toBe(204);
+
+  const member = await registerUser(request, { name: `Recipient ${Date.now().toString(36)}` });
+  const invite = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
+    email: member.email,
+    role: "member",
+  });
+  expect(invite.status()).toBe(201);
+  const joined = await request.post(`/invite/${(await invite.json()).token}/accept`, {
+    headers: { Cookie: member.cookie, Origin: E2E_BASE_URL },
+  });
+  expect(joined.status()).toBe(200);
+
+  const page = await (
+    await createAuthedContext(browser, browserCtx.auth, orgId, browserCtx.org.defaultSpaceId)
+  ).newPage();
+  try {
+    await page.goto(`/agents/${scope}/${name}`);
+    await page.getByTestId("package-actions-trigger").first().click();
+    await page.getByRole("menuitem", { name: /Partager|Share/ }).click();
+    await selectOption(page, "share-user", member.name);
+
+    // The offer is refused for want of a version, and the dialog says so in
+    // place rather than sending the author off to the Versions tab.
+    const refused = page.waitForResponse(
+      (response) => response.request().method() === "POST" && response.url().includes("/shares"),
+    );
+    await page.getByRole("button", { name: /^(Partager|Share)$/ }).click();
+    expect((await refused).status()).toBe(409);
+    await expect(page.getByTestId("share-needs-version")).toBeVisible();
+
+    // One button does both, in the order that makes the second succeed.
+    const published = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && response.url().includes("/versions") === true,
+    );
+    const offered = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().includes("/shares") &&
+        response.status() === 200,
+    );
+    await page.getByRole("button", { name: /Publier et partager|Publish and share/ }).click();
+    expect((await published).status()).toBe(201);
+    expect((await offered).status()).toBe(200);
+    await expect(page.getByTestId("share-needs-version")).toHaveCount(0);
+  } finally {
+    await page.context().close();
+  }
+
+  // The recipient really has the offer, pinned to the version just published.
+  const personalId = await personalSpaceOf(request, member.cookie, orgId);
+  const memberClient = createApiClient(request, {
+    cookie: member.cookie,
+    orgId,
+    spaceId: personalId,
+  });
+  const accepted = await memberClient.post(`/packages/${scope}/${name}/shares/accept`, {});
+  expect(accepted.status(), await accepted.text()).toBe(200);
+  expect((await accepted.json()).version_id).toEqual(expect.any(Number));
+});
+
 test("a non-admin builder manages a team offer from the space package view", async ({
   request,
   browser,

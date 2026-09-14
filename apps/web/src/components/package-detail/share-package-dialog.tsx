@@ -15,18 +15,24 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
+import type { PackageType } from "@appstrate/core/validation";
 import { $api } from "../../api/client";
+import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { splitPackageRef } from "../../lib/package-paths";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
+import { useCreateVersion } from "../../hooks/use-packages";
 import {
   shareTargetHandle,
   usePackageShares,
   useRevokePackageShare,
   useSharePackage,
 } from "../../hooks/use-package-shares";
+
+/** The subject of one offer, as the two tabs spell it. */
+type ShareTarget = { kind: "user"; user_id: string } | { kind: "space"; space_id: string };
 
 /**
  * A package's AUDIENCE — who it is offered to (RBAC spec §6.10).
@@ -36,18 +42,33 @@ import {
  * this dialog never handles that id. The list below is the current audience,
  * and revoking from it also uninstalls the package for that recipient — which
  * is why the button says so.
+ *
+ * Offering to a PERSON needs a published version, because their personal space
+ * installs at a pin (`409 package_has_no_version`). Rather than report that as
+ * an error the author must go elsewhere to fix, the dialog answers it in place:
+ * publish the draft's own version, then complete the offer that was refused.
  */
 export function SharePackageDialog({
   open,
   onClose,
   packageId,
+  type,
   homeSpaceId,
+  canPublish,
 }: {
   open: boolean;
   onClose: () => void;
   packageId: string;
+  /** Publishing is per-type — the version routes are `/api/packages/<type>/…`. */
+  type: PackageType;
   /** The package's home — never a share destination; it already lives there. */
   homeSpaceId: string | null | undefined;
+  /**
+   * `home_writable`: publishing is a WRITE in the home space, and a custom role
+   * may grant `share` without it (RBAC spec §6.10). Without it the dialog states
+   * the refusal and names no button the server would turn down.
+   */
+  canPublish: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const orgId = useCurrentOrgId();
@@ -61,8 +82,11 @@ export function SharePackageDialog({
   );
   const share = useSharePackage();
   const revoke = useRevokePackageShare();
+  const publish = useCreateVersion(type, packageId);
   const [user, setUser] = useState("");
   const [space, setSpace] = useState("");
+  /** The offer the server refused for want of a version, kept to replay it. */
+  const [needsVersion, setNeedsVersion] = useState<ShareTarget | null>(null);
 
   /** Already-offered subjects, so the pickers do not propose a no-op. */
   const offered = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
@@ -82,12 +106,11 @@ export function SharePackageDialog({
   const close = () => {
     setUser("");
     setSpace("");
+    setNeedsVersion(null);
     onClose();
   };
 
-  const submit = (
-    target: { kind: "user"; user_id: string } | { kind: "space"; space_id: string },
-  ) =>
+  const submit = (target: ShareTarget) =>
     share.mutate(
       { params: { path: splitPackageRef(packageId) }, body: { target } },
       {
@@ -95,10 +118,42 @@ export function SharePackageDialog({
           toast.success(t("packages.shareDone"));
           setUser("");
           setSpace("");
+          setNeedsVersion(null);
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
+        onError: (error) => {
+          // Not an error to report and walk away from: it is a missing step,
+          // and the next panel performs it. Every other refusal is terminal
+          // here and stays a toast.
+          if (error instanceof ApiError && error.code === "package_has_no_version") {
+            setNeedsVersion(target);
+            return;
+          }
+          toast.error(getErrorMessage(error));
+        },
       },
     );
+
+  /**
+   * Publish the draft under the version its own manifest declares, then replay
+   * the refused offer. Two calls the author could make by hand, in the order
+   * that makes the second one succeed — the server publishes nothing on its own
+   * (freezing somebody's working copy is their decision, not a side effect of
+   * a share).
+   */
+  const publishAndShare = async () => {
+    const target = needsVersion;
+    if (!target) return;
+    try {
+      const created = await publish.mutateAsync(undefined);
+      toast.success(t("packages.sharePublished", { version: created.version }));
+      setNeedsVersion(null);
+      submit(target);
+    } catch (error) {
+      // An incomplete draft is refused at publish (empty callable selections,
+      // a manifest the freeze point rejects): the server's own words say which.
+      toast.error(getErrorMessage(error));
+    }
+  };
 
   return (
     <Modal
@@ -167,6 +222,27 @@ export function SharePackageDialog({
           <p className="text-muted-foreground text-sm">{t("packages.shareSpaceHint")}</p>
         </TabsContent>
       </Tabs>
+
+      {needsVersion && (
+        <div
+          data-testid="share-needs-version"
+          className="mt-4 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+        >
+          <p>{t("packages.shareNeedsVersion")}</p>
+          {canPublish ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={publish.isPending || share.isPending}
+              onClick={() => void publishAndShare()}
+            >
+              {publish.isPending ? <Spinner /> : t("packages.sharePublishAndShare")}
+            </Button>
+          ) : (
+            <p className="text-muted-foreground">{t("packages.shareNeedsVersionNoWrite")}</p>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 space-y-1 border-t pt-4">
         <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>

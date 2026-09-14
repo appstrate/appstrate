@@ -279,6 +279,13 @@ beforeEach(async () => {
     draftContent: "---\nname: helper\ndescription: A skill\n---\n\nbody",
   });
   await seedDefaultOrgModel(ctx);
+  // Both fixtures carry a published version, because an offer to a PERSON needs
+  // one: their personal space installs at a pin, so `POST …/shares` refuses a
+  // package with nothing to pin (`package_has_no_version`). The suite shares
+  // with people constantly; a draft-only fixture would make every one of those
+  // assertions a 409.
+  await publish(AGENT, "0.1.0");
+  await publish(SKILL, "0.1.0");
 
   author = await principal({ orgRole: "member", space: { id: homeId, preset: "builder" } });
   viewer = await principal({ orgRole: "member", space: { id: homeId, preset: "viewer" } });
@@ -376,6 +383,50 @@ describe("authority — `<type>:share` in the home space", () => {
     );
   });
 
+  describe("an offer to a person needs something to pin", () => {
+    /** Strip the `latest` dist-tag: the package keeps its rows, loses its pin. */
+    const unpublish = (packageId: string) =>
+      db.delete(packageDistTags).where(eq(packageDistTags.packageId, packageId));
+
+    it("refuses a `user` target when nothing is published, and offers nothing", async () => {
+      await unpublish(AGENT);
+      await expectProblem(
+        await shareWithUser(author.headers(homeId), AGENT, recipient.userId),
+        409,
+        { code: "package_has_no_version" },
+      );
+      await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+    });
+
+    it("takes the same offer once a version exists", async () => {
+      await unpublish(AGENT);
+      await expectProblem(
+        await shareWithUser(author.headers(homeId), AGENT, recipient.userId),
+        409,
+        { code: "package_has_no_version" },
+      );
+      await publish(AGENT, "0.2.0");
+      expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(
+        200,
+      );
+    });
+
+    it("leaves a `space` target alone — a team installation takes no pin", async () => {
+      await unpublish(AGENT);
+      // The org owner, because the sharer must also REACH the destination and
+      // the home's builder is not a member of the team space.
+      expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    });
+
+    it("answers the AUTHORITY refusal first: a viewer gets 403, not 409", async () => {
+      await unpublish(AGENT);
+      await expectProblem(
+        await shareWithUser(viewer.headers(homeId), AGENT, recipient.userId),
+        403,
+      );
+    });
+  });
+
   it("refuses sharing a package with its own home (409)", async () => {
     await expectProblem(await shareWithSpace(author.headers(homeId), AGENT, homeId), 409, {
       code: "share_target_is_home",
@@ -455,7 +506,6 @@ describe("authority — `<type>:share` in the home space", () => {
 
 describe("offered is not activated", () => {
   beforeEach(async () => {
-    await publish(AGENT, "0.1.0");
     expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
   });
 
@@ -763,12 +813,24 @@ describe("offered is not activated", () => {
   });
 });
 
-describe("a share with nothing published", () => {
+describe("a share whose version disappeared after the offer", () => {
+  // `POST …/shares` refuses a person when nothing is published, so the accept
+  // path's own refusal survives for exactly one shape: the `latest` went away
+  // between the offer and the accept. It must still refuse rather than install
+  // an unpinned row that would follow the author's draft.
   it("answers 409 rather than installing something that follows `latest`", async () => {
     expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    await db.delete(packageDistTags).where(eq(packageDistTags.packageId, AGENT));
     await expectProblem(await acceptShare(recipient.headers(), AGENT), 409, {
       code: "package_has_no_version",
     });
+    await assertDbMissing(
+      spacePackages,
+      and(
+        eq(spacePackages.packageId, AGENT),
+        eq(spacePackages.spaceId, recipient.personalSpaceId),
+      )!,
+    );
   });
 });
 
@@ -827,6 +889,9 @@ describe("nothing leaks about a personal space", () => {
       draftManifest: { name: PRIVATE_AGENT, version: "0.1.0", type: "agent" },
       draftContent: "Private.",
     });
+    // Offering it to a person needs something to pin, like every other offer
+    // in this suite.
+    await publish(PRIVATE_AGENT, "0.1.0");
     // The admin cannot see it at all to begin with.
     await expectProblem(
       await app.request(`/api/packages/agents/${PRIVATE_AGENT}`, { headers: admin.headers() }),
@@ -1010,9 +1075,8 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
 
   it("on: the home's builder downloads an org package it may share, a viewer may not", async () => {
     await setRestrictCopy(true);
-    await publish(AGENT, "0.1.0");
-    // No archive in storage for this one — the point is that the COPY gate does
-    // not fire, so the refusal is the missing artifact and not a 403.
+    // The point is that the COPY gate does not fire for this caller: whatever
+    // the download answers, it is not a 403.
     expect((await download(author, AGENT, homeId)).status).not.toBe(403);
     await expectProblem(await download(viewer, AGENT, homeId), 403, {
       code: "package_copy_restricted",
@@ -1029,7 +1093,6 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
     await setRestrictCopy(true);
     expect((await download(viewer, SKILL, homeId)).status).not.toBe(403);
     // The control, same caller, same space, same toggle: an AGENT is refused.
-    await publish(AGENT, "0.1.0");
     await expectProblem(await download(viewer, AGENT, homeId), 403, {
       code: "package_copy_restricted",
     });
@@ -1067,7 +1130,6 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
 
   it("on: a run is unaffected — a bundle is assembled server-side, never copied", async () => {
     await setRestrictCopy(true);
-    await publish(AGENT, "0.1.0");
     expect((await shareWithUser(author.headers(homeId), AGENT, viewer.userId)).status).toBe(200);
     await acceptShare(viewer.headers(), AGENT);
     const launched = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
@@ -1098,7 +1160,6 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
  */
 describeRequiresPostgres("a revoke racing an accept (needs a real PostgreSQL)", () => {
   beforeEach(async () => {
-    await publish(AGENT, "0.1.0");
     expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
     // NOT accepted: the fixture must leave `space_packages` empty for this
     // pair, so the revoke's second DELETE takes no row lock of its own and the

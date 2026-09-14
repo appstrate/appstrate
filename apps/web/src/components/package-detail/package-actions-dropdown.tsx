@@ -183,7 +183,9 @@ export function PackageActionsDropdown({
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         packageId={packageId}
+        type={type}
         homeSpaceId={homeSpaceId}
+        canPublish={!!homeWritable}
       />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
