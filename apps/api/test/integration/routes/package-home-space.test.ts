@@ -12,7 +12,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { packages, spacePackages } from "@appstrate/db/schema";
+import { packages, packageShares, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem, getDbRow } from "../../helpers/assertions.ts";
@@ -26,6 +26,7 @@ import {
 import {
   seedAgent,
   seedInstalledPackage,
+  seedPackageShare,
   seedPackage,
   seedPackageVersion,
   seedSpace,
@@ -140,11 +141,26 @@ beforeEach(async () => {
     draftContent: CONTENT,
   });
   await seedInstalledPackage(alphaId, ID);
+  // Beta is a SECOND PLACEMENT — offered, then installed, which is the only
+  // shape a non-home installation can have (RBAC spec §6.9, and what
+  // `scripts/migration/0016` writes for the ones that predate the rule). What
+  // this file pins is that a placement is not authority: Beta's builder reads
+  // the package and still may not write it.
+  await seedPackageShare(betaId, ID);
   await seedInstalledPackage(betaId, ID);
 
   alpha = await builderIn(alphaId);
   beta = await builderIn(betaId);
 });
+
+/** Every space the package is OFFERED to — the placement rule's second half. */
+async function sharedSpaceIds(): Promise<string[]> {
+  const rows = await db
+    .select({ spaceId: packageShares.spaceId })
+    .from(packageShares)
+    .where(eq(packageShares.packageId, ID));
+  return rows.map((row) => row.spaceId);
+}
 
 /** The package's own detail, from whatever space the headers name. */
 const detailOf = (headers: Record<string, string>) =>
@@ -178,7 +194,7 @@ describe("write authority follows the home", () => {
     expect(res.status, await res.clone().text()).toBe(200);
   });
 
-  it("refuses the builder of the other installation", async () => {
+  it("refuses the builder of the other placement", async () => {
     await expectProblem(await editSkill(beta), 403);
     expect((await getDbRow(packages, eq(packages.id, ID))).draftContent).toBe(CONTENT);
   });
@@ -231,9 +247,9 @@ describe("write authority follows the home", () => {
 });
 
 describe("the home is a read grant", () => {
-  // Homed in Alpha, installed ONLY in Beta — the shape that was writable and
+  // Homed in Alpha, placed ONLY in Beta — the shape that was writable and
   // unreadable at the same time: the home authorized the `PUT`, and every read
-  // gate asked for an installation the home did not have.
+  // gate asked for a placement the home did not have.
   beforeEach(async () => {
     await db
       .delete(spacePackages)
@@ -257,7 +273,7 @@ describe("the home is a read grant", () => {
     expect(await skillIndexIds(alpha)).toContain(ID);
   });
 
-  it("opens nothing in a space that is neither the home nor an installation", async () => {
+  it("opens nothing in a space that is neither the home nor a placement", async () => {
     const gamma = await builderIn(gammaId);
     await expectProblem(await detailOf(gamma), 404);
     await expectProblem(await filesOf(gamma), 404);
@@ -359,6 +375,31 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
 
     await expectProblem(await editSkill(alpha), 403);
     expect((await editSkill(beta)).status).toBe(200);
+  });
+
+  it("re-places the installations the move would orphan", async () => {
+    // THE invariant of the placement rule: no `space_packages` row outside the
+    // package's home without a `package_shares` row behind it. Moving the home
+    // out of Alpha — where the package is still installed — is the one act that
+    // can break it, leaving an installation still running for a schedule and
+    // invisible on every page of the space running it. So the move writes the
+    // share that now places Alpha, and drops the destination's own (a package
+    // is not offered to the space it lives in).
+    expect((await sharedSpaceIds()).sort()).toEqual([betaId]);
+
+    expect((await move(owner(), betaId)).status).toBe(200);
+
+    expect((await sharedSpaceIds()).sort()).toEqual([alphaId]);
+    // …and Alpha's builder still READS what Alpha still runs.
+    expect((await detailOf(alpha)).status).toBe(200);
+    expect(await skillIndexIds(alpha)).toContain(ID);
+  });
+
+  it("re-places them for the organization catalog too — a NULL home places nothing", async () => {
+    expect((await move(owner(), null)).status).toBe(200);
+    expect((await sharedSpaceIds()).sort()).toEqual([alphaId, betaId].sort());
+    expect((await detailOf(alpha)).status).toBe(200);
+    expect((await detailOf(beta)).status).toBe(200);
   });
 
   it("requires write in the destination, not only in the current home", async () => {
@@ -511,8 +552,8 @@ describe("the home on the wire", () => {
     });
   });
 
-  it("withholds the id from a reader whose only reach is another installation", async () => {
-    // Beta's builder READS the package — it is installed there — and never
+  it("withholds the id from a reader whose only reach is another placement", async () => {
+    // Beta's builder READS the package — it is offered there — and never
     // reaches Alpha. Emitting Alpha's id would hand them a space that does not
     // exist for them, which is the whole reason the field is projected.
     expect(await homeWire(beta)).toEqual({ home_space_id: null, home_writable: false });
@@ -524,7 +565,13 @@ describe("the home on the wire", () => {
     // A NULL home is the organization catalogue: the same `null` on the wire,
     // but writable — which is exactly why `home_writable` exists rather than a
     // client-side reading of the id.
+    //
+    // The offer into Alpha is what keeps the package READABLE there once the
+    // home stops placing it: a NULL home places it in no space at all, and the
+    // catalogue exception lives in the cross-space reader, not in the
+    // current-space gate this route goes through.
     await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, ID));
+    await seedPackageShare(alphaId, ID);
     expect(await homeWire(owner())).toEqual({ home_space_id: null, home_writable: true });
     expect(await homeWire(beta)).toEqual({ home_space_id: null, home_writable: false });
   });

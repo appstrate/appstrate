@@ -30,12 +30,14 @@
 
 import { describe, it, expect, beforeEach, beforeAll } from "bun:test";
 import { eq } from "drizzle-orm";
-import { spacePackages } from "@appstrate/db/schema";
+import { packageShares, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import {
   seedPackage,
+  seedPackageShare,
+  seedPublishedVersion,
   seedInstalledPackage,
   seedApiKey,
   seedPackageVersion,
@@ -60,6 +62,9 @@ const SKILL_BODY =
  * which would make the negative assertions below pass for the wrong reason.
  */
 async function publishSkill(ctx: TestContext, version = "0.1.0"): Promise<void> {
+  // Deliberately UNPLACED: the suite's visibility assertions turn on the
+  // caller's space not reaching this package, so its placement (home or share)
+  // is each test's own fixture and never the publisher's.
   await seedPackage({ id: SKILL_ID, type: "skill", orgId: ctx.orgId, createdBy: ctx.user.id });
 
   const zip = zipArtifact({
@@ -109,6 +114,7 @@ describe("packages GET routes — read permission", () => {
 
     await seedPackage({
       id: SKILL_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
@@ -196,7 +202,18 @@ describe("packages GET routes — read permission", () => {
     // An `agents:read`-only key must not reach a SKILL — the per-type guard is
     // the point. Reading the agent is still allowed with the same key.
     const agentId = "@testorg/read-guard-agent";
-    await seedPackage({ id: agentId, type: "agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    await seedPackage({
+      id: agentId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "agent",
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
+    // PUBLISHED: an API key never holds write authority over a package, so the
+    // agent detail it reads is the latest published version — an unpublished
+    // agent answers `404 no_published_version` and this test would assert the
+    // wrong refusal.
+    await seedPublishedVersion(agentId, "0.1.0");
     await seedInstalledPackage(ctx.defaultSpaceId, agentId);
 
     const key = await seedApiKey({
@@ -228,6 +245,7 @@ describe("packages version download — access + read permission", () => {
 
   it("403s a download for a key without the package type's read scope", async () => {
     await publishSkill(ctx);
+    await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
     await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
 
     const key = await seedApiKey({
@@ -245,6 +263,7 @@ describe("packages version download — access + read permission", () => {
 
   it("serves the artifact to a key holding skills:read", async () => {
     await publishSkill(ctx);
+    await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
     await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
 
     const key = await seedApiKey({
@@ -310,6 +329,7 @@ describe("packages file explorer — read permission", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "testorg" });
     await publishSkill(ctx);
+    await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
     await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
   });
 
@@ -404,9 +424,12 @@ describe("packages file explorer — read permission", () => {
 
   it("still 404s (not 403s) a package the calling space cannot see", async () => {
     // Visibility is settled first and deliberately: the RBAC resource comes
-    // from the row, so `hasPackageAccess` has to run before the type is known.
-    // Same order as `/{version}/download` — permission is held here.
+    // from the row, so the placement check has to run before the type is known.
+    // Same order as `/{version}/download` — permission is held here. BOTH rows
+    // go: a package is placed in a space by its home or by a share, so leaving
+    // the offer behind would keep it visible and the 404 would never be tested.
     await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
+    await db.delete(packageShares).where(eq(packageShares.packageId, SKILL_ID));
 
     const res = await app.request(`/api/packages/${SKILL_ID}/files`, {
       headers: authHeaders(ctx),

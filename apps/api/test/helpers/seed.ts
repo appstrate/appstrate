@@ -14,6 +14,7 @@ import { db } from "./db.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   packages,
+  packageShares,
   spacePackages,
   runs,
   runLogs,
@@ -25,11 +26,16 @@ import {
   orgModels,
   orgInvitations,
   packageVersions,
+  packageDistTags,
   spaceMembers,
   spaceRoles,
 } from "@appstrate/db/schema";
 import { eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { mcpServerManifest } from "./integration-manifests.ts";
+import { zipArtifact } from "@appstrate/core/zip";
+import { computeIntegrity } from "@appstrate/core/integrity";
+import * as storage from "@appstrate/db/storage";
+import { AGENT_PACKAGES_BUCKET, versionZipKey } from "../../src/services/package-storage-keys.ts";
 
 // ─── Packages / Agents ───────────────────────────────────
 
@@ -85,6 +91,75 @@ export async function seedInstalledPackage(
       // already-installed package; no-op write when there are none.
       set: overrides && Object.keys(overrides).length > 0 ? overrides : { spaceId },
     });
+}
+
+/**
+ * Offer a package to a space (`package_shares`) — the PLACEMENT that makes it
+ * readable and installable there (RBAC spec §6.9, §6.10).
+ *
+ * A fixture for the sharer's act, not for the recipient's: it writes the offer
+ * and nothing else, so a test can set up "this space was offered the package"
+ * without going through `POST …/shares` and its authority checks. Pair it with
+ * {@link seedInstalledPackage} when the space should also have taken it up.
+ * `sharedBy` is nullable for the same reason `scripts/migration/0016` leaves it
+ * null: nobody in particular made this offer.
+ */
+export async function seedPackageShare(
+  spaceId: string,
+  packageId: string,
+  sharedBy: string | null = null,
+): Promise<void> {
+  await db.insert(packageShares).values({ spaceId, packageId, sharedBy }).onConflictDoNothing();
+}
+
+/**
+ * Publish a version of a package: upload a real AFPS archive, record the
+ * `package_versions` row that matches its integrity, and move the `latest`
+ * dist-tag onto it.
+ *
+ * The BYTES matter. Outside its home a package runs its latest published
+ * version, and the resolver reads that version's prompt out of storage — a
+ * row with no object behind it answers `422 version_artifact_unavailable`,
+ * which would make a fixture fail for a reason no test meant to assert.
+ *
+ * The manifest and content default to the package's own draft, which is what
+ * "the author published what they have" looks like and keeps a suite's
+ * assertions about the draft true of the published version too.
+ */
+export async function seedPublishedVersion(
+  packageId: string,
+  version: string,
+  opts?: { manifest?: Record<string, unknown>; content?: string },
+): Promise<InferSelectModel<typeof packageVersions>> {
+  const [pkg] = await db.select().from(packages).where(eq(packages.id, packageId)).limit(1);
+  if (!pkg) throw new Error(`seedPublishedVersion: package ${packageId} is not seeded`);
+  const manifest = opts?.manifest ?? {
+    ...(pkg.draftManifest as Record<string, unknown>),
+    name: packageId,
+    version,
+    type: pkg.type,
+  };
+  const content = opts?.content ?? pkg.draftContent ?? "content";
+  const zip = zipArtifact({
+    "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+    [pkg.type === "skill" ? "SKILL.md" : "prompt.md"]: new TextEncoder().encode(content),
+  });
+  await storage.uploadFile(AGENT_PACKAGES_BUCKET, versionZipKey(packageId, version), zip);
+  const row = await seedPackageVersion({
+    packageId,
+    version,
+    manifest,
+    integrity: computeIntegrity(zip),
+    artifactSize: zip.byteLength,
+  });
+  await db
+    .insert(packageDistTags)
+    .values({ packageId, tag: "latest", versionId: row.id })
+    .onConflictDoUpdate({
+      target: [packageDistTags.packageId, packageDistTags.tag],
+      set: { versionId: row.id, updatedAt: new Date() },
+    });
+  return row;
 }
 
 // ─── Package Versions ─────────────────────────────────────

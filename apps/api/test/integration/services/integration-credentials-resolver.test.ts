@@ -167,6 +167,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     token = startTokenServer();
     await seedPackage({
       id: INTEGRATION_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -584,6 +585,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     // Agent requires `delete`; the refresh narrows the grant to read+send only.
     await seedPackage({
       id: "@creds/agent-deleter",
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "agent",
       draftManifest: agentManifest("@creds/agent-deleter", ["delete_message"]),
@@ -608,6 +610,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     // Agent requires only `read`; the refresh shrinks delete away but keeps read.
     await seedPackage({
       id: "@creds/agent-reader",
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "agent",
       draftManifest: agentManifest("@creds/agent-reader", ["list_messages"]),

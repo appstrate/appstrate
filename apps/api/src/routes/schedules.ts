@@ -42,7 +42,11 @@ import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
-import { agentReadIsSummary } from "../lib/package-access.ts";
+import {
+  agentReadIsSummary,
+  assertDraftSelectorAllowed,
+  assertDependencyDraftOverridesAllowed,
+} from "../lib/package-access.ts";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -106,6 +110,50 @@ function assertFirable(cronExpression: string, timezone: string): void {
 }
 
 /**
+ * Did this patch MOVE the draft selector, or merely echo the one already
+ * stored?
+ *
+ * A stored value is not an act. The edit form reads the row, renders it, and
+ * posts every field back, so `version_override: "draft"` arrives on a patch
+ * whose author only touched the cron expression — and judging the echo refuses
+ * that cron edit to every space member who did not write the AGENT, for a
+ * working copy the request never asked to run. The row's selector was judged
+ * when it was written, by whoever wrote it; re-deciding it on each subsequent
+ * write would make authority a property of the last editor rather than of the
+ * one who chose the draft.
+ *
+ * Only a value the patch CHANGES is a decision, and then the value judged is
+ * the new one. Clearing it (`null`) is never refused: dropping back to the
+ * published default takes nothing away from anyone.
+ */
+function draftSelectorMoved(patched: string | null | undefined, stored: string | null): boolean {
+  if (patched === undefined) return false;
+  return (patched ?? undefined) !== (stored ?? undefined);
+}
+
+/**
+ * The same question, per dependency: the subset of `dependency_overrides` this
+ * patch actually MOVES.
+ *
+ * Judged key by key rather than map by map, because the map is judged key by
+ * key — authority over `@a/skill`'s draft says nothing about `@b/skill`'s — and
+ * because the form posts the whole map back. A key whose value is unchanged was
+ * already proven at the write that introduced it; a key this patch DROPS takes
+ * a draft away, which needs no authority at all.
+ */
+function movedDependencyOverrides(
+  patched: Readonly<Record<string, string>> | null | undefined,
+  stored: Readonly<Record<string, string>> | null,
+): Record<string, string> | null {
+  if (!patched) return null;
+  const moved: Record<string, string> = {};
+  for (const [dependencyId, selector] of Object.entries(patched)) {
+    if (stored?.[dependencyId] !== selector) moved[dependencyId] = selector;
+  }
+  return moved;
+}
+
+/**
  * Validate a schedule's stored input against the manifest the schedule will
  * actually FIRE — not the editor's working copy.
  *
@@ -127,20 +175,27 @@ function assertFirable(cronExpression: string, timezone: string): void {
  *
  * Resolving first is what `routes/runs.ts` already does for a manual launch;
  * this is the same order on the surface that keeps its verdict forever.
+ *
+ * Authority over the DRAFT is decided by the caller, not here: create judges
+ * the selector it receives, update judges only one that MOVES
+ * ({@link draftSelectorMoved}). Both do it at the WRITE and never at fire time
+ * — the authority is a property of the principal who writes the row, frozen
+ * onto it exactly as `connection_overrides` are, and `services/scheduler.ts`
+ * runs with no Hono context and deliberately re-checks nothing. This function
+ * still RESOLVES the selector it is handed, including a `draft` it did not
+ * judge, because the input has to be validated against the manifest that will
+ * actually fire.
  */
 async function assertScheduleTargetValid(args: {
+  c: Context<AppEnv>;
   scope: SpaceScope;
   agent: LoadedPackage;
   /** `version_override` as this request leaves it — the selector every fire replays. */
   versionOverride: string | undefined;
   packageSettings: InstalledPackageSettings;
   input: Record<string, unknown> | undefined;
-}): Promise<void> {
-  const { agent: effectiveAgent } = await resolveAgentRunVersion(
-    args.agent,
-    args.versionOverride,
-    args.scope,
-  );
+}): Promise<LoadedPackage> {
+  const { agent: effectiveAgent } = await resolveAgentRunVersion(args.agent, args.versionOverride);
   const inputSchema = effectiveAgent.manifest.input?.schema;
 
   if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
@@ -159,6 +214,10 @@ async function assertScheduleTargetValid(args: {
     input: args.input,
   });
   if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
+  // Handed back so the dependency gate judges override KEYS against the very
+  // definition this write just validated the input against — resolving the
+  // selector a second time there would let the two answers drift.
+  return effectiveAgent;
 }
 
 /**
@@ -322,13 +381,28 @@ export function createSchedulesRouter() {
       const scope = getSpaceScope(c);
 
       const packageSettings = await getInstalledPackageSettings(scope.spaceId, agent.id);
-      await assertScheduleTargetValid({
+      // A creation names every selector it carries, so every one of them is an
+      // act: `version_override: "draft"` here IS the request to freeze the
+      // author's working copy onto a row that replays it forever.
+      await assertDraftSelectorAllowed(c, agent.id, data.version_override);
+      const effectiveAgent = await assertScheduleTargetValid({
+        c,
         scope,
         agent,
         versionOverride: data.version_override,
         packageSettings,
         input: data.input,
       });
+      // The same proof for every dependency the schedule opts into its working
+      // copy — frozen onto the row here, replayed unchecked at every fire. A
+      // key the effective manifest does not declare is refused here as a
+      // malformed request, rather than freezing onto the row and 400-ing at
+      // every tick.
+      await assertDependencyDraftOverridesAllowed(
+        c,
+        data.dependency_overrides,
+        effectiveAgent.manifest as unknown as Record<string, unknown>,
+      );
 
       // #738: actor defaults to the caller; an admin may override it from the
       // form (validated against this org/space scope).
@@ -413,6 +487,24 @@ export function createSchedulesRouter() {
     // which can both run on the same request.
     const packageSettings = await getInstalledPackageSettings(scope.spaceId, existing.packageId);
 
+    // The selector this row will replay after the patch: `null` clears the
+    // override, i.e. back to the unified default; omitted leaves whatever the
+    // row already holds. Every judgement below is made against THIS value.
+    const nextVersionOverride =
+      (data.version_override !== undefined ? data.version_override : existing.version_override) ??
+      undefined;
+    /** Set by the input gate below when it runs; reused by the dependency gate. */
+    let effectiveAgent: LoadedPackage | null = null;
+
+    // A `version_override` this patch MOVES is an act and proves itself; one it
+    // merely echoes back was judged at the write that chose it. Outside the
+    // input gate on purpose: that gate asks "does the manifest decision move",
+    // and a selector that moves always does, while a patch that only re-sends
+    // it must reach the input validation without being refused.
+    if (draftSelectorMoved(data.version_override, existing.version_override)) {
+      await assertDraftSelectorAllowed(c, existing.packageId, data.version_override);
+    }
+
     // Same resolve-and-validate the create route runs, for the same stated
     // reason: refuse at THIS write rather than silently at every tick. A PUT
     // replacing `input` with a wrong-typed or incomplete value used to answer
@@ -442,18 +534,44 @@ export function createSchedulesRouter() {
       // so the impossible case is a typed 404 rather than a schedule validated
       // against nothing.
       if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
-      await assertScheduleTargetValid({
+      effectiveAgent = await assertScheduleTargetValid({
+        c,
         scope,
         agent: agentForInput,
         // `null` clears the override, i.e. back to the unified default; omitted
         // leaves whatever the row already replays.
-        versionOverride:
-          (data.version_override !== undefined
-            ? data.version_override
-            : existing.version_override) ?? undefined,
+        versionOverride: nextVersionOverride,
         packageSettings,
         input: data.input ?? existing.input ?? undefined,
       });
+    }
+
+    // A patch that ADDS or CHANGES a dependency override proves the authority
+    // for it, on its own gate: unlike the pair above, a dependency draft is
+    // judged package by package. The keys this patch leaves where they were
+    // are the row's own, already proven at the write that introduced them.
+    const movedDeps = movedDependencyOverrides(
+      data.dependency_overrides,
+      existing.dependency_overrides,
+    );
+    if (movedDeps && Object.keys(movedDeps).length > 0) {
+      // The manifest the keys are judged against is the one this row will
+      // FIRE, so a patch that only moves the dependency map still resolves it —
+      // adding an override changes what the schedule executes, and that is the
+      // half of a patch that has to prove itself.
+      let target = effectiveAgent;
+      if (!target) {
+        const agentForDeps = await getPackage(existing.packageId, scope.orgId);
+        // Unreachable in practice for the same reason the input gate's twin is:
+        // `package_schedules.package_id` cascades. Typed, not assumed.
+        if (!agentForDeps) throw notFound(`Agent '${existing.packageId}' not found`);
+        target = (await resolveAgentRunVersion(agentForDeps, nextVersionOverride)).agent;
+      }
+      await assertDependencyDraftOverridesAllowed(
+        c,
+        movedDeps,
+        target.manifest as unknown as Record<string, unknown>,
+      );
     }
 
     // Reject a `model_id_override` that references no real model (no-op when

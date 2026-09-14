@@ -31,6 +31,20 @@ interface PackageFileToolContext {
    * and a context without it would install unauthorised ones.
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
+  /**
+   * Whether the caller may OFFER a package out of its home space — asked of a
+   * re-imported root that already lives in ANOTHER space, so this tool places
+   * it by the same rule as `POST /api/packages/import-bundle` and
+   * `POST /api/spaces/{id}/packages`: the offer is written with the
+   * installation when the caller holds `<type>:share` in the home, and the
+   * result reports `root_installed: false` when they do not.
+   *
+   * Optional, and absent means `false`: a caller with no request context
+   * cannot be asked, and an import that silently offered on their behalf would
+   * be the one door that placed a package without proving the authority. One
+   * act, one rule — the fail-closed answer is the honest one here.
+   */
+  mayShareRoot?: (packageId: string) => Promise<boolean>;
 }
 
 interface PackageFileBytes {
@@ -212,6 +226,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
         ctx.scope,
         ctx.actor.id,
         ctx.authorizeBundle,
+        ctx.mayShareRoot,
       );
       for (const audit of bundleImportAuditRecords(result, {
         via: "import:file",

@@ -20,10 +20,7 @@ import {
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
-import {
-  getInstalledPackageSettings,
-  getInstalledPackageVersion,
-} from "../services/space-packages.ts";
+import { getInstalledPackageSettings } from "../services/space-packages.ts";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -33,7 +30,10 @@ import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import {
   agentReadIsSummary,
+  draftNotWritable,
+  defaultDefinitionSelector,
   homeWireForCaller,
+  homeWritableForPackages,
   packageAccessSpaces,
 } from "../lib/package-access.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
@@ -60,11 +60,21 @@ import { runVisibilityFilter } from "../lib/run-visibility.ts";
  * silently stop the client flagging a missing skill. Unifying the two — one
  * array of declared skills carrying `resolved` — is a wire change, tracked
  * separately.
+ *
+ * Every skill carries `home_writable`: the launch form offers "run this
+ * dependency's draft" per skill, and the run route refuses that draft to
+ * whoever cannot write THAT skill. Without the flag the option is a button that
+ * 403s. One catalogue read for the whole list, never one per row.
  */
 async function buildDependencyGroups(
   m: AgentManifest,
   orgId: string,
-  opts: { versioned: boolean; summaryOnly: boolean },
+  opts: {
+    versioned: boolean;
+    summaryOnly: boolean;
+    c: Context<AppEnv>;
+    accessible: Awaited<ReturnType<typeof packageAccessSpaces>>;
+  },
 ): Promise<AgentDetail["dependencies"]> {
   const integrations = parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
     id: e.id,
@@ -77,7 +87,7 @@ async function buildDependencyGroups(
 
   if (opts.summaryOnly) return { integrations };
 
-  const skillDeps = opts.versioned
+  const declaredSkills = opts.versioned
     ? Object.entries(
         (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
       ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
@@ -89,6 +99,15 @@ async function buildDependencyGroups(
           ...(s.name ? { name: s.name } : {}),
           ...(s.description ? { description: s.description } : {}),
         }));
+  const skillWritable = await homeWritableForPackages(
+    opts.c,
+    declaredSkills.map((s) => s.id),
+    opts.accessible,
+  );
+  const skillDeps = declaredSkills.map((s) => ({
+    ...s,
+    home_writable: skillWritable.get(s.id) ?? false,
+  }));
   return {
     skills: skillDeps,
     // AFPS §4.1 mcp_servers dependency group ({ id: version-range }). Agents
@@ -145,18 +164,43 @@ export async function buildAgentDetailDto(
     return null;
   }
 
-  // Launch forms read the installed snapshot by default; unpinned authoring
-  // still reads the draft. Explicit selectors use the run's own resolver.
-  const versionPin = await getInstalledPackageVersion(scope, agent.id);
-  const versionSel = opts.version?.trim() || versionPin;
-  const versioned = !!versionSel && versionSel !== VERSION_SELECTOR_DRAFT;
-  const effective = versioned
-    ? await resolveAgentRunVersion(agent, versionSel ?? undefined, scope)
-    : null;
+  // WHICH definition this page renders (plan decision 5). An explicit
+  // `?version=` is honoured — `draft` only for a caller who may write the agent,
+  // the same refusal the run route makes from the same predicate. With no
+  // selector, `defaultDefinitionSelector` answers: the author's DRAFT, else the
+  // latest PUBLISHED version, else — nothing published at all — the draft in
+  // read-only, because a readable package whose page 404s is a link the list
+  // just promised and cannot honour. Running it still refuses (the launch keeps
+  // its `404 no_published_version`), and `definition` below tells the reader
+  // which of the two they have so the SPA can say so.
+  const explicit = opts.version?.trim();
+  // ONE read of the authority, for both halves of the decision: which view is
+  // the default, and whether an explicit `draft` is the caller's to ask for.
+  const { selector: defaultSel, writable } = await defaultDefinitionSelector(c, agent, accessible);
+  if (explicit === VERSION_SELECTOR_DRAFT && !writable) throw draftNotWritable(agent.id);
+  const versionSel = explicit || defaultSel;
+  const effective =
+    versionSel === VERSION_SELECTOR_DRAFT ? null : await resolveAgentRunVersion(agent, versionSel);
+  // A published SNAPSHOT was substituted — not merely "a selector was named".
+  // A system agent ships its definition with the platform and resolves to
+  // itself whatever the selector says, so it stays on the draft projection of
+  // the dependency groups, which is the one that enriches skills from the
+  // catalog.
+  const versioned = effective?.overrideVersionLabel !== undefined;
   const m = effective?.agent.manifest ?? agent.manifest;
   const effectivePrompt = effective?.agent.prompt ?? agent.prompt;
 
-  const dependencies = await buildDependencyGroups(m, orgId, { versioned, summaryOnly });
+  // The wire name for the projection above: `draft` is the working copy,
+  // `published` any `package_versions` snapshot (the `latest` one by default,
+  // or the one an explicit `?version=` named).
+  const definition = versionSel === VERSION_SELECTOR_DRAFT ? "draft" : "published";
+
+  const dependencies = await buildDependencyGroups(m, orgId, {
+    versioned,
+    summaryOnly,
+    c,
+    accessible,
+  });
 
   const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
     spaceId,
@@ -190,7 +234,14 @@ export async function buildAgentDetailDto(
     // `{scope}` path params accept (issue #629).
     scope: parsed ? `@${parsed.scope}` : null,
     version: m.version ?? null,
-    version_pin: versionPin,
+    // WHICH of the two definitions the fields above were projected from — the
+    // author's working copy or a published snapshot. Emitted unconditionally
+    // and for every caller: `home_writable` alone cannot answer it, because a
+    // reader with no authority also lands on the draft when the agent has
+    // never been published, and that is precisely the pair the SPA renders as
+    // "never published — you are seeing the author's work in progress" with
+    // Launch disabled.
+    definition,
     dependencies,
     // The agent's ONE parameter schema, plus the per-space layers the
     // launch form needs: `values` are the editor's stored defaults and

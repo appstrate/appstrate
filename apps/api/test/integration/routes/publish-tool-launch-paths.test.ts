@@ -214,10 +214,7 @@ describe("publish_file across every launch path", () => {
     );
 
     const draftAgent = await getPackage("@compatorg/scheduled", ctx.orgId);
-    const resolved = await resolveAgentRunVersion(draftAgent!, "1.0.0", {
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-    });
+    const resolved = await resolveAgentRunVersion(draftAgent!, "1.0.0");
 
     await assertPublishToolSurvivesLaunch(resolved.agent, resolved.overrideVersionLabel);
   });

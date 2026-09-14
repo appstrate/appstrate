@@ -21,6 +21,7 @@ import {
 import {
   seedPackage,
   seedInstalledPackage,
+  seedPackageShare,
   seedSpace,
   seedSpaceMember,
   seedSpaceRole,
@@ -43,12 +44,22 @@ describe("space package install/config/uninstall — permission is per package t
     owner = await createTestContext();
     runs = await seedSpace({ orgId: owner.orgId, name: "Runs" });
     visits = await seedSpace({ orgId: owner.orgId, name: "Visits" });
-    await seedPackage({ orgId: owner.orgId, id: AGENT, type: "agent" });
-    await seedPackage({ orgId: owner.orgId, id: SKILL, type: "skill" });
-    // A local source must be readable before it can be copied to another space.
-    // Both callers can read this open space; only their target install grants differ.
-    await seedInstalledPackage(owner.defaultSpaceId, AGENT);
-    await seedInstalledPackage(owner.defaultSpaceId, SKILL);
+    // Homed in the default space, and OFFERED to both target spaces. The offer
+    // is what places a package in a space it does not live in (RBAC spec §6.9);
+    // this suite is about the install GRANT on top of that placement, so the
+    // placement is fixture rather than subject. Without it every install here
+    // would answer 404 for want of an audience decision, and the grant under
+    // test would never be reached.
+    for (const id of [AGENT, SKILL]) {
+      await seedPackage({
+        orgId: owner.orgId,
+        id,
+        type: id === AGENT ? "agent" : "skill",
+        homeSpaceId: owner.defaultSpaceId,
+      });
+      await seedPackageShare(runs.id, id);
+      await seedPackageShare(visits.id, id);
+    }
 
     spaceAdmin = await memberContext(owner, "member");
     await seedSpaceMember({ spaceId: runs.id, userId: spaceAdmin.user.id, presetRole: "admin" });

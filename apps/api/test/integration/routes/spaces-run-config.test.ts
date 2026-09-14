@@ -35,10 +35,10 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
         dependencies: { integrations: { "@afps/gmail": "^1.0.0" } },
       },
     });
-    const version = await seedPackageVersion({
-      packageId: "@testorg/agent",
-      version: "1.2.3",
-    });
+    // A published version EXISTS and must not leak into this response: the
+    // run-config is the per-space model/proxy/input layer, and which bytes run
+    // is the launch selector's business.
+    await seedPackageVersion({ packageId: "@testorg/agent", version: "1.2.3" });
 
     await db.insert(spacePackages).values({
       spaceId: ctx.defaultSpaceId,
@@ -46,7 +46,6 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       modelId: "claude-sonnet",
       generationConfig: { temperature: 0.2, reasoningLevel: "high" },
       proxyId: null,
-      versionId: version.id,
     });
 
     const res = await app.request(
@@ -55,12 +54,12 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
+    // `toEqual` on the WHOLE body, so a re-added version member fails here.
     expect(body).toEqual({
       generation: { temperature: 0.2, reasoningLevel: "high" },
       input: { values: {}, locked_fields: [] },
       modelId: "claude-sonnet",
       proxyId: null,
-      version_pin: "1.2.3",
     });
     // `input` carries the per-space layer, and it is NOT a second source
     // of truth. This endpoint feeds `appstrate run @scope/agent`, which fetches
@@ -108,7 +107,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
     expect(body.code).toBe("package_not_installed");
   });
 
-  it("returns null versionPin when no version is pinned", async () => {
+  it("emits the empty shape for a row with nothing stored", async () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@testorg/agent",
@@ -124,7 +123,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body.version_pin).toBeNull();
+    expect(body).not.toHaveProperty("version_pin");
     expect(body.modelId).toBeNull();
     expect(body.proxyId).toBeNull();
     // A row with nothing stored still emits both members — the CLI reads them

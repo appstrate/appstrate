@@ -25,6 +25,7 @@ import {
   type FakeKeyringInstall,
 } from "./helpers/auth-fixture.ts";
 import { createSkillServer, skillMd } from "./helpers/skills-server.ts";
+import { formatError } from "../src/lib/ui.ts";
 
 const configHome = useTempConfigHome("appstrate-cli-skills-plan-");
 let keyring: FakeKeyringInstall;
@@ -81,6 +82,92 @@ describe("resolveSkill", () => {
     ]).install();
 
     expect(await resolveSkill("default", "@acme/draft-only", "published")).toBeNull();
+  });
+});
+
+describe("resolveSkill — the draft is NAMED, never left to the route's default", () => {
+  // Without `?version=draft` the detail and file routes alike serve the
+  // definition the detail page renders, which for anyone who cannot write the
+  // package is the PUBLISHED version. A sync that omitted the selector on
+  // either request would still succeed — and would write published bytes under
+  // a ledger entry that calls them a draft. The stub answers an unnamed
+  // selector with the published snapshot for exactly that reason, so these
+  // assertions fail on content, not on an absent request.
+  it("reads the working copy and tokenizes it with the draft index ETag", async () => {
+    createSkillServer([
+      {
+        id: "@acme/pdf",
+        skillMd: skillMd("PDF Tools", "Published."),
+        extraFiles: { "reference/notes.md": "published notes" },
+        draft: {
+          skillMd: skillMd("pdf-tools-draft", "Working copy."),
+          etag: "idx-9",
+          fetchedFiles: { "reference/notes.md": "draft notes" },
+        },
+      },
+    ]).install();
+
+    const skill = (await resolveSkill("default", "@acme/pdf", "draft"))!;
+    expect(skill.version).toBe("draft");
+    expect(skill.integrity).toBe('draft:1:"idx-9"');
+    // The two fixtures carry DIFFERENT frontmatter names, so this pins the
+    // selector on the detail request the same way the bytes below pin it on
+    // the file routes: unnamed, the stub answers with the published metadata.
+    expect(skill.frontmatterName).toBe("pdf-tools-draft");
+
+    const files = await fetchSkillFiles("default", skill, "draft");
+    const decoder = new TextDecoder();
+    expect(decoder.decode(files["SKILL.md"]!)).toContain("Working copy.");
+    // Fetched separately, so this one pins the selector on `/files/content`.
+    expect(decoder.decode(files["reference/notes.md"]!)).toBe("draft notes");
+  });
+
+  it("says whose copy it is when the caller may not write the skill", async () => {
+    createSkillServer([
+      {
+        id: "@acme/pdf",
+        skillMd: skillMd("PDF Tools"),
+        draft: { skillMd: skillMd("PDF Tools", "Working copy."), notWritable: true },
+      },
+    ]).install();
+
+    const err = await resolveSkill("default", "@acme/pdf", "draft").then(
+      () => null,
+      (e: unknown) => e,
+    );
+    const rendered = formatError(err);
+    expect(rendered).toContain("@acme/pdf");
+    expect(rendered).toContain("author's working copy");
+    expect(rendered).toContain("skills:write");
+    expect(rendered).toContain("--source published");
+    // The status code alone would send the reader hunting for a permission on
+    // the sync command itself.
+    expect(rendered).not.toContain("HTTP 403");
+  });
+
+  it("explains the same refusal when it lands on a file download", async () => {
+    // Resolution and download are separate requests: a grant revoked between
+    // them refuses the second one, and that refusal must read the same way.
+    createSkillServer([
+      {
+        id: "@acme/pdf",
+        skillMd: skillMd("PDF Tools"),
+        draft: { skillMd: skillMd("PDF Tools"), notWritable: true },
+      },
+    ]).install();
+
+    const skill = resolved({
+      packageId: "@acme/pdf",
+      version: "draft",
+      integrity: 'draft:1:"idx-1"',
+      draftIndex: [{ path: "reference/notes.md" }],
+    });
+    const err = await fetchSkillFiles("default", skill, "draft").then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(formatError(err)).toContain("reference/notes.md");
+    expect(formatError(err)).toContain("--source published");
   });
 });
 

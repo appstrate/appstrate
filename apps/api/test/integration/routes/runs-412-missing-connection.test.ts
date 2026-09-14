@@ -44,6 +44,8 @@ import {
   seedAgent,
   seedMcpServer,
   seedPackage,
+  seedPublishedVersion,
+  seedPackageShare,
   seedPackageVersion,
   seedSpaceMember,
   seedSpaceRole,
@@ -165,6 +167,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       source: "local",
       draftManifest: buildIntegrationManifest(id),
     });
+    await seedPackageShare(ctx.defaultSpaceId, id);
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
@@ -193,6 +196,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   it("returns 412 with the envelope shape when an integration dep has no connection (not_connected)", async () => {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -231,6 +235,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   it("returns 412 for a required-auth integration declared with no tools selected (inert) and no connection", async () => {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       // Declares the integration dependency but selects zero tools.
@@ -239,6 +244,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -264,6 +270,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   it("accumulates one errors[] entry per missing integration (modal renders the full list)", async () => {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION, SECOND_INTEGRATION]),
@@ -300,6 +307,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   it("emits 412 with must_choose_connection + candidateConnectionIds when actor has >1 candidate", async () => {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -341,6 +349,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // users in the modal even after picking.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -382,6 +391,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // (target.kind === "update-owned") instead of INSERTing a duplicate.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -431,6 +441,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // integration and the agent runs without its tools. Readiness must reject.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -467,6 +478,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   it("returns 412 integration_not_active when a declared integration is NOT installed on the space", async () => {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -475,6 +487,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // Seed the integration PACKAGE but do NOT install it on the space.
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -502,6 +515,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // a live connect link for an integration nobody can use in this space.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -544,6 +558,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // `success`. Readiness must fail fast instead.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -574,6 +589,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   it("returns 412 integration_wrong_type when the declared package is not an integration (#737)", async () => {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -582,6 +598,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // A package with that id exists but is a SKILL, not an integration.
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "skill",
       source: "local",
@@ -606,6 +623,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
   it("returns 412 integration_invalid_manifest when the integration manifest fails validation (#737)", async () => {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -615,6 +633,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // `integrationManifestSchema` (missing every required field).
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -644,6 +663,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // envelope, so the contract is bidirectionally exercised.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -725,12 +745,14 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       version: "1.0.0",
       manifest: manifest as unknown as Record<string, unknown>,
     });
+    await seedPackageShare(ctx.defaultSpaceId, id);
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
   it("412s an agent that declares the dependency only, when the integration's default_tools make it active", async () => {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
@@ -760,6 +782,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // stop and ask instead.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
@@ -789,6 +812,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // spawned, and demanding a connection would be a false alarm.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
@@ -822,6 +846,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     async function seedOauthIntegration() {
       await seedPackage({
         id: OAUTH_INTEGRATION,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "integration",
         source: "local",
@@ -843,11 +868,18 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
       await seedAgent({
         id: AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: buildAgentManifest([OAUTH_INTEGRATION]),
       });
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+      // PUBLISHED, because `launchAs` below launches as members who hold
+      // `agents:run` and nothing else: the draft runs for whoever can WRITE the
+      // agent (plan decision 4), so a `?version=draft` launch by them would be
+      // a `403 draft_not_writable` — a refusal about the wrong thing in a suite
+      // about `integrations:connect`.
+      await seedPublishedVersion(AGENT, "1.0.0");
     }
 
     async function launch(headers: Record<string, string>): Promise<ProblemDetails> {
@@ -935,7 +967,8 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     }
 
     async function launchAs(actor: TestContext): Promise<ProblemDetails> {
-      const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      // No selector — the published version, which is what a launcher runs.
+      const res = await app.request(`/api/agents/${AGENT}/run`, {
         method: "POST",
         headers: {
           ...authHeaders(actor),
@@ -1256,6 +1289,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       // blank form is not something the card can present as the remedy.
       await seedAgent({
         id: AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: buildAgentManifest([INTEGRATION]),

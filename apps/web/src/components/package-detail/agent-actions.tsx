@@ -137,6 +137,12 @@ export function AgentActions({
           })
         }
         onRunWithOptions={() => setRunOptionsOpen(true)}
+        // Nothing published and the working copy is not this caller's: the
+        // launcher would open on a version that does not exist, and the
+        // server would answer `404 no_published_version`.
+        {...(detail.definition === "draft" && !detail.home_writable
+          ? { runBlockedReason: t("detail.titleNeverPublished") }
+          : {})}
       />
       <RunWithOptionsModal
         open={runOptionsOpen}
@@ -145,7 +151,8 @@ export function AgentActions({
         isPending={runAgent.isPending}
         onSubmit={({ input, version, overrides, dependencyOverrides }) => {
           // Map the modal payload onto the run API body. `version` rides the
-          // `?version=` query (defaults to `draft`, like plain "Lancer"). The
+          // `?version=` query and is always an explicit pick here — the modal
+          // seeds it with the same default plain "Lancer" would send. The
           // overrides panel already emits the server's wire values (a proxy
           // pick of "none" means no proxy), so the value passes through as-is.
           const proxy = overrides.proxy_id_override;

@@ -77,6 +77,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
     // `read`, which the connection below has.
     await seedPackage({
       id: INTEG,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -98,6 +99,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
 
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {

@@ -381,6 +381,7 @@ describe("NOTIFY triggers (regression)", () => {
     const INTEG = "@notifyorg/svc";
     await seedPackage({
       id: INTEG,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",

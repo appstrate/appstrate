@@ -87,6 +87,13 @@ interface PackageActionsDropdownProps {
   onDeleteMemories?: () => void;
   /** Agent-only: open the advanced run launcher (per-run overrides). */
   onRunWithOptions?: () => void;
+  /**
+   * Agent-only: why this caller cannot launch at all, already translated.
+   * Set when the package has never been published and its working copy is not
+   * theirs to run — the launcher would open on a version that does not exist.
+   * `undefined` means launchable.
+   */
+  runBlockedReason?: string;
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
@@ -125,6 +132,7 @@ export function PackageActionsDropdown({
   onAddSchedule,
   onDeleteMemories,
   onRunWithOptions,
+  runBlockedReason,
   canDeletePackage,
   onDeletePackage,
   canUninstall,
@@ -202,7 +210,11 @@ export function PackageActionsDropdown({
           {/* ── Run with options (advanced launcher — per-run overrides) ── */}
           {isAgent && can("agents:run") && onRunWithOptions && (
             <>
-              <DropdownMenuItem onSelect={onRunWithOptions}>
+              <DropdownMenuItem
+                onSelect={() => !runBlockedReason && onRunWithOptions()}
+                disabled={!!runBlockedReason}
+                title={runBlockedReason}
+              >
                 <SlidersHorizontal size={14} />
                 {t("run.options.menuItem")}
               </DropdownMenuItem>

@@ -50,7 +50,12 @@ import {
   normalizeContextFileUris,
   triggerInlineRun,
 } from "../services/inline-run.ts";
-import { agentReadIsSummary, assertPackageDependenciesAccessible } from "../lib/package-access.ts";
+import {
+  agentReadIsSummary,
+  assertDraftSelectorAllowed,
+  assertDependencyDraftOverridesAllowed,
+  assertPackageDependenciesAccessible,
+} from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
@@ -245,13 +250,15 @@ export function createRunsRouter() {
       // instead of being swallowed into `{}` and launched as an input-less run.
       const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
 
-      // Explicit selectors override the installation; omitted uses its pin,
-      // then latest. Running the working copy is opt-in via version=draft.
+      // Omitted ⇒ the latest PUBLISHED version (#636). The working copy is
+      // opt-in via `version=draft`, and only for a caller who can WRITE the
+      // agent — the resolver honours the selector, this decides who may name it
+      // (plan decision 4).
       const versionOverride = c.req.query("version");
+      await assertDraftSelectorAllowed(c, agent.id, versionOverride);
       const { agent: effectiveAgent, overrideVersionLabel } = await resolveAgentRunVersion(
         agent,
         versionOverride,
-        getSpaceScope(c),
       );
 
       // Single canonical prefix — `run_` — shared with inline + remote origins.
@@ -298,6 +305,16 @@ export function createRunsRouter() {
           connectionOverrides,
           dependencyOverrides,
         } = inputResult;
+
+        // A dependency opted into its working copy is the same act as
+        // `version=draft` on the agent, one package down: the authority that
+        // decides is the OVERRIDDEN package's, so ask it per entry — after the
+        // effective manifest has said the key names a dependency at all.
+        await assertDependencyDraftOverridesAllowed(
+          c,
+          dependencyOverrides,
+          effectiveAgent.manifest as unknown as Record<string, unknown>,
+        );
 
         // An explicit per-run `modelId` override must reference a real model
         // (system key or org-model UUID). Reject unknown/malformed values with a

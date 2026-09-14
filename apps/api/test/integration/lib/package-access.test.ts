@@ -29,7 +29,12 @@ import type { Permission } from "../../../src/lib/permissions.ts";
 import type { AppEnv } from "../../../src/types/index.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedInstalledPackage, seedPackage, seedSpace } from "../../helpers/seed.ts";
+import {
+  seedInstalledPackage,
+  seedPackage,
+  seedPackageShare,
+  seedSpace,
+} from "../../helpers/seed.ts";
 import { packageShares } from "@appstrate/db/schema";
 import { listOrgItems } from "../../../src/services/package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
@@ -116,10 +121,11 @@ describe("assertPackageMutationAccess", () => {
     );
   });
 
-  it("refuses a builder of another installation, and says so rather than hiding it", async () => {
+  it("refuses a builder of another placement, and says so rather than hiding it", async () => {
     await seedInstalledPackage(homeId, SKILL);
+    await seedPackageShare(otherId, SKILL);
     await seedInstalledPackage(otherId, SKILL);
-    // Reachable — the package is installed where they read — but not theirs.
+    // Reachable — the package is OFFERED where they read — but not theirs.
     const accessible: AccessibleSpaces = [space(otherId, BUILDER_SKILLS)];
     const refused = await refusal(
       assertPackageMutationAccess(
@@ -149,6 +155,9 @@ describe("assertPackageMutationAccess", () => {
 
   it("reserves a package with no home to owners and admins on a session", async () => {
     await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, SKILL));
+    // OFFERED where the member reads, so the refusal below is about authority
+    // and not about reach: a NULL-home package they cannot see would be a 404.
+    await seedPackageShare(homeId, SKILL);
     await seedInstalledPackage(homeId, SKILL);
     const accessible: AccessibleSpaces = [space(homeId, BUILDER_SKILLS)];
 
@@ -252,7 +261,7 @@ describe("placementGrantsRead", () => {
     expect(placementGrantsRead({ homeSpaceId: "spc_a" }, [], readable)).toBe(true);
   });
 
-  it("grants read from a PLACEMENT — installed or shared, the same disjunct", () => {
+  it("grants read from a SHARE — the second and last placement", () => {
     expect(placementGrantsRead({ homeSpaceId: "spc_z" }, ["spc_a"], readable)).toBe(true);
   });
 
@@ -269,16 +278,20 @@ describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirro
    * `installFilter` disjunction inside `listOrgItems` (`package-items/crud.ts`),
    * because the per-type index page cannot load the organization's catalogue to
    * filter it in memory. Nothing makes them agree except this test, and a
-   * FOURTH disjunct added to one and not the other drifts silently: a package
+   * THIRD disjunct added to one and not the other drifts silently: a package
    * would be readable on its detail and absent from the page a reader would go
    * looking for it on, or the reverse.
    *
-   * Each fixture below places the package one way and asserts BOTH readers on
-   * it, from the same rows.
+   * The rule has exactly TWO disjuncts — homed here, shared here. The
+   * INSTALLATION is deliberately a fixture dimension of its own below rather
+   * than a third: it must move neither reader, which is what decision 1 of
+   * `docs/plans/package-placement-unification.md` removed and what a silent
+   * re-addition would look like.
    */
   const placements = {
     "installed only": { install: true, share: false, home: false },
     "shared only": { install: false, share: true, home: false },
+    "shared and installed": { install: true, share: true, home: false },
     "homed only": { install: false, share: false, home: true },
     "placed nowhere": { install: false, share: false, home: false },
   } as const;
@@ -297,17 +310,15 @@ describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirro
         await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
       }
 
-      const expected = placement.install || placement.share || placement.home;
+      // The installation is NOT a term: "installed only" is expected to read
+      // as unplaced, which is the whole point of the rule this pins.
+      const expected = placement.share || placement.home;
 
-      // The TS reader, from the same three facts the SQL sees.
-      const placedIn = [
-        ...(placement.install ? [otherId] : []),
-        ...(placement.share ? [otherId] : []),
-      ];
+      // The TS reader, from the same facts the SQL sees.
       expect(
         placementGrantsRead(
           { homeSpaceId: placement.home ? otherId : null },
-          placedIn,
+          placement.share ? [otherId] : [],
           new Set([otherId]),
         ),
         `placementGrantsRead on a package ${label}`,
@@ -403,6 +414,9 @@ describe("assertPackageShareAccess", () => {
     // can never carry it, and a NULL-home package additionally answers to
     // `managesOrgCatalog`, which refuses key auth outright.
     await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, SKILL));
+    // Offered where the key looks, so the refusal is the authority one (403)
+    // and not the unreachable-id one (404).
+    await seedPackageShare(homeId, SKILL);
     await seedInstalledPackage(homeId, SKILL);
     const accessible: AccessibleSpaces = [space(homeId, [...BUILDER_SKILLS, "skills:share"])];
     const refused = await refusal(

@@ -257,18 +257,20 @@ export async function listOrgItems(
   // picker so it only offers usable integrations (server-side filter — the
   // full catalogue can be large).
   // The catalogue branch mirrors `placementGrantsRead` (`lib/package-access.ts`,
-  // RBAC spec §6.9, §6.10): installed here OR shared here OR homed here.
-  // Without the home half a package this space governs but has uninstalled
+  // RBAC spec §6.9, §6.10): shared here OR homed here — the two placements, in
+  // SQL. Without the home half a package this space governs but has uninstalled
   // disappears from its own type's index page while staying editable — write
   // without read; without the share half a package offered to this space is
-  // invisible on the page the recipient would go looking for it.
+  // invisible on the page the recipient would go looking for it. An
+  // INSTALLATION is not a third placement any more: it only ever exists where
+  // one of these two already holds, so reading it here would state nothing the
+  // rule does not — and would restate the term decision 1 removed.
   // `activeOnly` stays install-only: neither a home nor an offer is a usable
   // instance.
   const installFilter = opts?.activeOnly
     ? and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true))
     : or(
         eq(packages.source, "system"),
-        isNotNull(spacePackages.packageId),
         isNotNull(packageShares.packageId),
         eq(packages.homeSpaceId, spaceId),
       );

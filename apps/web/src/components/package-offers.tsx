@@ -7,17 +7,15 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { ApiError } from "../api/errors";
 import {
   useSpaceLibrary,
   useTogglePackageInstall,
-  type LibraryResponse,
+  type LibraryOffer,
   type LibrarySpace,
 } from "../hooks/use-library";
 import { useSpaces } from "../hooks/use-spaces";
-import { useAcceptPackageShare } from "../hooks/use-package-shares";
 import { useSpaceSwitcher } from "../hooks/use-current-space";
-import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { packageDetailPath } from "../lib/package-paths";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { ErrorState } from "./page-states";
 
@@ -39,39 +37,28 @@ export function SpacePackageOffers({ type }: { type: PackageType }) {
  * package READABLE; it never installs it, because it would run with the
  * recipient's own credentials — so accepting is a button the recipient presses.
  *
- * Which button depends on the destination, and there are two. An offer to the
- * caller's OWN personal space is accepted (`POST …/shares/accept`), which needs
- * no permission at all and pins the version. An offer to a TEAM space is an
- * ordinary install into that space, so it is offered only to a caller who holds
- * the type's install grant THERE — without a button of its own the row said
- * "offered in « T »" and left the reader to find the package in the matrix
- * below, having been told it was shared with them.
+ * There is ONE act and one route behind both buttons — `POST
+ * /api/spaces/{spaceId}/packages`, the single door. Only the wording and who
+ * may press differ: an offer to the caller's OWN personal space needs no grant
+ * at all (owning the space is the authorization), while an offer to a TEAM
+ * space is shown only to a caller holding the type's install grant THERE —
+ * without a button of its own the row said "offered in « T »" and left the
+ * reader to find the package in the matrix below, having been told it was
+ * shared with them.
  */
 export function SharedWithMe({
   shared,
   spaces,
 }: {
-  shared: LibraryResponse["shared"];
+  shared: LibraryOffer[];
   spaces: LibrarySpace[];
 }) {
   const { t } = useTranslation();
-  const accept = useAcceptPackageShare();
   const { switchSpace } = useSpaceSwitcher();
   const install = useTogglePackageInstall();
   const { data: accessibleSpaces } = useSpaces();
   if (shared.length === 0) return null;
   const spaceName = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
-  /**
-   * The one refusal the recipient can do nothing about. `POST …/shares` turns a
-   * person away when the package has nothing published, so this survives only
-   * as a race — the `latest` was deleted after the offer was made. The server's
-   * sentence tells the AUTHOR to publish; said to a recipient who owns nothing
-   * here, it would be an instruction they cannot follow.
-   */
-  const acceptError = (err: unknown) =>
-    err instanceof ApiError && err.code === "package_has_no_version"
-      ? t("library.shared.noVersion")
-      : getErrorMessage(err);
   /** The install grant in the OFFERED space — the target of this row's button. */
   const canInstallThere = (spaceId: string, type: string) =>
     accessibleSpaces
@@ -110,13 +97,13 @@ export function SharedWithMe({
             {offer.personal ? (
               <Button
                 size="sm"
-                disabled={accept.isPending}
+                disabled={install.isPending}
                 onClick={() =>
-                  accept.mutate(
-                    { params: { path: splitPackageRef(offer.id) } },
+                  install.mutate(
+                    { spaceId: offer.space_id, packageId: offer.id, installed: false },
                     {
                       onSuccess: () => toast.success(t("library.shared.added")),
-                      onError: (err) => toast.error(acceptError(err)),
+                      onError: (err) => toast.error(getErrorMessage(err)),
                     },
                   )
                 }

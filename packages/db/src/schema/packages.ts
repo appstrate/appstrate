@@ -30,9 +30,11 @@ export const spacePackages = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    versionId: integer("version_id").references(() => packageVersions.id, {
-      onDelete: "set null",
-    }),
+    // This table carries no version: an installation outside the package's
+    // home runs the `latest` published version, always (RBAC spec §6.10). The
+    // draft belongs to whoever can write it, and dependency versions come from
+    // the agent's own manifest ranges — nothing here selects a definition.
+    //
     // The agent's stored input settings for this space, in one
     // document:
     //   `values` — editor-set defaults for the agent's INPUT fields (AFPS

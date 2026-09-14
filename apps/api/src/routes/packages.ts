@@ -7,18 +7,18 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
-import { eq, and, inArray } from "drizzle-orm";
-import { packages, profiles } from "@appstrate/db/schema";
+import { eq, and, inArray, ne } from "drizzle-orm";
+import { packages, packageShares, profiles, spacePackages, spaces } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
-import { acceptSharedPackage, installPackage } from "../services/space-packages.ts";
+import { installPackage } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
 import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
 import { createPackageShareNotification } from "../services/state/notifications.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import { callerOrgRole, callerPersonalOwnerId } from "../lib/view-as.ts";
+import { callerOrgRole } from "../lib/view-as.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { unzipPackageArchive } from "../services/package-archive.ts";
@@ -64,17 +64,21 @@ import {
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { VERSION_SELECTOR_DRAFT } from "../services/agent-version-resolver.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import {
   assertCatalogPackageAccess,
+  assertDraftSelectorAllowed,
   assertPackageCopyAllowed,
   assertPackageDependenciesAccessible,
   assertForkSourceAccess,
   authorizeBundlePackages,
   assertExistingPackageInstallAccess,
+  defaultDefinitionSelector,
   PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
   assertPackageShareAccess,
+  holdsPackageShareAuthority,
   homeWireForCaller,
   isPackageReadableInSpace,
   managesOrgCatalog,
@@ -786,10 +790,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       normalizedFiles: draft.files,
       lockVersion: createdItem.lockVersion,
     });
+    // The package was just created HERE (`homeSpaceId: spaceId` above), so the
+    // placement rule is satisfied and this can only fail on an already-present
+    // row. WARN nonetheless: a create whose package never reached the space is
+    // a half-finished act, and it has to be visible to an operator.
     const spaceId = c.get("spaceId");
     if (spaceId && versionCreated) {
       await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
+        logger.warn("auto-install skipped", { packageId, spaceId, err: getErrorMessage(e) }),
       );
     }
     await recordAuditFromContext(c, {
@@ -835,18 +843,80 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
 }
 
 /**
+ * The manifest-derived half of a package detail, read from a PUBLISHED
+ * snapshot instead of the draft columns — `getOrgItem`'s projection applied to
+ * a version's own manifest and archive, so the two halves of a detail response
+ * never come from two different definitions.
+ *
+ * The manifest is the `package_versions.manifest` column: authoritative, one
+ * DB read, and immune to an archive that will not open. The CONTENT is the
+ * archive entry this type is authored around ({@link PACKAGE_CONTENT_ENTRY}),
+ * and the fallbacks below are the exact inverse of `applyDraftOverlay`: a type
+ * with no content entry at all (`mcp-server`, whose content IS its manifest)
+ * and an `integration` published without its optional `INTEGRATION.md` both
+ * store the manifest TEXT in `draft_content`, so the published projection
+ * reproduces that rather than handing back a `null` the editor would render as
+ * an empty file. A REQUIRED entry has no such fallback — a published `SKILL.md`
+ * the storage cannot produce is a broken artifact, and it gets the same 422 the
+ * run path answers for a published agent with no readable prompt.
+ */
+async function loadPublishedDefinition(
+  type: PackageType,
+  packageId: string,
+  spec: string,
+): Promise<Record<string, unknown>> {
+  const detail = await getVersionDetail(packageId, spec);
+  if (!detail) throw notFound(`Version '${spec}' not found`);
+  const m = asRecord(detail.manifest);
+  const entry = PACKAGE_CONTENT_ENTRY[type];
+  const bytes = entry ? detail.content?.[entry.path] : undefined;
+  if (entry?.required && !bytes) {
+    throw new ApiError({
+      status: 422,
+      code: "version_artifact_unavailable",
+      title: "Version Artifact Unavailable",
+      detail: `Published '${packageId}@${detail.version}' has no readable '${entry.path}' in its archive`,
+    });
+  }
+  return {
+    // Same projection `getOrgItem` runs over the draft manifest, field for
+    // field: a reader must not be able to tell which definition answered by
+    // the SHAPE of what came back.
+    name: typeof m.display_name === "string" ? m.display_name : packageId,
+    description: typeof m.description === "string" ? m.description : null,
+    version: typeof m.version === "string" ? m.version : null,
+    manifest_name: typeof m.name === "string" ? m.name : null,
+    manifest: m,
+    content: bytes ? decodeSkillMarkdown(bytes) : JSON.stringify(m, null, 2),
+  };
+}
+
+/**
  * Build the canonical package detail DTO for skills / integrations / mcp-servers
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
  * Org-scoped (no space-install gate): the GET handler applies that gate before
  * calling this, while mutating endpoints (create / update / fork) reuse this
  * directly to echo what the caller just wrote (issue #646). Returns `null` when
  * the package is not found in the org.
+ *
+ * WHICH definition the manifest-derived fields are projected from is the agent
+ * page's question, answered by the agent page's two functions — `?version=draft`
+ * is an author's act (`403 draft_not_writable`), and with no selector a caller
+ * who may WRITE the package reads their draft while everybody else reads the
+ * latest published version, falling back to the draft when nothing is published
+ * at all. {@link resolveFileExplorerVersion} is that pair, already worded once;
+ * calling it here is what stops this page and its own Files tab answering
+ * "which definition am I looking at" differently in the same second.
+ *
+ * Mutating callers pass `draft` explicitly: they have just written that copy,
+ * and the echo has to be it whether or not a version is published.
  */
 async function buildPackageDetailDto(
   c: Context<AppEnv>,
   rcfg: PackageRouteConfig,
   itemId: string,
   orgId: string,
+  opts: { version?: string } = {},
 ): Promise<Record<string, unknown> | null> {
   const [item, versionCount, latestVersionDate, accessible] = await Promise.all([
     getOrgItem(orgId, itemId, rcfg.cfg),
@@ -857,11 +927,37 @@ async function buildPackageDetailDto(
 
   if (!item) return null;
 
+  const spec = await resolveFileExplorerVersion(
+    c,
+    { id: item.id, source: item.source },
+    opts.version?.trim() || undefined,
+  );
+  // The answer comes back in the version-SPEC vocabulary, where the stored tree
+  // has two spellings — an omitted selector and the literal `draft` — and
+  // `resolvePackageFileValidator` treats them as one. So must this: `draft` is
+  // not a row in `package_versions`, and handing it to the version resolver
+  // would 404 the very page an author just asked for by name.
+  const rendersStoredTree = spec === undefined || spec === VERSION_SELECTOR_DRAFT;
+  // For an org-authored package that stored tree IS the draft; for a system
+  // package it is the definition the platform ships, published by
+  // construction. The bytes are the same either way — only the wire name
+  // differs, and a system package must never be labelled `draft` or the SPA
+  // renders "never published" over something that cannot be published at all.
+  const definition = rendersStoredTree && item.source !== "system" ? "draft" : "published";
+  const published = rendersStoredTree
+    ? null
+    : await loadPublishedDefinition(rcfg.cfg.type, item.id, spec);
+
   const { homeSpaceId, ...rest } = item;
   return {
     ...rest,
+    ...published,
+    definition,
     ...homeWireForCaller(c, { type: rcfg.cfg.type, source: item.source, homeSpaceId }, accessible),
     version_count: versionCount,
+    // Authoring metadata, never projected: it compares the DRAFT against the
+    // latest version, and that answer does not change with the definition the
+    // reader was served.
     has_unarchived_changes: computeHasUnpublishedChanges(
       item.source,
       versionCount,
@@ -876,6 +972,13 @@ async function buildPackageDetailDto(
  * richer Agent detail when configured (`rcfg.detailDto`), otherwise the generic
  * package detail. Single source of truth so create / update / fork stay in
  * lockstep with their respective GET serializers.
+ *
+ * `draft` is named on BOTH branches, for the reason the agent branch already
+ * names it: a write echoes the bytes it just wrote. Left to the default
+ * selector, a caller who publishes and then saves would read their new save
+ * back as the published version they are now ahead of. The selector costs them
+ * nothing — naming the draft requires write authority, which they have just
+ * exercised.
  */
 function loadPackageDetailDto(
   c: Context<AppEnv>,
@@ -885,7 +988,7 @@ function loadPackageDetailDto(
 ): Promise<Record<string, unknown> | null> {
   return rcfg.detailDto
     ? rcfg.detailDto(c, itemId, orgId)
-    : buildPackageDetailDto(c, rcfg, itemId, orgId);
+    : buildPackageDetailDto(c, rcfg, itemId, orgId, { version: VERSION_SELECTOR_DRAFT });
 }
 
 function makeGetHandler(rcfg: PackageRouteConfig) {
@@ -899,7 +1002,9 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
-    const dto = await buildPackageDetailDto(c, rcfg, itemId, orgId);
+    const dto = await buildPackageDetailDto(c, rcfg, itemId, orgId, {
+      version: c.req.query("version"),
+    });
     if (!dto) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
@@ -1439,7 +1544,8 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  *   middleware.
  *
  * The row read in between adds the org boundary (`isPackageReadableInSpace`
- * does not filter `orgId`) and fetches the draft columns the overlay needs.
+ * does not filter `orgId`) and fetches the draft columns the overlay needs
+ * plus the `source` {@link resolveFileExplorerVersion} reads.
  *
  * Authorizing HERE rather than at each call site is what makes the ordering
  * safe. Both handlers call this before they touch a validator, so no
@@ -1452,7 +1558,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * the row, so visibility has to be settled first. Same order as
  * `/{version}/download`.
  */
-async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileSource> {
+async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<FileExplorerPackage> {
   const packageId = getItemId(c);
   const orgId = c.get("orgId");
   const spaceId = c.get("spaceId");
@@ -1465,6 +1571,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
     .select({
       id: packages.id,
       type: packages.type,
+      source: packages.source,
       orgId: packages.orgId,
       draftManifest: packages.draftManifest,
       draftContent: packages.draftContent,
@@ -1482,6 +1589,59 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
   await requirePackageReadPermission(c, pkg.type);
 
   return pkg;
+}
+
+/**
+ * The file-explorer row: a {@link PackageFileSource} plus the `source` column,
+ * which is what tells a platform-shipped definition from an org-authored one.
+ */
+type FileExplorerPackage = PackageFileSource & { source: string };
+
+/**
+ * WHICH definition a file-explorer read renders — the same question the agent
+ * detail page answers, from the same two functions, because they are the same
+ * question (RBAC spec §6.10).
+ *
+ * Reading is not executing, so an omitted `?version` gets the definition that
+ * EXISTS for this caller: the author's draft when they may write the package,
+ * the latest published version otherwise, and the draft again when nothing is
+ * published — a readable package whose explorer 404s is a tab the detail page
+ * has just promised and cannot honour. That is {@link defaultDefinitionSelector},
+ * verbatim, mapped onto the version-spec vocabulary these two routes speak:
+ * `undefined` is their word for the draft and `latest` for the published tag.
+ *
+ * An EXPLICIT `?version=draft` is the other act, and keeps the other rule:
+ * naming the working copy is an author's move, refused with
+ * `403 draft_not_writable` ({@link assertDraftSelectorAllowed}). Without it
+ * these two routes would be the fifth door to a draft the run, the schedule,
+ * the readiness and the bundle export all close — and the loosest, since they
+ * hand over every byte one file at a time.
+ *
+ * A system package ships its definition with the platform and owns no
+ * `package_versions` rows, so `latest` would resolve to nothing: its stored
+ * tree IS its published definition, and every selector but ONE reads it. The
+ * exception is the named `draft`, refused a line earlier like everybody
+ * else's: nobody writes a platform-shipped package, so nobody may ask for a
+ * working copy it does not have. Same rule the run path applies
+ * (`resolveAgentRunVersion` ignores the selector for `source === "system"`) —
+ * stated here rather than inherited, because the 404 it prevents would only
+ * show up on a system package's Files tab.
+ *
+ * Takes the two columns it reads rather than a whole row, because the DETAIL
+ * projection asks the same question from a different query
+ * ({@link buildPackageDetailDto}) and must get it from this function rather
+ * than from a second spelling of it.
+ */
+async function resolveFileExplorerVersion(
+  c: Context<AppEnv>,
+  pkg: Pick<FileExplorerPackage, "id" | "source">,
+  explicit: string | undefined,
+): Promise<string | undefined> {
+  await assertDraftSelectorAllowed(c, pkg.id, explicit);
+  if (pkg.source === "system") return undefined;
+  if (explicit) return explicit;
+  const { selector } = await defaultDefinitionSelector(c, pkg);
+  return selector === VERSION_SELECTOR_DRAFT ? undefined : "latest";
 }
 
 /**
@@ -1802,10 +1962,46 @@ export function createPackagesRouter() {
       // and `has_unarchived_changes` compares it against the latest version's
       // (`computeHasUnpublishedChanges`). Moving the home changes no bytes, so
       // touching it would report a fully-published package as dirty.
-      await db
-        .update(packages)
-        .set({ homeSpaceId: target })
-        .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+      //
+      // The move and the PLACEMENTS it invalidates travel in ONE transaction.
+      // A package is placed in a space by its home or by a share (RBAC spec
+      // §6.9), so moving the home OUT of a space where it stays installed would
+      // leave an installation nothing places — still running for a schedule,
+      // invisible on every page of the space that runs it. That is the exact
+      // state `scripts/migration/0016` exists to repair, and a route must not
+      // create it: every installation outside the NEW home gets the share that
+      // now places it, `shared_by` NULL because nobody offered it — the home
+      // did, until this call. The destination's own share is dropped for the
+      // mirror-image reason `POST …/shares` answers `share_target_is_home`: a
+      // package is not offered to the space it lives in.
+      await db.transaction(async (tx) => {
+        await tx
+          .update(packages)
+          .set({ homeSpaceId: target })
+          .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+        const orphaned = await tx
+          .select({ spaceId: spacePackages.spaceId })
+          .from(spacePackages)
+          .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
+          .where(
+            and(
+              eq(spacePackages.packageId, packageId),
+              eq(spaces.orgId, orgId),
+              target === null ? undefined : ne(spacePackages.spaceId, target),
+            ),
+          );
+        if (orphaned.length > 0) {
+          await tx
+            .insert(packageShares)
+            .values(orphaned.map((row) => ({ packageId, spaceId: row.spaceId, sharedBy: null })))
+            .onConflictDoNothing();
+        }
+        if (target !== null) {
+          await tx
+            .delete(packageShares)
+            .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, target)));
+        }
+      });
       await recordAuditFromContext(c, {
         action: "package.home_space_changed",
         resourceType: "package",
@@ -1870,14 +2066,16 @@ export function createPackagesRouter() {
       }
     }
 
-    // Auto-install the forked package in the current space (non-fatal)
+    // The fork is homed in the current space, so its placement is this space's
+    // by construction and the install can only fail on an already-present row.
+    // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
     const spaceId = c.get("spaceId");
     if (spaceId) {
       await installPackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", {
+        logger.warn("auto-install skipped", {
           packageId: result.packageId,
           spaceId,
-          err: String(e),
+          err: getErrorMessage(e),
         }),
       );
     }
@@ -1909,15 +2107,16 @@ export function createPackagesRouter() {
 
   // --- Sharing: a package's AUDIENCE (RBAC spec §6.10) ---
   //
-  // THREE of the four routes — offer, list, revoke — are authorized by
-  // `<type>:share` in the package's HOME space, the same authority helper the
-  // write routes use, so they have no route-level permission guard either.
-  // `share` is in no API key's allowlist, so those three are session-borne in
-  // effect without a transport check of their own.
+  // All three routes — offer, list, revoke — are authorized by `<type>:share`
+  // in the package's HOME space, the same authority helper the write routes
+  // use, so they have no route-level permission guard either. `share` is in no
+  // API key's allowlist, so all three are session-borne in effect without a
+  // transport check of their own.
   //
-  // `accept` is the fourth and is NOT one of them: it is the recipient's act on
-  // their own space and requires neither `share` nor the type's install grant —
-  // the offer plus the owner's own call is the whole authorization (§3.6).
+  // There is no ACCEPT route: taking up an offer is installing, and installing
+  // has one door, `POST /api/spaces/{spaceId}/packages` — for a personal space
+  // exactly as for a team one, with ownership standing in for the install grant
+  // there (§3.6).
   //
   // Registered BEFORE `/{scope}/{name}/:version/download`: `:version` would
   // otherwise match the literal segment `shares`.
@@ -1931,6 +2130,25 @@ export function createPackagesRouter() {
     const pkg = await assertPackageShareAccess(c, packageId, accessible);
     const { target } = await readJsonBody(c, shareTargetSchema);
 
+    // Outside its home a package runs the LATEST PUBLISHED version, always
+    // (plan decisions 3 and 6) — so an offer of a package with nothing
+    // published is an offer of nothing: the recipient installs it and every
+    // launch answers `404 no_published_version`. Refusing HERE puts the refusal
+    // on the only principal who can clear it — the author, in the act they are
+    // performing, where the dialogue offers "Publish and share" — instead of on
+    // a recipient three screens away who cannot publish anything.
+    //
+    // EVERY target, person or space: both receive the package under the same
+    // rule — the latest published version — so both are offered nothing when
+    // there is none. Checked BEFORE the target is resolved, so a refused offer
+    // provisions no personal space.
+    if ((await getLatestVersionId(packageId)) === null) {
+      throw conflict(
+        "package_has_no_version",
+        `Package '${packageId}' has no published version to offer — publish one first, since a package runs its latest published version outside the space that owns it.`,
+      );
+    }
+
     let spaceId: string;
     let recipientUserId: string | null = null;
     if (target.kind === "user") {
@@ -1940,26 +2158,6 @@ export function createPackagesRouter() {
       await makePermissionGuard("members:read")(c, async () => {});
       const membership = await getOrgMember(orgId, target.user_id);
       if (!membership) throw notFound(`User '${target.user_id}' not found in this organization`);
-      // An offer to a PERSON is an offer into their personal space, and an
-      // install there is always PINNED (plan decision 6, enforced in
-      // `resolvePersonalSpaceInstall`). A package with nothing published has no
-      // pin to take, so the offer would be one the recipient can never accept.
-      // Refusing HERE puts the refusal on the only principal who can clear it —
-      // the author, in the act they are performing — instead of on a recipient
-      // three screens away who cannot publish anything. Checked BEFORE
-      // `ensurePersonalSpaceFor`, so a refused offer provisions nothing.
-      //
-      // A TEAM target takes no pin and is deliberately not gated: an
-      // installation there resolves `version_pin ?? draft`, so the package runs
-      // from the dashboard without a publication (`run-agent-button.tsx`).
-      // The accept path keeps its own copy of this refusal — a `latest` can be
-      // deleted between the offer and the accept.
-      if ((await getLatestVersionId(packageId)) === null) {
-        throw conflict(
-          "package_has_no_version",
-          `Package '${packageId}' has no published version to offer — publish one first, since a personal space always runs a pinned version.`,
-        );
-      }
       const space = await ensurePersonalSpaceFor(orgId, target.user_id);
       spaceId = space.id;
       recipientUserId = target.user_id;
@@ -2034,40 +2232,6 @@ export function createPackagesRouter() {
     await assertPackageShareAccess(c, packageId);
     const shares = await listPackageShares(packageId, orgId);
     return c.json(listResponse(shares.map((share) => ({ object: "package_share", ...share }))));
-  });
-
-  // Accept a share into the caller's OWN personal space. Deliberately NOT
-  // guarded by `share` or by the type's install grant: the recipient consented
-  // by calling it, and a `guest` holds only `operator` in their own space
-  // (RBAC spec §3.6, forward constraint). Re-calling it RE-PINS to `latest` —
-  // that is how the owner takes a version the author has since published.
-  router.post(`/${SCOPED_PACKAGE_ROUTE}/shares/accept`, async (c) => {
-    const packageId = getItemId(c);
-    const orgId = c.get("orgId");
-    // `null` for an API key, an end-user and a role preview — none of them has
-    // a personal space, so none of them has anything to accept INTO.
-    const userId = callerPersonalOwnerId(c, orgId);
-    if (userId === null) throw notFound(`Package '${packageId}' not found`);
-
-    const space = await ensurePersonalSpaceFor(orgId, userId);
-    // The offer is the whole authorization, and it is checked INSIDE
-    // `acceptSharedPackage`'s transaction, next to the insert it authorizes —
-    // checking it here would leave a revoke racing an accept able to commit an
-    // installation the share no longer backs, which is exactly what the
-    // one-transaction revoke exists to prevent.
-    const { versionId } = await acceptSharedPackage({ orgId, spaceId: space.id }, packageId);
-    await recordAuditFromContext(c, {
-      action: "package.share_accepted",
-      resourceType: "package",
-      resourceId: packageId,
-      // The PERSON who accepted, never the personal space it landed in — the
-      // same rule `package.shared` follows (plan decision 5b): that id is
-      // withheld everywhere on the wire, so writing it into the trail would
-      // publish through the audit log what §3.6 withholds. `versionId` is what
-      // the act actually settled: which version this recipient now runs.
-      after: { recipientUserId: userId, versionId },
-    });
-    return c.json({ object: "space_package", package_id: packageId, version_id: versionId });
   });
 
   // The path segment is the target as the LISTING published it: a space id for
@@ -2346,11 +2510,12 @@ export function createPackagesRouter() {
       });
     }
 
-    // Auto-install in the current space (non-fatal, skip if already installed)
+    // Same as the create route: the import homes the package here, so only an
+    // already-present row can refuse. WARN so a silent non-placement is visible.
     const spaceId = c.get("spaceId");
     if (spaceId) {
       await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
+        logger.warn("auto-install skipped", { packageId, spaceId, err: getErrorMessage(e) }),
       );
     }
 
@@ -2437,8 +2602,14 @@ export function createPackagesRouter() {
 
     let result: Awaited<ReturnType<typeof handleImportBundle>>;
     try {
-      result = await handleImportBundle(bytes, { orgId, spaceId }, userId, (bundle) =>
-        authorizeBundlePackages(c, bundle),
+      result = await handleImportBundle(
+        bytes,
+        { orgId, spaceId },
+        userId,
+        (bundle) => authorizeBundlePackages(c, bundle),
+        // A root that already lives in another space is placed here by the same
+        // rule as any install: the offer, when this caller may make one.
+        (packageId) => holdsPackageShareAuthority(c, packageId),
       );
     } catch (err) {
       // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
@@ -2523,10 +2694,15 @@ export function createPackagesRouter() {
 
   // GET /api/packages/:scope/:name/files — flat index of the artifact's files
   router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), async (c) => {
-    const { version } = parseFileQuery(c, fileIndexQuerySchema);
+    const { version: requested } = parseFileQuery(c, fileIndexQuerySchema);
     // Visibility + `<type>:read` are both settled inside this call, BEFORE any
     // validator is resolved — nothing below can answer an unauthorized caller.
     const pkg = await loadFileExplorerPackage(c);
+    // WHICH definition, and whether an explicit `draft` is this caller's to
+    // ask for. Above the ETag short-circuit for the same reason the permission
+    // check is: a 304 answered before the refusal would confirm the draft's
+    // content to someone the refusal exists to keep out.
+    const version = await resolveFileExplorerVersion(c, pkg, requested);
     const inm = c.req.header("if-none-match");
 
     // Resolve the validator FIRST. A published version's snapshot id comes
@@ -2556,11 +2732,13 @@ export function createPackagesRouter() {
   // Serves preview AND download: a small text file that fell past the index's
   // inline budget stays previewable through here.
   router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), async (c) => {
-    const { version, path } = parseFileQuery(c, fileContentQuerySchema);
+    const { version: requested, path } = parseFileQuery(c, fileContentQuerySchema);
     // Must stay ABOVE the validator: the 304 short-circuit below answers
     // without reading the artifact, so a permission check placed after it
-    // would turn `If-None-Match` into a file-existence oracle.
+    // would turn `If-None-Match` into a file-existence oracle. The definition
+    // selector rides in the same window, for the same reason.
     const pkg = await loadFileExplorerPackage(c);
+    const version = await resolveFileExplorerVersion(c, pkg, requested);
     const inm = c.req.header("if-none-match");
 
     // Same short-circuit as the index, but the tag folds in the PATH: a

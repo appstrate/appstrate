@@ -115,6 +115,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     ctxOther = await createTestContext({ orgSlug: "isoorg-other" });
     await seedPackage({
       id: INTEG,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",

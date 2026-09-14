@@ -17,12 +17,19 @@
  *   - `stage: "draft"`     → `getPackage` reads `draftManifest`/`draftContent`.
  *                            `versionLabel = "draft"`. `spec` is rejected.
  *   - `stage: "published"` → `resolveExportVersion` (explicit `spec` →
- *                            pinned-in-space version → `latest` dist-tag).
- *                            Manifest + prompt loaded from `package_versions`.
+ *                            `latest` dist-tag). Manifest + prompt loaded from
+ *                            `package_versions`.
  *
  * Access control: the package must exist in the org's catalog AND be
  * installed in the calling space — same 404 semantics the bundle
  * route already enforces.
+ *
+ * `stage: "draft"` carries one more condition, and it is NOT asked here: write
+ * authority over the package (`assertDraftSelectorAllowed`, 403
+ * `draft_not_writable`). It needs the Hono context — the caller's role in the
+ * package's HOME space, its view-as persona, its credential ceiling — which
+ * this resolver deliberately does not take, so the route asserts it before
+ * calling in. A future second caller must do the same.
  */
 
 import { getPackage } from "./package-catalog.ts";
@@ -135,10 +142,10 @@ export async function resolveRegistryAgent(
     return { agent: pkg, versionLabel: "draft" };
   }
 
-  // Published path. `resolveExportVersion` handles three resolution
-  // shapes: explicit spec, pinned-in-space version, "latest" dist-tag.
-  // It throws `notFound` if nothing resolves — let it bubble.
-  const version = await resolveExportVersion(packageId, { orgId, spaceId }, spec ?? null);
+  // Published path. `resolveExportVersion` handles both resolution shapes:
+  // an explicit spec, else the "latest" dist-tag. It throws `notFound` if
+  // nothing resolves — let it bubble.
+  const version = await resolveExportVersion(packageId, spec ?? null);
   const detail = await getVersionDetail(packageId, version);
   if (!detail) {
     throw new ApiError({

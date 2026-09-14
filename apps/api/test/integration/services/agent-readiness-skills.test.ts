@@ -26,7 +26,7 @@ import { createVersionFromDraft } from "../../../src/services/package-versions.t
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import type { AgentManifest, LoadedPackage } from "../../../src/types/index.ts";
@@ -62,6 +62,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
       createdBy: ctx.user.id,
       draftManifest: { name: id, version: "1.0.0", type: "skill" },
     });
+    await seedPackageShare(ctx.defaultSpaceId, id);
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
@@ -76,6 +77,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
 
     await seedPackage({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {
@@ -109,10 +111,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
 
   it("reports nothing for a published run whose declared skill is installed", async () => {
     const agent = await seedDriftedAgent();
-    const { agent: published } = await resolveAgentRunVersion(agent, "published", {
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-    });
+    const { agent: published } = await resolveAgentRunVersion(agent, "published");
 
     // The published manifest declares skill-x; the draft no longer does.
     expect(Object.keys(published.manifest.dependencies?.skills ?? {})).toEqual([SKILL_X]);
@@ -121,10 +120,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
 
   it("reports nothing for the draft run whose declared skill is installed", async () => {
     const agent = await seedDriftedAgent();
-    const { agent: draft } = await resolveAgentRunVersion(agent, "draft", {
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-    });
+    const { agent: draft } = await resolveAgentRunVersion(agent, "draft");
 
     expect(Object.keys(draft.manifest.dependencies?.skills ?? {})).toEqual([SKILL_Y]);
     expect(await skillErrors(draft)).toEqual([]);
@@ -132,10 +128,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
 
   it("an omitted selector behaves exactly like published", async () => {
     const agent = await seedDriftedAgent();
-    const { agent: implicitly } = await resolveAgentRunVersion(agent, undefined, {
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-    });
+    const { agent: implicitly } = await resolveAgentRunVersion(agent, undefined);
 
     expect(await skillErrors(implicitly)).toEqual([]);
   });
@@ -145,6 +138,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
   it("still reports a declared skill that the org cannot see", async () => {
     await seedPackage({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {
@@ -171,6 +165,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
     });
     await seedPackage({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {

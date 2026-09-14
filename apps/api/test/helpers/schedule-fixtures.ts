@@ -73,6 +73,7 @@ export async function seedSchedulableAgent(args: {
 }): Promise<void> {
   await seedAgent({
     id: args.id,
+    homeSpaceId: args.spaceId,
     orgId: args.orgId,
     createdBy: args.userId,
     draftManifest: args.manifest ?? agentManifest(args.id),

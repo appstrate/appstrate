@@ -167,6 +167,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const displayName = agentDetail?.display_name ?? pkgDetail?.name ?? pkgDetail?.id ?? "";
   const source = agentDetail?.source ?? pkgDetail?.source;
+  // WHICH definition the server projected. Every type answers it now, from the
+  // one function that decides it, so the read-only banner below is a single
+  // condition rather than one per type.
+  const definition = (agentDetail ?? pkgDetail)?.definition;
   const version = agentDetail?.version ?? pkgDetail?.version;
   const hasUnarchivedChanges =
     agentDetail?.has_unarchived_changes ?? pkgDetail?.has_unarchived_changes;
@@ -435,6 +439,18 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       />
 
       {type === "agent" && <ModelRequiredAlert />}
+
+      {/* Nothing has ever been published and the working copy is not this
+          reader's: what the page renders below is the author's work in
+          progress. Saying it is what makes the greyed-out Run button legible
+          — and the page renders at all precisely because reading a definition
+          is not running it. True of every package type: the server answers
+          `definition` for all four from one function. */}
+      {definition === "draft" && !homeWritable && (
+        <Alert className="mb-4">
+          <AlertDescription>{t("detail.draftReadOnly")}</AlertDescription>
+        </Alert>
+      )}
 
       {!isOwned && (
         <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm">

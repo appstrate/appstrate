@@ -301,7 +301,8 @@ export const schemas = {
   },
   SpacePackage: {
     type: "object",
-    description: "A package installed in a space with its model/proxy/version overrides.",
+    description:
+      "A package installed in a space with its model/proxy overrides. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
     // The installedPackageSelect projection emits every field unconditionally
     // (package_type/package_source come from the join). `object` is spec-only
     // (not on the InstalledPackage type). Stored input values and their locks
@@ -313,20 +314,13 @@ export const schemas = {
     // field-for-field — spec==runtime is the hard invariant, so do NOT "normalize".
     //   - `packageId`/`modelId`/`proxyId`/`updatedAt` are camelCase per the
     //     universal *Id / timestamp carve-out (docs/CASING_CONVENTIONS.md).
-    //   - `version_id`/`installed_at` are snake_case: the projection aliases them
-    //     that way, so they DIVERGE from the *Id / timestamp carve-out. Documented
-    //     module carve-out — the write path (`updatePackageSchema`,
-    //     `PUT .../packages/{scope}/{name}` body) uses the same `version_id` key,
-    //     so read and write stay symmetric. A client that sends `versionId`
-    //     (camel, per the carve-out expectation) has its version pin silently
-    //     dropped by the Zod body schema — the divergence is load-bearing and
-    //     intentional here, not an accident.
+    //   - `installed_at` is snake_case: the projection aliases it that way, so it
+    //     DIVERGES from the timestamp carve-out. Documented module carve-out.
     required: [
       "packageId",
       "generationConfig",
       "modelId",
       "proxyId",
-      "version_id",
       "enabled",
       "installed_at",
       "updatedAt",
@@ -342,7 +336,6 @@ export const schemas = {
       },
       modelId: { type: ["string", "null"], description: "Model override for this space" },
       proxyId: { type: ["string", "null"], description: "Proxy override for this space" },
-      version_id: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
       enabled: { type: "boolean" },
       installed_at: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -498,12 +491,17 @@ export const schemas = {
   },
   AgentSkillRef: {
     type: "object",
-    required: ["id"],
+    required: ["id", "home_writable"],
     properties: {
       id: { type: "string" },
       version: { type: "string" },
       name: { type: "string" },
       description: { type: "string" },
+      home_writable: {
+        type: "boolean",
+        description:
+          'Whether THIS caller holds the skill\'s `skills:write` in its home space — i.e. whether its DRAFT is theirs to run. A launch may opt one dependency into its working copy with `dependency_overrides: { "@scope/skill": "draft" }`, and the run routes answer `403 draft_not_writable` when this is false, so a client offers that option only where it is true. Always emitted.',
+      },
     },
   },
   AgentListItem: {
@@ -592,7 +590,7 @@ export const schemas = {
       "source",
       "scope",
       "version",
-      "version_pin",
+      "definition",
       "dependencies",
       "input",
       "running_runs",
@@ -613,10 +611,11 @@ export const schemas = {
           "Scope from manifest name, including the leading `@` (e.g. `@myorg`). Directly usable as the `{scope}` path parameter of package/agent operations.",
       },
       version: { type: ["string", "null"], description: "Version from manifest" },
-      version_pin: {
-        type: ["string", "null"],
+      definition: {
+        type: "string",
+        enum: ["draft", "published"],
         description:
-          "Installed version in the current space. The default launch uses this pin when present.",
+          'WHICH definition every manifest-derived field here was projected from: `draft` is the author\'s working copy, `published` a `package_versions` snapshot (the `latest` one, or the version `?version=` named). With no selector: the draft for a caller who may WRITE the agent, otherwise the latest published version, and — when nothing is published — the draft in read-only, because a package the listing shows must have a page. `definition: "draft"` together with `home_writable: false` is therefore the pair that means "never published, you are seeing the author\'s work in progress": a launch with no selector will answer `404 no_published_version`, so a client disables it and says why rather than offering a button that cannot work.',
       },
       manifest: {
         allOf: [{ $ref: "#/components/schemas/AgentManifest" }],
@@ -1466,6 +1465,7 @@ export const schemas = {
       "home_writable",
       "home_shareable",
       "agents",
+      "definition",
     ],
     properties: {
       id: { type: "string" },
@@ -1475,7 +1475,17 @@ export const schemas = {
       },
       name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
-      content: { type: ["string", "null"], description: "Package item content" },
+      definition: {
+        type: "string",
+        enum: ["draft", "published"],
+        description:
+          'WHICH definition `content`, `manifest` and every field projected from them were read from: `draft` is the author\'s working copy, `published` a `package_versions` snapshot (the `latest` one, or the version `?version=` named). With no selector: the draft for a caller who may WRITE the package, otherwise the latest published version, and — when nothing is published — the draft in read-only, because a package the listing shows must have a page. The SAME rule and the same two functions the agent detail and the file explorer use, so the Content tab and the Files tab can never disagree about which bytes they are showing. `definition: "draft"` together with `home_writable: false` means "never published, you are seeing the author\'s work in progress".',
+      },
+      content: {
+        type: ["string", "null"],
+        description:
+          "The package's primary content: `SKILL.md` for a skill, `INTEGRATION.md` for an integration, the manifest text for an mcp-server (which has no companion file of its own) and for an integration published without one. Read from the draft or from the published archive according to `definition`.",
+      },
       source: { type: "string", enum: ["system", "local"] },
       created_by: { type: ["string", "null"] },
       auto_installed: { type: "boolean" },
@@ -2218,7 +2228,6 @@ export const schemas = {
         "home_writable",
         "home_shareable",
         "installed_in",
-        "update_available",
       ],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
@@ -2244,11 +2253,6 @@ export const schemas = {
           description:
             "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
           items: { type: "string" },
-        },
-        update_available: {
-          type: "boolean",
-          description:
-            "The caller's own personal space has this package installed at a version PIN older than the `latest` dist-tag. An installation in a personal space is pinned at install time so a newly published version never executes with the recipient's credentials unseen; re-calling `POST /api/packages/{scope}/{name}/shares/accept` re-pins it to `latest`. Always `false` for team-space installations, which follow `latest`.",
         },
       },
     },

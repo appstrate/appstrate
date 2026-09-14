@@ -296,6 +296,7 @@ export async function importBundle(
   bundle: Bundle,
   scope: BundleAssemblyScope,
   userId: string,
+  mayShareRoot?: (packageId: string) => Promise<boolean>,
 ): Promise<ImportBundleResult> {
   const imported: ImportedPackageResult[] = [];
   const warnings: string[] = [];
@@ -527,18 +528,32 @@ export async function importBundle(
   }
 
   // Install root in the space (idempotent — no-op if already there).
+  //
+  // A root the import CREATED is homed here, so the placement rule is already
+  // satisfied. A root that existed and lives in ANOTHER space is not: this is a
+  // re-import into a second space, and installing it there is the same act as
+  // `POST /api/spaces/{id}/packages` — it needs the offer. So it takes the same
+  // door: when the caller holds `<type>:share` in the root's home, the offer is
+  // written with the installation, in one transaction; when they do not,
+  // `installPackage` refuses and the result says `root_installed: false`.
   const rootParsed = parsePackageIdentity(bundle.root);
   if (!rootParsed) {
     throw invalidRequest("Bundle root identity is invalid");
   }
   let rootInstalled = false;
   try {
-    await installPackage(scope, rootParsed.packageId);
+    const mayShare = (await mayShareRoot?.(rootParsed.packageId)) ?? false;
+    await installPackage(scope, rootParsed.packageId, mayShare ? { shareBy: userId } : undefined);
     rootInstalled = true;
   } catch (err) {
-    // Conflict or already-installed is fine — surface the root id + swallow.
-    logger.debug("Root install skipped", {
+    // An already-installed root is the benign half of this; an unreachable or
+    // unofferable one is the half a caller has to diagnose, and the response
+    // only says `false`. WARN, carrying the refusal's own message: a bundle
+    // that imported its packages and then failed to place its root is an
+    // operator-visible outcome, not a debugging detail.
+    logger.warn("Bundle root not installed in space", {
       packageId: rootParsed.packageId,
+      spaceId: scope.spaceId,
       err: getErrorMessage(err),
     });
   }
@@ -657,6 +672,7 @@ export async function handleImportBundle(
   scope: BundleAssemblyScope,
   userId: string,
   authorize: (bundle: Bundle) => Promise<void>,
+  mayShareRoot?: (packageId: string) => Promise<boolean>,
 ): Promise<ImportBundleResult> {
   const { bundle, conflicts } = await preflightBundleImport(bytes, scope, authorize);
   if (conflicts.length > 0) {
@@ -669,5 +685,5 @@ export async function handleImportBundle(
       .join("; ");
     throw conflict("bundle_conflict", `Bundle conflicts with existing packages: ${summary}`);
   }
-  return importBundle(bundle, scope, userId);
+  return importBundle(bundle, scope, userId, mayShareRoot);
 }

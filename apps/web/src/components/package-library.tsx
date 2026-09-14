@@ -4,13 +4,17 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Package } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { PackageType } from "@appstrate/core/validation";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "./page-states";
 import { SharedWithMe } from "./package-offers";
 import { useTogglePackageInstall } from "../hooks/use-library";
-import type { LibraryPackageItem, LibraryResponse, LibrarySpace } from "../hooks/use-library";
+import type {
+  LibraryOffer,
+  LibraryPackageItem,
+  LibraryResponse,
+  LibrarySpace,
+} from "../hooks/use-library";
 import { useSpaces } from "../hooks/use-spaces";
 import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
@@ -25,10 +29,8 @@ import {
 } from "@appstrate/ui/components/table";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
-import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { packageDetailPath } from "../lib/package-paths";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { useAcceptPackageShare } from "../hooks/use-package-shares";
 
 const TABS = ["agents", "skills", "mcpServers", "integrations"] as const;
 type Tab = (typeof TABS)[number];
@@ -40,14 +42,31 @@ const TYPE_MAP: Record<Tab, PackageType> = {
   integrations: "integration",
 };
 
-export function PackageLibrary({ data, title }: { data: LibraryResponse; title: string }) {
+export function PackageLibrary({
+  data,
+  title,
+  offers,
+}: {
+  data: Pick<LibraryResponse, "packages" | "spaces">;
+  title: string;
+  /**
+   * The offers still waiting on a decision, when the caller is reading ONE
+   * space. The matrix below says where a package is active and where this
+   * caller can activate it; an offer is neither — it is a package addressed
+   * to a space whose recipient has not answered, and it carries what the
+   * matrix cannot say (who offered it, and into which space). So it has one
+   * home, here, and the organization catalog — which reads every space at
+   * once and belongs to nobody in particular — passes none.
+   */
+  offers?: LibraryOffer[];
+}) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useTabWithHash(TABS, "agents");
 
   return (
     <div className="p-6">
       <PageHeader title={title} />
-      <SharedWithMe shared={data.shared} spaces={data.spaces} />
+      {offers && <SharedWithMe shared={offers} spaces={data.spaces} />}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
         <TabsList>
           {TABS.map((tab) => (
@@ -86,9 +105,6 @@ function LibraryMatrix({
   const { data: accessibleSpaces } = useSpaces();
   const toggle = useTogglePackageInstall();
   const currentSpaceId = useCurrentSpaceId();
-  // Re-accepting a share re-pins the caller's personal-space installation to
-  // `latest` — the update button of the badge below.
-  const update = useAcceptPackageShare();
   const permissionsBySpace = new Map(accessibleSpaces?.map((s) => [s.id, s.permissions]));
   const { install: installPermission, uninstall: uninstallPermission } = PACKAGE_PERMISSIONS[type];
   // Every column targets a different space. Installation state chooses the
@@ -158,33 +174,6 @@ function LibraryMatrix({
                   <Badge variant="secondary" className="px-1.5 py-0 text-[0.6rem]">
                     {t("library.system")}
                   </Badge>
-                )}
-                {/* The caller's own personal space holds it at a version PIN
-                    older than `latest`. Re-accepting is what takes the new
-                    version — the same act that installed it. */}
-                {pkg.update_available && (
-                  <Badge variant="outline" className="px-1.5 py-0 text-[0.6rem]">
-                    {t("library.updateAvailable")}
-                  </Badge>
-                )}
-                {pkg.update_available && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-1.5 text-xs"
-                    disabled={update.isPending}
-                    onClick={() =>
-                      update.mutate(
-                        { params: { path: splitPackageRef(pkg.id) } },
-                        {
-                          onSuccess: () => toast.success(t("library.updateApplied")),
-                          onError: (err) => toast.error(getErrorMessage(err)),
-                        },
-                      )
-                    }
-                  >
-                    {t("library.updateApply")}
-                  </Button>
                 )}
               </div>
               {pkg.description && (

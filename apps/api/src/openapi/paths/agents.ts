@@ -93,7 +93,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Save agent input settings",
       description:
-        "Save the agent's stored input values and field locks for this space. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.",
+        "Save the agent's stored input values and field locks for this space. `values` are validated against the manifest `input.schema` of the definition this space RUNS — the draft for a caller who may write the agent, the latest published version for everybody else — so the editor never validates against a definition the page did not show (`defaultDefinitionSelector` — the same answer the detail projection and the readiness badge use, which falls back to the draft when nothing is published rather than refusing a readable agent). `values` are checked with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -247,7 +247,7 @@ export const agentsPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the installed version pin, else draft, matching the launch button. Pass a concrete version to get the same run-blocking verdict the run would produce for that pinned version (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents.",
+            "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents.",
         },
       ],
       responses: {
@@ -261,7 +261,11 @@ export const agentsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
@@ -654,7 +658,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Export an agent as an .afps-bundle",
       description:
-        "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this space (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space (owners and admins when it has none): `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
+        "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space (owners and admins when it has none): `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -665,7 +669,7 @@ export const agentsPaths = {
           name: "version",
           required: false,
           description:
-            "Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this space (falls back to the `latest` dist-tag). Mutually exclusive with `?source=draft`.",
+            "Version to export — exact semver, dist-tag, or semver range. Defaults to the `latest` dist-tag. Mutually exclusive with `?source=draft`.",
           schema: { type: "string" },
         },
         {
@@ -673,7 +677,7 @@ export const agentsPaths = {
           name: "source",
           required: false,
           description:
-            "Bundle source. `published` (default) exports a published version archive — reproducible and signable. `draft` bundles the agent's live draft state and resolves dependencies via the draft catalog — mirrors the dashboard Run button so the CLI can run never-published agents.",
+            "Bundle source. `published` (default) exports a published version archive — reproducible and signable. `draft` bundles the agent's live draft state as the ROOT and resolves its dependencies against PUBLISHED versions — the same closure a `version=draft` run gets — so the CLI can run a never-published agent on an explicit `@draft` spec without walking away with a skill's working copy. A dependency's own draft is reachable by the one act that names it, `dependency_overrides`, which asks for write authority on THAT package. It hands over the unpublished manifest and prompt and `--local` executes them, so it is the same act as running the draft and answers to the same authority: `403 draft_not_writable` for a caller who cannot WRITE the agent.",
           schema: { type: "string", enum: ["draft", "published"] },
         },
       ],
@@ -705,7 +709,11 @@ export const agentsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, or `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "422": {
           description:

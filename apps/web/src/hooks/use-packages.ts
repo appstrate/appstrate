@@ -112,15 +112,19 @@ async function fetchPackageDetail(
   version?: string,
 ): Promise<AgentDetail | OrgPackageItemDetail> {
   const path = splitPackageRef(packageId);
+  // Omitted lets the server pick the definition this caller may see — their
+  // draft when they may write the package, the latest published version
+  // otherwise. An explicit `draft` is an author's read, and every type answers
+  // it the same way (`403 draft_not_writable` for anybody else).
+  const query = version ? { query: { version } } : {};
   if (type === "agent") {
-    // Omitted inherits the installation; explicit draft is an editor read.
     const { data } = await client.GET("/api/packages/agents/{scope}/{name}", {
-      params: { path, ...(version ? { query: { version } } : {}) },
+      params: { path, ...query },
     });
     return normalizeAgentDetail(data!);
   }
   const { data } = await client.GET(`/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}`, {
-    params: { path },
+    params: { path, ...query },
   });
   return normalizePackageItemDetail(data!);
 }
@@ -164,7 +168,8 @@ function usePackageDetail<T extends PackageType>(
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const cfg = PACKAGE_CONFIG[type];
-  // Inherited installation and explicit draft must never share a cache entry.
+  // The server's default projection and an explicit `draft` are two different
+  // answers and must never share a cache entry.
   const version = opts?.version;
 
   return useQuery({

@@ -527,8 +527,6 @@ export interface AgentListItem extends BasePackageListItem {
 
 export interface AgentDetail {
   id: string;
-  /** Accepted installation version in the current space; null means unpinned. */
-  version_pin: string | null;
   /** Manifest-derived; may be absent (the SPA falls back to the id). */
   display_name?: string;
   description?: string;
@@ -540,8 +538,19 @@ export interface AgentDetail {
      *
      * `version`/`name`/`description` are emitted only when present on the
      * manifest skill ref (handler spreads them conditionally) — AFPS §4.1.
+     *
+     * `home_writable` is always present: it says whether THIS caller may run
+     * that skill's DRAFT (`dependency_overrides: { "@scope/skill": "draft" }`),
+     * which the run routes refuse to anyone who cannot write it. The launch
+     * form offers the option only where it is `true`.
      */
-    skills?: { id: string; version?: string; name?: string; description?: string }[];
+    skills?: {
+      id: string;
+      version?: string;
+      name?: string;
+      description?: string;
+      home_writable: boolean;
+    }[];
     /**
      * AFPS §4.1 mcp_servers dependency group (`{ id, version }` per entry).
      * Composition too: withheld from a summary read, with `skills`.
@@ -584,6 +593,18 @@ export interface AgentDetail {
   prompt?: string;
   scope: string | null;
   version: string | null;
+  /**
+   * WHICH definition every manifest-derived field above was projected from:
+   * `draft` is the author's working copy, `published` a `package_versions`
+   * snapshot (the `latest` one, or the one an explicit `?version=` named).
+   *
+   * `definition: "draft"` with `home_writable: false` is the one pair a reader
+   * must act on: nothing is published yet, the page is showing the author's
+   * work in progress, and a launch with no selector answers
+   * `404 no_published_version` — so the SPA renders the read-only banner and
+   * disables Launch instead of offering a button that cannot work.
+   */
+  definition: "draft" | "published";
   manifest?: Record<string, unknown>; // Raw manifest from DB (user agents only)
 
   callback_url?: string;
@@ -611,10 +632,11 @@ export interface AgentDetail {
   /**
    * Whether THIS caller holds `agents:share` in the home space — the predicate
    * the THREE `/shares` routes that change the audience enforce (offer, list,
-   * revoke), from the same server-side computation. `accept` is not one of
-   * them: it is the recipient's own act on their own space and asks for no
-   * `share`. Sharing is a third verb on the home, not a synonym for writing: a
-   * custom role may hold one without the other. Always emitted.
+   * revoke), from the same server-side computation. Installing an offered
+   * package is not one of them: it is the recipient's own act on their own
+   * space and asks for no `share`. Sharing is a third verb on the home, not a
+   * synonym for writing: a custom role may hold one without the other. Always
+   * emitted.
    */
   home_shareable: boolean;
   /**
@@ -658,8 +680,8 @@ export interface OrgPackageItem extends BasePackageListItem {
   /**
    * Whether THIS caller holds the type's `share` in the home space — the
    * predicate the THREE `/shares` routes that change the audience enforce
-   * (offer, list, revoke), from the same computation; `accept` asks for no
-   * `share`. Always emitted.
+   * (offer, list, revoke), from the same computation; installing an offered
+   * package asks for no `share`. Always emitted.
    */
   home_shareable: boolean;
 }
@@ -668,7 +690,24 @@ export interface OrgPackageItem extends BasePackageListItem {
 // dropped from the base via Omit (a sub-interface can't loosen a required
 // field to optional).
 export interface OrgPackageItemDetail extends Omit<OrgPackageItem, "used_by_agents"> {
-  /** Present but nullable — the draft_content column is nullable. */
+  /**
+   * WHICH definition `content`, `manifest` and every field projected from it
+   * (`name`, `description`, `version`, `manifest_name`) were read from —
+   * exactly the field `AgentDetail` carries, for exactly the same reason: a
+   * caller who may WRITE the package reads their own working copy, everybody
+   * else reads the latest published version, and nothing but this flag tells
+   * the two apart on the wire.
+   *
+   * `definition: "draft"` with `home_writable: false` is the pair a reader
+   * must act on: nothing is published yet, the page is showing the author's
+   * work in progress, and the SPA says so instead of letting it pass for a
+   * released definition.
+   */
+  definition: "draft" | "published";
+  /**
+   * Present but nullable — the `draft_content` column is nullable, and a
+   * published projection reads the archive entry this type is authored around.
+   */
   content: string | null;
   agents: { id: string; display_name: string }[];
   manifest?: Record<string, unknown>;
@@ -1062,7 +1101,6 @@ export interface InstalledPackage {
   generationConfig: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
-  version_id: number | null;
   enabled: boolean;
   installed_at: string;
   updatedAt: string;
@@ -1076,7 +1114,9 @@ export interface InstalledPackage {
  * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
  * Single source of truth for both the dashboard's per-space agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
- * lockstep prevents UI ↔ CLI drift on model / proxy / version pin.
+ * lockstep prevents UI ↔ CLI drift on model / proxy / generation settings.
+ * It carries no VERSION: which bytes run is the launch selector's business,
+ * not the installation's.
  *
  * `input` carries the per-space stored input layer, because
  * `appstrate run @scope/agent --local` fetches the bundle and executes it on
@@ -1090,8 +1130,6 @@ export interface ResolvedRunConfig {
   generation: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
-  /** Pinned semver label (`1.2.3`), or null when the space uses the floating dist-tag. */
-  version_pin: string | null;
   /**
    * `space_packages.input_settings` — layer 2 of the input resolution
    * (`apps/api/src/services/input-resolution.ts`), on the wire under the same

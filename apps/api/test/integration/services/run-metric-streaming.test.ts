@@ -51,7 +51,12 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     await truncateAll();
     _resetRunMetricBroadcasterForTests();
     ctx = await createTestContext();
-    await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
+    await seedAgent({
+      id: agentId,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const run = await seedRun({
       packageId: agentId,

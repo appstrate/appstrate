@@ -66,6 +66,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
   async function seedRunnableAgent(): Promise<void> {
     await seedAgent({
       id: AGENT_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {

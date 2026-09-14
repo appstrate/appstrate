@@ -5,7 +5,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { $api, type components, type paths } from "../../api/client.ts";
 import { render } from "../../test/render.tsx";
 import { SpacePackageOffers } from "../../components/package-offers.tsx";
-import { LibraryPage } from "../library-page.tsx";
+import { LibraryPage, SpacePackagesPage } from "../library-page.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 
 await i18nReady;
@@ -14,7 +14,9 @@ await i18n.changeLanguage("fr");
 type Space = components["schemas"]["SpaceObject"];
 type Package = components["schemas"]["LibraryPackageList"][number];
 type Library = paths["/api/library"]["get"]["responses"][200]["content"]["application/json"];
-type Offer = Library["shared"][number];
+type SpaceLibrary =
+  paths["/api/spaces/{spaceId}/library"]["get"]["responses"][200]["content"]["application/json"];
+type Offer = SpaceLibrary["shared"][number];
 
 function space(id: string, permissions: string[]): Space {
   return {
@@ -47,7 +49,6 @@ function packageRow(type: Package["type"], installed_in: string[], source = "loc
     home_writable: false,
     home_shareable: false,
     installed_in,
-    update_available: false,
   };
 }
 
@@ -72,7 +73,6 @@ function checkboxes(spaces: Space[] | undefined, pkg: Package) {
     object: "library",
     spaces: spaces ?? [space("spc_a", [])],
     packages: { agent: [], skill: [], "mcp-server": [], integration: [], [pkg.type]: [pkg] },
-    shared: [],
   };
   qc.setQueryData($api.queryOptions("get", "/api/library", { params }).queryKey, library);
   if (spaces) {
@@ -95,26 +95,38 @@ function checkboxes(spaces: Space[] | undefined, pkg: Package) {
 }
 
 /**
- * Render the page with one OFFER in "Partagé avec moi" and return the labels of
- * the buttons that section carries. `spaces` seeds both the library's column
- * list and `useSpaces`, which is where the per-space grants come from.
+ * Seed the SPACE library query with one offer and render the space view —
+ * where an offer lives. `spaces` seeds both the matrix's column list and
+ * `useSpaces`, which is where the per-space grants come from.
  */
-function offerButtons(spaces: Space[], offer: Offer): string[] {
+function renderSpaceLibraryWithOffer(spaces: Space[], offer: Offer): string {
   const qc = new QueryClient();
   const params = { header: { "X-Org-Id": undefined } };
-  const library: Library = {
+  const library: SpaceLibrary = {
     object: "library",
     spaces,
     packages: { agent: [], skill: [], "mcp-server": [], integration: [] },
     shared: [offer],
   };
-  qc.setQueryData($api.queryOptions("get", "/api/library", { params }).queryKey, library);
+  qc.setQueryData(
+    $api.queryOptions("get", "/api/spaces/{spaceId}/library", {
+      params: { path: { spaceId: "" }, ...params },
+    }).queryKey,
+    library,
+  );
   qc.setQueryData($api.queryOptions("get", "/api/spaces", { params }).queryKey, {
     object: "list",
     data: spaces,
     hasMore: false,
   });
-  const html = render(<LibraryPage />, { queryClient: qc, initialEntries: ["/library"] });
+  return render(<SpacePackagesPage />, { queryClient: qc, initialEntries: ["/space/packages"] });
+}
+
+/**
+ * The labels of the buttons the "Partagé avec moi" section carries.
+ */
+function offerButtons(spaces: Space[], offer: Offer): string[] {
+  const html = renderSpaceLibraryWithOffer(spaces, offer);
   // Bounded at the tab strip that follows the section, so the tab triggers
   // (which are buttons too) do not read as affordances on the offer.
   const start = html.indexOf(i18n.t("library.shared.title"));
@@ -137,10 +149,10 @@ function offer(overrides: Partial<Offer> = {}): Offer {
 }
 
 describe("the offers waiting on a decision", () => {
-  // A share is READ; the recipient activates it. Which act depends on the
-  // destination: their own personal space is `accept`ed, a TEAM space is an
-  // ordinary install into it — so the row offers that install exactly when the
-  // caller holds the type's install grant THERE. Without the button the row
+  // A share is READ; the recipient activates it, and there is ONE act behind
+  // both buttons — `POST /api/spaces/{spaceId}/packages`. Only who may press
+  // differs: owning a personal space is its own authorization, while a TEAM
+  // space asks for the type's install grant THERE. Without the button the row
   // named a space and left the reader to hunt the package in the matrix below.
   it("offers the install into a TEAM space to a caller who may install there", () => {
     expect(offerButtons([space("spc_team", ["agents:configure"])], offer())).toEqual([
@@ -161,11 +173,47 @@ describe("the offers waiting on a decision", () => {
     ).toEqual([]);
   });
 
-  it("keeps `accept` as the only act on an offer to the caller's own space", () => {
-    // No install grant anywhere, deliberately: accepting needs none (§3.6).
+  it("offers the install into the caller's own personal space with no grant at all", () => {
+    // No install grant anywhere, deliberately: owning the space is the
+    // authorization (§3.6), and the row must not read the grant map for it.
     expect(
       offerButtons([space("spc_mine", [])], offer({ space_id: "spc_mine", personal: true })),
     ).toEqual([i18n.t("library.shared.add")]);
+  });
+
+  it("names the offer in the SPACE view", () => {
+    // The positive half of the control below: the same seed, read where an
+    // offer belongs, does show it.
+    expect(
+      renderSpaceLibraryWithOffer([space("spc_team", ["agents:configure"])], offer()),
+    ).toContain(i18n.t("library.shared.title"));
+  });
+
+  it("says nothing about offers in the ORGANIZATION catalog", () => {
+    // The catalog reads every space at once, so an offer addressed to one of
+    // them has no row to belong to — and duplicating it beside the matrix
+    // gave the same package two lines and two buttons for one act.
+    const qc = new QueryClient();
+    const params = { header: { "X-Org-Id": undefined } };
+    const spaces = [space("spc_team", ["agents:configure"])];
+    // Seeded WITH an offer the schema no longer declares, deliberately: a
+    // snapshot without one would pass whatever the page does. The cast is the
+    // assertion — the catalog carries no `shared` member, and would render
+    // nothing even if a server sent one.
+    const library = {
+      object: "library",
+      spaces,
+      packages: { agent: [], skill: [], "mcp-server": [], integration: [] },
+      shared: [offer()],
+    } as unknown as Library;
+    qc.setQueryData($api.queryOptions("get", "/api/library", { params }).queryKey, library);
+    qc.setQueryData($api.queryOptions("get", "/api/spaces", { params }).queryKey, {
+      object: "list",
+      data: spaces,
+      hasMore: false,
+    });
+    const html = render(<LibraryPage />, { queryClient: qc, initialEntries: ["/library"] });
+    expect(html).not.toContain(i18n.t("library.shared.title"));
   });
 });
 
@@ -226,10 +274,10 @@ describe("library installation controls", () => {
 
 describe("pending offers in package lists", () => {
   it.each(["agent", "skill", "mcp-server", "integration"] as const)(
-    "shows only current-space %s offers with explicit acceptance",
+    "shows only current-space %s offers, each with its own install button",
     (type) => {
       const qc = new QueryClient();
-      const snapshot: Library = {
+      const snapshot: SpaceLibrary = {
         object: "library",
         spaces: [space("spc_mine", [])],
         packages: { agent: [], skill: [], "mcp-server": [], integration: [] },

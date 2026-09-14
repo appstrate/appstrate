@@ -59,6 +59,7 @@ import {
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
 import { listRunnableAgents, listInstalledSkills } from "../services/space-packages.ts";
+import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -406,13 +407,19 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const permissions = callerPermissions(c);
   const canRun = permissions.has("agents:run");
   const canReadSkills = permissions.has("skills:read");
+  // Resolved once for both hint listings: `home_writable` is what tells the
+  // model whether a draft-only package is THIS caller's to run, and computing
+  // it needs the caller's reach over every space, not the package rows.
+  const accessible = await packageAccessSpaces(c);
+  const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[1]) =>
+    homeWireForCaller(c, pkg, accessible).home_writable;
   const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
     listUsableIntegrationsForActor(scope, actor),
     canRun
-      ? listRunnableAgents(scope)
+      ? listRunnableAgents(scope, { homeWritable })
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
     canReadSkills
-      ? listInstalledSkills(scope)
+      ? listInstalledSkills(scope, { homeWritable })
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
     // The caller's own recent runs (actor-scoped) — no extra permission needed.
     listRecentForActor(scope, actor),

@@ -8,33 +8,134 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **A package can be SHARED with a person or with a space.** Sharing writes an
-  AUDIENCE row (`package_shares`, migration **0065**, a brand-new table with no
-  backfill); installing stays the recipient's own act on `space_packages`. Two
-  tables, because a package runs with the RECIPIENT's credentials: activating
-  one is a consent, and an "offered but not accepted" state carried on
-  `space_packages` would have had to be filtered at each of that table's
-  thirteen readers, where one miss executes a package nobody agreed to. The
-  subject is always a SPACE — "share with Bob" is a share with Bob's personal
+- **A package now lives in ONE space and reaches every other one through a
+  SHARE.** `package_shares` (migration **0065**, a brand-new table with no
+  backfill) says a package is OFFERED to a space; `space_packages` says it is
+  ACTIVATED there. Two tables, because a package runs with the RECIPIENT's
+  credentials: activating one is a consent, and an "offered but not accepted"
+  state carried on `space_packages` would have had to be filtered at each of that
+  table's thirteen readers, where one miss executes a package nobody agreed to.
+  The subject is always a SPACE — "share with Bob" is a share with Bob's personal
   space, resolved server-side from his user id and created if he has none, and
   the sharer never learns that id: the listing renders such a target as its
-  owner. Three routes are authorized by a THIRD verb on the package's home space
-  (§6.9's authority, `<type>:share`): `POST /api/packages/{scope}/{name}/shares`
-  (idempotent, 409 `share_target_is_home` when the target is the home itself,
-  404 for a space the caller cannot reach — so another member's personal space
-  is not targetable by a guessed id), `GET …/shares` and
-  `DELETE …/shares/{target}` (which removes the installation behind the share in
-  the SAME transaction — otherwise the package keeps running where it may no
-  longer be seen). A fourth, `POST …/shares/accept`, is the recipient's own act
-  and requires NEITHER `share` NOR the type's install grant: the owner of the
-  space consented by calling it, and a `guest` holds only the `operator` preset
-  in their own space. It installs pinned to `latest`, so an author publishing a
-  v3 never changes what the recipient executes; calling it again re-pins, which
-  is the update path. A share is a READ grant and nothing more — `placementGrantsRead`
-  becomes `installed ∨ shared ∨ home` and `GET /api/library` gains a `shared`
-  section listing the offers not yet installed — while execution, the version
-  pin, the per-space model and the credential resolution all stay on
-  `space_packages`. No execution path reads `package_shares`.
+  owner. A package is readable from exactly TWO placements, its HOME
+  (`packages.home_space_id`) and every space it is SHARED into. An INSTALLATION
+  is deliberately not a third one: it was the only answer to "why does this space
+  see this package" that never consulted `<type>:share`, so a builder of B who
+  read A's package from anywhere could install it into B and hand B a placement A
+  had granted to nobody. Installing is the act of TAKING an offer, and therefore
+  a placement's consequence rather than its source.
+
+  Three routes change the audience and are authorized by a THIRD verb on the
+  package's home space (`<type>:share`):
+  `POST /api/packages/{scope}/{name}/shares` (idempotent, 409
+  `share_target_is_home` when the target is the home itself, 404 for a space the
+  caller cannot reach — so another member's personal space is not targetable by a
+  guessed id), `GET …/shares` and `DELETE …/shares/{target}` (which removes the
+  installation behind the share in the SAME transaction — otherwise the package
+  keeps running where it may no longer be seen). Offering a package with
+  **nothing published** is 409 `package_has_no_version`, for EVERY target and
+  checked before the target is resolved so a refused offer provisions no personal
+  space: outside its home a package runs its latest published version, so an
+  offer of one with nothing published is an offer of nothing. The refusal lands
+  on the only principal who can clear it, in the act they are performing, where
+  the dialog offers **Publier et partager**.
+
+  **Installing has ONE door**, `POST /api/spaces/{spaceId}/packages`, for a
+  personal space exactly as for a team one. The package must be homed in the
+  target or shared into it, re-read under the share row's lock inside the
+  installing transaction, so a revoke racing an install makes the install refuse
+  rather than commit an installation nothing backs; otherwise 404, never a 403,
+  since a space id can be private. A caller holding `<type>:share` in the home
+  may install one that is NOT placed there yet — the offer is created with the
+  installation, in that one transaction, which is the administrator's single
+  click from the library, and it is why reading A's package from B still grants
+  nothing about placing it in B. In the caller's OWN personal space the type's
+  install and uninstall grants are waived entirely: ownership is the
+  authorization, and a `guest` holds only the `operator` preset there, which
+  carries none of them. An API key never carries `share`, so it installs the
+  already-placed and nothing else. `GET /api/spaces/{id}/library` proposes
+  exactly what that call would accept, so the listing cannot offer a package the
+  install would refuse.
+
+  **Outside its home, a package runs the latest PUBLISHED version, always.**
+  Publishing IS the rollout — the model of Copilot Studio, custom GPTs, n8n and
+  Apps Script — so an author ships a fix and every recipient gets it on their
+  next launch, with nothing to accept a second time. A recipient cannot repair an
+  agent they do not own, so freezing one on bytes its author had stopped
+  maintaining bought them nothing; the real hazard, a new version demanding an
+  access they never granted, is already refused at the right moment by 412
+  `missing_integration_connection` and its connection offers. Dependency versions
+  are unaffected: an agent's manifest ranges resolve against the published
+  catalogue and each run freezes what it resolved.
+
+- **The DRAFT belongs to whoever may WRITE the package, and every executable form
+  of it now says so — `403 draft_not_writable`.** A head deployment is the
+  developer's, the rule Apps Script states. One predicate and one wording gate
+  all of it: `?version=draft` on `POST /api/runs`, on schedule creation and
+  update and on `GET /api/agents/{scope}/{name}/connection-readiness`;
+  `dependency_overrides: { "@acme/skill": "draft" }` on the run route, the
+  remote-run route and both schedule writes, where the authority asked is the one
+  over THAT dependency rather than over the agent declaring it; `stage: "draft"`
+  on `POST /api/runs/remote`; and `GET /api/agents/{scope}/{name}/bundle?source=draft`,
+  because an exported draft is a draft run with the bytes handed over as well.
+  **Operators: an API key now needs `agents:write` to export a draft**, which is
+  what `appstrate run @scope/agent@draft --local` does — `agents:read` is enough
+  for every published export. A schedule is judged when it is WRITTEN and never
+  re-judged when it fires, exactly as its frozen `connection_overrides` are. A
+  selector left out is still the published `latest` (#636), and still 404
+  `no_published_version` when there is none — there is no silent fall-back to the
+  draft anywhere.
+
+- **Reading a package is not executing it: a readable package never 404s on its
+  detail page.** With no selector named, the page renders the DRAFT for a caller
+  who may write the package, the latest PUBLISHED version for everybody else,
+  and — when nothing is published at all — the draft in read-only, since hiding
+  it would 404 a page the package list had just linked to. `AgentDetail` and
+  `OrgPackageItemDetail` both carry the new required field `definition`
+  (`"draft" | "published"`) so the reader is told which of the two they are
+  looking at instead of inferring it; the SPA renders `definition: "draft"` with
+  `home_writable: false` as a read-only banner — the same banner and the same key
+  for all four package types — and disables **Lancer** with that reason rather
+  than letting the launch fail.
+  The readiness badge and the input-settings editor judge the SAME effective
+  selector, from the same function, so a badge can no longer contradict the page
+  it sits on. `AgentDetail.dependencies.skills[]` gains `home_writable` too, which
+  is what decides whether the run and schedule forms offer a per-dependency
+  **Brouillon** option at all. The agent and skill hints in `GET /api/me/context`,
+  the chat system prompt and the MCP tool descriptions carry the same flag: a
+  draft-only package is presented to the model as runnable with `version=draft`
+  only when the caller may write it, and as "not yet published, not runnable"
+  otherwise.
+
+- **`enabled` is a switch of PRESENCE, not a setting.** On
+  `PUT /api/spaces/{id}/packages/{scope}/{name}`, `enabled: true` is gated as
+  `install` and `enabled: false` as `uninstall` — the same pair of acts as
+  `POST …/integrations/{id}/activate` and `DELETE …/deactivate`, spelled on the
+  association row instead of on their own route — so the personal-space waiver
+  covers them and a recipient can put down what they took up. `modelId`,
+  `proxyId` and `generationConfig` stay under `configure`, a body touching both
+  must clear both gates, and a body touching neither is still gated as
+  `configure` so an empty patch cannot become a cheap installed-or-not oracle. A
+  guest at home therefore installs, uninstalls and enables what was offered to
+  them, and never chooses the model it runs on: that spends the organization's
+  LLM budget, which is precisely what their org role withholds.
+
+- **Moving a package's home reconciles the placements it invalidates.**
+  `PATCH /api/packages/{scope}/{name}` now writes, in the same transaction as the
+  move, a `package_shares` row for every space that still has the package
+  installed and is not the new home — `shared_by` NULL, because nobody offered
+  it; the home did, until this call — and deletes the destination's own share,
+  for the mirror image of the reason an offer to the home answers 409
+  `share_target_is_home`. Those authorless rows are ordinary shares: `GET …/shares`
+  lists them with no author and `DELETE …/shares/{target}` revokes one like any
+  other, uninstalling with it. Without this a move left an installation nothing
+  placed — still running for a schedule, invisible on every page of the space
+  running it. Re-importing a bundle whose root is homed elsewhere follows the
+  same rule: it installs WITH an offer when the caller holds `<type>:share` in
+  that home, and otherwise reports `root_installed: false` and logs the refusal
+  at **warn**, because a placement that did not happen is an operator-visible
+  fact.
 
 - **New permission `share`** on `agents`, `skills`, `mcp-servers` and
   `integrations` (`@appstrate/core`, additive): held by the `admin` and
@@ -152,9 +253,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   package reads and on `GET /api/library`, and is moved by the new
   `PATCH /api/packages/{scope}/{name}`, which requires that permission in both
   the old and the new home (an unreachable destination answers 404). It is a
-  read grant too, everywhere: a package is readable from the spaces it is
-  installed in **and** from its home, so a draft installed nowhere — or one
-  installed only where its author cannot go — stays visible to them, on the
+  read grant too, everywhere: the home is one of the two placements that make a
+  package readable (the other is a SHARE), so a draft nobody has been offered —
+  or one placed only where its author cannot go — stays visible to them, on the
   detail, in the library and in the file explorer. Running a package is
   unchanged: that still needs an installation in the space it runs in. This
   replaces the rule requiring the permission in _every_ space where a package
@@ -363,6 +464,73 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   green).
 
 ### Changed
+
+- **BREAKING: every read of a package answers with ONE definition.** The file
+  explorer — `GET /api/packages/{scope}/{name}/files` and `…/files/content` —
+  and the detail pages of skills, integrations and mcp-servers —
+  `GET /api/packages/{skills,integrations,mcp-servers}/{scope}/{name}` — no
+  longer serve the draft to every reader. With no `?version` they answer the
+  same effective selector the agent detail page renders
+  (`defaultDefinitionSelector`: the draft for a caller who may write the
+  package, the latest published version for everybody else, and the draft when
+  nothing is published at all), and an explicit `?version=draft` is the author's
+  act it is on every other route, refused to everybody else with
+  `403 draft_not_writable`.
+
+  The explorer was the last door where the word `draft` bought bytes the run
+  route refuses, and the widest one per request: a caller who loops the index
+  has the working copy on disk. **For the CLI, the draft sync is the author's
+  sync**: `appstrate skills sync --source draft` now needs write authority, and
+  the default `--source published` is unchanged for everyone.
+
+  The three detail pages were not an escalation — reading a draft is open to
+  every reader of the package by design — but they made the question have two
+  answers: the Content tab of a published skill showed the author's working
+  copy while its own Files tab, in the same second, showed the published bytes.
+  `content`, `manifest` and every field projected from the manifest (`name`,
+  `description`, `version`, `manifest_name`) now move together with the new
+  required `OrgPackageItemDetail.definition`; these three routes gain the
+  `?version` selector the agent detail already had, with the same
+  `draft_not_writable` refusal and a `422 version_artifact_unavailable` for a
+  published archive whose primary file cannot be read. A mutating call echoes the
+  draft it just wrote, and a SYSTEM package reports `definition: "published"` —
+  its stored tree IS the definition the platform ships — while still refusing a
+  named `draft` like everybody else's.
+
+- **A draft export resolves its dependencies exactly as a draft run does.**
+  `GET /api/agents/{scope}/{name}/bundle?source=draft` puts the agent's DRAFT
+  at the root — the half `agents:write` gates — and every transitive
+  dependency at the PUBLISHED version its manifest range selects, against the
+  published catalogue. That is what a server-side `version=draft` run without
+  `dependency_overrides` executes, and an export answering anything else
+  handed the CLI different bytes from the ones the platform runs: the closure
+  used to be walked against draft state, so exporting shipped the working copy
+  of a skill the run route refuses in the same request. A dependency no
+  published version satisfies now fails the export the way it fails the run —
+  the same `422 dependency_unresolved`, naming the dependency — instead of
+  falling back. Running a dependency's working
+  copy stays the one act that says so, `dependency_overrides`, with its own
+  write gate.
+
+- **A `dependency_overrides` key that names no declared dependency is a `400`,
+  not a `403`.** Whether the key means anything at all is decided against the
+  EFFECTIVE manifest — the definition the launch will execute — before whose
+  working copy it would have been, on `POST /api/runs`,
+  `POST /api/runs/remote` and both schedule writes. A typo in a dependency id
+  otherwise came back as `403 draft_not_writable`, sending its reader after a
+  grant they do not need for an act the launch would never have performed.
+
+- **Re-sending a schedule's stored selector is not asking for it again.**
+  `PUT /api/schedules/{id}` judges `version_override` and each
+  `dependency_overrides` entry only when the body CARRIES the field and its
+  value DIFFERS from the one the row holds. A holder of `schedules:write` can
+  therefore edit the cron or the input of a draft schedule they did not
+  author, and it is MOVING a schedule onto the draft — or onto a dependency's
+  draft — that asks for `<type>:write` and can answer
+  `403 draft_not_writable`. Creation judges whatever is present, there being
+  no stored value to compare against. The schedule form sends
+  `version_override` only when it moved, so the refusal that remains is a
+  refusal of something the editor actually asked for.
 
 - **A package read no longer publishes its home space's id to callers who
   cannot see that space.** `home_space_id` on `AgentDetail`, `OrgPackageItem`,
@@ -1262,6 +1430,53 @@ skills sync is running` and kept the stale plugin. The lock is now
   of building a URL from it.
 
 ### Removed
+
+- **BREAKING (API): `POST /api/packages/{scope}/{name}/shares/accept` is gone.**
+  Taking up an offer IS installing, and installing has one door —
+  `POST /api/spaces/{spaceId}/packages` — for a personal space exactly as for a
+  team one, with ownership standing in for the install grant there. The accept
+  route existed only because the install route could not say "the offer is
+  enough"; now it can, so a second door with its own authorization rule, its own
+  response shape and its own audit event (`package.share_accepted`) is a
+  duplicate of the happy path rather than a feature. The path is absent, so a
+  caller still posting to it gets a 404 from the router. `GET …/shares` renders
+  the audience as before; nothing about offering or revoking changed.
+
+- **BREAKING (API): an installation no longer carries a version.** Migration
+  **0066** drops `space_packages.version_id` and its foreign key, and everything
+  that spelled it goes with it: `version_id` on
+  `PATCH /api/spaces/{id}/packages/{scope}/{name}` (the body schema is `.strict()`,
+  so sending it is now a 400), `version_pin` on
+  `GET …/packages/{scope}/{name}/run-config`, on `AgentDetail` and on
+  `InstalledPackage` in `@appstrate/shared-types`, the `409 version_in_use`
+  refusal that stopped a pinned version from being deleted, the
+  `update_available` flag on `LibraryPackage` with the "Mise à jour disponible"
+  badge and button it fed, the re-accept update path, and the CLI's inheritance
+  of the pin from `run-config` (`appstrate run` with no `@spec` runs the latest
+  published version, `@draft` runs the working copy), and the launch form's
+  inherit option, which is now simply **Dernière version publiée** — there is no
+  pin left to inherit, and an explicit choice stays explicit. Outside its home a
+  package runs the latest published version, always, so a column selecting a
+  definition had nothing left to select and the guards that protected it had
+  nothing left to protect. **`0066` is one-way**: a previous build reads the column at launch, on
+  the detail page and in the export, and writes it through
+  `updateInstalledPackage`. Whatever it held is discarded with it — a pinned
+  installation becomes a `latest` one, which is the rule from this release on.
+  The window also needs `scripts/migration/0016-package-shares-backfill.sql`,
+  right after `0014`: it gives every installation sitting outside its package's
+  home the `package_shares` row that now places it there, without which those
+  packages vanish from the spaces running them at the first request. The runbook
+  is `scripts/migration/README.md` → "Personal spaces & sharing rollout".
+
+- **BREAKING (API): `GET /api/library` has no `shared` section.** A pending offer
+  is addressed to a SPACE, and it is that space's library
+  (`GET /api/spaces/{id}/library`) that presents it, in its `shared` section and
+  nowhere else — not also as a row of the `packages.<type>` matrix, which answers
+  "where is this activated, and where can I activate it" and had one install
+  sitting behind two different buttons. The organization catalogue is an
+  administration surface whose matrix IS the placement map, so there was nothing
+  for a `shared` section to add there. The key is absent from the response rather
+  than empty, and the SPA renders "Partagés avec moi" only in the space view.
 
 - **BREAKING (operators): the organization role `viewer` is retired; `guest`
   replaces it, and moving the rows is a two-file deploy in ONE maintenance

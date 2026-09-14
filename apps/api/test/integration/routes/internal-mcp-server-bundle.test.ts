@@ -77,6 +77,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
   async function seedLocalIntegration(installed: boolean, serverName = MCP_SERVER) {
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -133,6 +134,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     // reads `manifest.dependencies.integrations` keys to find references.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {

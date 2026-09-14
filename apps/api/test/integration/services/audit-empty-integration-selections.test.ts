@@ -137,9 +137,7 @@ describe("auditEmptyIntegrationSelections", () => {
 
   it("an installed draft is reported but does not block when only explicitly selectable", async () => {
     await seedSplitAgent();
-    await db
-      .insert(spacePackages)
-      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: null });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const findings = await auditEmptyIntegrationSelections();
     const reachable = findings.filter(isReachable);
@@ -150,11 +148,9 @@ describe("auditEmptyIntegrationSelections", () => {
     expect(findings.filter(isBlocking)).toHaveLength(0);
   });
 
-  it("a healthy install pin leaves its explicitly selectable broken draft as a warning", async () => {
-    const { goodVersionId } = await seedSplitAgent();
-    await db
-      .insert(spacePackages)
-      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: goodVersionId });
+  it("a healthy published default leaves its explicitly selectable broken draft as a warning", async () => {
+    await seedSplitAgent();
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
     expect(reachable).toHaveLength(1);
@@ -165,7 +161,7 @@ describe("auditEmptyIntegrationSelections", () => {
   });
 
   it("blocks when the default published version is broken", async () => {
-    const { goodVersionId } = await seedSplitAgent();
+    await seedSplitAgent();
     const broken = await seedPackageVersion({
       packageId: AGENT_ID,
       version: "2.0.0",
@@ -174,11 +170,7 @@ describe("auditEmptyIntegrationSelections", () => {
     await db
       .insert(packageDistTags)
       .values({ packageId: AGENT_ID, tag: "latest", versionId: broken.id });
-    await db.insert(spacePackages).values({
-      spaceId: ctx.defaultSpaceId,
-      packageId: AGENT_ID,
-      versionId: goodVersionId,
-    });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const findings = await auditEmptyIntegrationSelections();
     const latest = findings.find((f) => f.artifact === "2.0.0");
@@ -197,40 +189,13 @@ describe("auditEmptyIntegrationSelections", () => {
     await db
       .insert(packageDistTags)
       .values({ packageId: AGENT_ID, tag: "latest", versionId: goodVersionId });
-    await db.insert(spacePackages).values({
-      spaceId: ctx.defaultSpaceId,
-      packageId: AGENT_ID,
-      versionId: goodVersionId,
-    });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const findings = await auditEmptyIntegrationSelections();
     const old = findings.find((f) => f.artifact === historical.version);
     expect(old?.installedIn).toEqual([ctx.defaultSpaceId]);
     expect(old?.activeIn).toEqual([]);
     expect(old && isBlocking(old)).toBe(false);
-  });
-
-  it("blocks when a space version pin targets an otherwise historical version", async () => {
-    const { goodVersionId } = await seedSplitAgent();
-    const pinnedBroken = await seedPackageVersion({
-      packageId: AGENT_ID,
-      version: "2.0.0",
-      manifest: agentManifest(AGENT_ID, "2.0.0"),
-    });
-    await db
-      .insert(packageDistTags)
-      .values({ packageId: AGENT_ID, tag: "latest", versionId: goodVersionId });
-    await db.insert(spacePackages).values({
-      spaceId: ctx.defaultSpaceId,
-      packageId: AGENT_ID,
-      versionId: pinnedBroken.id,
-    });
-
-    const pinned = (await auditEmptyIntegrationSelections()).find(
-      (f) => f.artifact === pinnedBroken.version,
-    );
-    expect(pinned?.activeIn).toEqual([ctx.defaultSpaceId]);
-    expect(pinned && isBlocking(pinned)).toBe(true);
   });
 
   it("flags a non-empty inherited selection when hidden_tools removes every tool", async () => {
@@ -267,9 +232,7 @@ describe("auditEmptyIntegrationSelections", () => {
         and(eq(packageVersions.packageId, INTEGRATION_ID), eq(packageVersions.version, "1.0.0")),
       );
     await seedSplitAgent();
-    await db
-      .insert(spacePackages)
-      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: null });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID });
 
     const validationErrors = await validateAgentIntegrationSelections({
       manifest: agentManifest(AGENT_ID, "1.1.0"),

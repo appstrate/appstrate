@@ -32,8 +32,9 @@ export function usePackageShares(packageId: string, enabled: boolean) {
 
 /**
  * Every write here changes what the RECIPIENT sees, not just the audience list:
- * revoking also uninstalls, and accepting installs. So the library — the
- * listing that renders both halves — is invalidated alongside the share list.
+ * a share makes the package readable in the target space, and revoking also
+ * uninstalls it there. So the library — the listing that renders both halves —
+ * is invalidated alongside the share list.
  */
 function useInvalidateShares() {
   const qc = useQueryClient();
@@ -54,18 +55,6 @@ export function useSharePackage() {
 export function useRevokePackageShare() {
   const invalidate = useInvalidateShares();
   return $api.useMutation("delete", "/api/packages/{scope}/{name}/shares/{target}", {
-    onSuccess: invalidate,
-  });
-}
-
-/**
- * Add a shared package to one's own space — and, called again on an
- * already-installed one, re-pin it to the latest published version. One route
- * for both because they are one act: taking the version the author offers.
- */
-export function useAcceptPackageShare() {
-  const invalidate = useInvalidateShares();
-  return $api.useMutation("post", "/api/packages/{scope}/{name}/shares/accept", {
     onSuccess: invalidate,
   });
 }

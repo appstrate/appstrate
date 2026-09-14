@@ -12,6 +12,42 @@ const listPackagesSharedDescription =
   "the organization-wide catalogue with per-space install state, use " +
   "`GET /api/library`.";
 
+/**
+ * The `?version` selector of the three generic package detail routes (skill /
+ * integration / mcp-server), and the two answers that come with it.
+ *
+ * ONE wording for the three, because it is ONE rule — the same rule the agent
+ * detail and the file explorer apply, from the same two functions
+ * (`assertDraftSelectorAllowed` + `defaultDefinitionSelector`). Spelling it
+ * three times is how the Content tab and the Files tab of the same package
+ * came to answer "which definition am I looking at" differently.
+ */
+const PACKAGE_DETAIL_VERSION_PARAM = {
+  name: "version",
+  in: "query",
+  required: false,
+  schema: { type: "string" },
+  description:
+    "Which definition to project into `content`, `manifest` and the fields derived from them. OMITTED reads the one that EXISTS for this caller — the author's live draft when they may WRITE the package, the `latest` published version otherwise, and the draft again when nothing is published yet, because reading a definition is not running it and a package the listing shows must have a page. The response's `definition` says which of the two answered. An EXPLICIT `draft` is an author's act and is reserved to callers who may write the package: `403 draft_not_writable` otherwise. Any other value is resolved as a version spec (exact version, dist-tag, or semver range). A system package ships its definition with the platform, so every selector but the named `draft` reads the same stored tree.",
+} as const;
+
+/**
+ * The refusals of a detail GET once {@link PACKAGE_DETAIL_VERSION_PARAM} is on
+ * it: the `403` gains `draft_not_writable`, the `404` covers a version spec
+ * that resolves to nothing, and the `422` a published archive whose primary
+ * file cannot be read — the same answer the run path gives for a published
+ * agent with no readable prompt.
+ */
+const PACKAGE_DETAIL_DEFINITION_RESPONSES = {
+  "403": {
+    $ref: "#/components/responses/Forbidden",
+    description:
+      "Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package.",
+  },
+  "404": { $ref: "#/components/responses/NotFound" },
+  "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
+} as const;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mutation response schemas (issue #657)
 //
@@ -408,7 +444,7 @@ export const packagesPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which snapshot to read: omitted (or `draft`) reads the live draft, where the stored artifact is overlaid with the authoritative `manifest.json` / primary content from the database. Any other value is resolved as a version spec (exact version, dist-tag, or semver range) and returns exactly the published bytes, with no overlay.",
+            "Which definition to read. OMITTED reads the one that exists for this caller — the author's live draft (the stored artifact overlaid with the authoritative `manifest.json` / primary content from the database) when they may WRITE the package, the `latest` published version otherwise, and the draft again when nothing is published yet. An EXPLICIT `draft` is an author's act and is reserved to callers who may write the package: `403 draft_not_writable` otherwise. Any other value is resolved as a version spec (exact version, dist-tag, or semver range) and returns exactly the published bytes, with no overlay. A system package ships its definition with the platform and has no published versions, so every selector but the named `draft` reads the same stored tree — nobody writes a platform-shipped package, so `?version=draft` answers `403 draft_not_writable` there like anywhere else.",
         },
         {
           name: "If-None-Match",
@@ -472,7 +508,11 @@ export const packagesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — the package's `<type>:read` scope, or `draft_not_writable` when `?version=draft` is asked by a caller who cannot WRITE the package.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -517,7 +557,7 @@ export const packagesPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which snapshot to read from — same resolution as the file index: omitted (or `draft`) reads the live draft with the database overlay, any other value is an exact version, dist-tag, or semver range.",
+            "Which definition to read from — same resolution as the file index: omitted picks the draft for a caller who may WRITE the package and the `latest` published version otherwise (the draft again when nothing is published), an explicit `draft` answers `403 draft_not_writable` to a caller who may not write it, and any other value is an exact version, dist-tag, or semver range.",
         },
         {
           name: "If-None-Match",
@@ -598,7 +638,11 @@ export const packagesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — the package's `<type>:read` scope, or `draft_not_writable` when `?version=draft` is asked by a caller who cannot WRITE the package.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -1049,10 +1093,6 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          $ref: "#/components/responses/VersionInUse",
-          description: "The version is pinned by an installation (version_in_use).",
-        },
       },
     },
   },
@@ -1067,6 +1107,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        PACKAGE_DETAIL_VERSION_PARAM,
       ],
       responses: {
         "200": {
@@ -1079,8 +1120,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        ...PACKAGE_DETAIL_DEFINITION_RESPONSES,
       },
     },
     put: {
@@ -1303,7 +1343,7 @@ export const packagesPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, else the draft. Explicit `draft` always reads the working copy. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
+            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
         },
       ],
       responses: {
@@ -1317,7 +1357,11 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — including `draft_not_writable` when `version=draft` is named by a caller who cannot WRITE the package.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },
@@ -1632,8 +1676,7 @@ export const packagesPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description:
-            "Agent has runs in progress (`agent_in_use`) or the version is pinned by an installation (`version_in_use`).",
+          description: "Agent has runs in progress (`agent_in_use`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1649,7 +1692,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Move a package to another home space",
       description:
-        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. This route touches nothing else: the draft is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. It also reconciles PLACEMENT in the same transaction: every space where the package is installed and which is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through the installation alone), and the destination's own share, if any, is dropped since a package is not offered to the space it lives in. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one uninstalls the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1746,7 +1789,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Share a package with a person or a space",
       description:
-        "Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST …/shares/accept`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. A `user` target additionally requires the package to have a published version (`409 package_has_no_version`): a personal space always installs at a pin, so an offer with nothing to pin could never be accepted — a `space` target takes no pin and carries no such requirement. Idempotent: sharing the same pair twice answers 200 with the same entry.",
+        "Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1782,63 +1825,13 @@ export const packagesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The target space is the package's own home (`share_target_is_home`), or the package has no published version to offer a person (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
+            "The target space is the package's own home (`share_target_is_home`), or the package has no published version to offer (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
-      },
-    },
-  },
-  "/api/packages/{scope}/{name}/shares/accept": {
-    post: {
-      operationId: "acceptPackageShare",
-      tags: ["Packages"],
-      summary: "Add a shared package to your own space",
-      description:
-        "Install a package that was shared with you into your OWN personal space, pinned to the `latest` published version. Deliberately requires neither the `share` permission nor the package type's install grant: the space's owner consented by calling this, and a `guest` holds only the `operator` preset in their own space. The package must have a share row for that space, otherwise 404 — an offer the caller never received is indistinguishable from a package that does not exist. Idempotent in the useful direction: calling it again RE-PINS the installation to `latest`, which is how the owner takes a version the author has since published. API keys, end-users and role previews have no personal space and answer 404.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-      ],
-      responses: {
-        "200": {
-          description: "Installed (or re-pinned) in the caller's personal space.",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "package_id", "version_id"],
-                properties: {
-                  object: { type: "string", enum: ["space_package"] },
-                  package_id: { type: "string" },
-                  version_id: {
-                    type: "integer",
-                    description: "The pinned version's id — the `latest` dist-tag at accept time.",
-                  },
-                },
-              },
-            },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "The package has no published version to pin (`package_has_no_version`). A shared package is always installed at a pin, so there is nothing to install until its author publishes. RFC 9457 problem+json.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "422": { $ref: "#/components/responses/PackageArchiveUnreadable" },
       },
     },
   },
@@ -2296,10 +2289,6 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          $ref: "#/components/responses/VersionInUse",
-          description: "The version is pinned by an installation (version_in_use).",
-        },
       },
     },
   },
@@ -2314,6 +2303,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        PACKAGE_DETAIL_VERSION_PARAM,
       ],
       responses: {
         "200": {
@@ -2326,8 +2316,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        ...PACKAGE_DETAIL_DEFINITION_RESPONSES,
       },
     },
     put: {
@@ -2745,10 +2734,6 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          $ref: "#/components/responses/VersionInUse",
-          description: "The version is pinned by an installation (version_in_use).",
-        },
       },
     },
   },
@@ -2763,6 +2748,7 @@ export const packagesPaths = {
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
+        PACKAGE_DETAIL_VERSION_PARAM,
       ],
       responses: {
         "200": {
@@ -2775,8 +2761,7 @@ export const packagesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        ...PACKAGE_DETAIL_DEFINITION_RESPONSES,
       },
     },
     put: {

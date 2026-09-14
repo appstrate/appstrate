@@ -23,7 +23,12 @@ describe("requireAgent (via agent config route)", () => {
   });
 
   it("loads agent when it exists", async () => {
-    await seedPackage({ id: "@testorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    await seedPackage({
+      id: "@testorg/my-agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/my-agent");
 
     const res = await app.request("/api/agents/@testorg/my-agent/input-settings", {
@@ -53,7 +58,12 @@ describe("requireMutableAgent (via agent skills route)", () => {
   });
 
   it("allows modification of local agent with no running runs", async () => {
-    await seedPackage({ id: "@testorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    await seedPackage({
+      id: "@testorg/my-agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/my-agent");
 
     const res = await app.request("/api/agents/@testorg/my-agent/skills", {
@@ -65,7 +75,12 @@ describe("requireMutableAgent (via agent skills route)", () => {
   });
 
   it("rejects modification of agent with running runs (409)", async () => {
-    await seedPackage({ id: "@testorg/busy-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    await seedPackage({
+      id: "@testorg/busy-agent",
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/busy-agent");
 
     await seedRun({

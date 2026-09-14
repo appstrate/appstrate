@@ -529,15 +529,15 @@ export async function triggerScheduledRun(
     }
     agentDenorm = extractRunAgentDenorm(draftAgent);
 
-    // Apply the same installation pin as manual runs. Explicit schedule
-    // overrides still win; missing versions produce a visible failed run.
+    // Same resolver as a manual run: the schedule's own `version_override`, or
+    // the latest published version when it has none. No authority check — the
+    // principal who created the schedule proved it then (`routes/schedules.ts`),
+    // and this path has no Hono context to re-ask with. A missing version
+    // produces a visible failed run.
     let agent: LoadedPackage;
     let overrideVersionLabel: string | undefined;
     try {
-      const resolved = await resolveAgentRunVersion(draftAgent, overrides.versionOverride, {
-        orgId,
-        spaceId,
-      });
+      const resolved = await resolveAgentRunVersion(draftAgent, overrides.versionOverride);
       agent = resolved.agent;
       overrideVersionLabel = resolved.overrideVersionLabel;
     } catch (err) {

@@ -7,14 +7,7 @@
 
 import { eq, and, or, sql, isNotNull, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  spacePackages,
-  packages,
-  packageShares,
-  packageVersions,
-  packageDistTags,
-  spaces,
-} from "@appstrate/db/schema";
+import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
 import { notFound, conflict, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -77,16 +70,6 @@ async function assertMcpServerInstallable(scope: SpaceScope, packageId: string):
 }
 
 /**
- * Install a package into a space.
- *
- * Deliberately takes no initial values: `space_packages.input_settings`
- * holds the agent's editor-set input defaults, and it has exactly ONE write
- * path — `PUT /api/agents/{scope}/{name}/input-settings`, which validates them
- * against `manifest.input.schema` and refuses a locked required field with no
- * value behind it. An install writes the column's empty default and nothing
- * else.
- */
-/**
  * Type of a package the org can see, or null when it cannot see it.
  *
  * The space-install routes need it BEFORE the write, because the permission
@@ -107,18 +90,8 @@ export async function getCatalogPackageType(
   return row ? (row.type as PackageType) : null;
 }
 
-/** Transaction-local reads the personal-space install rules need. */
+/** Transaction-local reads the install rule needs. */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/** The owner of `spaceId` when it is a personal space, `null` when it is a team one. */
-async function personalSpaceOwner(tx: Tx, spaceId: string): Promise<string | null> {
-  const [row] = await tx
-    .select({ ownerUserId: spaces.ownerUserId })
-    .from(spaces)
-    .where(eq(spaces.id, spaceId))
-    .limit(1);
-  return row?.ownerUserId ?? null;
-}
 
 /**
  * Is the package OFFERED to this space (`package_shares`)?
@@ -143,67 +116,47 @@ async function sharedWith(tx: Tx, packageId: string, spaceId: string): Promise<b
   return !!row;
 }
 
-/** The `latest` dist-tag's version id, read inside the caller's transaction. */
-async function latestVersionIdIn(tx: Tx, packageId: string): Promise<number | null> {
-  const [tag] = await tx
-    .select({ versionId: packageDistTags.versionId })
-    .from(packageDistTags)
-    .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
-    .limit(1);
-  return tag?.versionId ?? null;
-}
-
 /**
- * The two rules an install into a PERSONAL space obeys (RBAC spec §6.10), and
- * the version to pin. THE one implementation: both doors into a personal space
- * — {@link installPackage} and {@link acceptSharedPackage} — call it, so the
- * precondition, the pin and the "nothing published" refusal cannot say two
- * different things depending on which route the caller used. A team space is
- * unchanged: `null` pin, no precondition beyond the caller's install grant.
+ * Install a package into a space — the ONE door, for a personal space and a
+ * team space alike (RBAC spec §6.10, plan decisions 1 and 2).
  *
- * 1. The package must be OFFERED there (`package_shares`) or HOMED there. A
- *    404, never a 403: the space id is private, so a named refusal would be an
- *    oracle. That the caller is the space's owner is already settled upstream —
- *    `resolveSpaceRole` answers `null` for anybody else and the space is
- *    `private`, so no other principal ever reaches this route. The offer is
- *    read under a ROW LOCK, in the transaction that acts on it — see
- *    {@link sharedWith}.
- * 2. An accepted share is PINNED to `latest` (plan decision 6). Without it the
- *    author publishes a v3 the recipient executes, with the recipient's
- *    credentials, having never seen it. A share with nothing published yet is
- *    refused rather than installed unpinned, which would be that same
- *    follow-`latest` behaviour under another name.
+ * The precondition is the PLACEMENT rule itself: the package must be HOMED here
+ * or SHARED here, read under the row lock of the transaction that acts on it
+ * (see {@link sharedWith}). An install is deliberately NOT a placement of its
+ * own — that would be the one way into a space that never consults
+ * `<type>:share`, letting a builder of B pull in A's package while A decided
+ * nothing. The placement exists first, or is CREATED by this call, which is
+ * what `shareBy` is for.
  *
- * A package homed HERE is NOT pinned: it is the owner's own, they are its
- * author, and the risk the pin exists to remove — executing a version you have
- * not seen — is not a risk they run against themselves. Pinning it would also
- * strand it, since a draft-only package has no version to pin and the update
- * path for a personal space is re-accepting a share it does not have.
+ * `shareBy` is the caller's id and says "I hold `share` in this package's home,
+ * so put the offer in with the installation". The route checks that authority
+ * (`assertPackageShareAccess`) before handing it over; here it only means the
+ * share row is written in the SAME transaction as the `space_packages` row, so
+ * an installation can never exist without the placement that authorizes it.
  *
- * @returns the version to pin, or `null` when the rule pins nothing — a TEAM
- *   space, or a package HOMED here.
+ * A missing placement without `shareBy` is a 404, never a 403: the package id
+ * may be private, and a named refusal would confirm it exists.
+ *
+ * Deliberately takes no initial values: `space_packages.input_settings` holds
+ * the agent's editor-set input defaults, and it has exactly ONE write path —
+ * `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against
+ * `manifest.input.schema` and refuses a locked required field with no value
+ * behind it. An install writes the column's empty default and nothing else.
+ *
+ * It writes NO version either. Outside its home a package runs the `latest`
+ * published version, always; the draft belongs to whoever can write it.
+ *
+ * Returns the association row plus `shared`: whether THIS call created the
+ * offer. The route writes its `package.shared` audit off that flag and not off
+ * its own earlier read — the offer may already have existed, or a concurrent
+ * install may have written it first (the insert is `onConflictDoNothing`), and
+ * an audit entry claiming an act that did not happen is worse than none.
  */
-async function resolvePersonalSpaceInstall(
-  tx: Tx,
+export async function installPackage(
   scope: SpaceScope,
-  pkg: { id: string; homeSpaceId: string | null },
-): Promise<number | null> {
-  if ((await personalSpaceOwner(tx, scope.spaceId)) === null) return null;
-  if (pkg.homeSpaceId === scope.spaceId) return null;
-  if (!(await sharedWith(tx, pkg.id, scope.spaceId))) {
-    throw notFound(`Package '${pkg.id}' not found in organization catalog`);
-  }
-  const versionId = await latestVersionIdIn(tx, pkg.id);
-  if (versionId === null) {
-    throw conflict(
-      "package_has_no_version",
-      `Package '${pkg.id}' has no published version to install — ask its author to publish one.`,
-    );
-  }
-  return versionId;
-}
-
-export async function installPackage(scope: SpaceScope, packageId: string) {
+  packageId: string,
+  opts?: { shareBy?: string },
+) {
   await assertSpaceInScope(scope);
   await assertMcpServerInstallable(scope, packageId);
 
@@ -215,7 +168,12 @@ export async function installPackage(scope: SpaceScope, packageId: string) {
     // Verify the package exists in the org catalog (or is a system package).
     // Ephemeral shadow packages are never installable.
     const [pkg] = await tx
-      .select({ id: packages.id, type: packages.type, homeSpaceId: packages.homeSpaceId })
+      .select({
+        id: packages.id,
+        type: packages.type,
+        source: packages.source,
+        homeSpaceId: packages.homeSpaceId,
+      })
       .from(packages)
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
       .limit(1);
@@ -238,75 +196,30 @@ export async function installPackage(scope: SpaceScope, packageId: string) {
       );
     }
 
-    const versionId = await resolvePersonalSpaceInstall(tx, scope, pkg);
+    // A SYSTEM package is readable in every space of every organization and
+    // takes no share — the placement rule has nothing to say about it, here as
+    // in `placementGrantsRead`.
+    let shared = false;
+    if (pkg.source !== "system" && pkg.homeSpaceId !== scope.spaceId) {
+      if (!(await sharedWith(tx, packageId, scope.spaceId))) {
+        if (opts?.shareBy === undefined) {
+          throw notFound(`Package '${packageId}' not found in organization catalog`);
+        }
+        const offer = await tx
+          .insert(packageShares)
+          .values({ packageId, spaceId: scope.spaceId, sharedBy: opts.shareBy })
+          .onConflictDoNothing()
+          .returning({ packageId: packageShares.packageId });
+        shared = offer.length > 0;
+      }
+    }
 
     const [row] = await tx
       .insert(spacePackages)
-      .values({
-        spaceId: scope.spaceId,
-        packageId,
-        ...(versionId !== null ? { versionId } : {}),
-      })
+      .values({ spaceId: scope.spaceId, packageId })
       .returning();
 
-    return row!;
-  });
-}
-
-/**
- * Accept a share into the recipient's OWN personal space — install it, pinned
- * to `latest`, on the space owner's behalf (RBAC spec §3.6, §6.10).
- *
- * The RULE is not restated here: {@link resolvePersonalSpaceInstall} is the one
- * implementation of it, and this route adds only the UPSERT. What separates the
- * two doors is what surrounds that rule. This one runs WITHOUT the type's
- * install grant: the space's owner consented by calling it, and a `guest` holds
- * only the `operator` preset in their own space, which carries none of
- * `agents:configure` / `integrations:install` / `<type>:write`. And it is
- * IDEMPOTENT in the useful direction — an already-installed package is RE-PINNED
- * to `latest`, which is how the owner takes a new version after the author
- * publishes one. Calling it twice is not an error; it is the update button.
- *
- * The rule runs INSIDE the transaction that inserts, so the offer it reads
- * cannot be revoked between the check and the write it authorizes.
- *
- * @returns the pinned version id.
- * @throws 404 when the package does not exist, or the rule pins nothing here —
- *   no offer, a package already homed here (installed through the ordinary
- *   route, not accepted), or a space with no owner to consent. One message for
- *   all of them, since the caller may not know which applies.
- */
-export async function acceptSharedPackage(
-  scope: SpaceScope,
-  packageId: string,
-): Promise<{ versionId: number }> {
-  await assertSpaceInScope(scope);
-  await assertMcpServerInstallable(scope, packageId);
-
-  return db.transaction(async (tx) => {
-    const [pkg] = await tx
-      .select({ id: packages.id, homeSpaceId: packages.homeSpaceId })
-      .from(packages)
-      .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
-      .limit(1);
-    if (!pkg) {
-      throw notFound(`Package '${packageId}' not found`);
-    }
-
-    const versionId = await resolvePersonalSpaceInstall(tx, scope, pkg);
-    if (versionId === null) {
-      throw notFound(`Package '${packageId}' not found`);
-    }
-
-    await tx
-      .insert(spacePackages)
-      .values({ spaceId: scope.spaceId, packageId, versionId })
-      .onConflictDoUpdate({
-        target: [spacePackages.spaceId, spacePackages.packageId],
-        set: { versionId, updatedAt: new Date() },
-      });
-
-    return { versionId };
+    return { ...row!, shared };
   });
 }
 
@@ -340,7 +253,7 @@ export async function uninstallPackage(scope: SpaceScope, packageId: string): Pr
 // ---------------------------------------------------------------------------
 
 // Stored input values (`space_packages.input_settings`) are deliberately
-// NOT projected here: this listing is the install / enable / pin surface, and
+// NOT projected here: this listing is the install / enable surface, and
 // the agent's stored values are read through `GET /api/agents/{scope}/{name}`
 // where they travel with the schema and the locks that give them meaning
 // (`AgentDetail.input`).
@@ -349,7 +262,6 @@ const installedPackageSelect = {
   generationConfig: spacePackages.generationConfig,
   modelId: spacePackages.modelId,
   proxyId: spacePackages.proxyId,
-  version_id: spacePackages.versionId,
   enabled: spacePackages.enabled,
   installed_at: spacePackages.installedAt,
   updatedAt: spacePackages.updatedAt,
@@ -450,7 +362,6 @@ export async function listAccessiblePackages(scope: SpaceScope, type: PackageTyp
       // is the reader for those, and it travels with the locks.
       spaceModelId: spacePackages.modelId,
       spaceProxyId: spacePackages.proxyId,
-      spaceVersionId: spacePackages.versionId,
       spaceEnabled: spacePackages.enabled,
       // `latest` dist-tag version id — non-null iff the package has a published
       // version. Lets callers tell published agents from draft-only ones without
@@ -487,13 +398,40 @@ interface PackageHint {
   source: string;
   /**
    * True when the package has a published version (a `latest` dist-tag) or is a
-   * system package. A draft-only package is `false` — callers must run it with
-   * `version=draft` (omitting `version` would 404 `no_published_version`).
+   * system package. `false` means draft-only: omitting the version selector at
+   * launch answers `404 no_published_version`.
    */
   published: boolean;
+  /**
+   * Whether THIS caller may write the package, i.e. whether the draft is theirs
+   * to run (`version=draft`, `403 draft_not_writable` otherwise).
+   *
+   * It travels WITH `published` because the pair is one fact for a consumer:
+   * `published: false, home_writable: false` is a package nobody but its author
+   * can execute, and a caller context that says "draft only — run with
+   * version=draft" to such a reader sends it into a 403 loop.
+   */
+  home_writable: boolean;
 }
 
 const DEFAULT_PACKAGE_HINT_LIMIT = 15;
+
+/**
+ * Options every hint listing takes. `homeWritable` is a callback rather than a
+ * context because the rule that answers it (`homeWireForCaller`) needs the Hono
+ * request — the caller's role in the package's home space, its view-as persona,
+ * its credential ceiling — which this service layer deliberately does not take.
+ * It is pure and in-memory, so the row above already carries everything it
+ * reads and the listing stays one query.
+ */
+interface HintOptions {
+  limit?: number;
+  homeWritable?: (pkg: {
+    type: PackageType;
+    source: string;
+    homeSpaceId: string | null;
+  }) => boolean;
+}
 
 /**
  * List the packages of one `type` an actor in this space could use, as a
@@ -520,13 +458,15 @@ async function listInstalledPackageHints<T extends PackageHint>(
   scope: SpaceScope,
   type: PackageType,
   project: (base: PackageHint, manifest: Record<string, unknown>) => T,
-  opts?: { limit?: number },
+  opts?: HintOptions,
 ): Promise<{ items: T[]; truncated: boolean; total: number }> {
   const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
   const rows = await db
     .select({
       id: packages.id,
+      type: packages.type,
       source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
       draftManifest: packages.draftManifest,
       // `latest` dist-tag version id — non-null iff the package has a
       // published version (see `listAccessiblePackages`).
@@ -563,6 +503,10 @@ async function listInstalledPackageHints<T extends PackageHint>(
       description: typeof manifest.description === "string" ? manifest.description : "",
       source: row.source ?? "local",
       published: row.source === "system" || row.latestVersionId != null,
+      // Decided by the CALLER's authority over the package's home, which this
+      // service has no context to read — the route resolves it and hands the
+      // verdict down. Absent resolver (no HTTP caller) ⇒ nobody authors here.
+      home_writable: opts?.homeWritable?.(row) ?? false,
     };
     return project(base, manifest);
   });
@@ -591,7 +535,7 @@ interface RunnableAgentsResult {
  */
 export async function listRunnableAgents(
   scope: SpaceScope,
-  opts?: { limit?: number },
+  opts?: HintOptions,
 ): Promise<RunnableAgentsResult> {
   const { items, truncated, total } = await listInstalledPackageHints(
     scope,
@@ -628,7 +572,7 @@ interface InstalledSkillsResult {
  */
 export async function listInstalledSkills(
   scope: SpaceScope,
-  opts?: { limit?: number },
+  opts?: HintOptions,
 ): Promise<InstalledSkillsResult> {
   const { items, truncated, total } = await listInstalledPackageHints(
     scope,
@@ -720,39 +664,13 @@ export async function getInstalledPackageSettings(
 // Resolved run-config — single source of truth for both the UI's per-space
 // agent run and the CLI's `appstrate run @scope/agent` invocation. The
 // CLI reads this endpoint after profile resolution to reproduce the UI
-// run byte-for-byte (same model, proxy, generation settings, version pin)
-// unless the user passed an explicit override flag.
+// run byte-for-byte (same model, proxy, generation settings) unless the user
+// passed an explicit override flag. It carries no VERSION: which bytes run is
+// the launch selector's business, not the installation's.
 //
 // Wire shape lives in `@appstrate/shared-types` so the CLI consumes the
 // same interface without redeclaring it.
 // ---------------------------------------------------------------------------
-
-/** The installed pin shared by execution, export and the launch forms. */
-export async function getInstalledPackageVersion(
-  scope: SpaceScope,
-  packageId: string,
-): Promise<string | null> {
-  const [row] = await db
-    .select({ version: packageVersions.version })
-    .from(spacePackages)
-    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .innerJoin(
-      packageVersions,
-      and(
-        eq(packageVersions.id, spacePackages.versionId),
-        eq(packageVersions.packageId, packageId),
-      ),
-    )
-    .where(
-      and(
-        eq(spacePackages.spaceId, scope.spaceId),
-        eq(spacePackages.packageId, packageId),
-        orgOrSystemFilter(scope.orgId),
-      ),
-    )
-    .limit(1);
-  return row?.version ?? null;
-}
 
 /**
  * Resolve the per-space run configuration for `(spaceId,
@@ -762,7 +680,7 @@ export async function getInstalledPackageVersion(
  *
  * The org filter lands in the SQL WHERE (`orgOrSystemFilter`) so a stray
  * association row pointing at another org's package id resolves to `null`
- * instead of leaking its model/proxy/version pin.
+ * instead of leaking its model/proxy override.
  *
  * `input` republishes the row's stored input values and locks — layer 2 of
  * `services/input-resolution.ts`. The CLI needs them because `appstrate run
@@ -794,8 +712,6 @@ export async function getResolvedRunConfig(
 
   if (!row) return null;
 
-  const versionPin = await getInstalledPackageVersion(scope, packageId);
-
   // JSONB read: narrow both members rather than trusting the column's
   // declared `$type` (same narrowing as `getInstalledPackageSettings`).
   const stored = row.inputSettings;
@@ -804,7 +720,6 @@ export async function getResolvedRunConfig(
     generation: row.generationConfig ?? null,
     modelId: row.modelId ?? null,
     proxyId: row.proxyId ?? null,
-    version_pin: versionPin,
     input: {
       values: asRecord(stored?.values),
       locked_fields: Array.isArray(stored?.locked) ? stored.locked : [],
@@ -840,7 +755,6 @@ export async function updateInstalledPackage(
     modelId?: string | null;
     generationConfig?: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId?: string | null;
-    versionId?: number | null;
     enabled?: boolean;
   },
   opts?: { requireInstalled?: boolean },
@@ -851,7 +765,6 @@ export async function updateInstalledPackage(
     modelId: string | null;
     generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId: string | null;
-    versionId: number | null;
     enabled: boolean;
   }> = { updatedAt: new Date() };
   // `space_packages.input_settings` has exactly ONE write path, and it is
@@ -868,7 +781,6 @@ export async function updateInstalledPackage(
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
   if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
-  if (updates.versionId !== undefined) set.versionId = updates.versionId;
   if (updates.enabled !== undefined) set.enabled = updates.enabled;
 
   await db.transaction(async (tx) => {
@@ -908,7 +820,6 @@ export async function updateInstalledPackage(
           ? { generationConfig: updates.generationConfig }
           : {}),
         ...(updates.proxyId !== undefined ? { proxyId: updates.proxyId } : {}),
-        ...(updates.versionId !== undefined ? { versionId: updates.versionId } : {}),
         ...(updates.enabled !== undefined ? { enabled: updates.enabled } : {}),
         updatedAt: new Date(),
       })

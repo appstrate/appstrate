@@ -17,6 +17,7 @@ import {
 import {
   seedApiKey,
   seedInstalledPackage,
+  seedPackageShare,
   seedPackage,
   seedSpace,
   seedSpaceMember,
@@ -32,6 +33,7 @@ interface OrgDetail {
 interface Library {
   spaces: { id: string }[];
   packages: { skill: { id: string; installed_in: string[] }[] };
+  shared: { id: string; space_id: string }[];
 }
 
 const ID = "@catalog/secret";
@@ -45,6 +47,20 @@ let guestId: string;
 let privateId: string;
 
 const installIn = (spaceId: string) => seedInstalledPackage(spaceId, ID);
+
+/**
+ * PLACE the skill in a space and install it there — the only shape a non-home
+ * installation can have (RBAC spec §6.9): a package is present in a space
+ * through its home or a `package_shares` row, and an installation outside the
+ * home is always backed by one (the install route writes it, and
+ * `scripts/migration/0016` wrote it for every row that predates the rule).
+ * `installIn` alone is kept for the cases that assert the refusal a NON-placed
+ * installation gets.
+ */
+const placeIn = async (spaceId: string) => {
+  await seedPackageShare(spaceId, ID);
+  await seedInstalledPackage(spaceId, ID);
+};
 
 /**
  * Give the seeded skill a home space — the ONE authority over its draft
@@ -244,17 +260,28 @@ describe("organization library administration", () => {
   it("discovers readable candidates without revealing other spaces' installation state", async () => {
     const source = await seedSpace({ orgId: ctx.orgId, name: "Source", visibility: "closed" });
     await seedSpaceMember({ spaceId: source.id, userId: guestId, presetRole: "viewer" });
-    await installIn(source.id);
+    // Homed in the space the guest only READS, and OFFERED to the one they
+    // build in: a candidate they may install, placed nowhere else they can see.
+    await homeIn(source.id);
+    await seedPackageShare(ctx.defaultSpaceId, ID);
     const body = await library(headers);
     expect(body.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
-    expect(body.packages.skill[0]).toMatchObject({ id: ID, installed_in: [] });
+    // An untaken offer is a candidate presented in `shared`, and nowhere else:
+    // the matrix answers "where is this activated, and where can I activate it
+    // in one click", and a decision still owed belongs to the section that
+    // carries who made the offer. Either way, nothing about the SOURCE space's
+    // installation state leaks — the id named here is the caller's own.
+    expect(body.packages.skill).toEqual([]);
+    expect(body.shared).toMatchObject([{ id: ID, space_id: ctx.defaultSpaceId }]);
     const installed = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({ packageId: ID }),
     });
     expect(installed.status).toBe(201);
-    expect((await library(headers)).packages.skill[0]?.installed_in).toEqual([ctx.defaultSpaceId]);
+    const after = await library(headers);
+    expect(after.shared).toEqual([]);
+    expect(after.packages.skill[0]?.installed_in).toEqual([ctx.defaultSpaceId]);
   });
 
   it("keeps the local package view available to a builder and pins keys to their space", async () => {
@@ -284,8 +311,9 @@ describe("library visibility", () => {
   });
 
   it("lists only readable types and installation mappings for accessible spaces", async () => {
+    await homeIn(ctx.defaultSpaceId);
     await installIn(ctx.defaultSpaceId);
-    await installIn(privateId);
+    await placeIn(privateId);
     expect((await library(headers)).packages.skill[0]?.installed_in).toEqual([ctx.defaultSpaceId]);
     await assignGuestCustomRole(["agents:read"]);
     expect((await library(headers)).packages.skill).toEqual([]);
@@ -335,8 +363,8 @@ describe("shared package authority", () => {
   });
 
   it("refuses a builder on a package with no home, and admits them once it has theirs", async () => {
-    await installIn(ctx.defaultSpaceId);
-    // No home = the org catalog: the guest is a builder where it is installed,
+    await placeIn(ctx.defaultSpaceId);
+    // No home = the org catalog: the guest is a builder where it is placed,
     // and that is deliberately not enough.
     expect((await deleteSkill(headers)).status).toBe(403);
     await assertDbCount(packages, eq(packages.id, ID), 1);
@@ -366,19 +394,19 @@ describe("shared package authority", () => {
     expect((await deleteSkill(headers)).status).toBe(204);
   });
 
-  it("refuses a builder of another installation once the home moves away", async () => {
+  it("refuses a builder of another placement once the home moves away", async () => {
     await homeIn(privateId);
-    await installIn(ctx.defaultSpaceId);
+    await placeIn(ctx.defaultSpaceId);
     await installIn(privateId);
-    // Reachable through its installation in their own space — so 403, not 404 —
-    // but governed elsewhere.
+    // Reachable through the offer to their own space — so 403, not 404 — but
+    // governed elsewhere.
     expect((await deleteSkill(headers)).status).toBe(403);
     await assertDbCount(packages, eq(packages.id, ID), 1);
   });
 
   it("tells a write-only key nothing about a package homed elsewhere", async () => {
     await homeIn(privateId);
-    await installIn(ctx.defaultSpaceId);
+    await placeIn(ctx.defaultSpaceId);
     await installIn(privateId);
     // 404 because `skills:delete` alone holds `skills:read` in NO space, so the
     // key may not know this id exists at all — the home never enters it. The
@@ -388,11 +416,11 @@ describe("shared package authority", () => {
 
   it("cannot use a key pinned to A to mutate a package homed in B", async () => {
     await homeIn(privateId);
-    await installIn(ctx.defaultSpaceId);
+    await placeIn(ctx.defaultSpaceId);
     await installIn(privateId);
-    // With `skills:read` the key sees the package through the installation in
-    // its own pinned space — so the refusal owes the caller a 403 — and the
-    // home, in a space the key cannot reach, is what refuses it.
+    // With `skills:read` the key sees the package through the offer to its own
+    // pinned space — so the refusal owes the caller a 403 — and the home, in a
+    // space the key cannot reach, is what refuses it.
     expect((await deleteSkill(await keyHeaders(["skills:read", "skills:delete"]))).status).toBe(
       403,
     );
@@ -470,7 +498,7 @@ describe("shared package authority", () => {
 
   it("uses the stored package type for an existing bundle root's install permission", async () => {
     await db.update(packages).set({ type: "integration" }).where(eq(packages.id, ID));
-    await installIn(privateId);
+    await placeIn(privateId);
     const role = await assignGuestCustomRole([
       "skills:write",
       "integrations:write",

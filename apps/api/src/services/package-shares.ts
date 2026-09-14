@@ -184,7 +184,8 @@ export interface SharedPackageRow {
 /**
  * Packages offered to one of `spaceIds` and NOT installed there — the library's
  * "Shared with me" section, i.e. exactly the offers still waiting on a
- * decision. An accepted share leaves this list and appears as an installation.
+ * decision. Installing one leaves this list and appears as an installation;
+ * there is no separate act of accepting.
  */
 export async function listSharedNotInstalled(
   spaceIds: readonly string[],

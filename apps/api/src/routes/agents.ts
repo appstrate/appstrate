@@ -22,7 +22,6 @@ import {
   listAccessiblePackages,
   updateInstalledPackage,
   getInstalledPackageSettings,
-  getInstalledPackageVersion,
   hasPackageAccess,
 } from "../services/space-packages.ts";
 import { getPackage } from "../services/package-catalog.ts";
@@ -54,7 +53,9 @@ import {
 import {
   agentReadIsSummary,
   assertCatalogPackageAccess,
+  assertDraftSelectorAllowed,
   assertPackageCopyAllowed,
+  defaultDefinitionSelector,
   packageAccessSpaces,
   requireAgentRead,
 } from "../lib/package-access.ts";
@@ -137,11 +138,12 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * Authorize the DEPENDENCY bytes an export is about to hand out.
  *
  * `agents:read` covers the root agent, whose files the export narrows to
- * `manifest.json` + `prompt.md`. Dependencies are a different surface: both
- * catalogs put a dependency's ENTIRE stored file map into the archive
- * (`DraftPackageCatalog.fetch` reads `downloadPackageFiles` whole,
- * `DbPackageCatalog.fetch` extracts the whole published artifact). A bundle
- * carrying a skill therefore hands out exactly the bytes
+ * `manifest.json` + `prompt.md`. Dependencies are a different surface: the
+ * catalog puts a dependency's ENTIRE stored file map into the archive
+ * (`DbPackageCatalog.fetch` extracts the whole published artifact — the same
+ * catalog for a `?source=draft` export as for a published one, since only the
+ * ROOT of a draft export is a working copy). A bundle carrying a skill
+ * therefore hands out exactly the bytes
  * `GET /api/packages/{scope}/{name}/files[/content]` serves — and #1123/#1124
  * settled that those need `skills:read`, resolved per package TYPE rather than
  * one blanket scope. Without this guard the export is a looser door to the same
@@ -251,8 +253,14 @@ export function createAgentsRouter() {
     async (c) => {
       const scope = getSpaceScope(c);
       const loaded = c.get("package");
-      const version = (await getInstalledPackageVersion(scope, loaded.id)) ?? "draft";
-      const { agent } = await resolveAgentRunVersion(loaded, version, scope);
+      // The manifest whose input schema these values must satisfy: the DRAFT
+      // for an author who can write this agent — they are editing it — and the
+      // latest published version for anybody else configuring an agent they
+      // merely operate. The same selector the detail page rendered and the
+      // readiness badge judged (`defaultDefinitionSelector`), so the editor
+      // never validates against a definition the form did not show.
+      const { selector: version } = await defaultDefinitionSelector(c, loaded);
+      const { agent } = await resolveAgentRunVersion(loaded, version);
       const body = await readJsonBody(c, agentInputSettingsSchema);
       const schema = asJSONSchemaObject(
         agent.manifest.input?.schema ?? { type: "object" as const, properties: {} },
@@ -361,6 +369,11 @@ export function createAgentsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
+      // Resolved ONCE and handed to both: the gate and the default selector ask
+      // the same question of the same package, and each one resolving the
+      // caller's spaces for itself is two full space walks per badge.
+      const accessible = await packageAccessSpaces(c);
+      await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"), accessible);
       return c.json(
         await resolveAgentConnectionReadiness({
           scope: getSpaceScope(c),
@@ -369,7 +382,15 @@ export function createAgentsRouter() {
           // Drives `can_add_connection`: the same exemption the connect route
           // applies, so the badge cannot promise what the mutation refuses.
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
-          version: c.req.query("version"),
+          // The ROUTER decides which definition readiness judges, and it is
+          // EXACTLY the one the detail page rendered: an explicit selector (a
+          // `draft` one only for a caller who may write the agent), else
+          // `defaultDefinitionSelector`. Deriving it a second way is how the
+          // badge came to 404 a page that had just rendered. The service takes
+          // the answer and never re-derives it.
+          version:
+            c.req.query("version") ||
+            (await defaultDefinitionSelector(c, agent, accessible)).selector,
         }),
       );
     },
@@ -674,12 +695,11 @@ export function createAgentsRouter() {
       const spaceId = c.get("spaceId")!;
       const versionSpec = c.req.query("version") ?? null;
       const sourceQuery = c.req.query("source");
-      // `source=draft` mirrors the dashboard "Run" button: bundle the
-      // agent's current draft state instead of a published version. The
-      // CLI's run-by-id flow uses it so `appstrate run @scope/agent`
-      // works on never-published agents — same UX as clicking Run in
-      // the UI. Default stays `published` so the existing dashboard
-      // export flow (download a published archive) is unchanged.
+      // `source=draft` exports the agent's current draft state instead of a
+      // published version, for the authors who own that working copy: the CLI
+      // asks for it on an explicit `@draft` spec so a never-published agent can
+      // still be run locally. Default stays `published`, which is what every
+      // other caller — and every omitted selector — resolves to.
       // `version=…` is mutually exclusive with `source=draft`.
       if (sourceQuery && sourceQuery !== "draft" && sourceQuery !== "published") {
         throw new ApiError({
@@ -734,6 +754,17 @@ export function createAgentsRouter() {
       const accessible = await packageAccessSpaces(c, orgId, orgRole);
       const root = await assertCatalogPackageAccess(c, packageId, accessible);
       await assertPackageCopyAllowed(c, root, { orgId, orgRole, accessible });
+      // An EXPORTED draft is a draft run with the bytes handed over as well:
+      // the archive carries the unpublished manifest and prompt, and `--local`
+      // executes them on the caller's machine. Refusing `?version=draft` on the
+      // run route while serving the same definition here would make that 403 a
+      // formality, so the one predicate that says who owns a working copy
+      // decides both (403 `draft_not_writable`). It gates the ROOT, which is
+      // the only draft the archive carries: the closure resolves against
+      // published versions (`buildBundleFromAgentDraft`), so no dependency's
+      // working copy leaves by this door without its own `dependency_overrides`
+      // gate.
+      await assertDraftSelectorAllowed(c, packageId, useDraft ? "draft" : undefined, accessible);
       const scope = getSpaceScope(c);
 
       // Omit time-varying metadata (createdAt) so two exports of the same
@@ -751,7 +782,7 @@ export function createAgentsRouter() {
           bundle = await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" });
           versionLabel = "draft";
         } else {
-          versionLabel = await resolveExportVersion(agent.id, scope, versionSpec);
+          versionLabel = await resolveExportVersion(agent.id, versionSpec);
           bundle = await buildBundleForAgentExport(agent.id, scope, {
             versionSpec: versionLabel,
             metadata: { builder: "appstrate-platform" },

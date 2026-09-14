@@ -53,7 +53,7 @@ export function ScheduleCreatePage() {
         persistedModelId={deps?.persistedModelId ?? null}
         persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
         persistedProxyId={deps?.persistedProxyId ?? null}
-        persistedVersion={deps?.persistedVersion ?? null}
+        homeWritable={deps?.homeWritable ?? false}
         packageId={effectiveAgentId || undefined}
         agentIntegrations={deps?.agentIntegrations ?? []}
         blockedMessage={deps?.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}

@@ -266,6 +266,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     async function seedOauthIntegration() {
       await seedPackage({
         id: OAUTH_INTEGRATION,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "integration",
         source: "local",

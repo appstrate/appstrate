@@ -26,20 +26,25 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 // package/agent keys stay legacy too (see the note in use-packages.ts).
 
 /**
- * Input-lock refusals, translated.
+ * Refusals whose server sentence is replaced rather than prefixed. The raw
+ * `detail` is English, so a French UI falling back to it tells the user
+ * nothing they can act on.
  *
- * Both codes are about ONE named field, and the server puts its name in
- * `param` (`input.<field>` / `locked_fields.<field>`). The raw `detail` is an
- * English sentence, so it is replaced rather than prefixed — a French UI that
- * falls back to it tells the user nothing they can act on.
+ * The two lock codes are about ONE named field and the server puts its name in
+ * `param` (`input.<field>` / `locked_fields.<field>`) — hence the `field`
+ * interpolation, which a code carrying no `param` simply leaves empty.
+ * `draft_not_writable` is the launch refusal: the draft is the author's
+ * working copy and runs only for whoever can write the package in its home
+ * space, so the sentence has to say which version WILL run instead.
  */
-const LOCK_ERROR_KEYS: Record<string, string> = {
+const REFUSAL_ERROR_KEYS: Record<string, string> = {
   locked_input_field: "error.lockedInputField",
   locked_required_field_empty: "error.lockedRequiredFieldEmpty",
+  draft_not_writable: "error.draftNotWritable",
 };
 
-function lockErrorMessage(err: ApiError): string | null {
-  const key = LOCK_ERROR_KEYS[err.code];
+function refusalMessage(err: ApiError): string | null {
+  const key = REFUSAL_ERROR_KEYS[err.code];
   if (!key) return null;
   // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
   // the first segment is the prefix.
@@ -56,9 +61,9 @@ export function onMutationError(err: Error) {
     return;
   }
   if (err instanceof ApiError) {
-    const locked = lockErrorMessage(err);
-    if (locked) {
-      toast.error(locked);
+    const refusal = refusalMessage(err);
+    if (refusal) {
+      toast.error(refusal);
       return;
     }
   }
@@ -95,7 +100,10 @@ interface RunAgentParams {
   /**
    * Version selector forwarded as `?version=`: `"draft"`, `"published"`, or
    * a version spec. Omitted selectors use the API's published-when-exists
-   * default; callers testing a working copy explicitly pass `"draft"`.
+   * default; callers testing a working copy explicitly pass `"draft"`, which
+   * the API grants only to a caller who can write the package in its home
+   * space (`403 draft_not_writable`). Launch surfaces derive it from
+   * `home_writable` via `defaultRunVersion`.
    */
   version?: string;
   /**

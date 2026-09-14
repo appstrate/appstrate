@@ -31,10 +31,11 @@ import {
   reconstructPackageZip,
 } from "../../../src/services/bundle-import.ts";
 import { db } from "@appstrate/db/client";
-import { packages, packageVersions } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { packages, packageShares, packageVersions, spacePackages } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedSpace } from "../../helpers/seed.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { describeRequiresPostgres } from "../../helpers/tier.ts";
 
@@ -445,5 +446,118 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
       ).value;
       expect(won.imported[0]!.status).toBe("inserted");
     });
+  });
+});
+
+/**
+ * Re-importing a bundle whose ROOT already lives in another space.
+ *
+ * The import creates the packages it does not know; a root that already exists
+ * is a package with a home, and putting it into a second space is the same act
+ * as `POST /api/spaces/{id}/packages` — it needs the offer. So the import takes
+ * the same door: the caller who may make that offer gets the root installed
+ * WITH its `package_shares` row, and the caller who may not gets
+ * `root_installed: false` instead of a silently half-finished import.
+ *
+ * The authority itself is a question about the HTTP caller, so it arrives as a
+ * callback — both doors pass `holdsPackageShareAuthority` built from their own
+ * request (`POST /api/packages/import-bundle` and the `import_package_file` MCP
+ * tool). A caller with no request context cannot be asked and passes none,
+ * which is the refusing half below: absent means `false`, so the one act keeps
+ * one rule and the fail-closed answer is the one an unaskable caller gets.
+ */
+describe("importBundle — a root homed in another space", () => {
+  let ctx: TestContext;
+  let otherSpaceId: string;
+  const ROOT = "@homeorg/moved-root";
+  const IDENTITY = `${ROOT}@1.0.0` as const;
+
+  const manifest = {
+    name: ROOT,
+    display_name: "Moved Root",
+    version: "1.0.0",
+    type: "agent",
+    description: "Root of the bundle",
+    schema_version: "0.1",
+    author: "tester",
+  };
+
+  function rootBundle(): Bundle {
+    const files = new Map<string, Uint8Array>([
+      ["manifest.json", enc(JSON.stringify(manifest, null, 2))],
+      ["prompt.md", enc("Root prompt.")],
+    ]);
+    return {
+      bundleFormatVersion: "1.0",
+      root: IDENTITY,
+      packages: new Map([[IDENTITY, { ...pkgFromFiles(files, IDENTITY), manifest }]]),
+      integrity: "sha256-abc",
+    };
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "homeorg" });
+    otherSpaceId = (await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" })).id;
+    // First import homes the root in the DEFAULT space and installs it there.
+    const first = await importBundle(
+      rootBundle(),
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      ctx.user.id,
+    );
+    expect(first.root_installed).toBe(true);
+    const [homed] = await db
+      .select({ homeSpaceId: packages.homeSpaceId })
+      .from(packages)
+      .where(eq(packages.id, ROOT));
+    expect(homed?.homeSpaceId).toBe(ctx.defaultSpaceId);
+  });
+
+  it("installs it with the offer when the caller may make one", async () => {
+    const result = await importBundle(
+      rootBundle(),
+      { orgId: ctx.orgId, spaceId: otherSpaceId },
+      ctx.user.id,
+      async () => true,
+    );
+    expect(result.root_installed).toBe(true);
+    // The installation and the placement that authorizes it, both present —
+    // an installation with no placement is exactly the state `0016` repairs.
+    expect(
+      await db
+        .select()
+        .from(spacePackages)
+        .where(and(eq(spacePackages.packageId, ROOT), eq(spacePackages.spaceId, otherSpaceId))),
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select()
+        .from(packageShares)
+        .where(and(eq(packageShares.packageId, ROOT), eq(packageShares.spaceId, otherSpaceId))),
+    ).toHaveLength(1);
+  });
+
+  it("reports `root_installed: false` and places nothing when the caller may not", async () => {
+    // The discriminating control: same bundle, same space, same user — only
+    // the authority answer changes.
+    const result = await importBundle(
+      rootBundle(),
+      { orgId: ctx.orgId, spaceId: otherSpaceId },
+      ctx.user.id,
+      async () => false,
+    );
+    expect(result.root_installed).toBe(false);
+    expect(
+      await db
+        .select()
+        .from(spacePackages)
+        .where(and(eq(spacePackages.packageId, ROOT), eq(spacePackages.spaceId, otherSpaceId))),
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(packageShares)
+        .where(and(eq(packageShares.packageId, ROOT), eq(packageShares.spaceId, otherSpaceId))),
+    ).toHaveLength(0);
   });
 });

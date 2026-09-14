@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedSpace } from "../../helpers/seed.ts";
+import { seedAgent, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { createRun } from "../../../src/services/state/runs.ts";
 import { initRunLimits } from "../../../src/services/run-limits.ts";
@@ -33,8 +33,14 @@ describe("nextRunNumber isolation per space", () => {
     const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SpaceB" });
     spaceBId = spaceB.id;
 
-    await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
+    await seedAgent({
+      id: agentId,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
+    await seedPackageShare(spaceBId, agentId);
     await installPackage({ orgId: ctx.orgId, spaceId: spaceBId }, agentId);
   });
 

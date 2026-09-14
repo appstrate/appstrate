@@ -9,9 +9,10 @@
  *      viewer of the home is refused, a caller who cannot reach the package at
  *      all gets 404 instead of 403, and no API key ever holds the verb.
  *   2. OFFERED IS NOT ACTIVATED. A share makes the package READABLE for the
- *      recipient and never runnable: the run route stays 404 until they accept,
- *      the accept PINS the version so a later publish does not change what they
- *      execute, and revoking removes the installation with the offer.
+ *      recipient and never runnable: the run route stays 404 until they install
+ *      it themselves, what they then run is the author's LATEST PUBLISHED
+ *      version (a later publish reaches them), and revoking removes the
+ *      installation with the offer.
  *   3. NOTHING LEAKS. Another member's personal space is not targetable by id,
  *      the sharer never sees such an id back, and an organization admin who was
  *      shared a package homed in somebody's personal space reads it without
@@ -48,7 +49,6 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedEndUser,
   seedInstalledPackage,
   seedPackage,
   seedPackageVersion,
@@ -66,7 +66,7 @@ import {
   uploadPackageZip,
   deleteVersionZip,
 } from "../../../src/services/package-storage.ts";
-import { acceptSharedPackage } from "../../../src/services/space-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { runs } from "@appstrate/db/schema";
 import { seedSchedule } from "../../helpers/seed.ts";
@@ -177,12 +177,22 @@ const listShares = (headers: Headers, packageId: string) =>
 const revokeShare = (headers: Headers, packageId: string, target: string) =>
   app.request(`/api/packages/${packageId}/shares/${target}`, { method: "DELETE", headers });
 
-const acceptShare = (headers: Headers, packageId: string) =>
-  app.request(`/api/packages/${packageId}/shares/accept`, { method: "POST", headers });
+/**
+ * Take up an offer — which is INSTALLING, through the one installation door
+ * (`POST /api/spaces/{spaceId}/packages`). There is no accept route: in the
+ * caller's own personal space ownership stands in for the install grant, so a
+ * guest reaches it with the `operator` preset alone.
+ */
+const takeUpOffer = (headers: Headers, packageId: string, spaceId?: string) =>
+  app.request(`/api/spaces/${spaceId ?? headers["X-Space-Id"]}/packages`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ packageId }),
+  });
 
 /** The current space package view. */
 async function library(headers: Headers): Promise<{
-  packages: Record<string, { id: string; update_available: boolean }[]>;
+  packages: Record<string, { id: string; installed_in: string[] }[]>;
   shared: {
     id: string;
     personal: boolean;
@@ -224,13 +234,13 @@ async function publish(packageId: string, version: string): Promise<number> {
   return row.id;
 }
 
-/** The version pinned by `spaceId`'s installation, or `null` when unpinned. */
-async function pinOf(spaceId: string, packageId: string): Promise<number | null> {
-  const row = await getDbRow(
-    spacePackages,
-    and(eq(spacePackages.spaceId, spaceId), eq(spacePackages.packageId, packageId))!,
-  );
-  return row.versionId;
+/** Is the package installed in `spaceId`? */
+async function installedIn(spaceId: string, packageId: string): Promise<boolean> {
+  const rows = await db
+    .select({ packageId: spacePackages.packageId })
+    .from(spacePackages)
+    .where(and(eq(spacePackages.spaceId, spaceId), eq(spacePackages.packageId, packageId)));
+  return rows.length > 0;
 }
 
 /** Flip the organization's copy key. */
@@ -279,11 +289,11 @@ beforeEach(async () => {
     draftContent: "---\nname: helper\ndescription: A skill\n---\n\nbody",
   });
   await seedDefaultOrgModel(ctx);
-  // Both fixtures carry a published version, because an offer to a PERSON needs
-  // one: their personal space installs at a pin, so `POST …/shares` refuses a
-  // package with nothing to pin (`package_has_no_version`). The suite shares
-  // with people constantly; a draft-only fixture would make every one of those
-  // assertions a 409.
+  // Both fixtures carry a published version, because EVERY offer needs one:
+  // outside its home a package runs its latest published version, so
+  // `POST …/shares` refuses a package with nothing published
+  // (`package_has_no_version`), whatever the target. A draft-only fixture would
+  // make every share in this suite a 409.
   await publish(AGENT, "0.1.0");
   await publish(SKILL, "0.1.0");
 
@@ -383,7 +393,7 @@ describe("authority — `<type>:share` in the home space", () => {
     );
   });
 
-  describe("an offer to a person needs something to pin", () => {
+  describe("an offer needs something published — every target", () => {
     /** Strip the `latest` dist-tag: the package keeps its rows, loses its pin. */
     const unpublish = (packageId: string) =>
       db.delete(packageDistTags).where(eq(packageDistTags.packageId, packageId));
@@ -411,10 +421,20 @@ describe("authority — `<type>:share` in the home space", () => {
       );
     });
 
-    it("leaves a `space` target alone — a team installation takes no pin", async () => {
+    it("refuses a `space` target for the same reason — the rule has one half now", async () => {
+      // THE generalization of decision 6. Every space but the home runs the
+      // latest published version, so an offer with nothing published is an
+      // offer of nothing wherever it points — a person or a team, one rule.
+      // The org owner is
+      // the sharer because the sharer must also REACH the destination, and the
+      // home's builder is not a member of the team space.
       await unpublish(AGENT);
-      // The org owner, because the sharer must also REACH the destination and
-      // the home's builder is not a member of the team space.
+      await expectProblem(await shareWithSpace(owner(), AGENT, teamId), 409, {
+        code: "package_has_no_version",
+      });
+      await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+
+      await publish(AGENT, "0.2.0");
       expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
     });
 
@@ -509,9 +529,13 @@ describe("offered is not activated", () => {
     expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
   });
 
-  /** The launch route, from the recipient's own space. `version=draft` needs no artifact. */
+  /**
+   * The launch route, from the recipient's own space. NO selector: a recipient
+   * cannot write the package, so `version=draft` is a 403 for them and the
+   * published `latest` is the only thing they can run (plan decisions 3 and 4).
+   */
   const runAsRecipient = (who: Principal) =>
-    app.request(`/api/agents/${AGENT}/run?version=draft`, {
+    app.request(`/api/agents/${AGENT}/run`, {
       method: "POST",
       headers: { ...who.headers(), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -531,35 +555,48 @@ describe("offered is not activated", () => {
     expect(detail.status, await detail.clone().text()).toBe(200);
   });
 
-  it("refuses the run until the recipient accepts", async () => {
+  it("refuses the run until the recipient installs it", async () => {
     await expectProblem(await runAsRecipient(recipient), 404);
 
-    const accepted = await acceptShare(recipient.headers(), AGENT);
-    expect(accepted.status, await accepted.clone().text()).toBe(200);
+    const installed = await takeUpOffer(recipient.headers(), AGENT);
+    expect(installed.status, await installed.clone().text()).toBe(201);
 
     const launched = await runAsRecipient(recipient);
     expect(launched.status, await launched.clone().text()).toBe(201);
     await waitForRunPipelineSettled();
   });
 
-  it("pins `latest` at accept, and a later publish does not move the pin", async () => {
-    const accepted = await acceptShare(recipient.headers(), AGENT);
-    const body = (await accepted.json()) as { version_id: number };
-    expect(await pinOf(recipient.personalSpaceId, AGENT)).toBe(body.version_id);
-
-    const v2 = await publish(AGENT, "0.2.0");
-    expect(v2).not.toBe(body.version_id);
-    // THE invariant: the author publishing does not change what the recipient
-    // executes with the recipient's own credentials.
-    expect(await pinOf(recipient.personalSpaceId, AGENT)).toBe(body.version_id);
-
-    const launched = await app.request(`/api/agents/${AGENT}/run`, {
+  it("refuses `version=draft` to the recipient — the draft is the author's", async () => {
+    // THE negative control for plan decision 4: before it, this same call from
+    // this same principal launched the author's uncommitted working copy with
+    // the recipient's credentials.
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
+    const drafted = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
       headers: { ...recipient.headers(), "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect(launched.status, await launched.clone().text()).toBe(201);
-    expect(await launched.json()).toMatchObject({ version_ref: "0.1.0" });
+    await expectProblem(drafted, 403, { code: "draft_not_writable" });
+    expect(await db.select().from(runs).where(eq(runs.packageId, AGENT))).toHaveLength(0);
+  });
+
+  it("follows `latest`: the author publishes, the recipient's next run executes it", async () => {
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
+
+    const first = await runAsRecipient(recipient);
+    expect(first.status, await first.clone().text()).toBe(201);
+    expect(await first.json()).toMatchObject({ version_ref: "0.1.0" });
+    await waitForRunPipelineSettled();
+
+    await publish(AGENT, "0.2.0");
+
+    // THE reversal this lot performs: the author's publish IS the rollout. The
+    // recipient's installation carries no version, so the very next launch —
+    // manual and scheduled alike — runs what was just published. Under the pin
+    // this assertion read `0.1.0` and the recipient could not take a fix.
+    const second = await runAsRecipient(recipient);
+    expect(second.status, await second.clone().text()).toBe(201);
+    expect(await second.json()).toMatchObject({ version_ref: "0.2.0" });
     await waitForRunPipelineSettled();
 
     const schedule = await seedSchedule({
@@ -579,39 +616,26 @@ describe("offered is not activated", () => {
     await waitForRunPipelineSettled();
     const scheduled = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
     expect(scheduled).toHaveLength(1);
-    expect(scheduled[0]!.versionRef).toBe("0.1.0");
+    expect(scheduled[0]!.versionRef).toBe("0.2.0");
 
+    // …and the detail page shows the recipient the package, not a photograph
+    // of it: the published manifest of 0.2.0, with no `version_pin` member at
+    // all on the wire.
     const detail = await app.request(`/api/packages/agents/${AGENT}`, {
       headers: recipient.headers(),
     });
     expect(detail.status).toBe(200);
-    expect(await detail.json()).toMatchObject({ version_pin: "0.1.0" });
-
-    // Re-accepting is the update: same route, same act, now on v2.
-    const again = await acceptShare(recipient.headers(), AGENT);
-    expect(again.status, await again.clone().text()).toBe(200);
-    expect(await pinOf(recipient.personalSpaceId, AGENT)).toBe(v2);
+    const dto = (await detail.json()) as Record<string, unknown>;
+    expect(dto).not.toHaveProperty("version_pin");
+    expect(dto.version).toBe("0.2.0");
   });
 
-  it("reports the pending update in the recipient's library", async () => {
-    await acceptShare(recipient.headers(), AGENT);
-    expect(
-      (await library(recipient.headers())).packages.agent?.find((p) => p.id === AGENT)
-        ?.update_available,
-    ).toBe(false);
-    await publish(AGENT, "0.2.0");
-    expect(
-      (await library(recipient.headers())).packages.agent?.find((p) => p.id === AGENT)
-        ?.update_available,
-    ).toBe(true);
-  });
-
-  it("never replaces an unavailable accepted archive with the author's current prompt", async () => {
-    await acceptShare(recipient.headers(), AGENT);
+  it("never replaces an unavailable published archive with the author's current prompt", async () => {
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
     await deleteVersionZip(AGENT, "0.1.0");
     await db
       .update(packages)
-      .set({ draftContent: "Unaccepted replacement" })
+      .set({ draftContent: "Unpublished replacement" })
       .where(eq(packages.id, AGENT));
     const response = await app.request(`/api/agents/${AGENT}/run`, {
       method: "POST",
@@ -621,62 +645,100 @@ describe("offered is not activated", () => {
     expect(await db.select().from(runs).where(eq(runs.packageId, AGENT))).toHaveLength(0);
   });
 
-  it("configures the accepted input schema while an explicit draft read returns current authoring", async () => {
+  it("configures the PUBLISHED input schema, and never reads the author's draft", async () => {
+    // What the recipient configures has to be what they run. They run the
+    // latest PUBLISHED version, so the input schema the settings route
+    // validates against is that version's — not the author's working copy,
+    // which they have no authority over and, since decision 4, no read of.
     const row = await getDbRow(packages, eq(packages.id, AGENT));
     await db
       .update(packages)
       .set({
         draftManifest: {
           ...asRecord(row.draftManifest),
-          input: { schema: { type: "object", properties: { accepted: { type: "string" } } } },
+          input: { schema: { type: "object", properties: { published: { type: "string" } } } },
         },
       })
       .where(eq(packages.id, AGENT));
     await publish(AGENT, "0.2.0");
-    await acceptShare(recipient.headers(), AGENT);
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
+    // The author moves on: the draft loses the field and gains a new prompt.
     await db
       .update(packages)
       .set({ draftManifest: row.draftManifest, draftContent: "Current authoring" })
       .where(eq(packages.id, AGENT));
+
     const settings = await app.request(`/api/agents/${AGENT}/input-settings`, {
       method: "PUT",
       headers: { ...recipient.headers(), "Content-Type": "application/json" },
-      body: JSON.stringify({ values: { accepted: "keep me" }, locked_fields: [] }),
+      body: JSON.stringify({ values: { published: "keep me" }, locked_fields: [] }),
     });
     expect(settings.status, await settings.clone().text()).toBe(200);
+
     const installed = await app.request(`/api/packages/agents/${AGENT}`, {
       headers: recipient.headers(),
     });
     const dto = await installed.json();
-    expect(dto).toHaveProperty("input.schema.properties.accepted", { type: "string" });
-    expect(dto).toHaveProperty("input.values", { accepted: "keep me" });
-    const draft = await app.request(`/api/packages/agents/${AGENT}?version=draft`, {
-      headers: recipient.headers(),
-    });
-    expect(await draft.json()).toMatchObject({ prompt: "Current authoring" });
+    expect(dto).toHaveProperty("input.schema.properties.published", { type: "string" });
+    expect(dto).toHaveProperty("input.values", { published: "keep me" });
+    // The draft is not theirs to read, explicitly asked for or not.
+    expect(dto).not.toHaveProperty("prompt", "Current authoring");
+    await expectProblem(
+      await app.request(`/api/packages/agents/${AGENT}?version=draft`, {
+        headers: recipient.headers(),
+      }),
+      403,
+      { code: "draft_not_writable" },
+    );
   });
 
-  it("refuses to delete an accepted version instead of silently unpinning the recipient", async () => {
-    await acceptShare(recipient.headers(), AGENT);
-    const pin = await pinOf(recipient.personalSpaceId, AGENT);
+  it("lets the author delete a published version the recipient was running", async () => {
+    // The `409 version_in_use` guard is gone with the pin it protected: no
+    // installation names a version, so nothing is "in use". What the recipient
+    // runs after the delete is whatever `latest` points at — the dist-tag is
+    // reassigned by the delete itself.
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
     await publish(AGENT, "0.2.0");
     const removed = await app.request(`/api/packages/agents/${AGENT}/versions/0.1.0`, {
       method: "DELETE",
       headers: author.headers(homeId),
     });
-    await expectProblem(removed, 409);
-    expect(await pinOf(recipient.personalSpaceId, AGENT)).toBe(pin);
+    expect(removed.status, await removed.clone().text()).toBe(204);
+
+    const launched = await runAsRecipient(recipient);
+    expect(launched.status, await launched.clone().text()).toBe(201);
+    expect(await launched.json()).toMatchObject({ version_ref: "0.2.0" });
+    await waitForRunPipelineSettled();
   });
 
-  it("leaves the shared section once the offer is accepted", async () => {
-    await acceptShare(recipient.headers(), AGENT);
+  it("leaves the shared section once the offer is installed", async () => {
+    // An untaken offer lives in `shared` and NOWHERE else: two rows with two
+    // buttons for one act is the duplicate this pin exists to catch.
+    const before = await library(recipient.headers());
+    expect(before.shared.find((entry) => entry.id === AGENT)).toBeDefined();
+    expect(before.packages.agent?.some((entry) => entry.id === AGENT)).toBe(false);
+
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
     const lib = await library(recipient.headers());
     expect(lib.shared.find((entry) => entry.id === AGENT)).toBeUndefined();
     expect(lib.packages.agent?.some((entry) => entry.id === AGENT)).toBe(true);
   });
 
+  it("keeps the offer out of the ORGANIZATION library, which has no `shared` section at all", async () => {
+    // An offer is addressed to a space and taken up from that space's page.
+    // The catalogue is an administrative map of what exists and where it sits,
+    // not a recipient's inbox — the section is ABSENT, not empty.
+    const res = await app.request("/api/library", { headers: owner() });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect("shared" in body).toBe(false);
+    // The control: the same call still returns the catalogue itself, so the
+    // absence above is the section and not a broken response.
+    expect(Object.keys(body).sort()).toEqual(["object", "packages", "spaces"]);
+  });
+
   it("revokes the offer AND the installation behind it", async () => {
-    await acceptShare(recipient.headers(), AGENT);
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
     const revoked = await revokeShare(author.headers(homeId), AGENT, recipient.userId);
     expect(revoked.status, await revoked.clone().text()).toBe(204);
     await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
@@ -707,43 +769,45 @@ describe("offered is not activated", () => {
     await assertDbMissing(spaces, eq(spaces.ownerUserId, stranger.id));
   });
 
-  it("refuses to accept an offer nobody made (404)", async () => {
-    await expectProblem(await acceptShare(teamMember.headers(), AGENT), 404);
+  it("refuses to install into a personal space nobody offered it to (404)", async () => {
+    await expectProblem(await takeUpOffer(teamMember.headers(), AGENT), 404);
   });
 
-  it("refuses to accept for a principal that HAS no personal space (404)", async () => {
-    // An API key and an end-user have nothing to accept INTO — the route reads
-    // `callerPersonalOwnerId`, which is `null` for both — and neither may be
-    // the reason a space gets created for the key's creator behind their back.
+  it("lets an API key install only the ALREADY-PLACED — it never holds `share`", async () => {
+    // A key is pinned to its space and `<type>:share` is not a grantable scope,
+    // so the install route's share-creating branch is closed to it by
+    // construction: it installs what its space is already offered, and answers
+    // 404 for anything else. `teamId` is the key's space here — the AGENT is
+    // homed in `homeId` and offered nowhere yet.
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      spaceId: homeId,
+      spaceId: teamId,
       createdBy: ctx.user.id,
       scopes: ["agents:read", "agents:configure"],
     });
-    await expectProblem(
-      await app.request(`/api/packages/${AGENT}/shares/accept`, {
+    const install = () =>
+      app.request(`/api/spaces/${teamId}/packages`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${key.rawKey}` },
-      }),
-      404,
+        headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ packageId: AGENT }),
+      });
+    await expectProblem(await install(), 404);
+    // Narrowed to the key's OWN space: the suite's `beforeEach` already offered
+    // the package to `recipient`, so a bare package-id predicate would pass on
+    // that row and prove nothing.
+    await assertDbMissing(
+      packageShares,
+      and(eq(packageShares.packageId, AGENT), eq(packageShares.spaceId, teamId))!,
     );
 
-    const endUser = await seedEndUser({
-      orgId: ctx.orgId,
-      spaceId: homeId,
-      externalId: "ext-share-accept",
-    });
-    await expectProblem(
-      await app.request(`/api/packages/${AGENT}/shares/accept`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key.rawKey}`, "Appstrate-User": endUser.id },
-      }),
-      404,
-    );
+    // Once a principal who DOES hold `share` has offered it, the same key
+    // installs it.
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    const placed = await install();
+    expect(placed.status, await placed.clone().text()).toBe(201);
   });
 
-  it("keeps every route that needs the INSTALLATION shut until the accept", async () => {
+  it("keeps every route that needs the INSTALLATION shut until it is installed", async () => {
     // The launch route above is one of them; `POST …/schedules` is the other
     // half of "offered is not activated", and it resolves the agent through the
     // installation too (`requireAgent`). A share must not arm a cron.
@@ -755,45 +819,91 @@ describe("offered is not activated", () => {
       });
     await expectProblem(await schedule(), 404);
 
-    expect((await acceptShare(recipient.headers(), AGENT)).status).toBe(200);
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
     const created = await schedule();
     expect(created.status, await created.clone().text()).toBe(201);
   });
 
-  it("lets a GUEST accept — the `operator` preset holds no install grant", async () => {
+  it("lets a GUEST install in their own space — ownership stands in for the grant", async () => {
     // The acceptance criterion of the whole lot, as the plan words it: "an
     // external invited as a guest sees EXACTLY ONE agent after the share, and
     // nothing else in the library". So the assertion is on the library's shape
-    // and not only on the pin — a guest who could see a second package would
-    // pass a `pinOf` check just as well.
+    // and not only on the row — a guest who could see a second package would
+    // pass a row check just as well. The `operator` preset a guest holds in
+    // their own space carries none of `agents:configure` / `<type>:write`; what
+    // authorizes the install is that the space is theirs.
     expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
 
     const before = await library(guest.headers());
     expect(before.shared.map((entry) => entry.id)).toEqual([AGENT]);
-    // Offered is not installed: every type group is empty, the system-package
-    // groups included (the fixture seeds none).
-    for (const [type, group] of Object.entries(before.packages)) {
-      expect(group, `library.packages.${type} before the accept`).toEqual([]);
-    }
+    // An untaken offer has ONE place, `shared`. It is deliberately absent from
+    // the matrix: two rows and two buttons for a single act is what the section
+    // exists to avoid. Nothing else is in either: not one other package, of any
+    // type.
+    expect(Object.values(before.packages).flat()).toEqual([]);
+    expect(await installedIn(guest.personalSpaceId, AGENT)).toBe(false);
 
-    const accepted = await acceptShare(guest.headers(), AGENT);
-    expect(accepted.status, await accepted.clone().text()).toBe(200);
-    expect(await pinOf(guest.personalSpaceId, AGENT)).not.toBeNull();
+    const installed = await takeUpOffer(guest.headers(), AGENT);
+    expect(installed.status, await installed.clone().text()).toBe(201);
+    expect(await installedIn(guest.personalSpaceId, AGENT)).toBe(true);
 
+    // Taken up, it changes section: out of `shared`, into the matrix with its
+    // installation. That move is the whole observable difference.
     const after = await library(guest.headers());
     expect(after.shared).toEqual([]);
     expect(after.packages.agent?.map((entry) => entry.id)).toEqual([AGENT]);
+    expect(after.packages.agent?.[0]?.installed_in).toEqual([guest.personalSpaceId]);
     expect(Object.values(after.packages).flat()).toHaveLength(1);
   });
 
-  it("checks the offer INSIDE the transaction that installs — a revoked share cannot be accepted", async () => {
-    // The check moved out of the route and next to the insert it authorizes, so
-    // that a revoke committing between the two cannot leave an installation the
-    // share no longer backs. Racing the two is not reproducible in-process;
-    // what is asserted is the property the single transaction guarantees —
-    // after the revoke, the accept finds no offer and writes nothing.
+  it("lets that guest DISABLE and re-enable it at home, but not reconfigure it", async () => {
+    // `enabled` is a switch of PRESENCE, judged as install/uninstall — so the
+    // ownership exemption covers it, and a guest who could take up an offer can
+    // put it down again without uninstalling. `modelId` is a `configure`: it
+    // spends the organization's LLM budget, and ownership does not waive it.
+    // The two calls differ ONLY in the body, which is what makes the pair a
+    // proof about the field and not about the caller.
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
+
+    const patch = (body: Record<string, unknown>) =>
+      app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
+        method: "PUT",
+        headers: { ...guest.headers(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const disabled = await patch({ enabled: false });
+    expect(disabled.status, await disabled.clone().text()).toBe(200);
+    expect(await disabled.json()).toMatchObject({ enabled: false });
+    const reenabled = await patch({ enabled: true });
+    expect(reenabled.status, await reenabled.clone().text()).toBe(200);
+    expect(await reenabled.json()).toMatchObject({ enabled: true });
+
+    await expectProblem(await patch({ modelId: null }), 403);
+    // A body doing BOTH must clear both gates, so it is refused too.
+    await expectProblem(await patch({ enabled: false, modelId: null }), 403);
+  });
+
+  it("refuses a guest who was offered NOTHING (404), grant or no grant", async () => {
+    // The negative control for the exemption above: ownership waives the
+    // install GRANT, never the placement. Without an offer the package is not
+    // placed in the guest's space and the id is not confirmed to exist.
+    await expectProblem(await takeUpOffer(guest.headers(), AGENT), 404);
+    await assertDbMissing(
+      spacePackages,
+      and(eq(spacePackages.packageId, AGENT), eq(spacePackages.spaceId, guest.personalSpaceId))!,
+    );
+  });
+
+  it("checks the offer INSIDE the transaction that installs — a revoked share cannot be taken up", async () => {
+    // The check sits next to the insert it authorizes, so that a revoke
+    // committing between the two cannot leave an installation the share no
+    // longer backs. Racing the two is not reproducible in-process; what is
+    // asserted is the property the single transaction guarantees — after the
+    // revoke, the install finds no offer and writes nothing.
     expect((await revokeShare(author.headers(homeId), AGENT, recipient.userId)).status).toBe(204);
-    await expectProblem(await acceptShare(recipient.headers(), AGENT), 404);
+    await expectProblem(await takeUpOffer(recipient.headers(), AGENT), 404);
     await assertDbMissing(
       spacePackages,
       and(
@@ -803,34 +913,159 @@ describe("offered is not activated", () => {
     );
   });
 
-  it("refuses the normal install route into a personal space without an offer", async () => {
-    const res = await app.request(`/api/spaces/${teamMember.personalSpaceId}/packages`, {
-      method: "POST",
-      headers: { ...teamMember.headers(), "Content-Type": "application/json" },
-      body: JSON.stringify({ packageId: AGENT }),
-    });
-    await expectProblem(res, 404);
+  it("refuses the install route into somebody's personal space without an offer", async () => {
+    await expectProblem(await takeUpOffer(teamMember.headers(), AGENT), 404);
   });
 });
 
 describe("a share whose version disappeared after the offer", () => {
-  // `POST …/shares` refuses a person when nothing is published, so the accept
-  // path's own refusal survives for exactly one shape: the `latest` went away
-  // between the offer and the accept. It must still refuse rather than install
-  // an unpinned row that would follow the author's draft.
-  it("answers 409 rather than installing something that follows `latest`", async () => {
+  // `POST …/shares` refuses an offer when nothing is published, so this shape
+  // survives for exactly one reason: the `latest` went away AFTER the offer.
+  // The installation then names nothing to run, and the launch must say so
+  // rather than fall back to the author's draft.
+  it("installs, then answers 404 `no_published_version` at launch — never the draft", async () => {
     expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
+    const installed = await takeUpOffer(recipient.headers(), AGENT);
+    expect(installed.status, await installed.clone().text()).toBe(201);
+
     await db.delete(packageDistTags).where(eq(packageDistTags.packageId, AGENT));
-    await expectProblem(await acceptShare(recipient.headers(), AGENT), 409, {
-      code: "package_has_no_version",
+    await db
+      .update(packages)
+      .set({ draftContent: "The author's working copy, which must not run here" })
+      .where(eq(packages.id, AGENT));
+
+    const launched = await app.request(`/api/agents/${AGENT}/run`, {
+      method: "POST",
+      headers: { ...recipient.headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
     });
+    await expectProblem(launched, 404, { code: "no_published_version" });
+    expect(await db.select().from(runs).where(eq(runs.packageId, AGENT))).toHaveLength(0);
+  });
+});
+
+describe("installing is the fourth door closed: it needs `share`, or a placement", () => {
+  /** `POST /api/spaces/{spaceId}/packages` — the one installation door. */
+  const install = (headers: Headers, spaceId: string, packageId = AGENT) =>
+    app.request(`/api/spaces/${spaceId}/packages`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ packageId }),
+    });
+
+  const sharesOf = async (packageId: string) =>
+    (await db.select().from(packageShares).where(eq(packageShares.packageId, packageId))).map(
+      (row) => row.spaceId,
+    );
+
+  it("creates the share alongside the installation for a caller who holds `share`", async () => {
+    // The organization owner holds `share` in every space, so installing a
+    // package that is placed NOWHERE in Team is the act of offering it there
+    // and taking it up at once — one call, both rows, one transaction.
+    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
+    const res = await install(owner(teamId), teamId);
+    expect(res.status, await res.clone().text()).toBe(201);
+
+    expect(await sharesOf(AGENT)).toEqual([teamId]);
+    await getDbRow(
+      spacePackages,
+      and(eq(spacePackages.packageId, AGENT), eq(spacePackages.spaceId, teamId))!,
+    );
+    // …and the offer is audited as the act it is, before nothing else.
+    const shared = await getDbRow(auditEvents, eq(auditEvents.action, "package.shared"));
+    expect(shared.after).toEqual({ spaceId: teamId, targetKind: "space" });
+  });
+
+  it("refuses a builder of the target who holds no `share` in the package's home", async () => {
+    // THE hole decision 1 closes. A builder of Team holds the install grant
+    // there and still cannot pull the home's package into Team, because the
+    // audience is the HOME's to decide. Two shapes, and the difference is
+    // whether they can SEE the package at all:
+    //   - unreachable from Team → 404, so the id is not confirmed to exist;
+    //   - reachable (the home offered it) but not theirs to hand on → 403,
+    //     after `assertPackageShareAccess`.
+    const teamBuilder = await principal({
+      orgRole: "member",
+      space: { id: teamId, preset: "builder" },
+    });
+    await expectProblem(await install(teamBuilder.headers(teamId), teamId, AGENT), 404);
     await assertDbMissing(
       spacePackages,
-      and(
-        eq(spacePackages.packageId, AGENT),
-        eq(spacePackages.spaceId, recipient.personalSpaceId),
-      )!,
+      and(eq(spacePackages.packageId, AGENT), eq(spacePackages.spaceId, teamId))!,
     );
+
+    // Reachable now — but reading is not sharing, and the home's `share` is
+    // what this builder does not hold.
+    expect((await shareWithUser(author.headers(homeId), AGENT, teamBuilder.userId)).status).toBe(
+      200,
+    );
+    await expectProblem(await install(teamBuilder.headers(teamId), teamId, AGENT), 403);
+    await assertDbMissing(
+      spacePackages,
+      and(eq(spacePackages.packageId, AGENT), eq(spacePackages.spaceId, teamId))!,
+    );
+  });
+
+  it("refuses 404 a package that EXISTS and the caller cannot reach", async () => {
+    // Homed in somebody else's personal space: the row is there, and the
+    // refusal must not say so — which is why the control below asserts the
+    // author reaches the very same id.
+    await seedPackage({
+      id: PRIVATE_AGENT,
+      orgId: ctx.orgId,
+      type: "agent",
+      homeSpaceId: author.personalSpaceId,
+      createdBy: author.userId,
+      draftManifest: { name: PRIVATE_AGENT, version: "0.1.0", type: "agent" },
+      draftContent: "Private.",
+    });
+    const teamBuilder = await principal({
+      orgRole: "member",
+      space: { id: teamId, preset: "builder" },
+    });
+    await expectProblem(await install(teamBuilder.headers(teamId), teamId, PRIVATE_AGENT), 404);
+    const read = await app.request(`/api/packages/agents/${PRIVATE_AGENT}`, {
+      headers: author.headers(),
+    });
+    expect(read.status, await read.clone().text()).toBe(200);
+  });
+
+  it("lets the owner of a personal space UNINSTALL without any grant either", async () => {
+    // The mirror of the install exemption (§3.6): a guest holds the `operator`
+    // preset in their own space, which carries no `integrations:uninstall` and
+    // no `<type>:write`. Ownership is the authorization, both ways.
+    expect((await shareWithUser(author.headers(homeId), AGENT, guest.userId)).status).toBe(200);
+    expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
+
+    const removed = await app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
+      method: "DELETE",
+      headers: guest.headers(),
+    });
+    expect(removed.status, await removed.clone().text()).toBe(204);
+    expect(await installedIn(guest.personalSpaceId, AGENT)).toBe(false);
+    // The OFFER survives the uninstall — only the sharer withdraws that.
+    expect(await sharesOf(AGENT)).toEqual([guest.personalSpaceId]);
+  });
+
+  it("takes the readability away from the space when the share is revoked", async () => {
+    const teamBuilder = await principal({
+      orgRole: "member",
+      space: { id: teamId, preset: "builder" },
+    });
+    expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
+    expect((await install(teamBuilder.headers(teamId), teamId)).status).toBe(201);
+    const readable = await app.request(`/api/packages/agents/${AGENT}`, {
+      headers: teamMember.headers(teamId),
+    });
+    expect(readable.status, await readable.clone().text()).toBe(200);
+
+    expect((await revokeShare(owner(), AGENT, teamId)).status).toBe(204);
+
+    await expectProblem(
+      await app.request(`/api/packages/agents/${AGENT}`, { headers: teamMember.headers(teamId) }),
+      404,
+    );
+    expect(await installedIn(teamId, AGENT)).toBe(false);
   });
 });
 
@@ -957,7 +1192,7 @@ describe("a NULL-home package stays the organization's when it is shared", () =>
   it("keeps it reachable by the fork route", async () => {
     // `forkPackage` refuses a source the organization already owns, so the
     // green path is a 400 and not a 201. What is asserted is that the refusal
-    // is no longer the reachability 404 that runs BEFORE it.
+    // is that one, and NOT the reachability 404 that runs before it.
     const res = await app.request(`/api/packages/${SKILL}/fork`, {
       method: "POST",
       headers: { ...owner(), "Content-Type": "application/json" },
@@ -1005,11 +1240,12 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
 
   /**
    * The THIRD copy door, and the widest: the whole agent plus every
-   * dependency's files. `source=draft` needs no stored artifact, so a refusal
-   * here is the copy gate and never a missing archive.
+   * dependency's files. Deliberately the PUBLISHED archive — `source=draft` has
+   * a gate of its own (write authority over the agent), so a refusal on it
+   * would be that rule and not the copy key this block is about.
    */
   const bundle = (who: Principal, packageId = AGENT, spaceId = homeId) =>
-    app.request(`/api/agents/${packageId}/bundle?source=draft`, { headers: who.headers(spaceId) });
+    app.request(`/api/agents/${packageId}/bundle`, { headers: who.headers(spaceId) });
 
   /** An on-screen read of the package's files — deliberately NOT a copy door. */
   const fileList = (who: Principal, packageId = AGENT, spaceId = homeId) =>
@@ -1131,8 +1367,8 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
   it("on: a run is unaffected — a bundle is assembled server-side, never copied", async () => {
     await setRestrictCopy(true);
     expect((await shareWithUser(author.headers(homeId), AGENT, viewer.userId)).status).toBe(200);
-    await acceptShare(viewer.headers(), AGENT);
-    const launched = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+    expect((await takeUpOffer(viewer.headers(), AGENT)).status).toBe(201);
+    const launched = await app.request(`/api/agents/${AGENT}/run`, {
       method: "POST",
       headers: { ...viewer.headers(), "Content-Type": "application/json" },
       body: JSON.stringify({}),
@@ -1146,11 +1382,11 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
  * The lock, driven by hand (`services/space-packages.ts` → `sharedWith`).
  *
  * The in-process test above asserts the sequential property: after a committed
- * revoke, the accept finds no offer. It cannot see the RACE, and the race is
- * what the lock is for — a revoke whose DELETE has landed but not committed
- * used to be invisible to the accept's plain SELECT under READ COMMITTED, so
- * the accept sailed past it and committed an installation the share no longer
- * backed. That state is unreachable through any route afterwards: nothing
+ * revoke, the install finds no offer. It cannot see the RACE, and the race is
+ * what the lock is for — a revoke whose DELETE has landed but not committed is
+ * invisible to a plain SELECT under READ COMMITTED, so without the lock the
+ * install sails past it and commits an installation nothing backs. That state
+ * is unreachable through any route afterwards: nothing
  * uninstalls it, and the recipient runs the package with their own credentials.
  *
  * Reproducing it needs TWO transactions held open at once, i.e. two
@@ -1158,12 +1394,12 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
  * engine, so under `TEST_TIER=0` there is no interleaving to observe and this
  * block skips with that as its reason (`test/helpers/tier.ts`).
  */
-describeRequiresPostgres("a revoke racing an accept (needs a real PostgreSQL)", () => {
+describeRequiresPostgres("a revoke racing an install (needs a real PostgreSQL)", () => {
   beforeEach(async () => {
     expect((await shareWithUser(author.headers(homeId), AGENT, recipient.userId)).status).toBe(200);
-    // NOT accepted: the fixture must leave `space_packages` empty for this
+    // NOT installed: the fixture must leave `space_packages` empty for this
     // pair, so the revoke's second DELETE takes no row lock of its own and the
-    // accept's INSERT has nothing to conflict on. Otherwise the accept would
+    // install's INSERT has nothing to conflict on. Otherwise the install would
     // block on the unique index rather than on the share row, and the test
     // would pass with or without the lock under test.
     await assertDbMissing(
@@ -1175,7 +1411,7 @@ describeRequiresPostgres("a revoke racing an accept (needs a real PostgreSQL)", 
     );
   });
 
-  it("makes the accept wait, then refuse — never an installation with no offer", async () => {
+  it("makes the install wait, then refuse — never an installation with no offer", async () => {
     let commitRevoke!: () => void;
     const gate = new Promise<void>((resolve) => {
       commitRevoke = resolve;
@@ -1205,28 +1441,28 @@ describeRequiresPostgres("a revoke racing an accept (needs a real PostgreSQL)", 
     });
     await Bun.sleep(150);
 
-    // T2 — the accept. `SELECT … FOR UPDATE` on the share row blocks on T1's
+    // T2 — the install. `SELECT … FOR UPDATE` on the share row blocks on T1's
     // uncommitted delete; without the lock this read sees the row (T1 has not
-    // committed) and the accept commits an installation.
-    const accepting = acceptSharedPackage(
+    // committed) and the install commits a `space_packages` row nothing backs.
+    const installing = installPackage(
       { orgId: ctx.orgId, spaceId: recipient.personalSpaceId },
       AGENT,
     );
     let settled = false;
-    void accepting.then(
+    void installing.then(
       () => (settled = true),
       () => (settled = true),
     );
     await Bun.sleep(300);
     // Still waiting on the lock — the observable half of the fix.
-    expect(settled, "the accept must block until the revoke commits").toBe(false);
+    expect(settled, "the install must block until the revoke commits").toBe(false);
 
     commitRevoke();
     await revoking;
 
     // The lock released onto a deleted row: READ COMMITTED re-evaluates and the
-    // offer is gone, so the accept refuses.
-    await expect(accepting).rejects.toThrow();
+    // offer is gone, so the install refuses.
+    await expect(installing).rejects.toThrow();
     await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT));
     await assertDbMissing(
       spacePackages,
@@ -1244,11 +1480,16 @@ describe("the table has no other reader", () => {
     // reader on an execution path would run a package nobody consented to.
     const proc = Bun.spawnSync(["grep", "-rl", "packageShares", "apps/api/src", "packages/db/src"]);
     const files = new TextDecoder().decode(proc.stdout).split("\n").filter(Boolean).sort();
-    // The share ROUTES and the library reach the table through
-    // `services/package-shares.ts`; these five are every file that names it.
+    // The share ROUTES reach the table through `services/package-shares.ts`;
+    // these seven are every file that names it. Two of them read it DIRECTLY
+    // and neither is an execution path: `package-library.ts` projects the share
+    // half of the placement rule per space (a listing), and `routes/packages.ts`
+    // writes the shares a home MOVE would otherwise orphan.
     expect(files).toEqual([
       "apps/api/src/lib/package-access.ts",
+      "apps/api/src/routes/packages.ts",
       "apps/api/src/services/package-items/crud.ts",
+      "apps/api/src/services/package-library.ts",
       "apps/api/src/services/package-shares.ts",
       "apps/api/src/services/space-packages.ts",
       "packages/db/src/schema/packages.ts",

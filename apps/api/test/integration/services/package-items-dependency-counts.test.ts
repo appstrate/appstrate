@@ -78,6 +78,7 @@ describe("package-items dependency counts", () => {
       for (const name of ["shared-skill", "solo-skill", "unused-skill"]) {
         await seedPackage({
           id: `@depcount/${name}`,
+          homeSpaceId: ctx.defaultSpaceId,
           orgId: ctx.orgId,
           type: "skill",
           createdBy: ctx.user.id,
@@ -148,6 +149,7 @@ describe("package-items dependency counts", () => {
     it("counts every dependency map, including a self-reference", async () => {
       await seedPackage({
         id: "@depcount/mcp-one",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "mcp-server",
         createdBy: ctx.user.id,

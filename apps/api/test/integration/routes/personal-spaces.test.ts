@@ -48,6 +48,7 @@ import {
   seedInstalledPackage,
   seedInvitation,
   seedPackage,
+  seedPackageShare,
   seedRun,
   seedSpace,
   seedSpaceMember,
@@ -346,6 +347,7 @@ describe("personal spaces — nobody else reaches one", () => {
     // `packages.home_space_id` would hand each of them the id of a space §3.6
     // says does not exist for them. `home_writable` carries the answer they
     // actually need.
+    await seedPackageShare(owner.defaultSpaceId, SECRET);
     await seedInstalledPackage(owner.defaultSpaceId, SECRET);
     type HomeWire = { home_space_id: string | null; home_writable: boolean };
     const read = async (ctx: TestContext, spaceId: string): Promise<HomeWire> => {
@@ -1000,9 +1002,11 @@ describe("personal spaces — offboarding", () => {
         draftManifest: { name: id, version: "0.1.0", type: "skill" },
         draftContent: `---\nname: x\ndescription: d\n---\n\n${id}`,
       });
+      await seedPackageShare(personalId, id);
       await seedInstalledPackage(personalId, id);
     }
     // Only one of the two is installed somewhere else.
+    await seedPackageShare(otherSpace.id, SHARED);
     await seedInstalledPackage(otherSpace.id, SHARED);
 
     await removeMember(owner.orgId, member.user.id);

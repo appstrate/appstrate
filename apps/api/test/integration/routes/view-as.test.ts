@@ -33,6 +33,7 @@ import {
   seedAgent,
   seedApiKey,
   seedInstalledPackage,
+  seedPackageShare,
   seedRun,
   seedSpace,
   seedSpaceMember,
@@ -672,6 +673,7 @@ describe("view as role", () => {
       body: agentBody("@view-as-source/shared", "Shared", "Lives in another organization"),
     });
     expect(created.status, await created.clone().text()).toBe(201);
+    await seedPackageShare(vault.id, "@view-as-source/shared");
     await seedInstalledPackage(vault.id, "@view-as-source/shared");
 
     // Persona `builder` in the previewing owner's OWN org, so the write half of
@@ -846,7 +848,7 @@ describe("view as role", () => {
       // A CLOSED space reaches nobody without a row, so what the hop sees there
       // depends on the persona's overlay and on nothing else.
       const closed = await space("Closed", "closed");
-      await seedAgent({ id: "@view-as/in-closed", orgId: owner.orgId });
+      await seedAgent({ id: "@view-as/in-closed", homeSpaceId: closed.id, orgId: owner.orgId });
       await seedInstalledPackage(closed.id, "@view-as/in-closed");
 
       const persona = {
@@ -854,11 +856,19 @@ describe("view as role", () => {
         orgRole: "member",
         space: { spaceId: closed.id, role: { kind: "preset", preset: "builder" } },
       };
-      // The claim carries the overlay, so the hop is a builder in that space.
-      expect(await libraryOverLoopback("member", persona)).toContain("@view-as/in-closed");
+      // Asserted on the CLOSED space's OWN library: the package is homed there
+      // and placed in no other space, so what it proves is the persona's reach
+      // into that space and nothing about the default one.
+      expect(await libraryAgentIds(loopbackHeaders("member", persona), closed.id)).toContain(
+        "@view-as/in-closed",
+      );
       // Strip it and the same token — same identity, same scope, same org role —
-      // reaches nothing there: a `member` with no row is not in a closed space.
-      expect(await libraryOverLoopback("member")).not.toContain("@view-as/in-closed");
+      // does not enter the space at all: a `member` with no row is not in a
+      // closed one.
+      const denied = await app.request(`/api/spaces/${closed.id}/library`, {
+        headers: loopbackHeaders("member"),
+      });
+      expect(denied.status).toBe(403);
     });
 
     it("ignores a claim minted for another organization", async () => {

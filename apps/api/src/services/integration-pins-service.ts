@@ -50,7 +50,6 @@ import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
-import { getInstalledPackageVersion } from "./space-packages.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
@@ -782,22 +781,20 @@ export async function resolveAgentConnectionReadiness(args: {
   actor: Actor;
   canConfigureIntegrations: boolean;
   /**
-   * Version selector (`draft` | `published` | concrete semver | dist-tag).
-   * Omitted ⇒ installed pin, else `draft`, matching the launch button. Any other value
-   * resolves the same manifest the run would execute (issue #770), so the
-   * readiness verdict matches the run for a pinned version, not the draft.
+   * Version selector (`draft` | `published` | concrete semver | dist-tag) —
+   * REQUIRED, and the router's decision, not this service's. Who may name
+   * `draft` is a question about the CALLER (`holdsPackageWriteAuthority`), which
+   * a service taking a `SpaceScope` cannot answer — so any default computed
+   * here would judge a definition the launch form and the run route do not
+   * execute. The route decides once, with `defaultDefinitionSelector`, and
+   * hands the answer over.
    */
-  version?: string;
+  version: string;
 }): Promise<AgentConnectionReadiness> {
   const { scope, agentPackageId, actor, canConfigureIntegrations, version } = args;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
-  // Match the launch form: installed pin first, draft for an unpinned author.
-  const { agent } = await resolveAgentRunVersion(
-    loaded,
-    version ?? (await getInstalledPackageVersion(scope, agentPackageId)) ?? "draft",
-    scope,
-  );
+  const { agent } = await resolveAgentRunVersion(loaded, version);
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);
 

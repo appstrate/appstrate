@@ -146,6 +146,10 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
   await seedPackage({
     id,
     orgId: ctx.orgId,
+    // Homed where it is installed: a package is placed in a space by its home
+    // or by a share, and an integration seeded straight into the context's own
+    // space is the shape the create route writes (RBAC spec §6.9).
+    homeSpaceId: ctx.defaultSpaceId,
     type: "integration",
     source: "local",
     draftManifest: connectionTestIntegrationManifest(id),

@@ -9,7 +9,12 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { apiIntegrationManifest, mcpServerManifest } from "../../helpers/integration-manifests.ts";
-import { seedPackage, seedInstalledPackage, seedApiKey } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedInstalledPackage,
+  seedPackage,
+  seedPackageShare,
+} from "../../helpers/seed.ts";
 import {
   uploadPackageFiles,
   downloadPackageFiles,
@@ -142,6 +147,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
     ctx = await createTestContext({ orgSlug: "fw" });
     await seedPackage({
       id: SKILL_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "skill",
       createdBy: ctx.user.id,
@@ -176,6 +182,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
             draftManifest: manifest,
             draftContent: type === "agent" ? "Follow the instructions." : "",
           });
+          await seedPackageShare(ctx.defaultSpaceId, id);
           await seedInstalledPackage(ctx.defaultSpaceId, id);
           await uploadPackageFiles(
             folder,
@@ -216,6 +223,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         createdBy: ctx.user.id,
         draftManifest: manifest,
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
       await uploadPackageFiles("mcp-servers", ctx.orgId, id, {
         "main.js": encoder.encode("export {};"),
@@ -249,6 +257,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         createdBy: ctx.user.id,
         draftManifest: manifest,
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
       expect(
         (await saveFiles([{ op: "write", path: "INTEGRATION.md", text: "Companion" }], { id }))
@@ -772,6 +781,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       const foreignId = "@fwother/private-skill";
       await seedPackage({
         id: foreignId,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: other.orgId,
         type: "skill",
         draftManifest: { ...skillManifest(), name: foreignId },

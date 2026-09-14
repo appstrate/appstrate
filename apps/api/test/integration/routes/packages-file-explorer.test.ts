@@ -20,8 +20,21 @@ import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import {
+  seedInstalledPackage,
+  seedPackage,
+  seedPackageShare,
+  seedPackageVersion,
+  seedSpace,
+  seedSpaceMember,
+} from "../../helpers/seed.ts";
 import {
   uploadPackageFiles,
   downloadPackageFiles,
@@ -98,6 +111,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: "draft prompt from DB",
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
     });
 
@@ -164,6 +178,7 @@ describe("package file explorer", () => {
       const skillId = "@fexp/a-skill";
       await seedPackage({
         id: skillId,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "skill",
         draftManifest: { ...manifestFor(skillId), type: "skill" },
@@ -191,6 +206,7 @@ describe("package file explorer", () => {
       const intId = "@fexp/documented-integration";
       await seedPackage({
         id: intId,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "integration",
         draftManifest: { ...manifestFor(intId), type: "integration" },
@@ -221,6 +237,7 @@ describe("package file explorer", () => {
       const manifest = { ...manifestFor(intId), type: "integration" };
       await seedPackage({
         id: intId,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "integration",
         draftManifest: manifest,
@@ -241,6 +258,7 @@ describe("package file explorer", () => {
       const manifest = { ...manifestFor(mcpId), type: "mcp-server" };
       await seedPackage({
         id: mcpId,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "mcp-server",
         draftManifest: manifest,
@@ -264,6 +282,7 @@ describe("package file explorer", () => {
       const manifest = { ...manifestFor(mcpId), type: "mcp-server" };
       await seedPackage({
         id: mcpId,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "mcp-server",
         draftManifest: manifest,
@@ -290,6 +309,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id, "2.0.0"),
         draftContent: "draft prompt",
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
 
       const zip = buildMinimalZip(manifestFor(id), "published prompt v1", "prompt.md");
@@ -407,6 +427,17 @@ describe("package file explorer", () => {
    * could inherit `unzipArtifact`'s 200 MB generic default. These assertions pin
    * both paths to the package-specific 50 MB ceiling.
    */
+  /**
+   * Budget for the two cases that build a 54 MB expansion and read it through
+   * BOTH routes. The decompression is the measurement, not incidental cost, and
+   * a pair of them lands within a few hundred milliseconds of bun's 5 s default
+   * — so on a loaded machine the suite went red on timing rather than on
+   * behaviour, and the ceiling these cases exist to prove said nothing either
+   * way. Generous on purpose: a real regression here is a 422 that stops
+   * arriving, which this still catches.
+   */
+  const CEILING_TEST_TIMEOUT_MS = 30_000;
+
   describe("decompression ceiling", () => {
     const id = "@fexp/high-ratio-agent";
 
@@ -451,50 +482,65 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: "draft prompt",
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
     });
 
-    it("refuses a published artifact that expands past the ceiling, on both read routes", async () => {
-      // 9 x 6 MB = 54 MB decompressed, over the 50 MB ceiling.
-      const zip = await seedVersionExpandingTo(6, 9);
+    it(
+      "refuses a published artifact that expands past the ceiling, on both read routes",
+      async () => {
+        // 9 x 6 MB = 54 MB decompressed, over the 50 MB ceiling.
+        const zip = await seedVersionExpandingTo(6, 9);
 
-      // The archive is well under the COMPRESSED ceiling — which is exactly the
-      // point: the compressed size can never bound the expansion, so the
-      // decompressed budget is the only thing standing between a stored
-      // artifact and an amplification primitive.
-      expect(zip.byteLength).toBeLessThan(PACKAGE_ZIP_MAX_COMPRESSED_BYTES);
+        // The archive is well under the COMPRESSED ceiling — which is exactly the
+        // point: the compressed size can never bound the expansion, so the
+        // decompressed budget is the only thing standing between a stored
+        // artifact and an amplification primitive.
+        expect(zip.byteLength).toBeLessThan(PACKAGE_ZIP_MAX_COMPRESSED_BYTES);
 
-      const { res } = await listFiles(ctx, id, "?version=1.0.0");
-      expect(res.status).toBe(422);
-      expect(res.headers.get("Content-Type")).toContain("application/problem+json");
-      const problem = (await res.json()) as { code: string; detail: string };
-      expect(problem.code).toBe("package_archive_unreadable");
-      expect(problem.detail).toContain("50 MB");
+        const { res } = await listFiles(ctx, id, "?version=1.0.0");
+        expect(res.status).toBe(422);
+        expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+        const problem = (await res.json()) as { code: string; detail: string };
+        expect(problem.code).toBe("package_archive_unreadable");
+        expect(problem.detail).toContain("50 MB");
 
-      // The single-file route reads through the same snapshot, so it must
-      // refuse identically — otherwise the cheaper route stays exploitable.
-      const content = await fetchContent(ctx, id, "prompt.md", "&version=1.0.0");
-      expect(content.status).toBe(422);
-      expect(((await content.json()) as { code: string }).code).toBe("package_archive_unreadable");
-    });
+        // The single-file route reads through the same snapshot, so it must
+        // refuse identically — otherwise the cheaper route stays exploitable.
+        const content = await fetchContent(ctx, id, "prompt.md", "&version=1.0.0");
+        expect(content.status).toBe(422);
+        expect(((await content.json()) as { code: string }).code).toBe(
+          "package_archive_unreadable",
+        );
+        // Two 54 MB decompressions on one request pair: the work IS the subject,
+        // so it sits above bun's 5 s default rather than failing on machine load.
+      },
+      CEILING_TEST_TIMEOUT_MS,
+    );
 
-    it("refuses a draft artifact that expands past the ceiling, on both read routes", async () => {
-      // Drafts use a different storage helper from published versions. Keep
-      // this assertion separate so neither path can silently drift to the
-      // generic ZIP helper's larger default.
-      await uploadPackageFiles("agents", ctx.orgId, id, expandingEntries(6, 9));
+    it(
+      "refuses a draft artifact that expands past the ceiling, on both read routes",
+      async () => {
+        // Drafts use a different storage helper from published versions. Keep
+        // this assertion separate so neither path can silently drift to the
+        // generic ZIP helper's larger default.
+        await uploadPackageFiles("agents", ctx.orgId, id, expandingEntries(6, 9));
 
-      const { res } = await listFiles(ctx, id);
-      expect(res.status).toBe(422);
-      expect(res.headers.get("Content-Type")).toContain("application/problem+json");
-      const problem = (await res.json()) as { code: string; detail: string };
-      expect(problem.code).toBe("package_archive_unreadable");
-      expect(problem.detail).toContain("50 MB");
+        const { res } = await listFiles(ctx, id);
+        expect(res.status).toBe(422);
+        expect(res.headers.get("Content-Type")).toContain("application/problem+json");
+        const problem = (await res.json()) as { code: string; detail: string };
+        expect(problem.code).toBe("package_archive_unreadable");
+        expect(problem.detail).toContain("50 MB");
 
-      const content = await fetchContent(ctx, id, "prompt.md");
-      expect(content.status).toBe(422);
-      expect(((await content.json()) as { code: string }).code).toBe("package_archive_unreadable");
-    });
+        const content = await fetchContent(ctx, id, "prompt.md");
+        expect(content.status).toBe(422);
+        expect(((await content.json()) as { code: string }).code).toBe(
+          "package_archive_unreadable",
+        );
+      },
+      CEILING_TEST_TIMEOUT_MS,
+    );
 
     it("still serves an artifact that stays under the ceiling", async () => {
       // Positive control: without it, a cap that rejected EVERY high-ratio
@@ -552,6 +598,7 @@ describe("package file explorer", () => {
       // the only thing standing between us and another org's bytes. Seeding
       // the install in the foreign space instead would make this test green with
       // the org filter deleted.
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
       expect(await hasPackageAccess({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
         true,
@@ -571,6 +618,7 @@ describe("package file explorer", () => {
       });
       const [shadow] = await db.select().from(packages).where(eq(packages.ephemeral, true));
       expect(shadow).toBeDefined();
+      await seedPackageShare(ctx.defaultSpaceId, shadow!.id);
       await seedInstalledPackage(ctx.defaultSpaceId, shadow!.id);
 
       const { res } = await listFiles(ctx, shadow!.id);
@@ -580,6 +628,140 @@ describe("package file explorer", () => {
     it("401s without a session", async () => {
       const res = await app.request("/api/packages/@fexp/draft-agent/files");
       expect(res.status).toBe(401);
+    });
+  });
+
+  /**
+   * WHICH definition a read renders when the caller named none, and who may
+   * name the draft (RBAC spec §6.10, R8).
+   *
+   * These two routes were the fifth door to a working copy, and the widest:
+   * the run, the schedule, the readiness endpoint and the bundle export all
+   * refuse an explicit `draft` to a caller who cannot WRITE the package, while
+   * `?version=draft` here was honoured for anyone holding `<type>:read` — one
+   * file at a time, which is the CLI's `skills sync --source draft`. The rule
+   * is now the one the detail page answers, from the same two functions:
+   * omitted is `writable ? draft : latest ?? draft`, and naming the draft is an
+   * author's act.
+   *
+   * The caller who discriminates is a space `viewer`: `<type>:read` without
+   * `<type>:write`. An org owner writes everything and would prove nothing.
+   */
+  describe("which definition a read renders", () => {
+    const id = "@fexp/definition-agent";
+    const DRAFT_BODY = "the author's working copy";
+    const PUBLISHED_BODY = "the published prompt";
+
+    /** A member of the org holding `preset` in the package's home space. */
+    async function memberIn(preset: "viewer" | "builder"): Promise<Record<string, string>> {
+      const user = await createTestUser();
+      await addOrgMember(ctx.orgId, user.id, "member");
+      await seedSpaceMember({ spaceId: homeId, userId: user.id, presetRole: preset });
+      return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": homeId };
+    }
+
+    async function read(
+      headers: Record<string, string>,
+      query = "",
+    ): Promise<{ status: number; body: string }> {
+      const res = await app.request(`/api/packages/${id}/files/content?path=prompt.md${query}`, {
+        headers,
+      });
+      return { status: res.status, body: await res.text() };
+    }
+
+    /** A CLOSED space, so every role in it is an explicit membership row. */
+    let homeId: string;
+
+    beforeEach(async () => {
+      homeId = (await seedSpace({ orgId: ctx.orgId, name: "Home", visibility: "closed" })).id;
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: homeId,
+        createdBy: ctx.user.id,
+        draftManifest: manifestFor(id),
+        draftContent: DRAFT_BODY,
+      });
+      await seedInstalledPackage(homeId, id);
+    });
+
+    /** Publish `1.0.0` with a body that differs from the draft — the control. */
+    async function publish(): Promise<void> {
+      const zip = buildMinimalZip(manifestFor(id), PUBLISHED_BODY, "prompt.md");
+      await uploadPackageZip(id, "1.0.0", zip);
+      const row = await seedPackageVersion({
+        packageId: id,
+        version: "1.0.0",
+        manifest: manifestFor(id),
+        integrity: computeIntegrity(new Uint8Array(zip)),
+        artifactSize: zip.byteLength,
+      });
+      await db
+        .insert(packageDistTags)
+        .values({ packageId: id, tag: "latest", versionId: row.id })
+        .onConflictDoUpdate({
+          target: [packageDistTags.packageId, packageDistTags.tag],
+          set: { versionId: row.id, updatedAt: new Date() },
+        });
+    }
+
+    it("serves the PUBLISHED bytes to a reader who cannot write, with no ?version", async () => {
+      await publish();
+      const { status, body } = await read(await memberIn("viewer"));
+      expect(status).toBe(200);
+      expect(body).toBe(PUBLISHED_BODY);
+    });
+
+    it("serves the DRAFT to the same reader when nothing is published", async () => {
+      // Reading is not executing: a readable package whose Files tab 404s is a
+      // tab the detail page has just promised. The draft is the only definition
+      // that exists here, so it is the one shown — in read-only, and the LAUNCH
+      // keeps refusing with `404 no_published_version`.
+      const { status, body } = await read(await memberIn("viewer"));
+      expect(status).toBe(200);
+      expect(body).toBe(DRAFT_BODY);
+    });
+
+    it("serves the DRAFT to a writer with no ?version, even once published", async () => {
+      await publish();
+      const { status, body } = await read(await memberIn("builder"));
+      expect(status).toBe(200);
+      expect(body).toBe(DRAFT_BODY);
+    });
+
+    it("refuses an EXPLICIT ?version=draft to a reader who cannot write", async () => {
+      await publish();
+      const headers = await memberIn("viewer");
+      const { status, body } = await read(headers, "&version=draft");
+      expect(status, body).toBe(403);
+      expect(JSON.parse(body) as { code?: string }).toMatchObject({
+        code: "draft_not_writable",
+      });
+      expect(body).not.toContain(DRAFT_BODY);
+
+      // The index route answers the same way — it inlines the same bytes, so
+      // gating only the content route would leave the cheaper door open.
+      const index = await app.request(`/api/packages/${id}/files?version=draft`, { headers });
+      expect(index.status).toBe(403);
+      expect(await index.text()).not.toContain(DRAFT_BODY);
+    });
+
+    it("honours an EXPLICIT ?version=draft for the author", async () => {
+      // The discriminating control: what the refusal above is about is the
+      // AUTHORITY, not the word `draft`.
+      await publish();
+      const { status, body } = await read(await memberIn("builder"), "&version=draft");
+      expect(status).toBe(200);
+      expect(body).toBe(DRAFT_BODY);
+    });
+
+    it("still serves an explicit published version to a reader who cannot write", async () => {
+      await publish();
+      const { status, body } = await read(await memberIn("viewer"), "&version=1.0.0");
+      expect(status).toBe(200);
+      expect(body).toBe(PUBLISHED_BODY);
     });
   });
 
@@ -596,6 +778,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: "prompt body",
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
     });
 
@@ -693,6 +876,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: "etag body",
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
     });
 
@@ -830,6 +1014,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id, "2.0.0"),
         draftContent: "draft prompt",
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await seedInstalledPackage(ctx.defaultSpaceId, id);
       // A version row WITHOUT its artifact in storage. Any code path that
       // downloads the ZIP to answer the request must fail loudly.
@@ -995,6 +1180,7 @@ describe("draft tree writes", () => {
       draftManifest: skillManifest(),
       draftContent: SKILL_MD,
     });
+    await seedPackageShare(ctx.defaultSpaceId, id);
     await seedInstalledPackage(ctx.defaultSpaceId, id);
     await uploadPackageFiles("skills", ctx.orgId, id, {
       "SKILL.md": encoder.encode(SKILL_MD),

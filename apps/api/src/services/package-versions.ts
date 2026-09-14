@@ -2,8 +2,7 @@
 
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageVersions, packageDistTags, spacePackages } from "@appstrate/db/schema";
-import { conflict } from "../lib/errors.ts";
+import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import {
   uploadPackageZip,
@@ -413,21 +412,6 @@ export async function deletePackageVersion(packageId: string, version: string): 
       .for("update");
 
     if (!row) return false;
-
-    // A deletion would SET NULL on installation pins and silently make an
-    // accepted share follow latest. Lock the version before checking: an
-    // install's FK lock serializes acceptance with this deletion.
-    const [installation] = await tx
-      .select({ spaceId: spacePackages.spaceId })
-      .from(spacePackages)
-      .where(eq(spacePackages.versionId, row.id))
-      .limit(1);
-    if (installation) {
-      throw conflict(
-        "version_in_use",
-        "This version is pinned by an installation. Update or uninstall it before deleting the version.",
-      );
-    }
 
     // Reassign dist-tags that point to this version before deleting
     const affectedTags = await tx

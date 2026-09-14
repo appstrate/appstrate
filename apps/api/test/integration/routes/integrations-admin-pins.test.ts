@@ -132,6 +132,7 @@ describe("/api/integrations/:packageId admin surface", () => {
 
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest(AGENT),
@@ -140,6 +141,7 @@ describe("/api/integrations/:packageId admin surface", () => {
 
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -228,6 +230,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       const INERT_AGENT = "@adminorg/agent-inert";
       await seedAgent({
         id: INERT_AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -396,6 +399,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       // Create two pins (different agents) via PUT.
       await seedAgent({
         id: SECOND_AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: buildAgentManifest(SECOND_AGENT),
@@ -446,6 +450,7 @@ describe("/api/integrations/:packageId admin surface", () => {
     it("returns the list of installed agents that depend on this integration", async () => {
       await seedAgent({
         id: SECOND_AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: buildAgentManifest(SECOND_AGENT),

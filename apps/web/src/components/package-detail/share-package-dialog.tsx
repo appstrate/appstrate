@@ -43,10 +43,12 @@ type ShareTarget = { kind: "user"; user_id: string } | { kind: "space"; space_id
  * and revoking from it also uninstalls the package for that recipient — which
  * is why the button says so.
  *
- * Offering to a PERSON needs a published version, because their personal space
- * installs at a pin (`409 package_has_no_version`). Rather than report that as
- * an error the author must go elsewhere to fix, the dialog answers it in place:
- * publish the draft's own version, then complete the offer that was refused.
+ * Offering needs a published version, whatever the target (`409
+ * package_has_no_version`): away from its home a package runs the latest
+ * published version and nothing else, so an offer of a package with nothing
+ * published is an offer of nothing. Rather than report that as an error the
+ * author must go elsewhere to fix, the dialog answers it in place: publish the
+ * draft's own version, then complete the offer that was refused.
  */
 export function SharePackageDialog({
   open,

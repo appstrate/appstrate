@@ -418,7 +418,13 @@ export const spacesPaths = {
       operationId: "installPackage",
       tags: ["Space Packages"],
       summary: "Install a package",
-      description: "Install a package from the organization catalog into this space.",
+      description:
+        "Install a package into this space — the ONE installation door, for a personal space as for a team one. " +
+        "A package must be PLACED here first: homed in this space, or shared with it (`POST /api/packages/{scope}/{name}/shares`); system packages are placed everywhere. " +
+        "If it is not, this call can create the share itself, but only for a caller holding the package type's `share` permission in the package's HOME space — `403` otherwise, `404` when the package id is not reachable at all. " +
+        "An API key never carries `share`, so it installs only what is already placed. " +
+        "In the caller's OWN personal space the type's install grant is not required: ownership is the authorization, which is how a guest takes up a package offered to them. " +
+        "The installation carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -454,7 +460,11 @@ export const spacesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The caller lacks the package type's install grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Package already installed in this space",
@@ -472,7 +482,7 @@ export const spacesPaths = {
       operationId: "getInstalledPackage",
       tags: ["Space Packages"],
       summary: "Get installed package",
-      description: "Get an installed package detail with its model/proxy/version overrides.",
+      description: "Get an installed package detail with its model and proxy overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -499,7 +509,9 @@ export const spacesPaths = {
       tags: ["Space Packages"],
       summary: "Update installed package overrides",
       description:
-        "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
+        "Update the model/proxy overrides, generation settings or enabled flag of an installed package. " +
+        "Two different acts share this body, and each answers to its own permission: `enabled` is a switch of PRESENCE, gated exactly as an install (`true`) or an uninstall (`false`) — so in the caller's OWN personal space ownership is the authorization and no grant is required, the same exemption `POST /api/spaces/{spaceId}/packages` applies. `modelId`, `proxyId` and `generationConfig` choose how a present package RUNS and need the type's `configure` grant everywhere, personal space included: selecting a model spends the organization's budget. A body carrying both must clear both gates. " +
+        "There is no version field: an installation carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -520,7 +532,6 @@ export const spacesPaths = {
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
-                version_id: { type: ["integer", "null"] },
                 enabled: { type: "boolean" },
               },
               additionalProperties: false,
@@ -540,7 +551,11 @@ export const spacesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The caller lacks the grant the body's fields require: the type's install/uninstall grant for `enabled`, its `configure` grant for `modelId` / `proxyId` / `generationConfig`.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -569,7 +584,7 @@ export const spacesPaths = {
       tags: ["Space Packages"],
       summary: "Get the resolved per-space run configuration",
       description:
-        "Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.",
+        "Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, and the stored input layer (editor values plus locked fields). It carries no version — which bytes run is decided per launch by the `version` selector, defaulting to the latest published version. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -584,7 +599,7 @@ export const spacesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["generation", "modelId", "proxyId", "version_pin", "input"],
+                required: ["generation", "modelId", "proxyId", "input"],
                 properties: {
                   generation: {
                     oneOf: [
@@ -594,7 +609,6 @@ export const spacesPaths = {
                   },
                   modelId: { type: ["string", "null"] },
                   proxyId: { type: ["string", "null"] },
-                  version_pin: { type: ["string", "null"] },
                   input: {
                     type: "object",
                     allOf: [{ $ref: "#/components/schemas/AgentInputSettings" }],
@@ -607,7 +621,6 @@ export const spacesPaths = {
                 generation: { temperature: 0.2, reasoningLevel: "high" },
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
-                version_pin: "1.2.3",
                 input: { values: { dry_run: true }, locked_fields: ["dry_run"] },
               },
             },

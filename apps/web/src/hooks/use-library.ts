@@ -9,13 +9,27 @@ import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
 
-/** Wire shape from the OpenAPI spec (GET /api/library response). */
+/**
+ * Wire shape from the OpenAPI spec (GET /api/library response) — the
+ * organization catalog: which packages exist and where each one is active.
+ */
 export type LibraryResponse =
   paths["/api/library"]["get"]["responses"][200]["content"]["application/json"];
+
+/**
+ * The same matrix read from one space, plus the section only a space has:
+ * `shared`, the offers still waiting on a decision. An offer is addressed to
+ * a space, so it is read there — the organization catalog carries none.
+ */
+type SpaceLibraryResponse =
+  paths["/api/spaces/{spaceId}/library"]["get"]["responses"][200]["content"]["application/json"];
 
 export type LibraryPackageItem = components["schemas"]["LibraryPackageList"][number];
 
 export type LibrarySpace = LibraryResponse["spaces"][number];
+
+/** One package offered to a space and not yet installed there. */
+export type LibraryOffer = SpaceLibraryResponse["shared"][number];
 
 export function useLibrary() {
   const scope = useOrgOnlyScope();

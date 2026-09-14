@@ -153,6 +153,7 @@ describe("RBAC — Permission enforcement", () => {
     it("member gets 403 on schedule creation", async () => {
       await seedPackage({
         id: `@rbac-test/test-agent`,
+        homeSpaceId: owner.defaultSpaceId,
         orgId: owner.orgId,
       });
       await installPackage(
@@ -173,7 +174,11 @@ describe("RBAC — Permission enforcement", () => {
     });
 
     it("space viewer gets 403 on schedule creation", async () => {
-      await seedPackage({ id: `@rbac-test/test-agent`, orgId: owner.orgId });
+      await seedPackage({
+        id: `@rbac-test/test-agent`,
+        homeSpaceId: owner.defaultSpaceId,
+        orgId: owner.orgId,
+      });
       await installPackage(
         { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
         "@rbac-test/test-agent",

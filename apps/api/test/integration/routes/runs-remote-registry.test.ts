@@ -17,8 +17,14 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedPackage, seedPackageVersion, seedSpaceMember } from "../../helpers/seed.ts";
 import { installPackage, updateInstalledPackage } from "../../../src/services/space-packages.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { runs, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
@@ -57,6 +63,7 @@ async function seedRegistryAgent(
   await seedPackage({
     orgId: ctx.orgId,
     id: "@acme/briefing",
+    homeSpaceId: ctx.defaultSpaceId,
     type: "agent",
     draftManifest: manifest,
     draftContent: PROMPT,
@@ -202,6 +209,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/briefing",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       draftManifest: manifest,
       draftContent: PROMPT,
@@ -252,6 +260,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/briefing",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       draftManifest: manifest,
       draftContent: PROMPT,
@@ -294,6 +303,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/briefing",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       // The draft column keeps a valid manifest: only the published snapshot
       // is malformed, so the failure can only come from the published path.
@@ -328,6 +338,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/draft-only",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       draftManifest: {
         name: "@acme/draft-only",
@@ -356,6 +367,114 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(run!.versionRef).toBe("draft");
   });
 
+  it("refuses `stage: draft` to a caller who cannot WRITE the agent", async () => {
+    // `stage: "draft"` is `?version=draft` spelled for this surface, so it
+    // answers to the same authority. Without this, the 403 the platform run
+    // route returns is a formality any holder of `agents:run` steps around by
+    // posting here instead — measured 201 against 403 on the same agent.
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@acme/draft-only",
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "agent",
+      draftManifest: {
+        name: "@acme/draft-only",
+        display_name: "Draft-only Agent",
+        version: "0.0.1",
+        type: "agent",
+        schema_version: "0.1",
+        author: "tester",
+        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+      } as unknown as Record<string, unknown>,
+      draftContent: "draft prompt",
+    });
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/draft-only");
+    // Publish one too, so the control below runs the SAME agent from the SAME
+    // caller and the only thing that changes is the stage.
+    const versionRow = await seedPackageVersion({
+      packageId: "@acme/draft-only",
+      version: "0.0.1",
+      integrity: "sha256-test",
+      artifactSize: 1024,
+      manifest: {
+        name: "@acme/draft-only",
+        display_name: "Draft-only Agent",
+        version: "0.0.1",
+        type: "agent",
+        description: "Test agent",
+        schema_version: "0.1",
+        author: "tester",
+        timeout: 300,
+        dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+      },
+    });
+    await db
+      .insert(packageDistTags)
+      .values({ packageId: "@acme/draft-only", tag: "latest", versionId: versionRow.id });
+    await uploadPackageZip(
+      "@acme/draft-only",
+      "0.0.1",
+      buildMinimalZip(
+        {
+          name: "@acme/draft-only",
+          display_name: "Draft-only Agent",
+          version: "0.0.1",
+          type: "agent",
+          description: "Test agent",
+          schema_version: "0.1",
+          author: "tester",
+          timeout: 300,
+          dependencies: { skills: {}, mcp_servers: {}, integrations: {} },
+        },
+        PROMPT,
+      ),
+    );
+
+    const operator = await createTestUser();
+    await addOrgMember(ctx.orgId, operator.id, "member");
+    await seedSpaceMember({
+      spaceId: ctx.defaultSpaceId,
+      userId: operator.id,
+      presetRole: "operator",
+    });
+    const asOperator = {
+      Cookie: operator.cookie,
+      "X-Org-Id": ctx.orgId,
+      "X-Space-Id": ctx.defaultSpaceId,
+      "Content-Type": "application/json",
+    };
+
+    const refused = await app.request("/api/runs/remote", {
+      method: "POST",
+      headers: asOperator,
+      body: JSON.stringify({
+        source: { kind: "registry", packageId: "@acme/draft-only", stage: "draft" },
+        spaceId: ctx.defaultSpaceId,
+        input: {},
+      }),
+    });
+    expect(refused.status, await refused.clone().text()).toBe(403);
+    expect((await refused.json()) as { code?: string }).toMatchObject({
+      code: "draft_not_writable",
+    });
+    expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/draft-only"))).toHaveLength(
+      0,
+    );
+
+    // The discriminating control: the SAME caller, the SAME agent, published.
+    // The refusal above is about the stage, not about `agents:run`.
+    const allowed = await app.request("/api/runs/remote", {
+      method: "POST",
+      headers: asOperator,
+      body: JSON.stringify({
+        source: { kind: "registry", packageId: "@acme/draft-only", stage: "published" },
+        spaceId: ctx.defaultSpaceId,
+        input: {},
+      }),
+    });
+    expect(allowed.status, await allowed.clone().text()).toBe(201);
+  });
+
   it("rejects a malformed draft manifest with 400", async () => {
     // Seed a draft that's missing required AFPS fields (no `displayName`,
     // no `schemaVersion`). The full-AFPS validator must catch this here
@@ -364,6 +483,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/broken-draft",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       draftManifest: {
         name: "@acme/broken-draft",
@@ -402,6 +522,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/briefing",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       draftManifest: publishedManifest() as unknown as Record<string, unknown>,
       draftContent: PROMPT,
@@ -491,7 +612,10 @@ describe("POST /api/runs/remote — kind: registry", () => {
       spaceId: ctx.defaultSpaceId,
       input: {},
       // Mirrors the platform run route: the freeze KEY gate runs on remote too.
-      dependency_overrides: { "@acme/not-a-dep": "draft" },
+      // A VERSION value, not `draft`: `draft` is judged earlier, by the
+      // authority gate, and would answer 403 before this gate ever ran — which
+      // is the right answer to that question and the wrong test for this one.
+      dependency_overrides: { "@acme/not-a-dep": "1.0.0" },
     });
 
     expect(res.status).toBe(400);
@@ -516,6 +640,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/helper",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       draftManifest: {
         name: "@acme/helper",
@@ -544,6 +669,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/briefing",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       draftManifest: manifest,
       draftContent: PROMPT,

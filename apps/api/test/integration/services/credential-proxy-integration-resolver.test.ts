@@ -111,6 +111,7 @@ describe("credential-proxy integration-resolver", () => {
     token = startTokenServer();
     await seedPackage({
       id: INTEGRATION_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -196,6 +197,7 @@ describe("credential-proxy integration-resolver", () => {
     const NO_AUTH = "@official/noauth";
     await seedPackage({
       id: NO_AUTH,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",

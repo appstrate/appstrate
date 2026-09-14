@@ -159,21 +159,16 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     // Every artifact a run can reach: the mutable draft (editor Run button,
     // `version=draft`) plus each published version (pin, dist-tag, or range).
     const manifestByLabel = new Map<string, Record<string, unknown>>();
-    const labelByVersionId = new Map<number, string>();
     const draftManifest = asManifest(agent.draftManifest);
     if (draftManifest) manifestByLabel.set("draft", draftManifest);
     for (const v of versions) {
       const m = asManifest(v.manifest);
       if (m) manifestByLabel.set(v.version, m);
-      labelByVersionId.set(v.id, v.version);
     }
     const latest = await getLatestVersionInfo(agent.id);
 
     const installs = await db
-      .select({
-        spaceId: spacePackages.spaceId,
-        versionId: spacePackages.versionId,
-      })
+      .select({ spaceId: spacePackages.spaceId })
       .from(spacePackages)
       .where(eq(spacePackages.packageId, agent.id));
     const agentSchedules = await db
@@ -198,18 +193,14 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     const consumers: Consumer[] = [];
     for (const i of installs) {
       // Installation grants access to the PACKAGE, not one immutable artifact:
-      // `/run?version=` accepts draft, exact, tag and range, and the editor's
-      // Run button explicitly selects the draft. A version_id is a default pin,
-      // not a permission boundary, so every artifact remains visible in the
-      // audit. Only the latest published version (normal run default) and the
-      // installed version pin (bundle/export default) block rollout; drafts and
-      // historical versions that need an explicit selector are warnings.
+      // `/run?version=` accepts draft, exact, tag and range, and an author can
+      // still select the draft. So every artifact remains visible in the audit.
+      // What BLOCKS a rollout is only what runs by DEFAULT, and an installation
+      // carries no version any more: that default is the latest published
+      // version, and nothing else. Drafts and historical versions need an
+      // explicit selector and are warnings.
       const activeLabels = new Set<string>();
       if (latest?.version) activeLabels.add(latest.version);
-      if (i.versionId !== null) {
-        const installedLabel = labelByVersionId.get(i.versionId);
-        if (installedLabel) activeLabels.add(installedLabel);
-      }
       for (const label of manifestByLabel.keys()) {
         consumers.push({
           label,

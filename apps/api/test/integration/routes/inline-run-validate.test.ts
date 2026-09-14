@@ -321,6 +321,7 @@ describe("POST /api/runs/inline/validate", () => {
       const manifest = integrationManifest() as unknown as Record<string, unknown>;
       await seedPackage({
         id: INTEGRATION,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "integration",
         source: "local",
@@ -457,6 +458,7 @@ describe("POST /api/runs/inline/validate", () => {
       async function seedDivergedIntegration() {
         await seedPackage({
           id: PINNED,
+          homeSpaceId: ctx.defaultSpaceId,
           orgId: ctx.orgId,
           type: "integration",
           source: "local",

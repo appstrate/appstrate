@@ -4,14 +4,23 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test"
 import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedAgent,
-  seedRun,
-  seedSpace,
+  seedInstalledPackage,
   seedOrgModel,
   seedOrgModelProviderKey,
   seedOrgModelProviderOAuth,
+  seedPackageShare,
+  seedRun,
+  seedSpace,
+  seedSpaceMember,
 } from "../../helpers/seed.ts";
 import {
   getSystemModels,
@@ -37,6 +46,7 @@ async function seedInstalledAgent(
 ) {
   const { spaceId, ...rest } = overrides;
   const pkg = await seedAgent(rest);
+  await seedPackageShare(spaceId, pkg.id);
   await installPackage({ orgId: rest.orgId!, spaceId: spaceId }, pkg.id);
   return pkg;
 }
@@ -208,11 +218,15 @@ describe("Agents API", () => {
     });
 
     it("returns 200 from custom space when agent is installed", async () => {
-      await seedAgent({ id: "@myorg/custom-installed", orgId: ctx.orgId, createdBy: ctx.user.id });
-
       const customApp = await seedSpace({
         orgId: ctx.orgId,
         name: "Custom Installed",
+        createdBy: ctx.user.id,
+      });
+      await seedAgent({
+        id: "@myorg/custom-installed",
+        homeSpaceId: customApp.id,
+        orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
       await installPackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@myorg/custom-installed");
@@ -311,6 +325,7 @@ describe("Agents API", () => {
     it("stores input values and field locks", async () => {
       await seedAgent({
         id: "@myorg/input-settings-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -349,6 +364,7 @@ describe("Agents API", () => {
     it("rejects a body missing locked_fields with 400 and leaves the stored row intact", async () => {
       await seedAgent({
         id: "@myorg/partial-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -388,6 +404,7 @@ describe("Agents API", () => {
     it("rejects a body carrying an unknown key with 400 and leaves the stored row intact", async () => {
       await seedAgent({
         id: "@myorg/unknown-key-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -429,6 +446,7 @@ describe("Agents API", () => {
     it("rejects a wrong-typed stored value with 400", async () => {
       await seedAgent({
         id: "@myorg/typed-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -464,6 +482,7 @@ describe("Agents API", () => {
     it("prunes a value key that names no declared property and still returns 200", async () => {
       await seedAgent({
         id: "@myorg/orphan-key-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -508,6 +527,7 @@ describe("Agents API", () => {
     it("stays saveable when the schema declares additionalProperties: false", async () => {
       await seedAgent({
         id: "@myorg/closed-schema-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -575,6 +595,7 @@ describe("Agents API", () => {
           },
         },
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
 
@@ -683,6 +704,7 @@ describe("Agents API", () => {
           input: { schema: { type: "object", properties: { note: { type: "string" } } } },
         },
       });
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
 
@@ -1342,6 +1364,138 @@ describe("Agents API", () => {
       });
       const body = (await get.json()) as { modelId: string | null };
       expect(body.modelId).toBeNull();
+    });
+  });
+});
+
+/**
+ * Reading a package is not executing it (RBAC spec §6.10).
+ *
+ * An agent nobody has published yet has exactly ONE definition — the author's
+ * draft. The package list shows it to every reader of its home, so its detail
+ * page has to exist for them too: a 404 there is a link the list just promised
+ * and cannot honour, and hiding the page protects nothing (`GET …/files` and
+ * the list already show the same draft).
+ *
+ * The refusals stay where they belong. Naming the working copy — an explicit
+ * `?version=draft` — is an author's act and answers `403 draft_not_writable`.
+ * LAUNCHING with no selector is the published version and answers
+ * `404 no_published_version`. The `definition` field is what lets a client tell
+ * the two situations apart and say so instead of offering a dead button.
+ */
+describe("GET /api/packages/agents/:scope/:name — a never-published agent is readable", () => {
+  let ctx: TestContext;
+  let homeId: string;
+  const NEVER = "@myorg/never-published";
+
+  /** A member holding `preset` in the agent's home, and nothing elsewhere. */
+  async function memberIn(preset: "viewer" | "operator" | "builder") {
+    const user = await createTestUser();
+    await addOrgMember(ctx.orgId, user.id, "member");
+    await seedSpaceMember({ spaceId: homeId, userId: user.id, presetRole: preset });
+    return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": homeId };
+  }
+
+  const detail = (headers: Record<string, string>, suffix = "") =>
+    app.request(`/api/packages/agents/${NEVER}${suffix}`, { headers });
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    homeId = (await seedSpace({ orgId: ctx.orgId, name: "Home", visibility: "closed" })).id;
+    await seedAgent({
+      id: NEVER,
+      homeSpaceId: homeId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: NEVER,
+        version: "0.1.0",
+        type: "agent",
+        description: "Work in progress",
+      },
+      draftContent: "The author's working copy.",
+    });
+    await seedInstalledPackage(homeId, NEVER);
+  });
+
+  for (const preset of ["viewer", "operator"] as const) {
+    it(`serves the draft in read-only to a ${preset} of the home`, async () => {
+      const headers = await memberIn(preset);
+      // The control: the list DOES show it, which is what makes a 404 on the
+      // detail a contradiction rather than a policy.
+      const listed = await app.request("/api/agents", { headers });
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      expect(
+        ((await listed.json()) as { data: { id: string }[] }).data.map((row) => row.id),
+      ).toContain(NEVER);
+
+      const res = await detail(headers);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect((await res.json()) as Record<string, unknown>).toMatchObject({
+        id: NEVER,
+        definition: "draft",
+        home_writable: false,
+      });
+    });
+  }
+
+  it("still refuses an EXPLICIT ?version=draft to a reader who cannot write it", async () => {
+    // The discriminating pair: the same caller, the same agent, the same
+    // definition — only the selector changes. Naming the working copy is the
+    // author's act; landing on it because nothing else exists is not.
+    const headers = await memberIn("operator");
+    expect((await detail(headers)).status).toBe(200);
+    const named = await detail(headers, "?version=draft");
+    expect(named.status, await named.clone().text()).toBe(403);
+    expect((await named.json()) as { code?: string }).toMatchObject({
+      code: "draft_not_writable",
+    });
+  });
+
+  it("answers readiness on the SAME definition the page rendered", async () => {
+    // The badge and the page must judge the SAME definition. Deriving the
+    // default selector in two places is how one of them 404s what the other
+    // has just rendered, so both read `defaultDefinitionSelector`.
+    const headers = await memberIn("operator");
+    const res = await app.request(`/api/agents/${NEVER}/connection-readiness`, { headers });
+    expect(res.status, await res.clone().text()).toBe(200);
+  });
+
+  it("keeps the LAUNCH refused — reading is not executing", async () => {
+    const headers = await memberIn("operator");
+    const res = await app.request(`/api/agents/${NEVER}/run`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ input: {} }),
+    });
+    expect(res.status, await res.clone().text()).toBe(404);
+    expect((await res.json()) as { code?: string }).toMatchObject({
+      code: "no_published_version",
+    });
+  });
+
+  it("reports `definition: published` once a version exists, for the same reader", async () => {
+    // The other half of the field's meaning: with something published, a
+    // non-author reads THAT, not the author's in-flight edits.
+    await createVersionFromDraft({ packageId: NEVER, orgId: ctx.orgId, userId: ctx.user.id });
+    const headers = await memberIn("operator");
+    const res = await detail(headers);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await res.json()) as Record<string, unknown>).toMatchObject({
+      definition: "published",
+      home_writable: false,
+    });
+  });
+
+  it("reports `definition: draft` to the author, published or not", async () => {
+    await createVersionFromDraft({ packageId: NEVER, orgId: ctx.orgId, userId: ctx.user.id });
+    const headers = await memberIn("builder");
+    const res = await detail(headers);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await res.json()) as Record<string, unknown>).toMatchObject({
+      definition: "draft",
+      home_writable: true,
     });
   });
 });

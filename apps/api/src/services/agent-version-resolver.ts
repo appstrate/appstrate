@@ -14,10 +14,19 @@
  *   - anything else → 3-step resolution (exact version → dist-tag → semver
  *                     range) via {@link getVersionDetail}. 404 when nothing
  *                     matches.
- *   - omitted       → the installed version pin in the current space, else
- *                     `"published"`. Accepting a share freezes this default
- *                     until the recipient accepts an update. An explicit
- *                     selector is an intentional per-run override.
+ *   - omitted       → `"published"` (#636). There is no third answer: an
+ *                     installation carries no version, so a space runs what its
+ *                     author last published unless the caller asks for
+ *                     something else.
+ *
+ * AUTHORITY is not decided here. `"draft"` is honoured as written, because the
+ * draft is the author's working copy and every HTTP entry point has already
+ * asked the one predicate that says who owns it
+ * (`holdsPackageWriteAuthority`, `lib/package-access.ts`) and answered
+ * `403 draft_not_writable` itself. Re-asking here would mean threading a Hono
+ * context into a resolver the scheduler calls with none — and the scheduler
+ * deliberately does NOT re-check: the authority was verified when the schedule
+ * was created, the same way its `connection_overrides` were frozen then.
  *
  * System agents have no published versions (their definition ships with the
  * platform), so any selector is ignored and the loaded definition runs as-is
@@ -41,17 +50,17 @@
 import { ApiError, notFound } from "../lib/errors.ts";
 import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
-import type { SpaceScope } from "../lib/scope.ts";
-import { getInstalledPackageVersion } from "./space-packages.ts";
 
-// Both keywords are reserved dist-tag names (`isProtectedTag` in
-// `@appstrate/core/dist-tags`): they resolve here BEFORE dist-tag lookup,
-// so a dist-tag named "draft" or "published" would be permanently shadowed —
-// tag creation rejects them.
+// Both keywords are reserved names (`isProtectedTag` in
+// `@appstrate/core/dist-tags`): they resolve here BEFORE any dist-tag lookup,
+// so a tag so named could never be reached. Nothing can create one anyway —
+// `latest` is the only dist-tag this platform writes, at publish, and there is
+// no route that names a tag. The reserved list is what
+// `isValidDependencyOverride` checks a pin's VALUE against.
 /** Keyword selecting the live draft definition. */
 export const VERSION_SELECTOR_DRAFT = "draft";
 /** Keyword selecting the latest published version. */
-const VERSION_SELECTOR_PUBLISHED = "published";
+export const VERSION_SELECTOR_PUBLISHED = "published";
 
 interface ResolvedRunAgent {
   /** The agent definition the run will execute (draft or version snapshot). */
@@ -102,23 +111,22 @@ function substituteVersion(
 export async function resolveAgentRunVersion(
   agent: LoadedPackage,
   selector: string | undefined,
-  scope: SpaceScope,
 ): Promise<ResolvedRunAgent> {
   // System agents ship their definition with the platform — no published
   // versions exist, the selector is ignored (pre-existing route behavior).
   if (agent.source === "system") return { agent };
 
   // Empty string ⇒ treated as omitted (query params arrive as "" easily).
-  const sel = selector?.trim() || (await getInstalledPackageVersion(scope, agent.id)) || undefined;
+  const sel = selector?.trim() || undefined;
 
   if (sel === VERSION_SELECTOR_DRAFT) return { agent };
 
   if (sel === undefined || sel === VERSION_SELECTOR_PUBLISHED) {
     const latest = await getLatestVersionInfo(agent.id).catch(() => null);
     if (!latest) {
-      // No installation pin and no publication — no silent draft fallback. An agent
-      // run without a selector is an explicit error, not a surprise draft
-      // execution; the working copy is opt-in via `version=draft` only.
+      // Nothing published — no silent draft fallback. An agent run without a
+      // selector is an explicit error, not a surprise draft execution; the
+      // working copy is opt-in via `version=draft` only.
       throw new ApiError({
         status: 404,
         code: "no_published_version",

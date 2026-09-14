@@ -101,9 +101,17 @@ describe("Multi-tenancy isolation", () => {
     });
 
     it("does not leak other org's agents in list", async () => {
-      await seedAgent({ id: "@org-a/agent-1", orgId: orgA.orgId });
+      await seedAgent({
+        id: "@org-a/agent-1",
+        homeSpaceId: orgA.defaultSpaceId,
+        orgId: orgA.orgId,
+      });
       await installPackage({ orgId: orgA.orgId, spaceId: orgA.defaultSpaceId }, "@org-a/agent-1");
-      await seedAgent({ id: "@org-b/agent-1", orgId: orgB.orgId });
+      await seedAgent({
+        id: "@org-b/agent-1",
+        homeSpaceId: orgB.defaultSpaceId,
+        orgId: orgB.orgId,
+      });
       await installPackage({ orgId: orgB.orgId, spaceId: orgB.defaultSpaceId }, "@org-b/agent-1");
 
       const resA = await app.request("/api/packages/agents", {

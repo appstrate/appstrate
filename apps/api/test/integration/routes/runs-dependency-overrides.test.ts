@@ -30,7 +30,12 @@ describe("POST /api/agents/:scope/:name/run — dependency_overrides validation"
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "deporg" });
-    await seedPackage({ id: AGENT, orgId: ctx.orgId, createdBy: ctx.user.id });
+    await seedPackage({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 
@@ -73,7 +78,12 @@ describe("GET /api/runs/:id — dependency_overrides echo", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "deporg" });
-    await seedPackage({ id: AGENT, orgId: ctx.orgId, createdBy: ctx.user.id });
+    await seedPackage({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 

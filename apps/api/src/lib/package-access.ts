@@ -5,7 +5,13 @@ import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
 import { extractDependencies } from "@appstrate/core/dependencies";
+import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
+import {
+  VERSION_SELECTOR_DRAFT,
+  VERSION_SELECTOR_PUBLISHED,
+} from "../services/agent-version-resolver.ts";
+import { getLatestVersionId } from "../services/package-versions.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
@@ -179,14 +185,22 @@ export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerO
  * Does a package's PLACEMENT grant read from these spaces?
  *
  * One rule, one place (RBAC spec §6.9, §6.10): a package is readable where it
- * is INSTALLED, where it is SHARED, and where it is HOMED. The home is a grant
- * of its own — a draft nobody has installed yet is readable where it lives, and
- * an author does not lose sight of their own package because a space uninstalled
- * it. Without the home half, write authority could exceed read access, which is
- * how a builder ended up able to `PUT` a package they could not `GET`. The
- * SHARE half is what makes "Shared with me" a listing at all: an offered package
- * has to be readable (its name, its description, the button that installs it)
- * before the recipient has decided to install it.
+ * is HOMED and where it is SHARED. Exactly TWO placements. The home is a grant
+ * of its own: a draft nobody has offered yet is readable where it lives, and an
+ * author does not lose sight of their own package because a space uninstalled
+ * it. Without it, write authority would exceed read access — a builder able to
+ * `PUT` a package they cannot `GET`. The SHARE half is both the audience rule
+ * and what makes "Shared with me" a listing at all: an offered package has to
+ * be readable (its name, its description, the button that installs it) before
+ * the recipient has decided to install it.
+ *
+ * An INSTALLATION is deliberately not a third one. It is the only candidate
+ * that would answer "why does this space see this package" without consulting
+ * `<type>:share`: a builder of B who reads A's package anywhere would install
+ * it into B and hand B a placement A granted to nobody. Installing is the act
+ * of TAKING an offer — `installPackage` requires `home ∨ shared` before it
+ * writes anything — so an installation is a placement's consequence and never
+ * its source.
  *
  * The readers of this rule differ only in the set they compare against: the
  * org-wide catalog check below, the current-space gate of the package read
@@ -199,19 +213,14 @@ export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerO
  * runs in — `hasPackageAccess`, deliberately untouched, and the reason a share
  * is not an activation: an agent runs with the recipient's credentials, so the
  * recipient installs it themselves.
- *
- * `placedIn` is the disjunction's data half: every space of the caller's
- * organization where the package is installed OR shared. One iterable rather
- * than two arguments because the rule does not distinguish them — a reader that
- * needed to would be reading something other than this rule.
  */
 export function placementGrantsRead(
   pkg: { homeSpaceId: string | null },
-  placedIn: Iterable<string>,
+  sharedIn: Iterable<string>,
   readable: ReadonlySet<string>,
 ): boolean {
   if (pkg.homeSpaceId !== null && readable.has(pkg.homeSpaceId)) return true;
-  for (const spaceId of placedIn) if (readable.has(spaceId)) return true;
+  for (const spaceId of sharedIn) if (readable.has(spaceId)) return true;
   return false;
 }
 
@@ -230,14 +239,9 @@ export async function isPackageReadableInSpace(
     .select({
       source: packages.source,
       homeSpaceId: packages.homeSpaceId,
-      installedHere: spacePackages.packageId,
       sharedHere: packageShares.packageId,
     })
     .from(packages)
-    .leftJoin(
-      spacePackages,
-      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
-    )
     .leftJoin(
       packageShares,
       and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
@@ -247,7 +251,7 @@ export async function isPackageReadableInSpace(
   if (!row) return false;
   if (row.source === "system") return true;
   const here = new Set([spaceId]);
-  return placementGrantsRead(row, (row.installedHere ?? row.sharedHere) ? here : [], here);
+  return placementGrantsRead(row, row.sharedHere ? here : [], here);
 }
 
 /** Catalog reachability permits copying between accessible spaces, never guessing a private id. */
@@ -257,19 +261,28 @@ export async function assertCatalogPackageAccess(
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
   source = { orgId: c.get("orgId"), orgRole: callerOrgRole(c, c.get("orgId")) },
 ) {
-  const [pkg, accessible, placements] = await Promise.all([
+  const [pkg, accessible, sharedIn] = await Promise.all([
     loadPackageRow(packageId, source.orgId),
     resolvedSpaces ?? packageAccessSpaces(c),
-    loadPackagePlacements(packageId, source.orgId),
+    loadPackageShares(packageId, source.orgId),
   ]);
-  assertPackageIsReachable(c, packageId, pkg, placements, accessible, source.orgRole);
+  assertPackageIsReachable(c, packageId, pkg, sharedIn, accessible, source.orgRole);
   return pkg;
 }
 
 type PackageAccessRow = Awaited<ReturnType<typeof loadPackageRow>>;
 
-/** The five columns every access decision reads. 404 when the org cannot see the id at all. */
-async function loadPackageRow(packageId: string, orgId: string) {
+/**
+ * The five columns every access decision reads, as a QUESTION — `null` when the
+ * org cannot see the id at all.
+ *
+ * One catalogue query, defined once: the throwing reader below and the boolean
+ * {@link holdsPackageWriteAuthority} decide differently about an invisible id
+ * (404 vs `false`) but must never disagree about which ids are visible, and two
+ * hand-written copies of `orgOrSystemFilter` + `notEphemeralFilter` is exactly
+ * how that drifts.
+ */
+async function findPackageRow(packageId: string, orgId: string) {
   const [pkg] = await db
     .select({
       id: packages.id,
@@ -281,41 +294,32 @@ async function loadPackageRow(packageId: string, orgId: string) {
     .from(packages)
     .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
     .limit(1);
+  return pkg ?? null;
+}
+
+/** The same read, for the callers that answer a missing id with 404. */
+async function loadPackageRow(packageId: string, orgId: string) {
+  const pkg = await findPackageRow(packageId, orgId);
   if (!pkg) throw notFound(`Package '${packageId}' not found`);
   return pkg;
 }
 
 /**
- * Every space of `orgId` the package is PLACED in — installed and shared, the
- * two halves KEPT APART. {@link placementGrantsRead} does not distinguish them
- * and receives their union; the org-catalogue exception in
- * {@link assertPackageIsReachable} reads the INSTALLED half alone, and merging
- * them here is what made a single share cancel that exception (see there).
+ * Every space of `orgId` the package is SHARED into — the one placement
+ * {@link placementGrantsRead} needs beyond the home, which is a column on the
+ * row itself.
  *
- * Split out from the row read because the write path never needs either half:
- * authority is the home alone, so the placements are loaded only when a refusal
- * has to decide between 403 and 404.
+ * Split out from the row read because the write path never needs it: authority
+ * is the home alone, so the shares are loaded only when a refusal has to decide
+ * between 403 and 404.
  */
-async function loadPackagePlacements(
-  packageId: string,
-  orgId: string,
-): Promise<{ installed: string[]; shared: string[] }> {
-  const [installed, shared] = await Promise.all([
-    db
-      .select({ spaceId: spacePackages.spaceId })
-      .from(spacePackages)
-      .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
-      .where(and(eq(spacePackages.packageId, packageId), eq(spaces.orgId, orgId))),
-    db
-      .select({ spaceId: packageShares.spaceId })
-      .from(packageShares)
-      .innerJoin(spaces, eq(spaces.id, packageShares.spaceId))
-      .where(and(eq(packageShares.packageId, packageId), eq(spaces.orgId, orgId))),
-  ]);
-  return {
-    installed: installed.map((row) => row.spaceId),
-    shared: shared.map((row) => row.spaceId),
-  };
+async function loadPackageShares(packageId: string, orgId: string): Promise<string[]> {
+  const shared = await db
+    .select({ spaceId: packageShares.spaceId })
+    .from(packageShares)
+    .innerJoin(spaces, eq(spaces.id, packageShares.spaceId))
+    .where(and(eq(packageShares.packageId, packageId), eq(spaces.orgId, orgId)));
+  return shared.map((row) => row.spaceId);
 }
 
 /** 404 unless the caller may know this id exists — {@link placementGrantsRead} + `<type>:read`. */
@@ -323,7 +327,7 @@ function assertPackageIsReachable(
   c: Context<AppEnv>,
   packageId: string,
   pkg: PackageAccessRow,
-  placements: { installed: string[]; shared: string[] },
+  sharedIn: readonly string[],
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
   orgRole: OrgRole,
 ): void {
@@ -335,24 +339,18 @@ function assertPackageIsReachable(
   if (
     permitted.length === 0 ||
     (pkg.source !== "system" &&
-      !placementGrantsRead(pkg, [...placements.installed, ...placements.shared], readable) &&
+      !placementGrantsRead(pkg, sharedIn, readable) &&
       // The org-catalogue exception is for a package with NO home. One homed in
       // a space is reachable through that space or not at all — otherwise an
       // admin would read a draft that lives, uninstalled, in a member's
       // personal space (§3.6).
       //
-      // "Placed nowhere" here means INSTALLED nowhere, and the share half is
-      // deliberately not consulted: a NULL-home package is the organization's,
-      // and offering it to somebody must not take it away from the catalogue
-      // it belongs to. Reading the union instead made one share turn the
-      // owner's own package into a 404 on its versions, its fork and its
-      // installation. `GET /api/library` states the same rule as
-      // `!row.installedAnywhere` — one rule, two readers, the same reading.
-      !(
-        pkg.homeSpaceId === null &&
-        placements.installed.length === 0 &&
-        managesOrgCatalog(c, orgRole)
-      ))
+      // The NULL home is the WHOLE condition: a package the organization owns
+      // stays the organization's however it is placed. Narrowing the exception
+      // to "placed nowhere" would turn a single offer into a 404 on the owner's
+      // own versions, fork and installation — a package the organization
+      // administers does not stop being theirs because somebody was given it.
+      !(pkg.homeSpaceId === null && managesOrgCatalog(c, orgRole)))
   ) {
     throw notFound(`Package '${packageId}' not found`);
   }
@@ -383,6 +381,182 @@ export async function assertPackageMutationAccess(
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<PackageAccessRow> {
   return assertHomeAuthority(c, packageId, action, resolvedSpaces);
+}
+
+/**
+ * The SAME rule as {@link assertPackageMutationAccess}'s `write`, asked as a
+ * question instead of a refusal — and the ONE predicate behind every "may this
+ * caller run the DRAFT" decision (plan decision 4).
+ *
+ * A draft is the author's working copy: it executes for whoever can WRITE the
+ * package, wherever they launch it from, and for nobody else. That is not a new
+ * rule, it is the write rule read in a place that must not throw — the run
+ * routes, the schedules, the readiness endpoint and the detail page each answer
+ * something of their own (a `403 draft_not_writable`, a published fallback, a
+ * projection) and none of them wants this function's 404/403 split. Stating it
+ * as a boolean here is what keeps the four of them from each re-deriving "who
+ * owns the draft" and drifting apart.
+ *
+ * `false`, never a throw, for every refusal the assert would spell out: a
+ * package the org cannot see, a system package (nobody writes those), a home
+ * the caller does not govern, a NULL home outside org-catalogue authority.
+ *
+ * Module-local on purpose. Every caller outside this file reaches it through
+ * one of the three wordings below — {@link assertDraftSelectorAllowed},
+ * {@link assertDependencyDraftOverridesAllowed},
+ * {@link defaultDefinitionSelector} — so a route cannot invent a fourth way of
+ * spelling the same refusal.
+ */
+async function holdsPackageWriteAuthority(
+  c: Context<AppEnv>,
+  packageId: string,
+  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<boolean> {
+  const orgId = c.get("orgId");
+  const pkg = await findPackageRow(packageId, orgId);
+  if (!pkg) return false;
+  if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
+  const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
+  return holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "write"));
+}
+
+/**
+ * The SAME rule as {@link assertPackageShareAccess}, asked as a question — for
+ * the one caller that has to CHOOSE rather than refuse: a bundle import whose
+ * root already lives in another space installs it with the offer when the
+ * caller may make one, and reports `root_installed: false` when they may not.
+ *
+ * `false`, never a throw, for every refusal the assert would spell out.
+ */
+export async function holdsPackageShareAuthority(
+  c: Context<AppEnv>,
+  packageId: string,
+  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<boolean> {
+  const orgId = c.get("orgId");
+  const pkg = await findPackageRow(packageId, orgId);
+  if (!pkg) return false;
+  if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
+  const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
+  return holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "share"));
+}
+
+/**
+ * Refuse a `version=draft` launch by a caller who cannot WRITE the package —
+ * `403 draft_not_writable` (plan decision 4).
+ *
+ * A no-op for every other selector, the omitted one included: an omitted
+ * selector is the published `latest` (#636), which anybody who may run the
+ * agent may run. Only the DRAFT is restricted, and it is restricted to its
+ * authors: a head deployment is the developer's, the rule Apps Script states.
+ *
+ * A thin throw around {@link holdsPackageWriteAuthority} rather than six copies
+ * of the same `ApiError` across the run route, the two schedule routes, the
+ * input-settings route and the readiness endpoint: they all refuse the same act
+ * for the same reason, and a refusal worded five ways is five contracts.
+ */
+export async function assertDraftSelectorAllowed(
+  c: Context<AppEnv>,
+  packageId: string,
+  selector: string | undefined | null,
+  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<void> {
+  if (selector?.trim() !== VERSION_SELECTOR_DRAFT) return;
+  if (await holdsPackageWriteAuthority(c, packageId, resolvedSpaces)) return;
+  throw draftNotWritable(packageId);
+}
+
+/**
+ * WHICH definition a READ of a package renders when the caller named none —
+ * the agent detail page, its readiness badge and the input-settings editor,
+ * which must all judge the same bytes or the badge contradicts the form.
+ *
+ * Reading is not executing (RBAC spec §6.10). An author reads their DRAFT,
+ * because that is the copy they are editing. Everybody else reads the latest
+ * PUBLISHED version — unless nothing is published, in which case the draft is
+ * the only definition that exists and hiding it would 404 a page the package
+ * list has just linked to. The refusal belongs to the LAUNCH, which keeps
+ * answering `404 no_published_version` for an omitted selector, and the wire
+ * carries `definition` so the reader is told which of the two they are looking
+ * at rather than inferring it.
+ *
+ * An EXPLICIT `?version=draft` is a different act and keeps its own rule:
+ * naming the working copy is an author's move, refused with
+ * `403 draft_not_writable` ({@link assertDraftSelectorAllowed}).
+ *
+ * A system package ships its definition with the platform and has no
+ * `package_versions` rows at all; it is published by construction, and every
+ * selector resolves to the same bytes.
+ */
+export async function defaultDefinitionSelector(
+  c: Context<AppEnv>,
+  agent: { id: string; source: string },
+  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<{
+  selector: typeof VERSION_SELECTOR_DRAFT | typeof VERSION_SELECTOR_PUBLISHED;
+  writable: boolean;
+}> {
+  if (agent.source === "system") return { selector: VERSION_SELECTOR_PUBLISHED, writable: false };
+  const writable = await holdsPackageWriteAuthority(c, agent.id, resolvedSpaces);
+  if (writable) return { selector: VERSION_SELECTOR_DRAFT, writable };
+  const published = await getLatestVersionId(agent.id);
+  return { selector: published ? VERSION_SELECTOR_PUBLISHED : VERSION_SELECTOR_DRAFT, writable };
+}
+
+/**
+ * The same refusal, applied to every DEPENDENCY a launch opts into its working
+ * copy — `dependency_overrides: { "@acme/skill": "draft" }` on the run route,
+ * the remote-run route and both schedule writes.
+ *
+ * `version=draft` and a dependency override spelled `draft` are ONE act: they
+ * both execute an unpublished working copy, and the authority that decides is
+ * the authority over THAT package — the overridden skill, not the agent that
+ * declares it. Without this, a caller refused the agent's own draft still ran
+ * every declared dependency's draft in the same request, which is the same rule
+ * unapplied on a second axis.
+ *
+ * FORM FIRST, and that is why the effective manifest is a parameter rather than
+ * a concern left downstream: a key naming no declared dependency is a
+ * malformed request, not an unauthorized one, and judging authority over it
+ * answered `403 draft_not_writable` for an act the launch would never have
+ * performed — a refusal that names the wrong problem and sends its reader after
+ * a grant they do not need. `assertDependencyOverrideKeysDeclared` runs first,
+ * here, so no caller can order the two wrong.
+ *
+ * Non-`draft` values are version specs and stay a pure value concern: they can
+ * only name something the author already published.
+ */
+export async function assertDependencyDraftOverridesAllowed(
+  c: Context<AppEnv>,
+  overrides: Readonly<Record<string, string>> | null | undefined,
+  /** The manifest the launch will EXECUTE — a draft and a published version do not declare the same dependencies. */
+  manifest: Record<string, unknown>,
+  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<void> {
+  assertDependencyOverrideKeysDeclared(manifest, overrides);
+  if (!overrides) return;
+  const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
+  for (const [dependencyId, selector] of Object.entries(overrides)) {
+    await assertDraftSelectorAllowed(c, dependencyId, selector, accessible);
+  }
+}
+
+/**
+ * The refusal itself, for the one caller that has already asked
+ * {@link holdsPackageWriteAuthority} for its own reasons — the agent detail
+ * page, which needs the verdict to pick its DEFAULT view as well as to police
+ * an explicit `?version=draft`, and would otherwise read the package row twice
+ * to answer the same question.
+ */
+export function draftNotWritable(packageId: string): ApiError {
+  return new ApiError({
+    status: 403,
+    code: "draft_not_writable",
+    title: "Draft Not Writable",
+    detail:
+      `Running the draft of '${packageId}' requires write authority on it — ` +
+      `omit the version selector to run the latest published version instead.`,
+  });
 }
 
 /**
@@ -439,7 +613,7 @@ async function assertHomeAuthority(
     c,
     packageId,
     pkg,
-    await loadPackagePlacements(packageId, orgId),
+    await loadPackageShares(packageId, orgId),
     accessible,
     callerOrgRole(c, orgId),
   );
@@ -498,6 +672,40 @@ export function homeWireForCaller(
     home_shareable:
       !system && holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "share")),
   };
+}
+
+/**
+ * {@link homeWireForCaller}'s `home_writable`, asked for MANY packages in one
+ * catalogue read — the dependency list of an agent, the installed-package hints
+ * served to a model.
+ *
+ * Both surfaces offer the draft of a package OTHER than the one being read, and
+ * the run route now refuses that draft to whoever cannot write it
+ * ({@link assertDependencyDraftOverridesAllowed}). Offering the option without
+ * the answer turns a silent 403 into a clickable one, and asking per entry
+ * turns a list into N catalogue queries.
+ *
+ * Ids the org cannot see are simply absent from the map — a caller reads it as
+ * `false`, which is the same verdict the assert would reach.
+ */
+export async function homeWritableForPackages(
+  c: Context<AppEnv>,
+  packageIds: readonly string[],
+  accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<Map<string, boolean>> {
+  const ids = [...new Set(packageIds)];
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      source: packages.source,
+      orgId: packages.orgId,
+      homeSpaceId: packages.homeSpaceId,
+    })
+    .from(packages)
+    .where(and(inArray(packages.id, ids), orgOrSystemFilter(c.get("orgId")), notEphemeralFilter()));
+  return new Map(rows.map((row) => [row.id, homeWireForCaller(c, row, accessible).home_writable]));
 }
 
 /**

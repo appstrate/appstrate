@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import {
@@ -93,6 +93,7 @@ describe("integration-scope-resolver", () => {
     ctx = await createTestContext({ orgSlug: "scope" });
     await seedPackage({
       id: INTEGRATION_ID,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -122,6 +123,7 @@ describe("integration-scope-resolver", () => {
     it("infers required scopes from a single agent's tool selection", async () => {
       await seedPackage({
         id: "@scope/agent-reader",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "agent",
         draftManifest: agentManifest("@scope/agent-reader", {
@@ -155,6 +157,7 @@ describe("integration-scope-resolver", () => {
           type: "agent",
           draftManifest: agentManifest(id, { version: "^1.0.0", tools: [...tools] }),
         });
+        await seedPackageShare(ctx.defaultSpaceId, id);
         await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
       }
       const out = await computeRequiredScopes({
@@ -168,6 +171,7 @@ describe("integration-scope-resolver", () => {
     it("agent declaring the dep without a selection contributes zero scopes (least-privilege)", async () => {
       await seedPackage({
         id: "@scope/agent-noselection",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "agent",
         draftManifest: agentManifest("@scope/agent-noselection", { version: "^1.0.0" }),
@@ -188,6 +192,7 @@ describe("integration-scope-resolver", () => {
     it("includes explicit agent.scopes[] in the union", async () => {
       await seedPackage({
         id: "@scope/agent-manual",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "agent",
         draftManifest: agentManifest("@scope/agent-manual", {
@@ -212,6 +217,7 @@ describe("integration-scope-resolver", () => {
     it("agent that declared rich form with empty tools[] contributes only its explicit scopes", async () => {
       await seedPackage({
         id: "@scope/agent-empty",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "agent",
         draftManifest: agentManifest("@scope/agent-empty", {
@@ -243,6 +249,7 @@ describe("integration-scope-resolver", () => {
       ctx = await createTestContext({ orgSlug: "scope" });
       await seedPackage({
         id: INTEGRATION_ID,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "integration",
         draftManifest: localIntegrationManifest({
@@ -279,6 +286,7 @@ describe("integration-scope-resolver", () => {
 
       await seedPackage({
         id: "@scope/agent-wildcard",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "agent",
         draftManifest: agentManifest("@scope/agent-wildcard", {
@@ -304,6 +312,7 @@ describe("integration-scope-resolver", () => {
     it("skips agents whose dep doesn't reference this integration", async () => {
       await seedPackage({
         id: "@scope/agent-other",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "agent",
         draftManifest: {

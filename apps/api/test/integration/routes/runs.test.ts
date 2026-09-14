@@ -15,12 +15,13 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
+  seedApiKey,
+  seedEndUser,
+  seedPackageShare,
   seedRun,
   seedRunLog,
-  seedSpace,
-  seedEndUser,
-  seedApiKey,
   seedSchedule,
+  seedSpace,
 } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
@@ -56,6 +57,7 @@ describe("Runs API", () => {
     async function seedAgentWithInput() {
       const agent = await seedAgent({
         id: "@runorg/input-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -164,6 +166,7 @@ describe("Runs API", () => {
     async function seedNoInputAgent() {
       await seedAgent({
         id: "@runorg/model-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -222,6 +225,7 @@ describe("Runs API", () => {
     it("returns 400 model_credential_missing for a default model with an empty key", async () => {
       await seedAgent({
         id: "@runorg/nokey-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -299,6 +303,7 @@ describe("Runs API", () => {
     async function seedRunnableAgent() {
       await seedAgent({
         id: "@runorg/echo-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -412,7 +417,12 @@ describe("Runs API", () => {
 
   describe("GET /api/agents/:scope/:name/runs", () => {
     it("returns empty array when no runs exist", async () => {
-      await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: "@runorg/my-agent",
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/my-agent");
 
       const res = await app.request("/api/agents/@runorg/my-agent/runs", {
@@ -427,7 +437,12 @@ describe("Runs API", () => {
     });
 
     it("returns runs for an agent", async () => {
-      await seedAgent({ id: "@runorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: "@runorg/my-agent",
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/my-agent");
       const run = await seedRun({
         packageId: "@runorg/my-agent",
@@ -1450,7 +1465,12 @@ describe("Runs API", () => {
 
   describe("DELETE /api/agents/:scope/:name/runs", () => {
     it("deletes all runs for an agent (admin)", async () => {
-      await seedAgent({ id: "@runorg/del-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: "@runorg/del-agent",
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/del-agent");
       await seedRun({
         packageId: "@runorg/del-agent",
@@ -1492,7 +1512,12 @@ describe("Runs API", () => {
     });
 
     it("returns 409 when running runs exist", async () => {
-      await seedAgent({ id: "@runorg/running-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: "@runorg/running-agent",
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await installPackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@runorg/running-agent",
@@ -1524,8 +1549,14 @@ describe("Runs API", () => {
       // Create a second space
       const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SpaceB" });
 
-      await seedAgent({ id: "@runorg/iso-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: "@runorg/iso-agent",
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@runorg/iso-agent");
+      await seedPackageShare(spaceB.id, "@runorg/iso-agent");
       await installPackage({ orgId: ctx.orgId, spaceId: spaceB.id }, "@runorg/iso-agent");
 
       // Seed runs in SpaceA
@@ -1753,7 +1784,12 @@ describe("Runs API", () => {
     });
 
     it("GET /api/agents/:scope/:name/runs returns enriched fields in list", async () => {
-      await seedAgent({ id: "@runorg/list-enriched", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: "@runorg/list-enriched",
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await installPackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@runorg/list-enriched",

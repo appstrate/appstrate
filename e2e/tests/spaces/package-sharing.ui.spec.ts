@@ -7,12 +7,17 @@
  * in the SPA. An administrator shares an agent from the package page's own
  * dialog, and the guest — an external identity with no reach into any space —
  * finds it under "Partagé avec moi" in their agent list and adds it to their own
- * space with one button. Only then does the platform let them launch it, and
- * the administrator still cannot see inside that space.
+ * space with one button — the same `POST /api/spaces/{spaceId}/packages` an
+ * admin uses from the library, because there is only one door. Only then does
+ * the platform let them launch it, and the administrator still cannot see
+ * inside that space.
  *
- * The launch is asserted as an ACCESS transition (404 before, something else
- * after) rather than as a completed run: this environment configures no model
- * provider, so a green-path run is not available to it.
+ * What the recipient then runs is the author's LATEST published version, not a
+ * frozen copy and never the draft: the tail of this test publishes a second
+ * version and reads it back off the next run the guest starts. The launch is
+ * asserted on the created run resource (its `version_ref`) rather than on a
+ * terminal status: the org gets a model so the launch reaches the run row, and
+ * nothing here reaches the provider — the run fails in the background.
  */
 
 import type { APIRequestContext } from "@playwright/test";
@@ -49,12 +54,28 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   const name = `shared-${Date.now().toString(36)}`;
 
   // The agent lives in the organization's default space — its home, and where
-  // the sharing authority (`agents:share`) is held. A share is installed
-  // PINNED, so the package needs a published version before it can be accepted
-  // at all: `POST /packages/agents` already mints the manifest's `0.1.0`
-  // (`createVersionSafe`), so republishing it here would be a 409
-  // `no_changes`, not a second version.
+  // the sharing authority (`agents:share`) is held. Away from its home a
+  // package runs its latest published version and nothing else, so an offer of
+  // a package with nothing published is an offer of nothing (409
+  // `package_has_no_version`): `POST /packages/agents` already mints the
+  // manifest's `0.1.0` (`createVersionSafe`), so republishing it here would be
+  // a 409 `no_changes`, not a second version.
   await createAgent(apiClient, scope, name);
+
+  // A launch resolves a model BEFORE it creates the run row (400
+  // `model_not_configured` otherwise), and this test reads `version_ref` off
+  // that row. Nothing here reaches the provider: the run is accepted and then
+  // fails in the background, which is all the version assertions need.
+  const credential = await apiClient.post("/model-provider-credentials", {
+    providerId: "anthropic",
+    apiKey: "sk-ant-e2e",
+  });
+  expect(credential.status(), await credential.text()).toBe(201);
+  const model = await apiClient.post("/models", {
+    modelId: "claude-sonnet-4-5-20250929",
+    credentialId: (await credential.json()).id,
+  });
+  expect(model.status(), await model.text()).toBe(201);
 
   // A GUEST: invited for exactly one thing, with no space assignment. Named
   // distinctly on purpose — the member picker below is a Radix listbox driven
@@ -110,10 +131,10 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
 
   // ── The guest finds it and adds it to their own space ──
   // It is READABLE now, and still not runnable: offered is not activated.
+  // No `?version=` selector anywhere in this test but the negative control
+  // below — an omitted selector is what resolves the latest published version.
   expect((await guestClient.get(`/packages/agents/${scope}/${name}`)).status()).toBe(200);
-  expect((await guestClient.post(`/agents/${scope}/${name}/run?version=draft`, {})).status()).toBe(
-    404,
-  );
+  expect((await guestClient.post(`/agents/${scope}/${name}/run`, {})).status()).toBe(404);
 
   const guestPage = await (
     await createAuthedContext(browser, guest, orgId, guestSpaceId)
@@ -126,28 +147,51 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     ).toBeVisible();
     await guestPage.goto("/agents");
     await expect(guestPage.getByText(/Partagé avec moi|Shared with me/)).toBeVisible();
-    const accept = guestPage.waitForResponse(
+    // THE door, and the only one: adding an offer to one's own space is the
+    // same route the library's checkboxes call for a team space.
+    const installed = guestPage.waitForResponse(
       (response) =>
-        response.request().method() === "POST" && response.url().includes("/shares/accept"),
+        response.request().method() === "POST" &&
+        response.url().endsWith(`/spaces/${guestSpaceId}/packages`),
     );
     await guestPage.getByRole("button", { name: /Ajouter à mon espace|Add to my space/ }).click();
-    expect((await accept).status()).toBe(200);
+    expect((await installed).status()).toBe(201);
   } finally {
     await guestPage.context().close();
   }
 
   // Installed in the guest's own space, and the run route no longer refuses
   // them: the execution gate is the installation, which is now theirs.
-  const installed = await guestClient.get(`/spaces/${guestSpaceId}/packages`);
-  expect(installed.status()).toBe(200);
+  const placed = await guestClient.get(`/spaces/${guestSpaceId}/packages`);
+  expect(placed.status()).toBe(200);
   expect(
-    ((await installed.json()).data as { packageId: string }[]).map((row) => row.packageId),
+    ((await placed.json()).data as { packageId: string }[]).map((row) => row.packageId),
   ).toContain(`${scope}/${name}`);
-  expect(
-    (await guestClient.post(`/agents/${scope}/${name}/run?version=draft`, {})).status(),
-  ).not.toBe(404);
+  const firstRun = await guestClient.post(`/agents/${scope}/${name}/run`, {});
+  expect(firstRun.status(), await firstRun.text()).toBe(201);
+  expect((await firstRun.json()).version_ref).toBe("0.1.0");
+
+  // The negative control the pin concealed: the draft is the author's working
+  // copy. Installing the package in your space does not make it yours to run —
+  // this exact call answered 404 before the share, and the moment it stopped
+  // doing so it would have executed the admin's uncommitted bytes.
+  const guestDraft = await guestClient.post(`/agents/${scope}/${name}/run?version=draft`, {});
+  expect(guestDraft.status(), await guestDraft.text()).toBe(403);
+  expect((await guestDraft.json()).code).toBe("draft_not_writable");
+
+  // The author ships a fix. Nobody accepts anything again, nobody re-pins:
+  // the next run the guest starts carries the new version.
+  const republished = await apiClient.post(`/packages/agents/${scope}/${name}/versions`, {
+    version: "0.2.0",
+  });
+  expect(republished.status(), await republished.text()).toBe(201);
+  const secondRun = await guestClient.post(`/agents/${scope}/${name}/run`, {});
+  expect(secondRun.status(), await secondRun.text()).toBe(201);
+  expect((await secondRun.json()).version_ref).toBe("0.2.0");
 
   // ── And the admin sees nothing of what happens in there ──
+  // Two runs exist by now, both in the guest's personal space; the admin's own
+  // listing of the agent they authored still shows none of them.
   const adminSpaceProbe = await request.get(`/api/spaces/${guestSpaceId}`, {
     headers: { Cookie: browserCtx.auth.cookie, "X-Org-Id": orgId },
   });
@@ -209,10 +253,11 @@ test("an offer opens in its destination space and accepting refreshes an already
     await page.locator('a[href="/space/packages"]').first().click();
     const accepted = page.waitForResponse(
       (response) =>
-        response.request().method() === "POST" && response.url().includes("/shares/accept"),
+        response.request().method() === "POST" &&
+        response.url().endsWith(`/spaces/${personalId}/packages`),
     );
     await page.getByRole("button", { name: /Ajouter à mon espace|Add to my space/ }).click();
-    expect((await accepted).status()).toBe(200);
+    expect((await accepted).status()).toBe(201);
     await page.locator('a[href="/agents"]').first().click();
     await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
   } finally {
@@ -287,16 +332,18 @@ test("a draft-only agent is published from the share dialog itself, then offered
     await page.context().close();
   }
 
-  // The recipient really has the offer, pinned to the version just published.
+  // The recipient really has the offer, and adding it to their own space needs
+  // no grant — owning the space is the authorization.
   const personalId = await personalSpaceOf(request, member.cookie, orgId);
   const memberClient = createApiClient(request, {
     cookie: member.cookie,
     orgId,
     spaceId: personalId,
   });
-  const accepted = await memberClient.post(`/packages/${scope}/${name}/shares/accept`, {});
-  expect(accepted.status(), await accepted.text()).toBe(200);
-  expect((await accepted.json()).version_id).toEqual(expect.any(Number));
+  const added = await memberClient.post(`/spaces/${personalId}/packages`, {
+    packageId: `${scope}/${name}`,
+  });
+  expect(added.status(), await added.text()).toBe(201);
 });
 
 test("a non-admin builder manages a team offer from the space package view", async ({

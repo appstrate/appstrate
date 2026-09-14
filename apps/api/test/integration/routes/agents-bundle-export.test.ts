@@ -22,8 +22,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
-import { packageDistTags, spacePackages } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
+import { packageDistTags } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
@@ -76,8 +75,15 @@ async function seedVersionedPackage(opts: {
    * `dependency_unresolved` into an `INTEGRITY_MISMATCH`.
    */
   absentArtifact?: boolean;
+  /** Where the package LIVES — a home is what places it in a space (§6.9). */
+  homeSpaceId?: string;
 }): Promise<{ versionId: number; version: string }> {
-  await seedPackage({ id: opts.id, type: opts.type, orgId: opts.orgId });
+  await seedPackage({
+    id: opts.id,
+    type: opts.type,
+    orgId: opts.orgId,
+    homeSpaceId: opts.homeSpaceId ?? null,
+  });
   const afps = opts.artifact ?? buildAfps(opts.manifest, opts.content ?? "content");
   const integrity = computeIntegrity(afps);
   const key = versionZipKey(opts.id, opts.version);
@@ -126,8 +132,9 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       dependencies: { skills: { "@exportorg/skill-a": "^1.0.0" } },
     };
 
-    const rootVer = await seedVersionedPackage({
+    await seedVersionedPackage({
       id: rootPkgId,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -137,6 +144,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     });
     await seedVersionedPackage({
       id: "@exportorg/skill-a",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       version: "1.2.0",
       orgId: ctx.orgId,
@@ -153,6 +161,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     });
     await seedVersionedPackage({
       id: "@exportorg/skill-b",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -167,15 +176,9 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       setLatest: true,
     });
 
-    // Install root in default space pinned to this version (so the export
-    // resolves without a latest-tag lookup for the root).
+    // Install the root in the default space. The export resolves the `latest`
+    // dist-tag set just above — an installation carries no version of its own.
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
-    await db
-      .update(spacePackages)
-      .set({ versionId: rootVer.versionId })
-      .where(
-        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, rootPkgId)),
-      );
 
     const res = await app.request(`/api/agents/@exportorg/agent-root/bundle`, {
       headers: authHeaders(ctx),
@@ -220,6 +223,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     const rootPkgId = "@exportorg/stable-agent" as const;
     await seedVersionedPackage({
       id: rootPkgId,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -261,6 +265,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     const rootPkgId = "@exportorg/secret-free" as const;
     await seedVersionedPackage({
       id: rootPkgId,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -303,6 +308,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     const rootPkgId = "@exportorg/version-gated" as const;
     await seedVersionedPackage({
       id: rootPkgId,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -330,7 +336,12 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     // `latest` dist-tag — the classic "draft agent" state that trips the
     // export endpoint. The error message should tell the caller how to
     // proceed rather than just saying "not found".
-    await seedPackage({ id: rootPkgId, type: "agent", orgId: ctx.orgId });
+    await seedPackage({
+      id: rootPkgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "agent",
+      orgId: ctx.orgId,
+    });
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     const res = await app.request(`/api/agents/@exportorg/draft-only/bundle`, {
@@ -352,6 +363,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     const rootPkgId = "@exportorg/dep-root" as const;
     await seedVersionedPackage({
       id: rootPkgId,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -379,6 +391,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     // nothing else, integrity recorded over those same bytes.
     await seedVersionedPackage({
       id: "@exportorg/dep-skill",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -417,6 +430,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     // RFC 9457 422 asserted below instead of an untyped 500.
     await seedVersionedPackage({
       id: "@exportorg/dep-skill",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -470,6 +484,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     );
     await seedVersionedPackage({
       id: "@exportorg/dep-skill",
+      homeSpaceId: ctx.defaultSpaceId,
       type: "skill",
       version: "1.0.0",
       orgId: ctx.orgId,
@@ -499,6 +514,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     // Seeded in the org catalog but NOT installed in the default space.
     await seedVersionedPackage({
       id: rootPkgId,
+      homeSpaceId: ctx.defaultSpaceId,
       type: "agent",
       version: "1.0.0",
       orgId: ctx.orgId,

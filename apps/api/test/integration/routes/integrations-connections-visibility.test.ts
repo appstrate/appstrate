@@ -109,6 +109,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
 
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",

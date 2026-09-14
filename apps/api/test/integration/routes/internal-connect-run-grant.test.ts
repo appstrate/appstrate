@@ -28,7 +28,13 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedPackage,
+  seedPackageShare,
+  seedPackageVersion,
+  seedRun,
+} from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import {
   writeConnectRunGrant,
@@ -120,6 +126,7 @@ describe("/internal/* — connect-run grant authorization", () => {
       }),
     });
     if (installed) {
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
   }
@@ -171,6 +178,7 @@ describe("/internal/* — connect-run grant authorization", () => {
     // ALLOW of its own to defend. It never declares OTHER_INTEGRATION.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {

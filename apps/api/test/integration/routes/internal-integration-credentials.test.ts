@@ -24,7 +24,13 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedPackage,
+  seedPackageShare,
+  seedPackageVersion,
+  seedRun,
+} from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import {
@@ -95,6 +101,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       draftManifest: buildIntegrationManifest(id),
     });
     if (installed) {
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
   }
@@ -149,6 +156,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
 
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -353,6 +361,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       draftManifest: buildIntegrationManifest(id),
     });
     if (installed) {
+      await seedPackageShare(ctx.defaultSpaceId, id);
       await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
   }
@@ -377,6 +386,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -484,6 +494,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
       source: "local",
       draftManifest: buildIntegrationManifest(id),
     });
+    await seedPackageShare(ctx.defaultSpaceId, id);
     await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
     await db.insert(integrationConnections).values({
@@ -524,6 +535,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     // Draft no longer declares INTEGRATION; published 1.0.0 does.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([]),
@@ -551,6 +563,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     // run token of the pinned run must not widen to the draft's dep set.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -580,6 +593,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     // and the package instead of the false "Agent not found".
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
@@ -609,6 +623,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
     // state A's "re-publish that version" remedy is a lie here.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),

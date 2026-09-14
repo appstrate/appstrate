@@ -125,6 +125,15 @@ export interface McpToolContext {
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
+  /**
+   * Whether the caller may OFFER a package from its home space — the
+   * predicate `import_package_file` needs to place a re-imported root the
+   * same way the REST import route places it. Optional so a non-HTTP caller
+   * (a unit test, an in-process consumer with no request) can omit it and
+   * get the fail-closed answer: the root is not installed and the result
+   * says so.
+   */
+  mayShareRoot?: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -836,8 +845,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
         version: {
           type: "string",
           description:
-            "Agent version selector (kind:agent). Omit for the installed version pin, else latest published; pass " +
-            "`draft` to run the working copy of a draft-only agent.",
+            "Agent version selector (kind:agent). Omit to run the latest PUBLISHED version — " +
+            "404 `no_published_version` when the agent has none. `draft` runs the author's " +
+            "working copy and is reserved to callers who may write the agent " +
+            "(403 `draft_not_writable` otherwise).",
         },
         input: {
           type: "object",

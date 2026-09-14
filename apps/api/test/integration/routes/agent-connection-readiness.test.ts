@@ -104,6 +104,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
   async function seedAgentWith(manifest: Record<string, unknown>) {
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: manifest,
@@ -114,6 +115,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
   async function seedIntegration(required: boolean) {
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",

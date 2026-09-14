@@ -36,7 +36,11 @@ import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
-import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
+import {
+  assertPackageDependenciesAccessible,
+  assertDraftSelectorAllowed,
+  assertDependencyDraftOverridesAllowed,
+} from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import type { IntegrationManifestCache } from "../services/integration-service.ts";
 import { collectFileRefs } from "../services/input-parser.ts";
@@ -230,8 +234,21 @@ export function createRunsRemoteRouter() {
         body.dependency_overrides && Object.keys(body.dependency_overrides).length > 0
           ? body.dependency_overrides
           : null;
-
+      // A dependency opted into its working copy needs the SAME authority here
+      // as on the platform run route: the host the run executes on changes
+      // nothing about who owns the unpublished bytes. Asked once per branch
+      // rather than once above them, because the gate now judges the keys
+      // against the EFFECTIVE manifest and the two branches get that manifest
+      // from different places — the catalog here, the request body there. Both
+      // placements stay ahead of every write this handler makes (the inline
+      // branch's shadow package row is inserted after its own).
       if (src.kind === "registry") {
+        // `stage: "draft"` is `?version=draft` spelled for this surface, so it
+        // answers to the one predicate that says who owns a working copy —
+        // otherwise the 403 the platform run route returns is a formality any
+        // caller holding `agents:run` steps around by posting here instead.
+        await assertDraftSelectorAllowed(c, src.packageId, src.stage);
+
         // Server-resolved attribution. The runner names the package; we
         // load manifest+prompt from our own catalog. No fingerprint
         // reconciliation, no shadow row, no "Inline" badge.
@@ -246,6 +263,11 @@ export function createRunsRemoteRouter() {
         agentForRun = resolved.agent;
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
+        await assertDependencyDraftOverridesAllowed(
+          c,
+          dependencyOverrides,
+          agentForRun.manifest as unknown as Record<string, unknown>,
+        );
 
         // A cataloged agent has per-space settings, so the run's input
         // resolves through the same four layers as a platform run: author
@@ -297,6 +319,11 @@ export function createRunsRemoteRouter() {
         // structurally, then create a shadow LoadedPackage. All inline
         // runs land on a shadow ephemeral package ("Inline" badge in UI);
         // callers who want deterministic attribution use kind=registry.
+        // The posted manifest IS the effective one on this branch — it is the
+        // definition the run executes — so the keys are judged against it
+        // before the preflight resolves a single pin.
+        await assertDependencyDraftOverridesAllowed(c, dependencyOverrides, src.manifest);
+
         const preflight = await runInlinePreflight({
           authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
           orgId,

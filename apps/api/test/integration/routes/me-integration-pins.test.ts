@@ -100,6 +100,7 @@ describe("/api/me/integration-pins", () => {
     // Agent + integration must exist + be installed for validatePinTarget.
     await seedPackage({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "agent",
       source: "local",
@@ -109,6 +110,7 @@ describe("/api/me/integration-pins", () => {
 
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",

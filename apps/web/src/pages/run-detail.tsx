@@ -25,6 +25,7 @@ import { RunFilesTab } from "../components/run-files-tab";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-files";
 import { isPublishedFileLogEvent } from "../lib/files";
+import { replayVersion } from "../lib/version-selector";
 import { RunRow } from "../components/run-row";
 import { RunCostReadout } from "../components/run-cost-readout";
 import { ContextGaugeReadout } from "../components/run-context-gauge";
@@ -274,12 +275,11 @@ export function RunDetailPage() {
           onClose={() => setInputOpen(false)}
           agent={agent}
           onSubmit={(input) => {
-            // Re-run the SAME definition the original run executed:
-            // `version_ref` is "draft" or a concrete semver. Pre-#636 this
-            // passed version_label, which silently re-ran the published
-            // version for runs that had executed a dirty draft.
+            // Re-run the SAME definition the original run executed, as far as
+            // this caller may: `version_ref` is "draft" or a concrete semver,
+            // and only an author replays a draft (see `replayVersion`).
             runAgent.mutate(
-              { input, version: run.version_ref },
+              { input, version: replayVersion(run.version_ref, agent.home_writable) },
               { onSuccess: () => setInputOpen(false) },
             );
           }}
@@ -363,14 +363,30 @@ export function RunDetailPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={!permissionsReady || runAgent.isPending}
+                    // Nothing published and the working copy is not this
+                    // reader's: a re-run resolves the latest published version
+                    // and there is none. Same refusal as the detail page's
+                    // Run button, said before the click rather than after.
+                    disabled={
+                      !permissionsReady ||
+                      runAgent.isPending ||
+                      (agent.definition === "draft" && !agent.home_writable)
+                    }
+                    title={
+                      agent.definition === "draft" && !agent.home_writable
+                        ? t("detail.titleNeverPublished")
+                        : undefined
+                    }
                     onClick={() => {
                       if (canReadAgent) {
                         setInputOpen(true);
                       } else {
                         // The API conceals resolved input from runners. Replay
                         // that snapshot server-side, preserving its parameters.
-                        runAgent.mutate({ rerun_from: run.id, version: run.version_ref });
+                        runAgent.mutate({
+                          rerun_from: run.id,
+                          version: replayVersion(run.version_ref, agent.home_writable),
+                        });
                       }
                     }}
                   >

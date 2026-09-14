@@ -124,7 +124,7 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "SpacePackage ↔ InstalledPackage",
   },
   // Inline run-config response — the CLI's only source for the per-space model /
-  // generation / proxy / version pin / stored input layer. Unregistered, the
+  // generation / proxy / stored input layer. Unregistered, the
   // shared-type was free to mark `generation` and `input` optional while the
   // spec required them, which is exactly the drift this step exists to catch.
   {

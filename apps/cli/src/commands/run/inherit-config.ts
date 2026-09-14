@@ -2,11 +2,13 @@
 
 /**
  * Fetch the per-space run-config (model / generation / proxy /
- * version pin / stored input layer) for `<spaceId, packageId>` and
+ * stored input layer) for `<spaceId, packageId>` and
  * merge it with the user's CLI flags + env vars. Source of truth lives server-side at
  * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`
  * — the UI consumes the same payload, so a CLI run with no overrides
- * targets the same model and version the dashboard would.
+ * targets the same model the dashboard would. Version is not inherited:
+ * a package runs the version the `@spec` names, and the latest published
+ * one otherwise — the space holds no pin to carry over.
  *
  * Merge order (highest priority first):
  *   1. Explicit CLI flags (--model / --proxy / @spec)
@@ -33,8 +35,6 @@ export interface InheritedRunConfig {
   generation: ModelGenerationSettings | null;
   /** Proxy id to pass to the run pipeline, or null when nothing is set. */
   proxyId: string | null;
-  /** Pinned version label, when the user did not provide an explicit @spec. */
-  versionPin: string | null;
   /**
    * `space_packages.input_settings.values` — layer 2 of the platform's
    * input resolution. Empty when nothing was inherited.
@@ -138,8 +138,6 @@ interface MergeRunConfigInputs {
   flagModel?: string;
   /** `--proxy <id>` flag value. */
   flagProxy?: string;
-  /** Whether the user explicitly passed `@spec` in the package id. */
-  hasExplicitSpec: boolean;
   /** APPSTRATE_MODEL_ID env var. */
   envModel?: string;
   /** APPSTRATE_PROXY env var. */
@@ -156,10 +154,6 @@ interface MergeRunConfigInputs {
  * the CLI just adds an `env` rung so `APPSTRATE_MODEL_ID` /
  * `APPSTRATE_PROXY` keep working in CI.
  *
- * `versionPin`: an explicit `@spec` in the package id always wins;
- * otherwise the per-space pin feeds into the bundle URL. Identical to
- * the platform's `?version=` query param semantics.
- *
  * `inputValues` / `lockedInputFields`: passed through untouched — they are
  * not a CLI flag's business. `run.ts` layers them between the author
  * defaults and the caller's `--input`, exactly where the server puts them.
@@ -168,12 +162,10 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
   const inherited = inputs.inherited;
   const modelId = inputs.flagModel ?? inputs.envModel ?? inherited?.modelId ?? null;
   const proxyId = inputs.flagProxy ?? inputs.envProxy ?? inherited?.proxyId ?? null;
-  const versionPin = inputs.hasExplicitSpec ? null : (inherited?.version_pin ?? null);
   return {
     modelId,
     generation: inherited?.generation ?? null,
     proxyId,
-    versionPin,
     inputValues: inherited?.input.values ?? {},
     lockedInputFields: inherited?.input.locked_fields ?? [],
     inherited: inherited !== null,

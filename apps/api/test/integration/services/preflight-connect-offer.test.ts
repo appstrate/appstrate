@@ -64,6 +64,7 @@ describe("attachConnectOffers — block_user_connections", () => {
     ctx = await createTestContext({ orgSlug: "offers" });
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",

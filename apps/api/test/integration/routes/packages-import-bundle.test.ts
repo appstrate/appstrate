@@ -17,7 +17,7 @@ import { zipSync } from "fflate";
 import { db } from "../../helpers/db.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
@@ -146,7 +146,7 @@ async function seedAndExportBundle(opts: {
   skillB: `@${string}/${string}`;
 }): Promise<{ bytes: Uint8Array; bundle: Bundle }> {
   const { ctx, rootId, skillA, skillB } = opts;
-  const rootVer = await seedVersionedPackage({
+  await seedVersionedPackage({
     id: rootId,
     type: "agent",
     version: "1.0.0",
@@ -195,11 +195,9 @@ async function seedAndExportBundle(opts: {
     setLatest: true,
   });
 
+  await seedPackageShare(ctx.defaultSpaceId, rootId);
+
   await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootId);
-  await db
-    .update(spacePackages)
-    .set({ versionId: rootVer.versionId })
-    .where(and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, rootId)));
 
   const res = await app.request(`/api/agents/${rootId}/bundle`, { headers: authHeaders(ctx) });
   if (res.status !== 200) {

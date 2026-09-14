@@ -16,6 +16,7 @@ import {
   seedApiKey,
   seedInstalledPackage,
   seedPackage,
+  seedPackageShare,
   seedSpace,
   seedSpaceMember,
 } from "../../helpers/seed.ts";
@@ -48,6 +49,7 @@ beforeEach(async () => {
   const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
   await seedPackage({
     id: skillId,
+    homeSpaceId: hidden.id,
     orgId: ctx.orgId,
     type: "skill",
     draftManifest: { name: skillId, version: "0.1.0", type: "skill" },
@@ -89,6 +91,7 @@ describe("inline dependency authorization", () => {
   });
 
   it("accepts an operator's readable dependency installed in their own space", async () => {
+    await seedPackageShare(ctx.defaultSpaceId, skillId);
     await seedInstalledPackage(ctx.defaultSpaceId, skillId);
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",
@@ -105,6 +108,7 @@ describe("inline dependency authorization", () => {
       createdBy: ctx.user.id,
       scopes: ["agents:run"],
     });
+    await seedPackageShare(ctx.defaultSpaceId, skillId);
     await seedInstalledPackage(ctx.defaultSpaceId, skillId);
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",

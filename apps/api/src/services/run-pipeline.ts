@@ -25,7 +25,7 @@ import {
   type IntegrationManifestCache,
   type ResolvedIntegrationVersionMap,
 } from "./integration-service.ts";
-import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
+import { assertDependencyOverrideKeysDeclared } from "../lib/launch-schemas.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
@@ -290,6 +290,9 @@ export async function resolveRunPreflight(params: {
  *
  *   - Rejects an override KEY that names no declared skill/integration with a
  *     400 (the "fails silently on the key axis" trap the value gate can't see).
+ *     Every HTTP launch surface has already made that refusal, BEFORE its own
+ *     draft-authority gate, so this restates it for the one caller that arrives
+ *     with no request behind it: the scheduler's fire.
  *   - Seeds the shared `manifestCache` (when given) so every kickoff reader
  *     threading it honors the pin with no per-caller change.
  *   - Throws a structured `dependency_unresolved` (422) on an unsatisfiable /
@@ -308,22 +311,14 @@ export async function freezeRunSpawnDependencies(params: {
   dependencyOverrides?: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
 }): Promise<ResolvedIntegrationVersionMap> {
-  if (params.dependencyOverrides) {
-    const declaredDeps = collectOverridableDependencyIds(
-      params.agent.manifest as Record<string, unknown>,
-    );
-    const unknownKey = Object.keys(params.dependencyOverrides).find(
-      (key) => !declaredDeps.has(key),
-    );
-    if (unknownKey) {
-      throw new ApiError({
-        status: 400,
-        code: "invalid_request",
-        title: "Bad Request",
-        detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill or integration dependency of this agent`,
-      });
-    }
-  }
+  // The same refusal the HTTP surfaces already made, restated for the callers
+  // that reach here without one: the scheduler's fire, which runs with no
+  // request. Idempotent by construction — a key this rejects never made it
+  // past a launch route.
+  assertDependencyOverrideKeysDeclared(
+    params.agent.manifest as Record<string, unknown>,
+    params.dependencyOverrides,
+  );
 
   const resolved = await resolveRunIntegrationVersions({
     agentManifest: params.agent.manifest as Record<string, unknown>,

@@ -141,6 +141,10 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       agentPackageId: AGENT,
       actor: { type: "user", id: ctx.user.id },
       canConfigureIntegrations: true,
+      // The selector is the ROUTER's decision now, and the service takes it as
+      // given. `draft` is what the route hands over for a caller who may write
+      // the agent — which is this fixture's author.
+      version: "draft",
     });
 
     // THE negative control. Unseeded, the cascade reads the draft (which needs

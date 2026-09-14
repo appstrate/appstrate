@@ -79,6 +79,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
     // needs `read` here, which the connection below has.
     await seedPackage({
       id: INTEG,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
@@ -100,6 +101,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
 
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {

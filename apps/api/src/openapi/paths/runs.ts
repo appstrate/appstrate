@@ -77,7 +77,7 @@ const canonicalRunsPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted uses the current space's installed version pin, then the latest published version; returns `404 no_published_version` when neither exists. An explicit selector deliberately overrides the installation. The run object's `version_ref` states which definition executed. Ignored for system agents.",
+            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted means the latest published version, and returns `404 no_published_version` when nothing is published. `draft` requires WRITE authority on the package — the type's `write` permission in the package's home space, organization owner or admin when it has none — and answers `403 draft_not_writable` otherwise: a working copy runs for the people who author it, everybody else runs what they published. The run object's `version_ref` states which definition executed. Ignored for system agents.",
         },
       ],
       requestBody: {
@@ -123,7 +123,7 @@ const canonicalRunsPaths = {
                 dependency_overrides: {
                   type: "object",
                   description:
-                    'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent\'s closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency\'s mutable working copy (the skill edit loop: edit → run → observe, no republish), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it.',
+                    'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent\'s closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency\'s mutable working copy (the skill edit loop: edit → run → observe, no republish) and requires WRITE authority on THAT dependency (`403 draft_not_writable` naming it otherwise: an unpublished definition runs for its author, whichever package declared it), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
                   additionalProperties: { type: "string" },
                 },
               },
@@ -223,7 +223,11 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — including `draft_not_writable` when `version=draft`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE (the message names it).",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
@@ -1185,7 +1189,7 @@ const canonicalRunsPaths = {
                           enum: ["draft", "published"],
                           default: "published",
                           description:
-                            "`draft` reads `draft_manifest`/`draftContent` (mutable, mirrors the dashboard Run button on never-published agents); `published` resolves a concrete `package_versions` row.",
+                            "`draft` reads `draft_manifest`/`draftContent` (mutable) and is reserved to callers who may WRITE the package — `403 draft_not_writable` otherwise, the same rule and the same refusal as `?version=draft` on the platform run route. `published` resolves a concrete `package_versions` row.",
                         },
                         spec: {
                           type: "string",
@@ -1210,7 +1214,7 @@ const canonicalRunsPaths = {
                 dependency_overrides: {
                   type: "object",
                   description:
-                    'Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422).',
+                    'Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy and needs WRITE authority on THAT dependency — `403 draft_not_writable` naming it otherwise, since running an unpublished definition answers to its author whichever package declared it. Any other value replaces the manifest pin; an unsatisfiable pin aborts the run with `dependency_unresolved` (422). A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
                   additionalProperties: { type: "string" },
                 },
                 contextSnapshot: {
@@ -1289,7 +1293,11 @@ const canonicalRunsPaths = {
             },
           },
         },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            'Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. The refusal precedes resolution, so `stage: "draft"` on an id that does not exist also answers 403 rather than 404 — deliberately: the same answer for "not yours" and "not there" is what keeps this route from confirming which packages an organization holds. Omit `stage` and an unknown id answers 404 as usual.',
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/RunAdmissionConflict" },
         "412": {
