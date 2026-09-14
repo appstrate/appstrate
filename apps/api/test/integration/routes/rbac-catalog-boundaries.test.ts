@@ -92,7 +92,7 @@ const orgDetail = async (h: Record<string, string>) => {
 };
 
 const library = async (h: Record<string, string>) => {
-  const res = await app.request("/api/library", { headers: h });
+  const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/library`, { headers: h });
   expect(res.status).toBe(200);
   return (await res.json()) as Library;
 };
@@ -165,6 +165,64 @@ describe("organization detail privacy", () => {
     const asMember = await orgDetail({ ...authHeaders(ctx), Cookie: member.cookie });
     expect(asMember.members.length).toBeGreaterThan(0);
     expect(asMember.invitations).toEqual([]);
+  });
+});
+
+describe("organization library administration", () => {
+  it("reserves the organization library to owners and admins", async () => {
+    expect((await app.request("/api/library", { headers: authHeaders(ctx) })).status).toBe(200);
+    for (const role of ["admin", "member", "guest"] as const) {
+      const user = await createTestUser();
+      await addOrgMember(ctx.orgId, user.id, role);
+      const res = await app.request("/api/library", {
+        headers: { ...authHeaders(ctx), Cookie: user.cookie },
+      });
+      expect(res.status).toBe(role === "admin" ? 200 : 403);
+    }
+    expect(
+      (
+        await app.request("/api/library", {
+          headers: await keyHeaders(["spaces:read", "skills:read"]),
+        })
+      ).status,
+    ).toBe(403);
+  });
+
+  it("does not let an owner previewing a member regain organization administration", async () => {
+    const res = await app.request("/api/library", {
+      headers: { ...authHeaders(ctx), "X-View-As": "org_role=member" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("discovers readable candidates without revealing other spaces' installation state", async () => {
+    const source = await seedSpace({ orgId: ctx.orgId, name: "Source", visibility: "closed" });
+    await seedSpaceMember({ spaceId: source.id, userId: guestId, presetRole: "viewer" });
+    await installIn(source.id);
+    const body = await library(headers);
+    expect(body.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
+    expect(body.packages.skill[0]).toMatchObject({ id: ID, installed_in: [] });
+    const installed = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ packageId: ID }),
+    });
+    expect(installed.status).toBe(201);
+    expect((await library(headers)).packages.skill[0]?.installed_in).toEqual([ctx.defaultSpaceId]);
+  });
+
+  it("keeps the local package view available to a builder and pins keys to their space", async () => {
+    await homeIn(ctx.defaultSpaceId);
+    await installIn(ctx.defaultSpaceId);
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/library`, { headers });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Library;
+    expect(body.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
+    expect(body.packages.skill[0]?.id).toBe(ID);
+    const denied = await app.request(`/api/spaces/${privateId}/library`, {
+      headers: await keyHeaders(["spaces:read", "skills:read"]),
+    });
+    expect(denied.status).toBe(403);
   });
 });
 

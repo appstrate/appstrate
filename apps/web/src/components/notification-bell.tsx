@@ -19,7 +19,6 @@ import {
 import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
-import { packageDetailPath } from "../lib/package-paths";
 
 /** One notification as returned by `GET /api/notifications`. */
 type NotificationItem = {
@@ -113,12 +112,7 @@ export function NotificationContent({
             // Source agent gone → fall back to the run-scoped route. Marking
             // it read still flows through `onItemClick`.
             const linkTarget = shared
-              ? packageId
-                ? packageDetailPath(
-                    payloadString(notification.payload, "package_type") ?? "agent",
-                    packageId,
-                  )
-                : "/library"
+              ? "/space/packages"
               : agentId && notification.run_id
                 ? `/agents/${agentId}/runs/${notification.run_id}`
                 : notification.run_id

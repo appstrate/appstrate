@@ -63,14 +63,14 @@ describe("NotificationContent", () => {
     ]);
 
     expect(html).toContain(`Alice Martin vous a partagé ${PACKAGE_ID}`);
-    // The package's own page, from the one type→route map the SPA has.
-    expect(html).toContain(`href="/agents/${PACKAGE_ID}"`);
+    // The current space view has the acceptance action, regardless of type.
+    expect(html).toContain('href="/space/packages"');
     // Not a run: no run-scoped link, and nothing that reads as a dead agent.
     expect(html).not.toContain("Agent supprimé");
     expect(html).not.toContain('href="/runs/');
   });
 
-  it("routes a shared SKILL to the skills detail page", () => {
+  it("routes a shared skill to the local acceptance view", () => {
     const html = renderList([
       {
         id: "n2",
@@ -81,7 +81,7 @@ describe("NotificationContent", () => {
       },
     ]);
 
-    expect(html).toContain('href="/skills/@acme/helper"');
+    expect(html).toContain('href="/space/packages"');
   });
 
   it("still renders a run notification as the agent and its status", () => {

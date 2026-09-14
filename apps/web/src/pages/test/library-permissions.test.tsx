@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api, type components, type paths } from "../../api/client.ts";
 import { render } from "../../test/render.tsx";
+import { SpacePackageOffers } from "../../components/package-offers.tsx";
 import { LibraryPage } from "../library-page.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 
@@ -221,4 +222,33 @@ describe("library installation controls", () => {
       { checked: false, disabled: true, hint: null },
     ]);
   });
+});
+
+describe("pending offers in package lists", () => {
+  it.each(["agent", "skill", "mcp-server", "integration"] as const)(
+    "shows only current-space %s offers with explicit acceptance",
+    (type) => {
+      const qc = new QueryClient();
+      const snapshot: Library = {
+        object: "library",
+        spaces: [space("spc_mine", [])],
+        packages: { agent: [], skill: [], "mcp-server": [], integration: [] },
+        shared: [
+          offer({ type, personal: true, name: "Pending package", space_id: "spc_mine" }),
+          offer({ type: type === "agent" ? "skill" : "agent", name: "Other type" }),
+        ],
+      };
+      qc.setQueryData(
+        $api.queryOptions("get", "/api/spaces/{spaceId}/library", {
+          params: { path: { spaceId: "" }, header: { "X-Org-Id": undefined } },
+        }).queryKey,
+        snapshot,
+      );
+      const html = render(<SpacePackageOffers type={type} />, { queryClient: qc });
+      expect(html).toContain("Pending package");
+      expect(html).toContain(i18n.t("library.shared.pending"));
+      expect(html).toContain(i18n.t("library.shared.add"));
+      expect(html).not.toContain("Other type");
+    },
+  );
 });

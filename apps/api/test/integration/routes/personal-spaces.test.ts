@@ -231,6 +231,33 @@ describe("personal spaces — nobody else reaches one", () => {
     await seedInstalledPackage(personalId, SECRET);
   });
 
+  it("does not offer a personal-space install for an unshared team package", async () => {
+    const teamPackage = "@private/team-only";
+    await seedPackage({
+      id: teamPackage,
+      orgId: owner.orgId,
+      type: "skill",
+      homeSpaceId: owner.defaultSpaceId,
+    });
+    await seedInstalledPackage(owner.defaultSpaceId, teamPackage);
+    await seedPackage({
+      id: "@system/unoffered",
+      orgId: null,
+      type: "integration",
+      source: "system",
+    });
+    const res = await app.request(`/api/spaces/${personalId}/library`, {
+      headers: headersFor(member, personalId),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      packages: { skill: { id: string }[]; integration: { id: string }[] };
+    };
+    expect(body.packages.integration.map((pkg) => pkg.id)).not.toContain("@system/unoffered");
+    expect(body.packages.skill.map((pkg) => pkg.id)).toContain(SECRET);
+    expect(body.packages.skill.map((pkg) => pkg.id)).not.toContain(teamPackage);
+  });
+
   it("lists it to its owner and to nobody else", async () => {
     const own = await ownPersonalSpace(member);
     expect(own.access).toBe("member");
@@ -254,7 +281,13 @@ describe("personal spaces — nobody else reaches one", () => {
   it("answers 404 on every space-scoped route pointed at it", async () => {
     // One from each family the middleware covers: the space context itself is
     // what refuses, so this is the shape every route inherits.
-    for (const path of ["/api/agents", "/api/runs", "/api/schedules", "/api/files"]) {
+    for (const path of [
+      "/api/agents",
+      "/api/runs",
+      "/api/schedules",
+      "/api/files",
+      `/api/spaces/${personalId}/library`,
+    ]) {
       await expectProblem(await app.request(path, { headers: headersFor(admin, personalId) }), 404);
       expect((await app.request(path, { headers: headersFor(member, personalId) })).status).toBe(
         200,
@@ -278,9 +311,12 @@ describe("personal spaces — nobody else reaches one", () => {
 
   it("keeps it out of the admin's library listing, installed or not", async () => {
     const listed = async (ctx: TestContext) => {
-      const res = await app.request("/api/library", {
-        headers: headersFor(ctx, ctx === member ? personalId : owner.defaultSpaceId),
-      });
+      const res = await app.request(
+        ctx === member ? `/api/spaces/${personalId}/library` : "/api/library",
+        {
+          headers: headersFor(ctx, ctx === member ? personalId : owner.defaultSpaceId),
+        },
+      );
       expect(res.status, await res.clone().text()).toBe(200);
       const body = (await res.json()) as {
         spaces: { id: string }[];

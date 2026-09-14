@@ -43,6 +43,12 @@ export function useCanPreviewRole(): boolean {
   return orgRole !== null && (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(orgRole);
 }
 
+/** Organization catalog administration follows the effective organization role. */
+export function useCanManageOrgCatalog(): boolean {
+  const { orgRole } = usePermissions();
+  return orgRole === "owner" || orgRole === "admin";
+}
+
 /**
  * Display name of a package's home space, or `null` when there is none to show.
  *

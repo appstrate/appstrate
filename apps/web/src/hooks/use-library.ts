@@ -6,6 +6,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type components, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (GET /api/library response). */
@@ -23,6 +24,18 @@ export function useLibrary() {
     "/api/library",
     { params: { header: scope.header } },
     { enabled: scope.enabled },
+  );
+}
+
+/** Space readers never need access to the organization administration view. */
+export function useSpaceLibrary() {
+  const scope = useOrgOnlyScope();
+  const spaceId = useCurrentSpaceId();
+  return $api.useQuery(
+    "get",
+    "/api/spaces/{spaceId}/library",
+    { params: { path: { spaceId: spaceId ?? "" }, header: scope.header } },
+    { enabled: scope.enabled && !!spaceId, staleTime: 0, refetchOnWindowFocus: true },
   );
 }
 
@@ -56,8 +69,7 @@ function updateLibraryCache(
 }
 
 /**
- * Derive install state for a single package from the library cache: which space
- * names have it installed, and whether the current space does.
+ * Derive whether a package is installed in the current space.
  *
  * The package's HOME is deliberately NOT derived here. It comes from the
  * package's own detail response (`home_space_id`), which every page showing it
@@ -66,7 +78,7 @@ function updateLibraryCache(
  * disagree.
  */
 export function usePackageInstallState(packageId: string) {
-  const { data: libraryData } = useLibrary();
+  const { data: libraryData } = useSpaceLibrary();
   const currentSpaceId = useCurrentSpaceId();
 
   return useMemo(() => {
@@ -76,18 +88,11 @@ export function usePackageInstallState(packageId: string) {
           .find((p) => p.id === packageId)
       : undefined;
 
-    const installedSpaceNames =
-      libraryPkg && libraryData
-        ? libraryData.spaces
-            .filter((a) => libraryPkg.installed_in.includes(a.id))
-            .map((a) => a.name)
-        : [];
-
     const isInstalledInCurrentSpace = !!(
       currentSpaceId && libraryPkg?.installed_in.includes(currentSpaceId)
     );
 
-    return { installedSpaceNames, isInstalledInCurrentSpace };
+    return { isInstalledInCurrentSpace };
   }, [libraryData, packageId, currentSpaceId]);
 }
 
@@ -96,8 +101,10 @@ export function useInvalidatePackageInstallation() {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] });
     void qc.invalidateQueries({ queryKey: packageKeys.all });
     void qc.invalidateQueries({ queryKey: agentsKeys.all });
+    void invalidateIntegrationQueries(qc);
   };
 }
 

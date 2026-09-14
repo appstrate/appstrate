@@ -11,16 +11,16 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
  * spaces already have the package installed.
  */
 
-export const libraryPaths = {
+const organizationLibraryPaths = {
   "/api/library": {
     get: {
       operationId: "getLibrary",
       tags: ["Library"],
-      summary: "List readable packages with accessible-space install state",
+      summary: "Organization library (owners and admins)",
       description:
         "Returns packages readable in an accessible space, plus readable system packages, grouped by type. " +
         "Organization owners and admins also see uninstalled organization packages with their read permissions. " +
-        "Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. " +
+        "Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. " +
         "The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings " +
         "also require the package type's read permission in that space.",
       parameters: [
@@ -181,6 +181,27 @@ export const libraryPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+} as const;
+
+export const libraryPaths = {
+  ...organizationLibraryPaths,
+  "/api/spaces/{spaceId}/library": {
+    get: {
+      operationId: "getSpaceLibrary",
+      tags: ["Library"],
+      summary: "Discover packages and pending shares for a space",
+      description:
+        "Accessible to readers of the target space. Returns readable package candidates (including packages readable in other accessible spaces for a team destination), but installation state and pending shares only for this space. Each package type requires read permission in the target space. Installation remains subject to the target space permissions. Personal spaces remain private and API keys remain pinned to their space.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        ...organizationLibraryPaths["/api/library"].get.responses,
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

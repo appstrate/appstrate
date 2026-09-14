@@ -50,7 +50,7 @@ export function AgentActions({
   const uninstallMutation = useTogglePackageInstall();
   const runAgent = useRunAgent(packageId);
   const currentSpaceId = useCurrentSpaceId();
-  const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
+  const { isInstalledInCurrentSpace } = usePackageInstallState(packageId);
 
   const [confirmState, setConfirmState] = useState<{
     type: "deleteAgent" | "clearRuns" | "clearMemories" | "uninstallAgent";
@@ -110,13 +110,7 @@ export function AgentActions({
         onDeleteAgent={() =>
           setConfirmState({
             type: "deleteAgent",
-            label:
-              installedSpaceNames.length > 0
-                ? t("detail.deleteConfirmWithSpaces", {
-                    name: detail.display_name,
-                    spaces: installedSpaceNames.join(", "),
-                  })
-                : t("detail.deleteConfirm", { name: detail.display_name }),
+            label: t("detail.deleteConfirm", { name: detail.display_name }),
           })
         }
         canUninstall={isInstalledInCurrentSpace && detail.source !== "system"}

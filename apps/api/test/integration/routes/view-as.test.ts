@@ -144,9 +144,12 @@ function agentBody(name: string, displayName: string, description: string) {
   };
 }
 
-async function libraryAgentIds(headers: Record<string, string>): Promise<string[]> {
+async function libraryAgentIds(
+  headers: Record<string, string>,
+  spaceId: string,
+): Promise<string[]> {
   const body = await expectJson<{ packages: { agent: Array<{ id: string }> } }>(
-    await app.request("/api/library", { headers }),
+    await app.request(`/api/spaces/${spaceId}/library`, { headers }),
   );
   return body.packages.agent.map((pkg) => pkg.id);
 }
@@ -582,7 +585,8 @@ describe("view as role", () => {
     it("answers the package catalog as a member would, not as the org catalog admin", async () => {
       // Installed in no space: only someone who manages the ORG catalog sees it.
       await seedAgent({ id: "@view-as/uninstalled", orgId: owner.orgId });
-      const library = (view?: string) => libraryAgentIds(orgOnlyHeaders(owner, viewHeader(view)));
+      const library = (view?: string) =>
+        libraryAgentIds(orgOnlyHeaders(owner, viewHeader(view)), owner.defaultSpaceId);
 
       expect(await library()).toContain("@view-as/uninstalled");
       expect(await library(persona("member", "preset:admin"))).not.toContain(
@@ -836,7 +840,7 @@ describe("view as role", () => {
     }
 
     const libraryOverLoopback = (orgRole: string, viewAs?: unknown) =>
-      libraryAgentIds(loopbackHeaders(orgRole, viewAs));
+      libraryAgentIds(loopbackHeaders(orgRole, viewAs), owner.defaultSpaceId);
 
     it("reaches a closed space the persona is a member of, and only with the claim", async () => {
       // A CLOSED space reaches nobody without a row, so what the hop sees there

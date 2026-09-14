@@ -71,7 +71,7 @@
   "validation.emailFormat": "Invalid email address",
   "validation.urlFormat": "Invalid URL",
   "test.failed": "Test failed",
-  "dashboard.welcome": "Welcome, {{name}} \ud83d\udc4b",
+  "dashboard.welcome": "Welcome, {{name}} 👋",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",
   "notifications.empty": "No notifications",
@@ -129,5 +129,8 @@
   "viewAs.stopped.view_as_unsupported": "Preview unavailable: this session cannot preview a role.",
   "viewAs.stopped.view_as_forbidden": "Preview unavailable: you may not preview this role.",
   "viewAs.stopped.view_as_not_found": "Preview unavailable: the space or role to preview does not exist.",
-  "viewAs.stopped.generic": "Preview unavailable."
+  "viewAs.stopped.generic": "Preview unavailable.",
+  "library.spaceTitle": "Packages in this space",
+  "library.shared.pending": "Pending acceptance",
+  "library.tab.mcpServers": "MCP servers"
 }

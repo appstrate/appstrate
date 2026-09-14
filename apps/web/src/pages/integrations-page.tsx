@@ -20,6 +20,7 @@ import { Boxes, Plus, Search } from "lucide-react";
 import { Input } from "@appstrate/ui/components/input";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { SpacePackageOffers } from "../components/package-offers";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
@@ -114,6 +115,7 @@ export function IntegrationsPage() {
       >
         <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>
       </PageHeader>
+      <SpacePackageOffers type="integration" />
 
       <div className="mb-4 flex items-center gap-3">
         <Tabs value={tab} onValueChange={(v) => setTab(v as "active" | "all")}>

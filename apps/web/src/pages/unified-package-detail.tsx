@@ -202,7 +202,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const deletePkgMutation = useDeletePackage(type);
   const uninstallMutation = useTogglePackageInstall();
   const currentSpaceId = useCurrentSpaceId();
-  const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
+  const { isInstalledInCurrentSpace } = usePackageInstallState(packageId);
   // The package's own detail response is the authority on both halves of the
   // home contract: the id (only when this caller reaches that space) and the
   // write verdict. `undefined` means "not loaded yet", which every gate reads
@@ -405,19 +405,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
                   setConfirmAction({
                     type: "deletePackage",
-                    description:
-                      installedSpaceNames.length > 0
-                        ? t("packages.deleteConfirmWithSpaces", {
-                            type: typeLabel,
-                            name: nameStr,
-                            spaces: installedSpaceNames.join(", "),
-                            ns: "settings",
-                          })
-                        : t("packages.deleteConfirm", {
-                            type: typeLabel,
-                            name: nameStr,
-                            ns: "settings",
-                          }),
+                    description: t("packages.deleteConfirm", {
+                      type: typeLabel,
+                      name: nameStr,
+                      ns: "settings",
+                    }),
                   });
                 }}
                 canUninstall={isInstalledInCurrentSpace && source !== "system"}

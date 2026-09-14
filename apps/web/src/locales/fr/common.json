@@ -71,7 +71,7 @@
   "validation.emailFormat": "Adresse email invalide",
   "validation.urlFormat": "URL invalide",
   "test.failed": "Échec du test",
-  "dashboard.welcome": "Bienvenue, {{name}} \ud83d\udc4b",
+  "dashboard.welcome": "Bienvenue, {{name}} 👋",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",
   "notifications.empty": "Aucune notification",
@@ -129,5 +129,8 @@
   "viewAs.stopped.view_as_unsupported": "Prévisualisation indisponible : cette session ne peut pas prévisualiser de rôle.",
   "viewAs.stopped.view_as_forbidden": "Prévisualisation indisponible : vous n'avez pas le droit de prévisualiser ce rôle.",
   "viewAs.stopped.view_as_not_found": "Prévisualisation indisponible : l'espace ou le rôle à prévisualiser n'existe pas.",
-  "viewAs.stopped.generic": "Prévisualisation indisponible."
+  "viewAs.stopped.generic": "Prévisualisation indisponible.",
+  "library.spaceTitle": "Packages de cet espace",
+  "library.shared.pending": "À accepter",
+  "library.tab.mcpServers": "Serveurs MCP"
 }

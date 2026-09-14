@@ -9,6 +9,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
+import { SpacePackageOffers } from "../components/package-offers";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -41,6 +42,7 @@ interface PackageTabProps {
   extraActions?: ReactNode;
   emptyExtraActions?: ReactNode;
   headerContent?: ReactNode;
+  beforeItems?: ReactNode;
 }
 
 export function PackageTab({
@@ -56,6 +58,7 @@ export function PackageTab({
   extraActions,
   emptyExtraActions,
   headerContent,
+  beforeItems,
 }: PackageTabProps) {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -72,6 +75,7 @@ export function PackageTab({
     return (
       <>
         {header}
+        {beforeItems}
         <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon}>
           {emptyActions}
         </EmptyState>
@@ -82,6 +86,7 @@ export function PackageTab({
   return (
     <>
       {header}
+      {beforeItems}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {items.map((item) => (
           <PackageCard key={item.id} {...item} />
@@ -112,6 +117,7 @@ export function PackageList() {
   return (
     <div className="p-6">
       <PackageTab
+        beforeItems={<SpacePackageOffers type="agent" />}
         title={t("list.tabAgents")}
         emoji="⚡"
         breadcrumbs={[

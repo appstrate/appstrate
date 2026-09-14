@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import { getPackageLibrary } from "../services/package-library.ts";
 import type { Context, Next } from "hono";
 import { z } from "zod";
 import {
@@ -320,6 +321,15 @@ export function createSpacesRouter() {
 
   router.use("/:id", pinnedSpaceScopeGuard);
   router.use("/:spaceId/*", pinnedSpaceScopeGuard);
+
+  router.get(
+    "/:spaceId/library",
+    requireSpaceFromParam("spaceId"),
+    requirePermission("spaces", "read"),
+    async (c) => {
+      return c.json(await getPackageLibrary(c, c.req.param("spaceId")));
+    },
+  );
 
   // GET /api/spaces — list spaces the caller reaches (RBAC spec §6.3)
   router.get("/", requirePermission("spaces", "read"), async (c) => {

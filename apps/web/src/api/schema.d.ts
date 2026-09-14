@@ -1812,8 +1812,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List readable packages with accessible-space install state
-         * @description Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Space-pinned API keys see only their own space and its packages. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.
+         * Organization library (owners and admins)
+         * @description Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -4490,6 +4490,26 @@ export interface paths {
          * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space has it installed) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).
          */
         post: operations["sweepPersonalSpace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/spaces/{spaceId}/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discover packages and pending shares for a space
+         * @description Accessible to readers of the target space. Returns readable package candidates (including packages readable in other accessible spaces for a team destination), but installation state and pending shares only for this space. Each package type requires read permission in the target space. Installation remains subject to the target space permissions. Personal spaces remain private and API keys remain pinned to their space.
+         */
+        get: operations["getSpaceLibrary"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -21794,6 +21814,141 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    getSpaceLibrary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                spaceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Library snapshot. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "object": "library",
+                     *       "spaces": [
+                     *         {
+                     *           "id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *           "name": "Default",
+                     *           "isDefault": true
+                     *         },
+                     *         {
+                     *           "id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *           "name": "Staging",
+                     *           "isDefault": false
+                     *         }
+                     *       ],
+                     *       "packages": {
+                     *         "agent": [
+                     *           {
+                     *             "id": "pkg_inbox_triage",
+                     *             "type": "agent",
+                     *             "source": "local",
+                     *             "name": "Inbox Triage",
+                     *             "description": "Sorts incoming Gmail threads into priority buckets.",
+                     *             "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *             "home_writable": true,
+                     *             "home_shareable": true,
+                     *             "installed_in": [
+                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *             ],
+                     *             "update_available": false
+                     *           }
+                     *         ],
+                     *         "skill": [],
+                     *         "mcp-server": [],
+                     *         "integration": [
+                     *           {
+                     *             "id": "pkg_gmail",
+                     *             "type": "integration",
+                     *             "source": "system",
+                     *             "name": "Gmail",
+                     *             "description": "Google Mail OAuth integration.",
+                     *             "home_space_id": null,
+                     *             "home_writable": false,
+                     *             "home_shareable": false,
+                     *             "installed_in": [
+                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *               "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
+                     *             ],
+                     *             "update_available": false
+                     *           }
+                     *         ]
+                     *       },
+                     *       "shared": [
+                     *         {
+                     *           "id": "@acme/weekly-digest",
+                     *           "type": "agent",
+                     *           "source": "local",
+                     *           "name": "Weekly Digest",
+                     *           "description": "Summarises the week's threads.",
+                     *           "space_id": "spc_9a1b3c5d-7e9f-4a1b-8c3d-5e7f9a1b3c5d",
+                     *           "personal": true,
+                     *           "shared_by": {
+                     *             "user_id": "usr_1",
+                     *             "name": "Alex"
+                     *           }
+                     *         }
+                     *       ]
+                     *     }
+                     */
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "library";
+                        /** @description Accessible spaces in the caller's organization, restricted to an API key's space. The default space (if any) is listed first. */
+                        spaces: {
+                            /** @description Space id (`spc_…`). */
+                            id: string;
+                            name: string;
+                            isDefault: boolean;
+                        }[];
+                        /** @description Packages grouped by type. Every group is always present (possibly empty). */
+                        packages: {
+                            agent: components["schemas"]["LibraryPackageList"];
+                            skill: components["schemas"]["LibraryPackageList"];
+                            "mcp-server": components["schemas"]["LibraryPackageList"];
+                            integration: components["schemas"]["LibraryPackageList"];
+                        };
+                        /** @description Packages OFFERED to a space the caller reads and not installed there — "shared with me", i.e. the offers still waiting on a decision. An accepted offer leaves this list and appears as an installation in `packages`. Empty for a caller nobody has shared anything with. */
+                        shared: {
+                            /** @description Package id (`@scope/name`). */
+                            id: string;
+                            /** @enum {string} */
+                            type: "agent" | "skill" | "mcp-server" | "integration";
+                            source: string;
+                            name: string;
+                            description: string;
+                            /** @description The space the package is offered to (`spc_…`) — always one the caller reads, so no private id is disclosed. */
+                            space_id: string;
+                            /** @description The offered space is the caller's OWN personal space, i.e. `POST /api/packages/{scope}/{name}/shares/accept` applies. When false the offer targets a team space and is installed through `POST /api/spaces/{spaceId}/packages` by someone holding the type's install grant there. */
+                            personal: boolean;
+                            /** @description Who shared it. `null` once that account is gone. */
+                            shared_by: {
+                                user_id: string;
+                                name: string;
+                            } | null;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listInstalledPackages: {

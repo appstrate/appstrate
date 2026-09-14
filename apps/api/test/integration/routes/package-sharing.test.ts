@@ -180,7 +180,7 @@ const revokeShare = (headers: Headers, packageId: string, target: string) =>
 const acceptShare = (headers: Headers, packageId: string) =>
   app.request(`/api/packages/${packageId}/shares/accept`, { method: "POST", headers });
 
-/** `GET /api/library`, org-scoped (no space header). */
+/** The current space package view. */
 async function library(headers: Headers): Promise<{
   packages: Record<string, { id: string; update_available: boolean }[]>;
   shared: {
@@ -190,7 +190,7 @@ async function library(headers: Headers): Promise<{
     shared_by: { user_id: string; name: string } | null;
   }[];
 }> {
-  const res = await app.request("/api/library", {
+  const res = await app.request(`/api/spaces/${headers["X-Space-Id"]}/library`, {
     headers: { Cookie: headers.Cookie!, "X-Org-Id": headers["X-Org-Id"]! },
   });
   expect(res.status, await res.clone().text()).toBe(200);
@@ -780,7 +780,7 @@ describe("sharing with a team space", () => {
   it("shows the package to that space's members and to nobody else", async () => {
     expect((await shareWithSpace(owner(), AGENT, teamId)).status).toBe(200);
 
-    const lib = await library(teamMember.headers());
+    const lib = await library(teamMember.headers(teamId));
     expect(lib.shared.find((entry) => entry.id === AGENT)?.personal).toBe(false);
     const detail = await app.request(`/api/packages/agents/${AGENT}`, {
       headers: teamMember.headers(teamId),

@@ -162,9 +162,9 @@ async function skillIndexIds(headers: Record<string, string>): Promise<string[]>
   return body.data.map((pkg) => pkg.id);
 }
 
-/** Ids of the skills `GET /api/library` shows this caller (an org-scoped read). */
+/** Ids of the skills available to this caller in the current space. */
 async function librarySkillIds(headers: Record<string, string>): Promise<string[]> {
-  const res = await app.request("/api/library", {
+  const res = await app.request(`/api/spaces/${headers["X-Space-Id"]}/library`, {
     headers: { Cookie: headers.Cookie!, "X-Org-Id": headers["X-Org-Id"]! },
   });
   expect(res.status, await res.clone().text()).toBe(200);
@@ -484,7 +484,7 @@ describe("the home on the wire", () => {
 
   /** The same pair, off the library listing — the second of the four shapes. */
   async function libraryHomeWire(headers: Record<string, string>): Promise<HomeWire> {
-    const res = await app.request("/api/library", { headers });
+    const res = await app.request(`/api/spaces/${headers["X-Space-Id"]}/library`, { headers });
     expect(res.status, await res.clone().text()).toBe(200);
     const body = (await res.json()) as {
       packages: { skill: (HomeWire & { id: string })[] };

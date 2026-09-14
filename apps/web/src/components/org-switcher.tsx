@@ -6,7 +6,7 @@ import { ChevronsUpDown, Check, Plus, Star, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
-import { usePermissions } from "../hooks/use-permissions";
+import { usePermissions, useCanManageOrgCatalog } from "../hooks/use-permissions";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import {
   DropdownMenu,
@@ -51,6 +51,7 @@ export function OrgSwitcher() {
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const { can } = usePermissions();
+  const canManageCatalog = useCanManageOrgCatalog();
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   const hasMultipleSpaces = (spaces?.length ?? 0) > 1;
@@ -203,6 +204,14 @@ export function OrgSwitcher() {
               </Link>
             </DropdownMenuItem>
             {can("spaces:read") && (
+              <DropdownMenuItem asChild>
+                <Link to="/space/packages" className="text-primary flex items-center gap-2">
+                  <Library size={14} />
+                  {t("library.spaceTitle")}
+                </Link>
+              </DropdownMenuItem>
+            )}
+            {canManageCatalog && (
               <DropdownMenuItem asChild>
                 <Link to="/library" className="text-primary flex items-center gap-2">
                   <Library size={14} />

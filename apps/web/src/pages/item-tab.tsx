@@ -7,6 +7,7 @@ import { Wrench, Plug } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { ImportModal } from "../components/import-modal";
 import { usePackageList, type PackageType } from "../hooks/use-packages";
+import { SpacePackageOffers } from "../components/package-offers";
 import { type CardItem, PackageTab } from "./package-list";
 import { packageNewPath } from "../lib/package-paths";
 
@@ -60,6 +61,7 @@ export function ItemTab({
   return (
     <>
       <PackageTab
+        beforeItems={<SpacePackageOffers type={type} />}
         items={items}
         isLoading={isLoading}
         emoji={presentation.emoji}

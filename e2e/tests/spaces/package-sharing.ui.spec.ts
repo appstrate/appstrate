@@ -6,7 +6,7 @@
  * What a route test cannot show: that the two halves of the flow actually meet
  * in the SPA. An administrator shares an agent from the package page's own
  * dialog, and the guest — an external identity with no reach into any space —
- * finds it under "Partagé avec moi" in their library and adds it to their own
+ * finds it under "Partagé avec moi" in their agent list and adds it to their own
  * space with one button. Only then does the platform let them launch it, and
  * the administrator still cannot see inside that space.
  *
@@ -119,7 +119,12 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     await createAuthedContext(browser, guest, orgId, guestSpaceId)
   ).newPage();
   try {
+    expect((await guestClient.get("/library")).status()).toBe(403);
     await guestPage.goto("/library");
+    await expect(
+      guestPage.getByText(/Vous n'avez pas accès|You do not have access/).first(),
+    ).toBeVisible();
+    await guestPage.goto("/agents");
     await expect(guestPage.getByText(/Partagé avec moi|Shared with me/)).toBeVisible();
     const accept = guestPage.waitForResponse(
       (response) =>
@@ -184,11 +189,9 @@ test("an offer opens in its destination space and accepting refreshes an already
   });
   expect(shared.status(), await shared.text()).toBe(200);
 
-  const page = await (
-    await createAuthedContext(browser, member, orgId, browserCtx.org.defaultSpaceId)
-  ).newPage();
+  const page = await (await createAuthedContext(browser, member, orgId, personalId)).newPage();
   try {
-    await page.goto("/library");
+    await page.goto("/agents");
     const detailResponse = page.waitForResponse((response) =>
       response.url().includes(`/api/packages/agents/${scope}/${name}`),
     );
@@ -202,7 +205,8 @@ test("an offer opens in its destination space and accepting refreshes an already
     await page.locator('a[href="/agents"]').first().click();
     await expect(page.getByText(/Aucun agent disponible|No agents available/)).toBeVisible();
     await page.getByTestId("org-switcher-button").click();
-    await page.locator('a[href="/library"]').first().click();
+    await expect(page.locator('a[href="/library"]')).toHaveCount(0);
+    await page.locator('a[href="/space/packages"]').first().click();
     const accepted = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" && response.url().includes("/shares/accept"),
@@ -211,6 +215,68 @@ test("an offer opens in its destination space and accepting refreshes an already
     expect((await accepted).status()).toBe(200);
     await page.locator('a[href="/agents"]').first().click();
     await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a non-admin builder manages a team offer from the space package view", async ({
+  request,
+  browser,
+  browserCtx,
+  orgOnlyClient,
+}) => {
+  const orgId = browserCtx.org.orgId;
+  const spaceId = browserCtx.org.defaultSpaceId;
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const name = `team-offer-${Date.now().toString(36)}`;
+  const author = createApiClient(request, {
+    cookie: browserCtx.auth.cookie,
+    orgId,
+    spaceId: await personalSpaceOf(request, browserCtx.auth.cookie, orgId),
+  });
+  await createAgent(author, scope, name);
+  const member = await registerUser(request);
+  const invite = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
+    email: member.email,
+    role: "guest",
+    space_assignments: [{ space_id: spaceId, preset_role: "builder" }],
+  });
+  expect(invite.status()).toBe(201);
+  expect(
+    (
+      await request.post(`/invite/${(await invite.json()).token}/accept`, {
+        headers: { Cookie: member.cookie, Origin: E2E_BASE_URL },
+      })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await author.post(`/packages/${scope}/${name}/shares`, {
+        target: { kind: "space", space_id: spaceId },
+      })
+    ).status(),
+  ).toBe(200);
+  const page = await (await createAuthedContext(browser, member, orgId, spaceId)).newPage();
+  try {
+    await page.goto("/space/packages");
+    const installed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith(`/spaces/${spaceId}/packages`),
+    );
+    await page.getByRole("button", { name: /Installer dans|Install in/ }).click();
+    expect((await installed).status()).toBe(201);
+    const row = page.getByRole("row").filter({ hasText: `Test Agent ${name}` });
+    await expect(row.getByRole("checkbox")).toBeChecked();
+    const removed = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().includes(`/packages/${scope}/${name}`),
+    );
+    await row.getByRole("checkbox").click();
+    expect((await removed).status()).toBe(204);
+    await expect(page.getByRole("button", { name: /Installer dans|Install in/ })).toBeVisible();
   } finally {
     await page.context().close();
   }

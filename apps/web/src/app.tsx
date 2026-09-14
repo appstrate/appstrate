@@ -26,7 +26,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { RequirePermission } from "./components/require-permission";
+import { RequirePermission, RequireOrgCatalogAdmin } from "./components/require-permission";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
@@ -89,6 +89,9 @@ const IntegrationsPage = lazy(() =>
 );
 const IntegrationDetailPage = lazy(() =>
   import("./pages/integration-detail").then((m) => ({ default: m.IntegrationDetailPage })),
+);
+const SpacePackagesPage = lazy(() =>
+  import("./pages/library-page").then((m) => ({ default: m.SpacePackagesPage })),
 );
 const LibraryPage = lazy(() =>
   import("./pages/library-page").then((m) => ({ default: m.LibraryPage })),
@@ -804,11 +807,23 @@ export function App() {
               }
             />
             <Route
+              path="/space/packages"
+              element={
+                <RequirePermission permission="spaces:read">
+                  <LazyRoute>
+                    <SpacePackagesPage />
+                  </LazyRoute>
+                </RequirePermission>
+              }
+            />
+            <Route
               path="/library"
               element={
-                <LazyRoute>
-                  <LibraryPage />
-                </LazyRoute>
+                <RequireOrgCatalogAdmin>
+                  <LazyRoute>
+                    <LibraryPage />
+                  </LazyRoute>
+                </RequireOrgCatalogAdmin>
               }
             />
             <Route
