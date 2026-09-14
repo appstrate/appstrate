@@ -1,4 +1,25 @@
 {
+  "MiniMaxAI/MiniMax-M2.7": {
+    "label": "MiniMaxAI/MiniMax M2.7",
+    "contextWindow": 196608,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.3,
+      "output": 1.2,
+      "cacheRead": 0.06
+    }
+  },
   "MiniMaxAI/MiniMax-M3": {
     "label": "MiniMaxAI/MiniMax M3",
     "contextWindow": 524288,
@@ -49,6 +70,66 @@
     "cost": {
       "input": 0,
       "output": 0
+    }
+  },
+  "Qwen/QwQ-32B": {
+    "label": "Qwen/QwQ 32B",
+    "contextWindow": 131072,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 1.2,
+      "output": 1.2
+    }
+  },
+  "Qwen/Qwen2.5-72B-Instruct-Turbo": {
+    "label": "Qwen/Qwen2.5 72B Instruct Turbo",
+    "contextWindow": 131072,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 1.2,
+      "output": 1.2
+    }
+  },
+  "Qwen/Qwen2.5-7B-Instruct-Turbo": {
+    "label": "Qwen/Qwen2.5 7B Instruct Turbo",
+    "contextWindow": 32768,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.3,
+      "output": 0.3
     }
   },
   "Qwen/Qwen3-235B-A22B-Instruct-2507-tput": {
@@ -131,6 +212,26 @@
       "output": 2
     }
   },
+  "Qwen/Qwen3-Coder-Next-FP8": {
+    "label": "Qwen/Qwen3 Coder Next FP8",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.5,
+      "output": 1.2
+    }
+  },
   "Qwen/Qwen3-Next-80B-A3B-Instruct": {
     "label": "Qwen/Qwen3 Next 80B A3B Instruct",
     "contextWindow": 262144,
@@ -169,6 +270,46 @@
     "cost": {
       "input": 0.15,
       "output": 1.5
+    }
+  },
+  "Qwen/Qwen3-VL-32B-Instruct": {
+    "label": "Qwen/Qwen3 VL 32B Instruct",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.5,
+      "output": 1.5
+    }
+  },
+  "Qwen/Qwen3-VL-8B-Instruct": {
+    "label": "Qwen/Qwen3 VL 8B Instruct",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.18,
+      "output": 0.68
     }
   },
   "Qwen/Qwen3.5-397B-A17B": {
@@ -359,6 +500,26 @@
     "label": "Deepseek Ai/DeepSeek R1",
     "contextWindow": 128000,
     "maxTokens": 20480,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 3,
+      "output": 7
+    }
+  },
+  "deepseek-ai/DeepSeek-R1-0528": {
+    "label": "Deepseek Ai/DeepSeek R1 0528",
+    "contextWindow": 163840,
+    "maxTokens": null,
     "capabilities": [
       "text"
     ],
@@ -620,6 +781,86 @@
       "cacheRead": 0.04
     }
   },
+  "mistralai/Ministral-3-14B-Instruct-2512": {
+    "label": "Mistralai/Ministral 3 14B Instruct 2512",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.2,
+      "output": 0.2
+    }
+  },
+  "mistralai/Mistral-7B-Instruct-v0.1": {
+    "label": "Mistralai/Mistral 7B Instruct V0.1",
+    "contextWindow": 32768,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.2,
+      "output": 0.2
+    }
+  },
+  "mistralai/Mistral-7B-Instruct-v0.3": {
+    "label": "Mistralai/Mistral 7B Instruct V0.3",
+    "contextWindow": 32768,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.2,
+      "output": 0.2
+    }
+  },
+  "mistralai/Mistral-Small-24B-Instruct-2501": {
+    "label": "Mistralai/Mistral Small 24B Instruct 2501",
+    "contextWindow": 32768,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.1,
+      "output": 0.3
+    }
+  },
   "moonshotai/Kimi-K2-Instruct-0905": {
     "label": "Moonshotai/Kimi K2 Instruct 0905",
     "contextWindow": 262144,
@@ -669,6 +910,47 @@
     "cost": {
       "input": 0.5,
       "output": 2.8
+    }
+  },
+  "moonshotai/Kimi-K2.5-fp4": {
+    "label": "Moonshotai/Kimi K2.5 Fp4",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.5,
+      "output": 2.8
+    }
+  },
+  "moonshotai/Kimi-K2.6": {
+    "label": "Moonshotai/Kimi K2.6",
+    "contextWindow": 262144,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 1.2,
+      "output": 4.5,
+      "cacheRead": 0.2
     }
   },
   "moonshotai/Kimi-K2.7-Code": {
@@ -723,6 +1005,26 @@
       "input": 3,
       "output": 15,
       "cacheRead": 0.3
+    }
+  },
+  "nvidia/NVIDIA-Nemotron-Nano-9B-v2": {
+    "label": "Nvidia/NVIDIA Nemotron Nano 9B V2",
+    "contextWindow": 131072,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 0.06,
+      "output": 0.25
     }
   },
   "nvidia/nemotron-3-ultra-550b-a55b": {
@@ -946,6 +1248,47 @@
     "cost": {
       "input": 0.45,
       "output": 2
+    }
+  },
+  "zai-org/GLM-5": {
+    "label": "Zai Org/GLM 5",
+    "contextWindow": 202752,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 1,
+      "output": 3.2
+    }
+  },
+  "zai-org/GLM-5.1": {
+    "label": "Zai Org/GLM 5.1",
+    "contextWindow": 202752,
+    "maxTokens": null,
+    "capabilities": [
+      "text"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 1.4,
+      "output": 4.4,
+      "cacheRead": 0.26
     }
   },
   "zai-org/GLM-5.2": {
