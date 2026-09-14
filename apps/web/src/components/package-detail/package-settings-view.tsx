@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A skill's Paramètres, in the shape an agent's and an integration's have.
+ * Paramètres for the packages with nothing set per space — skills and local
+ * MCP servers — in the shape an agent's and an integration's have.
  *
- * A skill has no configuration of its own in a space, so two groups, not
- * three: Explorer (its files, read) and Définition (what it is, edited in
- * place by whoever may write it). The raw manifest is not a section — every
- * form writes into it — but a modal reached from under Identité and from
+ * Two groups, not three: Explorer (the files, read) and Définition (what the
+ * package is, edited in place by whoever may write it). A skill's Définition
+ * is Identité and Contenu (SKILL.md); a server's is Identité alone, its server
+ * block and tools living in the manifest. The raw manifest is not a section —
+ * every form writes into it — but a modal reached from under Identité and from
  * `manifest.json` in the files.
  */
 import { lazy, Suspense } from "react";
@@ -26,15 +28,22 @@ const SkillDefinitionEditor = lazy(() =>
     default: module.SkillDefinitionEditor,
   })),
 );
+const McpServerDefinitionEditor = lazy(() =>
+  import("../../pages/package-editor").then((module) => ({
+    default: module.McpServerDefinitionEditor,
+  })),
+);
 
-type SkillSettingsSection = "files" | SkillDefinitionSection;
+type PackageSettingsSection = "files" | SkillDefinitionSection;
 
-export function SkillSettingsView({
+export function PackageSettingsView({
+  type,
   packageId,
   detail,
   version,
   canEditDefinition,
 }: {
+  type: "skill" | "mcp-server";
   packageId: string;
   detail: OrgPackageItemDetail | undefined;
   /** A pinned version being read; the definition is only edited on the draft. */
@@ -46,14 +55,18 @@ export function SkillSettingsView({
   const navigate = useNavigate();
   const editable = canEditDefinition && Boolean(detail) && version === undefined;
 
-  const requested = new URLSearchParams(location.search).get("skillSettings");
-  const active: SkillSettingsSection =
-    editable && (requested === "general" || requested === "content") ? requested : "files";
+  const requested = new URLSearchParams(location.search).get("packageSettings");
+  const sections: SkillDefinitionSection[] =
+    type === "skill" ? ["general", "content"] : ["general"];
+  const active: PackageSettingsSection =
+    editable && sections.includes(requested as SkillDefinitionSection)
+      ? (requested as SkillDefinitionSection)
+      : "files";
 
-  const sectionHref = (section: SkillSettingsSection, modal?: "edit" | "editManifest") => {
+  const sectionHref = (section: PackageSettingsSection, modal?: "edit" | "editManifest") => {
     const search = new URLSearchParams(location.search);
-    if (section === "files") search.delete("skillSettings");
-    else search.set("skillSettings", section);
+    if (section === "files") search.delete("packageSettings");
+    else search.set("packageSettings", section);
     // A modal belongs to the section it was opened in.
     search.delete("edit");
     search.delete("editManifest");
@@ -73,7 +86,9 @@ export function SkillSettingsView({
             label: t("detail.settings.definitionGroup"),
             items: [
               { id: "general" as const, icon: IdCard, label: t("editor.tabIdentity") },
-              { id: "content" as const, icon: FileText, label: t("editor.tabContent") },
+              ...(type === "skill"
+                ? [{ id: "content" as const, icon: FileText, label: t("editor.tabContent") }]
+                : []),
             ],
           },
         ]
@@ -82,7 +97,7 @@ export function SkillSettingsView({
 
   return (
     <AgentDetailSplit
-      data-skill-settings
+      data-package-settings
       railClassName="p-6"
       rail={
         <nav className="space-y-5" aria-label={t("detail.tabSettings")}>
@@ -108,21 +123,25 @@ export function SkillSettingsView({
     >
       {active !== "files" && detail ? (
         <Suspense fallback={<LoadingState />}>
-          <SkillDefinitionEditor
-            detail={detail}
-            section={active}
-            onSection={(next) => void navigate(sectionHref(next))}
-          />
+          {type === "skill" ? (
+            <SkillDefinitionEditor
+              detail={detail}
+              section={active}
+              onSection={(next) => void navigate(sectionHref(next))}
+            />
+          ) : (
+            <McpServerDefinitionEditor detail={detail} />
+          )}
         </Suspense>
       ) : (
         <FileExplorer
           packageId={packageId}
-          type="skill"
+          type={type}
           version={version}
           editHref={
             editable
               ? (path) =>
-                  path === primaryDisplayFile("skill").name
+                  type === "skill" && path === primaryDisplayFile("skill").name
                     ? sectionHref("content", "edit")
                     : path === "manifest.json"
                       ? sectionHref("general", "editManifest")

@@ -31,24 +31,29 @@ import { RailButton } from "./settings/rail-link";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
 // Only agent + skill have an editor route (see app.tsx).
-type EditablePackageType = "agent" | "skill" | "integration";
+/** Every type is edited in its Définition; only the page (create) shows the emoji and breadcrumb. */
+type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
 
 const emojiMap: Record<EditablePackageType, string> = {
   agent: "⚡",
   skill: "🧠",
   integration: "🧩",
+  "mcp-server": "🔌",
 };
 
 const breadcrumbNewKeys: Record<EditablePackageType, string> = {
   agent: "editor.breadcrumbNew",
   skill: "editor.breadcrumbNewSkill",
   integration: "editor.breadcrumbNewIntegration",
+  // A server is imported, never created here: the key is never read.
+  "mcp-server": "editor.breadcrumbNewIntegration",
 };
 
 const listLabelKeys: Record<EditablePackageType, { key: string; ns?: string }> = {
   agent: { key: "detail.breadcrumb" },
   skill: { key: "packages.type.skills", ns: "settings" },
   integration: { key: "packages.type.integrations", ns: "settings" },
+  "mcp-server": { key: "packages.type.mcp-servers", ns: "settings" },
 };
 
 interface EditorTab {

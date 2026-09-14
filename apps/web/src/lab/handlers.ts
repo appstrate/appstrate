@@ -39,6 +39,8 @@ const deletedEndUsers = new Set<string>();
 const dashboardSsoByOrg = new Map<string, boolean>();
 const organizationLogoByOrg = new Map<string, string | null>();
 const changedAgentBundles = new Map<string, LabAgentDetail>();
+/** Skill and MCP-server drafts saved in this lab session. */
+const changedPackageDrafts = new Map<string, (typeof f.skillDetails)[number]>();
 const integrationDefaults = new Map<string, { connection_id: string; enforce: boolean }>();
 const defaultKey = (url: URL, headers: Headers) =>
   `${headers.get("X-Org-Id")}:${headers.get("X-Application-Id")}:${url.pathname}`;
@@ -775,8 +777,38 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     method: "GET",
     pattern: /^\/api\/packages\/skills\/[^/]+\/[^/]+$/,
     handler: (url) => {
-      const detail = f.skillDetails.find((candidate) => candidate.id === typedPackageId(url));
+      const id = typedPackageId(url);
+      const detail =
+        changedPackageDrafts.get(id) ?? f.skillDetails.find((candidate) => candidate.id === id);
       return detail ? { status: 200, body: detail } : { status: 404, body: {} };
+    },
+  },
+  {
+    // Saving a skill's or a server's definition: the draft moves forward one
+    // lock version and the page reads it back.
+    method: "PUT",
+    pattern: /^\/api\/packages\/(skills|mcp-servers)\/[^/]+\/[^/]+$/,
+    handler: (url, scenario, _headers, body) => {
+      const update = body as {
+        manifest?: Record<string, unknown>;
+        content?: string | null;
+        lock_version?: number;
+      } | null;
+      const id = typedPackageId(url);
+      const current =
+        changedPackageDrafts.get(id) ??
+        [...f.skillDetails, ...f.mcpServerDetails].find((candidate) => candidate.id === id);
+      if (!current || !update?.manifest) return { status: 400, body: {} };
+      const updated = {
+        ...current,
+        manifest: update.manifest,
+        content: url.pathname.includes("/skills/")
+          ? (update.content ?? current.content)
+          : current.content,
+        lock_version: (update.lock_version ?? current.lock_version ?? 0) + 1,
+      };
+      if (scenario !== "error") changedPackageDrafts.set(id, updated);
+      return { status: scenario === "error" ? 500 : 200, body: updated };
     },
   },
   {
@@ -826,7 +858,9 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     method: "GET",
     pattern: /^\/api\/packages\/mcp-servers\/[^/]+\/[^/]+$/,
     handler: (url) => {
-      const detail = f.mcpServerDetails.find((candidate) => candidate.id === typedPackageId(url));
+      const id = typedPackageId(url);
+      const detail =
+        changedPackageDrafts.get(id) ?? f.mcpServerDetails.find((candidate) => candidate.id === id);
       return detail ? { status: 200, body: detail } : { status: 404, body: {} };
     },
   },

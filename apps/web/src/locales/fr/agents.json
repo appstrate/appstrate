@@ -868,5 +868,7 @@
   "editor.editFile": "Modifier {{name}}",
   "detail.settings.exploreGroup": "Explorer",
   "editor.editManifestLink": "Modifier le manifeste AFPS",
-  "editor.tabContent": "Contenu"
+  "editor.tabContent": "Contenu",
+  "editor.fileEmpty": "Ce fichier est vide.",
+  "mcpServerEditor.description.general": "Le nom, la description et l’identité du serveur. Son exécution et ses outils se règlent dans le manifeste."
 }

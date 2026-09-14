@@ -4,10 +4,10 @@
  * A definition file — the prompt, a skill's content — read in place and edited
  * in a modal.
  *
- * One rule for every file of a package: the page shows a reader, never an
- * editor. The files explorer reads the same way, so a file looks the same
- * wherever it appears, and changing one is always the same gesture: "Modifier",
- * a modal with the editor, "Appliquer". Applying writes into the Définition
+ * One rule for every file of a package: the page shows the text as a reader
+ * sees it, never an editor — a read-only editor still looks typeable, and
+ * hides the Markdown layout the author wrote. Changing one is always the same
+ * gesture: "Modifier", a modal with the editor, "Appliquer". Applying writes into the Définition
  * draft, and the section's save bar saves it with everything else — no second
  * save path, no second lock version to race.
  *
@@ -19,10 +19,9 @@ import { useTranslation } from "react-i18next";
 import { Braces, Pencil } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { useModalParam } from "../hooks/use-modal-param";
-import { useTheme } from "../stores/theme-store";
 import { JsonEditor } from "./json-editor";
 import { Modal } from "./modal";
-import { MonacoEditor } from "./monaco";
+import { Markdown } from "./markdown";
 import { ContentEditor } from "./package-editor/content-editor";
 
 export function DefinitionFileSection({
@@ -38,8 +37,8 @@ export function DefinitionFileSection({
   onApply: (value: string) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const { resolvedTheme } = useTheme();
   const editing = useModalParam("edit");
+  const { frontmatter, body } = splitFrontmatter(value);
 
   return (
     <div className="space-y-3">
@@ -53,21 +52,21 @@ export function DefinitionFileSection({
             {t("btn.edit", { ns: "common" })}
           </Button>
         </div>
-        <MonacoEditor
-          height="480px"
-          language="markdown"
-          value={value}
-          theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-          options={{
-            readOnly: true,
-            ariaLabel: fileName,
-            minimap: { enabled: false },
-            fontSize: 13,
-            fontFamily: "'SF Mono', 'Fira Code', monospace",
-            scrollBeyondLastLine: false,
-            wordWrap: "on",
-          }}
-        />
+        <div className="space-y-4 p-5">
+          {/* A skill's YAML header is data, not prose: shown as it is written,
+              apart from the text Markdown lays out. */}
+          {frontmatter && (
+            <pre className="bg-muted text-muted-foreground overflow-x-auto rounded-md px-3 py-2 font-mono text-xs">
+              {frontmatter}
+            </pre>
+          )}
+          {body.trim() ? (
+            // Package text: no image fetch, no author-controlled links.
+            <Markdown inert>{body}</Markdown>
+          ) : (
+            <p className="text-muted-foreground text-sm">{t("editor.fileEmpty")}</p>
+          )}
+        </div>
       </div>
       {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
 
@@ -171,4 +170,12 @@ export function ManifestEditEntry({
       )}
     </>
   );
+}
+
+/** A leading `---` YAML block, kept apart from the Markdown body. */
+function splitFrontmatter(text: string): { frontmatter: string | null; body: string } {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+  return match
+    ? { frontmatter: match[1]!, body: text.slice(match[0].length) }
+    : { frontmatter: null, body: text };
 }

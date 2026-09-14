@@ -14,6 +14,11 @@ import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
 import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
 import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
+import { useUnsavedChanges } from "../hooks/use-unsaved-changes";
+import { useQueryClient } from "@tanstack/react-query";
+import { client } from "../api/client";
+import { splitPackageRef } from "../lib/package-paths";
+import { invalidatePackageFiles, packageKeys } from "../lib/query-keys";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 import { FormField } from "../components/form-field";
 
@@ -921,6 +926,95 @@ export function SkillDefinitionEditor({
       tab={section}
       onTabRequest={(next) => onSection(next as SkillDefinitionSection)}
     />
+  );
+}
+
+export type McpServerDefinitionSection = "general";
+
+/**
+ * A local MCP server's definition. The server has no content file and no form
+ * of its own beyond its identity — `server`, `tools` and `user_config` are
+ * authored in the manifest — so its Définition is Identité, with the manifest
+ * reached raw like every other package. Update-only: a server is never
+ * created here (it arrives by import), which is why this does not go through
+ * `useEditorState`, whose create path the type has not got.
+ */
+export function McpServerDefinitionEditor({ detail }: { detail: OrgPackageItemDetail }) {
+  return <McpServerDefinitionInner key={`${detail.id}:${detail.lock_version}`} detail={detail} />;
+}
+
+function McpServerDefinitionInner({ detail }: { detail: OrgPackageItemDetail }) {
+  const { t } = useTranslation(["agents", "common"]);
+  const qc = useQueryClient();
+  const initial = detail.manifest ?? {};
+  const [manifest, setManifest] = useState<Record<string, unknown>>(initial);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const isDirty = JSON.stringify(manifest) !== JSON.stringify(initial);
+  const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
+  const metadata = useMemo(() => manifestToMetadata(manifest), [manifest]);
+
+  const save = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      await client.PUT("/api/packages/mcp-servers/{scope}/{name}", {
+        params: { path: splitPackageRef(detail.id) },
+        body: {
+          manifest,
+          content: JSON.stringify(manifest, null, 2),
+          lock_version: detail.lock_version ?? 0,
+        } as never,
+      });
+      allowNavigation();
+      toast.success(t("editor.saved"));
+      await qc.invalidateQueries({ queryKey: packageKeys.all });
+      invalidatePackageFiles(qc);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <EditorShell
+      type="mcp-server"
+      packageId={detail.id}
+      isEdit
+      displayName={(manifest.display_name as string) || detail.id}
+      tabs={[{ id: "general", label: t("editor.tabIdentity") }]}
+      activeTab="general"
+      onTabChange={() => {}}
+      error={error}
+      isPending={pending}
+      onSubmit={() => void save()}
+      onCancel={() => {}}
+      presentation="embedded"
+      activeDescription={t("mcpServerEditor.description.general")}
+      isDirty={isDirty}
+      onDiscardChanges={() => {
+        setManifest(initial);
+        setError(null);
+      }}
+    >
+      <MetadataSection
+        value={metadata}
+        onChange={(m) => setManifest((prev) => ({ ...prev, ...metadataToManifestPatch(m) }))}
+        isEdit
+        surface="settings"
+      />
+      <ManifestEditEntry
+        value={manifest}
+        schema={{
+          uri: AFPS_SCHEMA_URLS["mcp-server"],
+          schema: PACKAGE_SCHEMAS["mcp-server"] ?? {},
+        }}
+        showLink
+        onApply={setManifest}
+      />
+      <UnsavedChangesModal blocker={blocker} />
+    </EditorShell>
   );
 }
 

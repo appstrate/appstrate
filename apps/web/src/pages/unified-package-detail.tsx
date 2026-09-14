@@ -32,7 +32,6 @@ import { PackageActionsDropdown } from "../components/package-detail/package-act
 import { VersionBanners } from "../components/version-banners";
 import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
-import { FileExplorer } from "../components/package-files/file-explorer";
 import { PackageOverview } from "../components/package-detail/package-overview";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
@@ -45,7 +44,7 @@ import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/ag
 import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
-import { SkillSettingsView } from "../components/package-detail/skill-settings-view";
+import { PackageSettingsView } from "../components/package-detail/package-settings-view";
 import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 
 type DetailTab =
@@ -218,10 +217,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const allValidTabs: DetailTab[] =
     type === "agent"
       ? AGENT_DETAIL_TABS.filter((id) => fullRead || id !== "overview")
-      : type === "skill"
-        ? // `content` stays valid only to redirect old links to Paramètres.
-          ["overview", "versions", "diff", "settings", "content", "usedBy"]
-        : ["overview", "versions", "diff", "content", "usedBy"];
+      : // `content` stays valid only to redirect old links to Paramètres.
+        ["overview", "versions", "diff", "settings", "content", "usedBy"];
   // Every detail has a useful summary; explicit file/version deep links still win.
   const defaultTab: DetailTab = fullRead ? "overview" : "runs";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
@@ -255,8 +252,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   useEffect(() => {
     if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
     if (tab === "versions" && source === "system") setTab(defaultTab);
-    // A skill's files moved into Paramètres › Explorer.
-    if (type === "skill" && tab === "content") setTab("settings");
+    // A package's files moved into Paramètres › Explorer.
+    if (tab === "content") setTab("settings");
   }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab, type]);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
   // ── Loading / Error ──
@@ -326,11 +323,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   // The artifact file explorer — one generic tab for every package type. Keeps
   // the historical `"content"` id so existing deep links (#content) still land.
-  const filesTab: { id: DetailTab; label: string } = {
-    id: "content",
-    label: t("detail.tabFiles"),
-  };
-
   // The rendered manifest, next to the raw artifact it comes from.
   const overviewTab: { id: DetailTab; label: string } = {
     id: "overview",
@@ -352,7 +344,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     overviewTab,
-    type === "skill" ? { id: "settings", label: t("detail.tabSettings") } : filesTab,
+    { id: "settings", label: t("detail.tabSettings") },
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
@@ -420,8 +412,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
                 onFork={() => setForkOpen(true)}
-                // A skill's definition is edited in Paramètres › Définition.
-                showEdit={type !== "skill"}
+                // The definition is edited in Paramètres › Définition.
+                showEdit={false}
                 canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
                 onDeletePackage={() => {
                   if (!pkgDetail) return;
@@ -589,30 +581,28 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 version={unifiedForHeader.version}
                 historical={isHistoricalVersion}
                 agentCount={pkgDetail.agents.length}
-                onOpenFiles={() => setTab(type === "skill" ? "settings" : "content")}
+                onOpenFiles={() => setTab("settings")}
                 onOpenUsage={() => setTab("usedBy")}
               />
             )}
           </TabsContent>
 
-          {type === "skill" ? (
+          {(type === "skill" || type === "mcp-server") && (
             <TabsContent
               value="settings"
               className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
             >
-              <SkillSettingsView
+              <PackageSettingsView
+                type={type}
                 packageId={packageId}
                 detail={pkgDetail}
                 version={versionLabel}
-                canEditDefinition={isOwned && can("skills:write") && !isHistoricalVersion}
+                canEditDefinition={
+                  isOwned &&
+                  can(type === "skill" ? "skills:write" : "mcp-servers:write") &&
+                  !isHistoricalVersion
+                }
               />
-            </TabsContent>
-          ) : (
-            <TabsContent
-              value="content"
-              className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-            >
-              <FileExplorer packageId={packageId} type={type} version={versionLabel} />
             </TabsContent>
           )}
 
