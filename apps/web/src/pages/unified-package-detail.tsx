@@ -45,6 +45,7 @@ import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/ag
 import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
+import { SkillSettingsView } from "../components/package-detail/skill-settings-view";
 import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 
 type DetailTab =
@@ -217,7 +218,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const allValidTabs: DetailTab[] =
     type === "agent"
       ? AGENT_DETAIL_TABS.filter((id) => fullRead || id !== "overview")
-      : ["overview", "versions", "diff", "content", "usedBy"];
+      : type === "skill"
+        ? // `content` stays valid only to redirect old links to Paramètres.
+          ["overview", "versions", "diff", "settings", "content", "usedBy"]
+        : ["overview", "versions", "diff", "content", "usedBy"];
   // Every detail has a useful summary; explicit file/version deep links still win.
   const defaultTab: DetailTab = fullRead ? "overview" : "runs";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
@@ -251,7 +255,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   useEffect(() => {
     if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
     if (tab === "versions" && source === "system") setTab(defaultTab);
-  }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab]);
+    // A skill's files moved into Paramètres › Explorer.
+    if (type === "skill" && tab === "content") setTab("settings");
+  }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab, type]);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
   // ── Loading / Error ──
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
@@ -346,7 +352,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     overviewTab,
-    filesTab,
+    type === "skill" ? { id: "settings", label: t("detail.tabSettings") } : filesTab,
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
@@ -414,6 +420,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 onDownload={downloadPackage}
                 onCreateVersion={() => setCreateVersionOpen(true)}
                 onFork={() => setForkOpen(true)}
+                // A skill's definition is edited in Paramètres › Définition.
+                showEdit={type !== "skill"}
                 canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
                 onDeletePackage={() => {
                   if (!pkgDetail) return;
@@ -581,18 +589,32 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 version={unifiedForHeader.version}
                 historical={isHistoricalVersion}
                 agentCount={pkgDetail.agents.length}
-                onOpenFiles={() => setTab("content")}
+                onOpenFiles={() => setTab(type === "skill" ? "settings" : "content")}
                 onOpenUsage={() => setTab("usedBy")}
               />
             )}
           </TabsContent>
 
-          <TabsContent
-            value="content"
-            className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-          >
-            <FileExplorer packageId={packageId} type={type} version={versionLabel} />
-          </TabsContent>
+          {type === "skill" ? (
+            <TabsContent
+              value="settings"
+              className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+            >
+              <SkillSettingsView
+                packageId={packageId}
+                detail={pkgDetail}
+                version={versionLabel}
+                canEditDefinition={isOwned && can("skills:write") && !isHistoricalVersion}
+              />
+            </TabsContent>
+          ) : (
+            <TabsContent
+              value="content"
+              className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+            >
+              <FileExplorer packageId={packageId} type={type} version={versionLabel} />
+            </TabsContent>
+          )}
 
           <TabsContent value="usedBy" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
             {pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />}

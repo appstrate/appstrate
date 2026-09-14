@@ -31,7 +31,7 @@ import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
 import { EditorShell } from "../components/editor-shell";
-import { DefinitionFileSection } from "../components/definition-file-section";
+import { DefinitionFileSection, ManifestEditEntry } from "../components/definition-file-section";
 
 import type { AgentEditorState } from "../components/agent-editor/types";
 import type { MetadataState } from "../components/agent-editor/metadata-section";
@@ -255,7 +255,7 @@ function AgentEditorInner({
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "integrations", label: t("editor.tabIntegrations") },
-    { id: "json", label: presentation === "page" ? t("editor.tabJson") : t("editor.tabManifest") },
+    { id: "json", label: t("editor.tabJson") },
   ];
   const agentTabDescriptions: Partial<Record<GenericEditorTab, string>> = {
     general: t("editor.description.general"),
@@ -335,7 +335,6 @@ function AgentEditorInner({
       {activeTab === "prompt" &&
         (presentation === "embedded" ? (
           <DefinitionFileSection
-            kind="markdown"
             fileName={primaryDisplayFile("agent").name}
             value={state.prompt}
             onApply={(prompt) => setState((s) => ({ ...s, prompt }))}
@@ -434,30 +433,29 @@ function AgentEditorInner({
           />
         </div>
       )}
-      {activeTab === "json" &&
-        (presentation === "embedded" ? (
-          <DefinitionFileSection
-            kind="json"
-            fileName="manifest.json"
-            value={state.manifest}
-            schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
-            onApply={(manifest) => {
-              setState((s) => ({ ...s, manifest }));
-              setSchemaFields(manifestToSchemaFields(manifest));
-            }}
-          />
-        ) : (
-          <JsonEditor
-            key={jsonEditorKey}
-            value={state.manifest}
-            onApply={(manifest) => {
-              setState((s) => ({ ...s, manifest }));
-              setSchemaFields(manifestToSchemaFields(manifest));
-              setActiveTab("general");
-            }}
-            schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
-          />
-        ))}
+      {presentation === "embedded" && (
+        <ManifestEditEntry
+          value={state.manifest}
+          schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
+          showLink={activeTab !== "prompt"}
+          onApply={(manifest) => {
+            setState((s) => ({ ...s, manifest }));
+            setSchemaFields(manifestToSchemaFields(manifest));
+          }}
+        />
+      )}
+      {activeTab === "json" && presentation !== "embedded" && (
+        <JsonEditor
+          key={jsonEditorKey}
+          value={state.manifest}
+          onApply={(manifest) => {
+            setState((s) => ({ ...s, manifest }));
+            setSchemaFields(manifestToSchemaFields(manifest));
+            setActiveTab("general");
+          }}
+          schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
+        />
+      )}
 
       <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
@@ -511,15 +509,25 @@ function PackageEditorInner({
   initialState,
   packageId,
   isEdit,
+  presentation = "page",
+  tab,
+  onTabRequest,
 }: {
   type: "skill";
   initialState: PackageEditorState;
   packageId: string | undefined;
   isEdit: boolean;
+  /** A page to create; embedded in the skill's Définition to edit. */
+  presentation?: "page" | "embedded";
+  tab?: GenericEditorTab;
+  onTabRequest?: (tab: GenericEditorTab) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+  const [localTab, setLocalTab] = useState<GenericEditorTab>("general");
+  const activeTab = tab ?? localTab;
+  const setActiveTab = (next: GenericEditorTab) =>
+    tab !== undefined ? onTabRequest?.(next) : setLocalTab(next);
 
   const {
     state,
@@ -527,6 +535,8 @@ function PackageEditorInner({
     updateManifest,
     blocker,
     error,
+    setError,
+    isDirty,
     jsonEditorKey,
     bumpJsonKey,
     saveDraft,
@@ -566,11 +576,25 @@ function PackageEditorInner({
   const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
 
   const onSubmit = () =>
-    handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));
+    presentation === "embedded"
+      ? void saveEmbedded(saveDraft, setError, t("editor.saved"))
+      : handleSubmit(undefined, (next) => next && setActiveTab(next as GenericEditorTab));
+
+  const discardChanges = () => {
+    setState(initialState);
+    setError(null);
+    bumpJsonKey();
+  };
 
   const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = [
-    { id: "general", label: t("editor.tabGeneral") },
-    { id: "content", label: primaryDisplayFile(type).name },
+    {
+      id: "general",
+      label: presentation === "page" ? t("editor.tabGeneral") : t("editor.tabIdentity"),
+    },
+    {
+      id: "content",
+      label: presentation === "page" ? primaryDisplayFile(type).name : t("editor.tabContent"),
+    },
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -592,21 +616,45 @@ function PackageEditorInner({
       onCancel={() =>
         navigate(isEdit ? packageDetailPath(type, packageId!) : packageListPath(type))
       }
-      hideSubmitBar={activeTab === "json"}
+      hideSubmitBar={presentation === "page" && activeTab === "json"}
+      presentation={presentation}
+      isDirty={isDirty}
+      onDiscardChanges={discardChanges}
     >
       {activeTab === "general" && (
-        <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
-      )}
-
-      {activeTab === "content" && (
-        <ContentEditor
-          value={state.content}
-          onChange={(content) => setState((s) => ({ ...s, content }))}
-          language="markdown"
+        <MetadataSection
+          value={metadata}
+          onChange={onMetadataChange}
+          isEdit={isEdit}
+          surface={presentation === "page" ? "card" : "settings"}
         />
       )}
 
-      {activeTab === "json" && (
+      {activeTab === "content" &&
+        (presentation === "embedded" ? (
+          <DefinitionFileSection
+            fileName={primaryDisplayFile(type).name}
+            value={state.content}
+            onApply={(content) => setState((s) => ({ ...s, content }))}
+          />
+        ) : (
+          <ContentEditor
+            value={state.content}
+            onChange={(content) => setState((s) => ({ ...s, content }))}
+            language="markdown"
+          />
+        ))}
+
+      {presentation === "embedded" && (
+        <ManifestEditEntry
+          value={state.manifest}
+          schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type]! }}
+          showLink={activeTab === "general"}
+          onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
+        />
+      )}
+
+      {activeTab === "json" && presentation === "page" && (
         <JsonEditor
           key={jsonEditorKey}
           value={state.manifest}
@@ -730,7 +778,7 @@ function IntegrationEditorInner({
           ? t("integrationEditor.tabTools")
           : t("integrationEditor.tabToolPolicies"),
     },
-    { id: "json", label: presentation === "page" ? t("editor.tabJson") : t("editor.tabManifest") },
+    { id: "json", label: t("editor.tabJson") },
   ];
 
   return (
@@ -796,26 +844,25 @@ function IntegrationEditorInner({
         />
       )}
 
-      {activeTab === "json" &&
-        (presentation === "embedded" ? (
-          <DefinitionFileSection
-            kind="json"
-            fileName="manifest.json"
-            value={state.manifest}
-            schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
-            onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
-          />
-        ) : (
-          <JsonEditor
-            key={jsonEditorKey}
-            value={state.manifest}
-            onApply={(manifest) => {
-              setState((s) => ({ ...s, manifest }));
-              setActiveTab("general");
-            }}
-            schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
-          />
-        ))}
+      {presentation === "embedded" && (
+        <ManifestEditEntry
+          value={state.manifest}
+          schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
+          showLink
+          onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
+        />
+      )}
+      {activeTab === "json" && presentation !== "embedded" && (
+        <JsonEditor
+          key={jsonEditorKey}
+          value={state.manifest}
+          onApply={(manifest) => {
+            setState((s) => ({ ...s, manifest }));
+            setActiveTab("general");
+          }}
+          schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
+        />
+      )}
 
       <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
@@ -843,6 +890,36 @@ export function IntegrationDefinitionEditor({
       presentation="embedded"
       tab={section}
       onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
+    />
+  );
+}
+
+export type SkillDefinitionSection = "general" | "content";
+
+/** A skill's definition, edited inside its settings — see `AgentDefinitionEditor`. */
+export function SkillDefinitionEditor({
+  detail,
+  section,
+  onSection,
+}: {
+  detail: OrgPackageItemDetail;
+  section: SkillDefinitionSection;
+  onSection: (section: SkillDefinitionSection) => void;
+}) {
+  return (
+    <PackageEditorInner
+      key={`${detail.id}:${detail.lock_version}`}
+      type="skill"
+      initialState={{
+        manifest: detail.manifest ?? {},
+        content: detail.content ?? "",
+        lock_version: detail.lock_version,
+      }}
+      packageId={detail.id}
+      isEdit
+      presentation="embedded"
+      tab={section}
+      onTabRequest={(next) => onSection(next as SkillDefinitionSection)}
     />
   );
 }

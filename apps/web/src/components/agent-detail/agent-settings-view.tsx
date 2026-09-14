@@ -8,7 +8,6 @@ import {
   Braces,
   BrainCircuit,
   CalendarClock,
-  Code2,
   FileText,
   FolderTree,
   Globe,
@@ -44,7 +43,6 @@ const DEFINITION_SECTION_IDS: readonly AgentDefinitionSection[] = [
   "schema",
   "skills",
   "integrations",
-  "json",
 ];
 
 /**
@@ -79,7 +77,6 @@ const SETTINGS_GROUPS = [
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
       { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
       { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },
-      { id: "json", icon: Code2, labelKey: "editor.tabManifest" },
     ],
   },
 ] satisfies Array<{
@@ -155,22 +152,25 @@ export function AgentSettingsView({
     search.delete("agentConfig");
     // A file modal belongs to the section it was opened in.
     search.delete("edit");
+    search.delete("editManifest");
     const query = search.toString();
     return `${location.pathname}${query ? `?${query}` : ""}#settings`;
   };
 
   // The bundle files a Définition section edits, and the section that does.
   const fileEditHref = (path: string) => {
-    const section =
+    // The prompt has its section; the manifest is the raw form of every other
+    // section, so it opens its modal over Identité.
+    const target =
       path === primaryDisplayFile("agent").name
-        ? "prompt"
+        ? { section: "prompt", modal: "edit" }
         : path === "manifest.json"
-          ? "json"
+          ? { section: "general", modal: "editManifest" }
           : null;
-    if (!section) return undefined;
+    if (!target) return undefined;
     const search = new URLSearchParams(location.search);
-    search.set("agentSettings", section);
-    search.set("edit", "1");
+    search.set("agentSettings", target.section);
+    search.set(target.modal, "1");
     return `${location.pathname}?${search.toString()}#settings`;
   };
 

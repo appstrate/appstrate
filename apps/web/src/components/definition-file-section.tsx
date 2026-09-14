@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A definition file — the prompt, the AFPS manifest — read in place and edited
+ * A definition file — the prompt, a skill's content — read in place and edited
  * in a modal.
  *
  * One rule for every file of a package: the page shows a reader, never an
@@ -16,7 +16,7 @@
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil } from "lucide-react";
+import { Braces, Pencil } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { useModalParam } from "../hooks/use-modal-param";
 import { useTheme } from "../stores/theme-store";
@@ -25,28 +25,21 @@ import { Modal } from "./modal";
 import { MonacoEditor } from "./monaco";
 import { ContentEditor } from "./package-editor/content-editor";
 
-type DefinitionFile =
-  | { kind: "markdown"; value: string; onApply: (value: string) => void }
-  | {
-      kind: "json";
-      value: Record<string, unknown>;
-      onApply: (value: Record<string, unknown>) => void;
-      schema?: { uri: string; schema: object };
-    };
-
 export function DefinitionFileSection({
   fileName,
   hint,
-  ...file
-}: DefinitionFile & {
+  value,
+  onApply,
+}: {
   /** The file's name in the package, shown on the reader and the modal. */
   fileName: string;
   hint?: string;
+  value: string;
+  onApply: (value: string) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { resolvedTheme } = useTheme();
   const editing = useModalParam("edit");
-  const text = file.kind === "json" ? JSON.stringify(file.value, null, 2) : file.value;
 
   return (
     <div className="space-y-3">
@@ -62,8 +55,8 @@ export function DefinitionFileSection({
         </div>
         <MonacoEditor
           height="480px"
-          language={file.kind === "json" ? "json" : "markdown"}
-          value={text}
+          language="markdown"
+          value={value}
           theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
           options={{
             readOnly: true,
@@ -85,24 +78,13 @@ export function DefinitionFileSection({
           title={t("editor.editFile", { name: fileName })}
           className="sm:max-w-5xl"
         >
-          {file.kind === "json" ? (
-            <JsonEditor
-              value={file.value}
-              schema={file.schema}
-              onApply={(next) => {
-                file.onApply(next);
-                editing.close();
-              }}
-            />
-          ) : (
-            <MarkdownFileEditor
-              initial={file.value}
-              onApply={(next) => {
-                file.onApply(next);
-                editing.close();
-              }}
-            />
-          )}
+          <MarkdownFileEditor
+            initial={value}
+            onApply={(next) => {
+              onApply(next);
+              editing.close();
+            }}
+          />
         </Modal>
       )}
     </div>
@@ -127,5 +109,66 @@ function MarkdownFileEditor({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * The AFPS manifest, edited raw — the escape hatch, not a section.
+ *
+ * Every form of the Définition writes into `manifest.json`; listing the file
+ * beside them read as a second copy of the same content. But the manifest also
+ * holds fields no form covers, so its raw editor stays reachable: a quiet link
+ * under the forms, and "Modifier" on `manifest.json` in the files explorer,
+ * both opening this one modal (`?editManifest=1`). What it applies joins the
+ * same draft the forms write.
+ */
+export function ManifestEditEntry({
+  value,
+  schema,
+  onApply,
+  showLink,
+}: {
+  value: Record<string, unknown>;
+  schema?: { uri: string; schema: object };
+  onApply: (value: Record<string, unknown>) => void;
+  /** The link sits under forms; a file section (the prompt) has its own editor. */
+  showLink: boolean;
+}) {
+  const { t } = useTranslation("agents");
+  const editing = useModalParam("editManifest");
+  return (
+    <>
+      {showLink && (
+        <div className="border-border mt-8 border-t pt-4">
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="text-muted-foreground h-auto px-0"
+            onClick={() => editing.open()}
+          >
+            <Braces />
+            {t("editor.editManifestLink")}
+          </Button>
+        </div>
+      )}
+      {editing.value !== null && (
+        <Modal
+          open
+          onClose={editing.close}
+          title={t("editor.editFile", { name: "manifest.json" })}
+          className="sm:max-w-5xl"
+        >
+          <JsonEditor
+            value={value}
+            schema={schema}
+            onApply={(next) => {
+              onApply(next);
+              editing.close();
+            }}
+          />
+        </Modal>
+      )}
+    </>
   );
 }

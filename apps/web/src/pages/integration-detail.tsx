@@ -44,7 +44,6 @@ import {
   Workflow,
   IdCard,
   Server,
-  Code2,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { AddIntegrationConnection } from "../components/integration-connect/add-integration-connection";
@@ -131,7 +130,6 @@ const DEFINITION_RAIL: Record<string, IntegrationDefinitionSection> = {
   source: "source",
   "auth-methods": "auths",
   "tool-policies": "tools",
-  manifest: "json",
 };
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 
@@ -704,7 +702,6 @@ function IntegrationSettings({
               label: t("integrationEditor.tabToolPolicies", { ns: "agents" }),
               icon: ShieldCheck,
             },
-            { id: "manifest", label: t("editor.tabManifest", { ns: "agents" }), icon: Code2 },
           ]
         : [{ id: "functioning", label: t("integration.structure.functioning"), icon: Plug }],
     },
@@ -727,6 +724,7 @@ function IntegrationSettings({
                   next.set("integrationSettings", section.id);
                   // A file modal belongs to the section it was opened in.
                   next.delete("edit");
+                  next.delete("editManifest");
                   return (
                     <RailLink
                       key={section.id}
@@ -758,6 +756,7 @@ function IntegrationSettings({
               const search = new URLSearchParams(location.search);
               if (railId) search.set("integrationSettings", railId);
               search.delete("edit");
+              search.delete("editManifest");
               void navigate({ search: search.toString(), hash: "configuration" });
             }}
           />
@@ -771,8 +770,8 @@ function IntegrationSettings({
               ? (path) => {
                   if (path !== "manifest.json") return undefined;
                   const search = new URLSearchParams(location.search);
-                  search.set("integrationSettings", "manifest");
-                  search.set("edit", "1");
+                  search.set("integrationSettings", "identity");
+                  search.set("editManifest", "1");
                   return `?${search.toString()}#configuration`;
                 }
               : undefined

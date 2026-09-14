@@ -862,10 +862,11 @@
   "integrationEditor.description.tools": "Les outils exposés aux agents et les droits que chacun demande.",
   "detail.settings.definitionGroup": "Définition",
   "editor.tabIdentity": "Identité",
-  "editor.tabManifest": "Manifeste AFPS",
   "editor.saved": "Définition enregistrée",
   "integrationEditor.tabAuthMethods": "Méthodes d’authentification",
   "integrationEditor.tabToolPolicies": "Politique des outils",
   "editor.editFile": "Modifier {{name}}",
-  "detail.settings.exploreGroup": "Explorer"
+  "detail.settings.exploreGroup": "Explorer",
+  "editor.editManifestLink": "Modifier le manifeste AFPS",
+  "editor.tabContent": "Contenu"
 }

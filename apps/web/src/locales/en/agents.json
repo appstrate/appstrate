@@ -862,10 +862,11 @@
   "integrationEditor.description.tools": "The tools exposed to agents and the scopes each one asks for.",
   "detail.settings.definitionGroup": "Definition",
   "editor.tabIdentity": "Identity",
-  "editor.tabManifest": "AFPS manifest",
   "editor.saved": "Definition saved",
   "integrationEditor.tabAuthMethods": "Authentication methods",
   "integrationEditor.tabToolPolicies": "Tool policies",
   "editor.editFile": "Edit {{name}}",
-  "detail.settings.exploreGroup": "Explore"
+  "detail.settings.exploreGroup": "Explore",
+  "editor.editManifestLink": "Edit the AFPS manifest",
+  "editor.tabContent": "Content"
 }
