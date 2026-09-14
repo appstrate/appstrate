@@ -1519,8 +1519,8 @@ export const mcpServerVersionInfoById: Record<
   Json200<"/api/packages/mcp-servers/{scope}/{name}/versions/info", "get">
 > = {
   [githubGitMcpServerDetail.id]: {
-    latest_published_version: "2.1.0",
-    active_version: "2.1.0",
+    latest_published_version: "1.0.1",
+    active_version: "1.0.1",
   },
   [qboMcpServerDetail.id]: {
     latest_published_version: "0.9.0",

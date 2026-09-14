@@ -14,13 +14,20 @@ import i18n from "../i18n";
 interface ImportModalProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * Stay where you are and hand the result back, instead of opening the
+   * imported package. For an import made from inside another form — the
+   * integration editor importing its local server — navigating would throw
+   * away the form.
+   */
+  onImported?: (result: { packageId: string; type: string }) => void;
 }
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 type FormData = { file: File | null; githubUrl: string };
 
-export function ImportModal({ open, onClose }: ImportModalProps) {
+export function ImportModal({ open, onClose, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
@@ -32,7 +39,7 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
     version: string;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const importPackage = useImportPackage();
+  const importPackage = useImportPackage({ navigateOnSuccess: !onImported });
   const importGithub = useImportFromGithub();
 
   const {
@@ -108,7 +115,8 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       importPackage.mutate(
         { file: file, force },
         {
-          onSuccess: () => {
+          onSuccess: (result) => {
+            onImported?.(result);
             resetAndClose();
           },
           onError: (err) => {

@@ -687,8 +687,6 @@
   "integrationEditor.source.kindDesc": "remote = remote HTTP MCP server · local = bundled mcp-server package · none = credential proxy only.",
   "integrationEditor.source.remoteUrl": "Remote server URL",
   "integrationEditor.source.transport": "Transport",
-  "integrationEditor.source.serverName": "mcp-server package name",
-  "integrationEditor.source.serverNameDesc": "References an installed mcp-server package (imported separately).",
   "integrationEditor.source.serverVersion": "Version",
   "integrationEditor.source.noneDesc": "No MCP server — the integration only exposes the credential-injecting API proxy.",
   "integrationEditor.auths.title": "Authentication methods",
@@ -850,5 +848,13 @@
   "manifest.toolsPolicy": "Tools policy",
   "detail.tabConnections": "Connections",
   "dashboard.allAgents": "All agents",
-  "dashboard.schedules": "Schedules"
+  "dashboard.schedules": "Schedules",
+  "integrationEditor.source.server": "Local MCP server",
+  "integrationEditor.source.serverPick": "Choose a server",
+  "integrationEditor.source.serverImport": "Import a server…",
+  "integrationEditor.source.serverDesc": "The code the sandbox runs for this integration.",
+  "integrationEditor.source.serverMissing": "“{{name}}” does not exist in the organisation: at run time the integration would be skipped silently and the agent would run without its tools.",
+  "integrationEditor.source.serverVersions": "Published versions: {{versions}}",
+  "integrationEditor.source.serverNoVersion": "No published version: runs will fail until one is published.",
+  "integrationEditor.source.serverVersionUnmatched": "No published version matches “{{range}}”: runs will fail."
 }

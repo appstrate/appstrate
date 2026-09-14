@@ -173,7 +173,9 @@ export function useRunAgent(packageId: string) {
   });
 }
 
-export function useImportPackage() {
+export function useImportPackage({
+  navigateOnSuccess = true,
+}: { navigateOnSuccess?: boolean } = {}) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
@@ -227,7 +229,12 @@ export function useImportPackage() {
           toast.warning(message);
         }
       }
-      navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
+      // The library lists servers for the integration editor's picker, which
+      // imports in place and must see the new one.
+      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+      if (navigateOnSuccess) {
+        navigate(`/${data.type === "agent" ? "agent" : data.type}s/${data.packageId}`);
+      }
     },
     onError: onMutationError,
   });

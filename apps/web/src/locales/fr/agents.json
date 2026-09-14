@@ -687,8 +687,6 @@
   "integrationEditor.source.kindDesc": "remote = serveur MCP HTTP distant · local = paquet mcp-server embarqué · none = proxy d'API uniquement.",
   "integrationEditor.source.remoteUrl": "URL du serveur distant",
   "integrationEditor.source.transport": "Transport",
-  "integrationEditor.source.serverName": "Nom du paquet mcp-server",
-  "integrationEditor.source.serverNameDesc": "Référence un paquet mcp-server installé (importé séparément).",
   "integrationEditor.source.serverVersion": "Version",
   "integrationEditor.source.noneDesc": "Aucun serveur MCP — l'intégration n'expose que le proxy d'API à injection de credentials.",
   "integrationEditor.auths.title": "Méthodes d'authentification",
@@ -850,5 +848,13 @@
   "manifest.toolsPolicy": "Politique des outils",
   "detail.tabConnections": "Connexions",
   "dashboard.allAgents": "Tous les agents",
-  "dashboard.schedules": "Planifications"
+  "dashboard.schedules": "Planifications",
+  "integrationEditor.source.server": "Serveur MCP local",
+  "integrationEditor.source.serverPick": "Choisir un serveur",
+  "integrationEditor.source.serverImport": "Importer un serveur…",
+  "integrationEditor.source.serverDesc": "Le code que la sandbox exécute pour cette intégration.",
+  "integrationEditor.source.serverMissing": "« {{name}} » n’existe pas dans l’organisation : au lancement, l’intégration serait ignorée sans erreur et l’agent tournerait sans ses outils.",
+  "integrationEditor.source.serverVersions": "Versions publiées : {{versions}}",
+  "integrationEditor.source.serverNoVersion": "Aucune version publiée : le lancement échouera tant qu’une version n’est pas publiée.",
+  "integrationEditor.source.serverVersionUnmatched": "Aucune version publiée ne correspond à « {{range}} » : le lancement échouera."
 }
