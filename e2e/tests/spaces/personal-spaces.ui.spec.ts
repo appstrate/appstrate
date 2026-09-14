@@ -104,7 +104,7 @@ test("an agent authored in a personal space is invisible to a colleague and to t
   const authorContext = await createAuthedContext(browser, author, orgId, personalId);
   try {
     const authorPage = await authorContext.newPage();
-    await authorPage.goto("/library");
+    await authorPage.goto("/space/packages");
     await expect(libraryRow(authorPage)).toBeVisible();
     await authorPage.goto(agentPath);
     // The detail page DOES print the id, under the display name.
@@ -120,7 +120,7 @@ test("an agent authored in a personal space is invisible to a colleague and to t
     const context = await createAuthedContext(browser, other, orgId, browserCtx.org.defaultSpaceId);
     try {
       const page = await context.newPage();
-      await page.goto("/library");
+      await page.goto(other === browserCtx.auth ? "/library" : "/space/packages");
       // An empty page satisfies a count of zero as happily as a rendered one,
       // so wait for the type tabs before reading the absence.
       await expect(page.getByRole("tab").first()).toBeVisible();
