@@ -156,9 +156,6 @@ function ConfigPanel({ packageId }: { packageId: string }) {
   }
   return (
     <InputSettingsSection
-      // Same remount rule as the configuration tab: restart from what the
-      // server holds rather than from a snapshot taken before the write.
-      key={JSON.stringify([detail.input.values, detail.input.locked_fields])}
       packageId={packageId}
       wrapper={{ schema }}
       initialValues={detail.input.values}

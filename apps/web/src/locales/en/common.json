@@ -130,6 +130,7 @@
   "viewAs.stopped.view_as_forbidden": "Preview stopped: you may no longer preview this role.",
   "viewAs.stopped.view_as_not_found": "Preview stopped: the previewed space or role no longer exists.",
   "viewAs.stopped.generic": "Preview stopped.",
-  "nav.chat": "Chat",
-  "nav.catalogue": "Catalogue"
+  "nav.catalogue": "Catalogue",
+  "products.unread_one": "{{count}} unread conversation",
+  "products.unread_other": "{{count}} unread conversations"
 }

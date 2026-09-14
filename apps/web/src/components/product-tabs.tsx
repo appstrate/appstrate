@@ -27,6 +27,8 @@ import { useTranslation } from "react-i18next";
 import { Blocks, MessageSquare } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { useAppConfig } from "@/hooks/use-app-config";
+import { useChatUnreadCount } from "@appstrate/module-chat/unread";
+import { buildScopingHeaders } from "@/lib/scoping-headers";
 
 interface Product {
   id: string;
@@ -35,12 +37,17 @@ interface Product {
   to: string;
   active: boolean;
   enabled: boolean;
+  /** Unread conversations, on the tab that leads to them. */
+  unread?: number;
 }
 
 export function ProductTabs() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
   const { features } = useAppConfig();
+  // The chat has no entry in the Studio's navigation: its unread count rides
+  // on the tab that switches to it.
+  const chatUnread = useChatUnreadCount(buildScopingHeaders, Boolean(features.chat));
 
   // Studio owns every route the chat does not, so it cannot be matched by
   // prefix — it is the active one whenever the chat is not.
@@ -62,6 +69,7 @@ export function ProductTabs() {
       to: "/chat",
       active: inChat,
       enabled: Boolean(features.chat),
+      unread: chatUnread,
     },
   ].filter((p) => p.enabled);
 
@@ -87,6 +95,14 @@ export function ProductTabs() {
         >
           <span className="flex shrink-0 items-center justify-center">{p.icon}</span>
           <span className="truncate group-data-[collapsible=icon]:hidden">{p.label}</span>
+          {!p.active && (p.unread ?? 0) > 0 && (
+            <span
+              className="bg-primary text-primary-foreground rounded-full px-1.5 text-[10px] leading-4 font-semibold tabular-nums group-data-[collapsible=icon]:hidden"
+              aria-label={t("products.unread", { count: p.unread })}
+            >
+              {p.unread}
+            </span>
+          )}
         </Link>
       ))}
     </div>

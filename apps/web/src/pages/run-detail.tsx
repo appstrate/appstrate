@@ -42,14 +42,6 @@ import type { JournalOverviewFilter } from "../components/log-viewer";
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
 
-/**
- * Has this React Query subscription reached a state that will not change on its
- * own? Either it answered (data or error, so no longer `pending`), or it is
- * disabled and will never run (`pending` with an idle fetch). A query still
- * `fetching` — including the very first render, where v5 already reports the
- * optimistic `fetching` — has not.
- */
-
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();

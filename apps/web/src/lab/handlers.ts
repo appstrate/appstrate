@@ -957,6 +957,13 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     },
   },
   {
+    // The agent's input settings save themselves: the lab answers with what it
+    // was sent, so the form reads "Enregistré" instead of a missing fixture.
+    method: "PUT",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/input-settings$/,
+    handler: (_url, _scenario, _headers, body) => ({ status: 200, body }),
+  },
+  {
     method: "GET",
     pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+$/,
     handler: (url) => ({ status: 200, body: agentDetailFixture(typedPackageId(url)) }),

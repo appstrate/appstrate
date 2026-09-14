@@ -1806,8 +1806,14 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
     runtime_tools: ["output", "log", "note", "pin", "publish_file"],
   },
   input: {
-    values: {},
-    locked_fields: [],
+    // The values this space set, as the pre-RBAC lab showed them; one locked.
+    values: {
+      fiscal_year: "2025-2026",
+      drive_folder: "TRACTR / Finances / 2026-Q2",
+      language: "fr",
+      report_format: "xlsx",
+    },
+    locked_fields: ["report_format"],
     schema: {
       type: "object",
       properties: {

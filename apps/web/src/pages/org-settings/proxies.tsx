@@ -23,7 +23,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest, type TestResult } from "../../hooks/use-connection-test";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState } from "../../components/page-states";
 import { TestResultSpan } from "../../components/test-result-span";
 import { TableRowActions } from "../../components/table-row-actions";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
@@ -219,10 +219,6 @@ export function OrgSettingsProxiesPage() {
       ? (setDefaultMutation.variables?.body.proxyId ?? null)
       : null,
   });
-
-  // Below the hooks, same reason as members.tsx.
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   // Every hook first, THEN the guard: the column set is a hook now, and a
   // return above it makes the call conditional.

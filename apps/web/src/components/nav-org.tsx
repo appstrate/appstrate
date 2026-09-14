@@ -10,7 +10,6 @@ import {
   Wrench,
   Loader2,
   Boxes,
-  MessageSquare,
   FileText,
   type LucideIcon,
 } from "lucide-react";
@@ -18,9 +17,6 @@ import { useUnreadCount } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
-import { useAppConfig } from "../hooks/use-app-config";
-import { useChatUnreadCount } from "@appstrate/module-chat/unread";
-import { buildScopingHeaders } from "../lib/scoping-headers";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import {
   SidebarGroup,
@@ -45,8 +41,6 @@ export function NavOrg() {
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
   const { can } = usePermissions();
-  const { features } = useAppConfig();
-  const chatUnread = useChatUnreadCount(buildScopingHeaders, features.chat);
 
   // Inline runs live on ephemeral shadow packages that are not in `agents`,
   // so they don't contribute to `runningRuns`. Check them separately.
@@ -68,9 +62,6 @@ export function NavOrg() {
   const activityItems: NavItem[] = [
     { path: "/", label: t("nav.dashboard"), icon: LayoutDashboard },
     // Module-contributed product surfaces (absent flag = entry hidden)
-    ...(features.chat
-      ? [{ path: "/chat", label: t("nav.chat"), icon: MessageSquare, badge: chatUnread }]
-      : []),
     { path: "/files", label: t("nav.files"), icon: FileText },
   ];
 

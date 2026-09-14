@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
+import { usePermissions } from "../../hooks/use-permissions";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
@@ -27,6 +28,9 @@ export function OrgSettingsOAuthPage() {
   const updateSettingsMutation = useUpdateOrgSettings();
   const { currentOrg } = useOrg();
   const { features } = useAppConfig();
+  // Switching collaborator SSO is `org:settings`, as the API requires; reading
+  // the clients below stays open to whoever reached the page.
+  const { can } = usePermissions();
   if (!features.oidc) return <NavigateKeepingState to="/org-settings/general" />;
 
   if (failureReason) return <ErrorState message={getErrorMessage(failureReason)} />;
@@ -48,7 +52,7 @@ export function OrgSettingsOAuthPage() {
           <Switch
             id="dashboard-sso"
             checked={orgSettings?.dashboard_sso_enabled ?? false}
-            disabled={!currentOrg || updateSettingsMutation.isPending}
+            disabled={!currentOrg || !can("org:settings") || updateSettingsMutation.isPending}
             onCheckedChange={(checked) => {
               if (!currentOrg) return;
               updateSettingsMutation.mutate(

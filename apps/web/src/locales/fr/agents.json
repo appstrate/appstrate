@@ -363,7 +363,6 @@
   "run.tabDocuments": "Documents",
   "run.tabManifest": "Manifest",
   "run.tabPrompt": "Prompt",
-  "run.tabFiles": "Fichiers",
   "run.emptyUsage": "Aucune donnée d'utilisation",
   "run.infoTrigger": "Déclenché par",
   "run.headerTrigger": "Déclenchement",
@@ -517,7 +516,7 @@
   "editor.errorPrompt": "Le prompt est requis.",
   "editor.skillsEmpty": "Aucun skill dans les packages. Ajoutez-en depuis la page Packages.",
   "editor.integrationsEmpty": "Aucune intégration importée. Visitez le marketplace Intégrations pour en importer une.",
-  "editor.integrationInactive": "Non active dans cet espace",
+  "editor.integrationInactive": "Non active dans cet espace de travail",
   "editor.activateIntegration": "Activer",
   "editor.dependencyMissing": "Non installé dans cette organisation",
   "editor.tabGeneral": "Général",
@@ -736,8 +735,7 @@
   "ownership.systemAgent": "Agent système",
   "ownership.systemAgentTooltip": "Définition fournie et maintenue par Appstrate. Vous pouvez exécuter cet agent et configurer son installation, mais son bundle reste en lecture seule.",
   "ownership.forkedFrom": "Dupliqué depuis ",
-  "detail.tabConfiguration": "Paramètres par défaut",
-  "detail.inputSettings.title": "Paramètres de l'agent",
+  "detail.tabConfiguration": "Configuration",
   "detail.inputSettings.hint": "Valeurs utilisées quand l'appelant n'en fournit pas. Un paramètre laissé vide est demandé au lancement ; un paramètre verrouillé est imposé et ne peut plus être fourni au lancement.",
   "detail.inputSettings.lock": "Verrouiller",
   "detail.inputSettings.lockHint": "Le paramètre n'est plus demandé au lancement et un appel qui le fournit est refusé.",
@@ -926,5 +924,7 @@
   "integrationEditor.toolsPolicy.editTitle": "Scopes requis : {{name}}",
   "integrationEditor.toolsPolicy.remove": "Retirer la politique",
   "integrationEditor.toolsPolicy.nameRequired": "Le nom de l’outil est requis.",
-  "integrationEditor.toolsPolicy.nameTaken": "Cet outil est déjà dans le catalogue."
+  "integrationEditor.toolsPolicy.nameTaken": "Cet outil est déjà dans le catalogue.",
+  "detail.emptyConfig": "Cet agent ne déclare aucune entrée configurable.",
+  "detail.bundle.inputSchema": "Schéma d'entrée"
 }

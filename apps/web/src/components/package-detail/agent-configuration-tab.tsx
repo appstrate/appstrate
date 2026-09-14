@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CircleSlash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -37,6 +36,7 @@ import {
   type ModelGenerationSettings,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
+import { JsonView } from "../json-view";
 import { SettingRow } from "../settings/setting-row";
 
 // ─── Input Settings Section ─────────────────────────────────────────
@@ -55,6 +55,9 @@ import { SettingRow } from "../settings/setting-row";
  * legitimate and means "ask it at launch". Locking a required field with
  * nothing behind it is the one refused combination (400
  * `locked_required_field_empty`), surfaced as a toast naming the field.
+ *
+ * It saves itself, like the rest of the redesigned settings: a pause after the
+ * last change sends the whole pair, and the line under the form says so.
  */
 /** Exported so the visual map can mount the same settings form in a dialog. */
 export function InputSettingsSection({
@@ -78,6 +81,16 @@ export function InputSettingsSection({
   const upload = useUploadClient();
   const [values, setValues] = useState<Record<string, unknown>>(initialValues);
   const [locked, setLocked] = useState<string[]>(initialLocked);
+  const [hasEdited, setHasEdited] = useState(false);
+
+  useEffect(() => {
+    if (!hasEdited || isHistorical) return;
+    const timeout = window.setTimeout(() => {
+      setHasEdited(false);
+      mutation.mutate({ values, locked_fields: locked });
+    }, 650);
+    return () => window.clearTimeout(timeout);
+  }, [hasEdited, isHistorical, mutation, values, locked]);
 
   const defaults = authorDefaults(wrapper.schema);
   const keys = getOrderedKeys(wrapper.schema, wrapper.property_order);
@@ -89,16 +102,18 @@ export function InputSettingsSection({
       else out[key] = next;
       return out;
     });
+    setHasEdited(true);
   };
 
-  const toggleLock = (key: string, on: boolean) =>
+  const toggleLock = (key: string, on: boolean) => {
     setLocked((prev) => (on ? [...prev, key] : prev.filter((k) => k !== key)));
+    setHasEdited(true);
+  };
 
   return (
-    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
-      <h3 className="text-sm font-medium">{t("detail.inputSettings.title")}</h3>
+    <div className="max-w-2xl space-y-3 py-4">
       {showDescription && (
-        <p className="text-muted-foreground text-xs">{t("detail.inputSettings.hint")}</p>
+        <p className="text-muted-foreground text-sm">{t("detail.inputSettings.hint")}</p>
       )}
       <div className="space-y-4">
         {keys.map((key) => (
@@ -117,15 +132,11 @@ export function InputSettingsSection({
           />
         ))}
       </div>
-      <div className="flex justify-end pt-2">
-        <Button
-          onClick={() => mutation.mutate({ values, locked_fields: locked })}
-          disabled={mutation.isPending || isHistorical}
-          size="sm"
-        >
-          {mutation.isPending ? "..." : t("btn.save")}
-        </Button>
-      </div>
+      <SaveFeedback
+        pending={mutation.isPending}
+        success={mutation.isSuccess}
+        error={mutation.isError}
+      />
     </div>
   );
 }
@@ -552,20 +563,30 @@ export function AgentConfigurationTab({
   // settings belong to the installation, not to the frozen bundle.
   if (isHistorical) {
     return (
-      <p className="text-muted-foreground text-sm">
-        {t("detail.configuration.historicalDefaultsUnavailable")}
-      </p>
+      <div className="space-y-4">
+        <p className="text-muted-foreground text-sm">
+          {t("detail.configuration.historicalDefaultsUnavailable")}
+        </p>
+        {showInputSettings && wrapper && (
+          <div className="rounded-lg border p-4">
+            <h3 className="mb-3 text-sm font-medium">{t("detail.bundle.inputSchema")}</h3>
+            <JsonView data={wrapper.schema} />
+          </div>
+        )}
+      </div>
     );
   }
 
-  if (!showInputSettings || !wrapper || !detail) return null;
+  if (!detail) return null;
+  if (!showInputSettings || !wrapper) {
+    return <p className="text-muted-foreground text-sm">{t("detail.emptyConfig")}</p>;
+  }
 
   return (
     <InputSettingsSection
-      // Remounted when the saved settings change, so the editor's local
-      // state restarts from what the server now holds rather than from a
-      // stale snapshot taken before the write.
-      key={JSON.stringify([detail.input.values, detail.input.locked_fields])}
+      // Not remounted when the saved settings change: the form saves itself,
+      // so its local state IS what was written, and a remount would take the
+      // focus away mid-typing.
       packageId={packageId}
       wrapper={wrapper}
       initialValues={detail.input.values}

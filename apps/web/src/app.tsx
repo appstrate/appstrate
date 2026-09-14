@@ -1100,51 +1100,6 @@ export function App() {
               <Route path="connections" element={<PreferencesConnectionsPage />} />
               <Route path="mcp-access" element={<PreferencesMcpAccessPage />} />
             </Route>
-            {features.webhooks && (
-              <>
-                <Route
-                  path="/webhooks"
-                  element={
-                    <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
-                      <Suspense fallback={<LoadingState />}>
-                        <WebhooksPage />
-                      </Suspense>
-                    </RequirePermission>
-                  }
-                />
-                <Route
-                  path="/webhooks/:id"
-                  element={
-                    <RequirePermission permission={WEBHOOK_READ_PERMISSIONS}>
-                      <Suspense fallback={<LoadingState />}>
-                        <WebhookDetailPage />
-                      </Suspense>
-                    </RequirePermission>
-                  }
-                />
-              </>
-            )}
-            {features.chat && (
-              <>
-                <Route
-                  path="/chat"
-                  element={
-                    <Suspense fallback={<LoadingState />}>
-                      <ChatModulePage />
-                    </Suspense>
-                  }
-                />
-                <Route
-                  path="/chat/:conversationId"
-                  element={
-                    <Suspense fallback={<LoadingState />}>
-                      <ChatModulePage />
-                    </Suspense>
-                  }
-                />
-              </>
-            )}
-            {/* Space-scoped routes (read spaceId from store, like orgId) */}
             <Route
               element={
                 <LazyRoute>

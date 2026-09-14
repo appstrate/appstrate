@@ -9,15 +9,12 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatBytes } from "@appstrate/core/format";
 import { $api } from "../../api/client";
-import { Switch } from "@appstrate/ui/components/switch";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
-import { useAppConfig } from "../../hooks/use-app-config";
-import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
@@ -64,9 +61,6 @@ export function OrgSettingsGeneralPage() {
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
   const canUpdateOrg = can("org:update");
-  const { features } = useAppConfig();
-  const { data: orgSettings } = useOrgSettings();
-  const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
@@ -229,44 +223,6 @@ export function OrgSettingsGeneralPage() {
           />
         </SettingRow>
       </SettingsGroup>
-
-      {/* Dashboard SSO — who may sign in to the dashboard through the org's own
-          identity provider. Behind `org:settings` (not `org:update`): an admin
-          administers the org without being able to re-slug it. */}
-      {can("org:settings") && features.oidc && (
-        <SettingsGroup title={t("orgSettings.advancedSection")}>
-          <SettingRow
-            variant="toggle"
-            label={t("orgSettings.dashboardSsoTitle")}
-            description={t("orgSettings.dashboardSsoDesc")}
-            status={updateSettingsMutation.isPending && <Spinner />}
-          >
-            <Switch
-              checked={Boolean(orgSettings?.dashboard_sso_enabled)}
-              disabled={updateSettingsMutation.isPending}
-              aria-label={t("orgSettings.dashboardSsoTitle")}
-              onCheckedChange={(next) =>
-                updateSettingsMutation.mutate(
-                  {
-                    params: { path: { orgId: currentOrg.id } },
-                    body: { dashboard_sso_enabled: next },
-                  },
-                  {
-                    onSuccess: (data) =>
-                      toast.success(
-                        data.dashboard_sso_enabled
-                          ? t("orgSettings.dashboardSsoEnabled")
-                          : t("orgSettings.dashboardSsoDisabled"),
-                      ),
-                    onError: (err) =>
-                      toast.error(t("error.prefix", { message: getErrorMessage(err) })),
-                  },
-                )
-              }
-            />
-          </SettingRow>
-        </SettingsGroup>
-      )}
 
       {storage && (
         <>

@@ -1156,6 +1156,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   const deletePin = useDeleteIntegrationPin();
 
   const [newAgent, setNewAgent] = useState("");
+  const [adding, setAdding] = useState(false);
   const [newConnectionId, setNewConnectionId] = useState("");
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
@@ -1180,6 +1181,7 @@ function PinManagementSection({ packageId }: { packageId: string }) {
         onSuccess: () => {
           setNewAgent("");
           setNewConnectionId("");
+          setAdding(false);
         },
       },
     );
@@ -1194,33 +1196,23 @@ function PinManagementSection({ packageId }: { packageId: string }) {
   );
 
   return (
-    <div
-      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
-      data-testid="pin-management-section"
-    >
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">{t("integration.admin.exceptions.title")}</h3>
-        <p className="text-muted-foreground mt-1 text-xs">
-          {t("integration.admin.exceptions.help")}
-        </p>
-      </div>
+    <div className="pb-0" data-testid="pin-management-section">
+      <SettingsHeading
+        level="group"
+        title={t("integration.admin.exceptions.title")}
+        description={t("integration.admin.exceptions.help")}
+      />
 
       {/* Existing pins */}
       {(pins ?? []).length > 0 ? (
-        <div className="border-border bg-background mb-3 overflow-hidden rounded-md border">
-          <Table className="text-xs">
-            <TableHeader className="bg-muted/40">
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colAgent")}
-                </TableHead>
-                <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colAuth")}
-                </TableHead>
-                <TableHead className="h-auto px-3 py-2">
-                  {t("integration.admin.pinManagement.colConnection")}
-                </TableHead>
-                <TableHead className="h-auto w-12 px-3 py-2" />
+        <div className="mb-4 overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("integration.admin.pinManagement.colAgent")}</TableHead>
+                <TableHead>{t("integration.admin.pinManagement.colAuth")}</TableHead>
+                <TableHead>{t("integration.admin.pinManagement.colConnection")}</TableHead>
+                <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1229,14 +1221,14 @@ function PinManagementSection({ packageId }: { packageId: string }) {
                   key={`${p.packageId}-${p.auth_key}`}
                   data-testid={`pin-row-${p.packageId}-${p.auth_key}`}
                 >
-                  <TableCell className="px-3 py-2">{agentDisplayName(p.packageId)}</TableCell>
-                  <TableCell className="px-3 py-2">
+                  <TableCell>{agentDisplayName(p.packageId)}</TableCell>
+                  <TableCell>
                     <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
                       {p.auth_key}
                     </span>
                   </TableCell>
-                  <TableCell className="px-3 py-2">{connectionDisplay(p.connection_id)}</TableCell>
-                  <TableCell className="px-3 py-2">
+                  <TableCell>{connectionDisplay(p.connection_id)}</TableCell>
+                  <TableCell>
                     <Button
                       size="icon"
                       variant="ghost"
@@ -1272,51 +1264,62 @@ function PinManagementSection({ packageId }: { packageId: string }) {
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>
+      ) : !adding ? (
+        <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+          {t("integration.admin.pinManagement.add")}
+        </Button>
       ) : (
-        <div className="border-border bg-background flex flex-wrap items-end gap-2 rounded-md border p-3">
+        <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[12rem] flex-1">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
+            <Label htmlFor="pin-add-agent" className="mb-2 block text-sm">
               {t("integration.admin.pinManagement.colAgent")}
             </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={newAgent}
-              onChange={(e) => setNewAgent(e.target.value)}
-              data-testid="pin-add-agent"
-            >
-              <option value="">—</option>
-              {pinnableAgents.map((a) => (
-                <option key={a.packageId} value={a.packageId}>
-                  {a.display_name}
-                </option>
-              ))}
-            </select>
+            <Select value={newAgent} onValueChange={setNewAgent}>
+              <SelectTrigger id="pin-add-agent" data-testid="pin-add-agent">
+                <SelectValue placeholder={t("integration.admin.pinManagement.colAgent")} />
+              </SelectTrigger>
+              <SelectContent>
+                {pinnableAgents.map((a) => (
+                  <SelectItem key={a.packageId} value={a.packageId}>
+                    {a.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="min-w-[12rem] flex-1">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
+            <Label htmlFor="pin-add-connection" className="mb-2 block text-sm">
               {t("integration.admin.pinManagement.colConnection")}
             </Label>
-            <select
-              className="border-border bg-background w-full rounded border px-2 py-1 text-xs"
-              value={newConnectionId}
-              onChange={(e) => setNewConnectionId(e.target.value)}
-              data-testid="pin-add-connection"
-            >
-              <option value="">—</option>
-              {pinnableConnections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {connectionDisplay(c.id)}
-                </option>
-              ))}
-            </select>
+            <Select value={newConnectionId} onValueChange={setNewConnectionId}>
+              <SelectTrigger id="pin-add-connection" data-testid="pin-add-connection">
+                <SelectValue placeholder={t("integration.admin.pinManagement.colConnection")} />
+              </SelectTrigger>
+              <SelectContent>
+                {pinnableConnections.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {connectionDisplay(c.id)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <Button
             size="sm"
+            variant="outline"
             onClick={onSubmitNewPin}
             disabled={!newAgent || !newConnectionId || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={upsertPin.isPending}
+            onClick={() => setAdding(false)}
+          >
+            {t("btn.cancel", { ns: "common" })}
           </Button>
         </div>
       )}

@@ -47,12 +47,35 @@ export function setPreset(next: LabPreset): void {
   window.location.reload();
 }
 
-const orgAll = [...ORG_LEVEL_PERMISSIONS] as string[];
-const spaceAll = [...SPACE_LEVEL_PERMISSIONS] as string[];
+/**
+ * What the lab's modules contribute (`permissionsContribution`), which the core
+ * catalogs cannot list: oidc (`oauth-clients`, `cli-sessions`), webhooks
+ * (`webhooks` per space, `org-webhooks`) and ee (`billing`). Without them an
+ * owner lost SSO collaborateurs, Sessions CLI, Facturation and Webhooks from
+ * the settings rail, which no real owner does.
+ */
+const MODULE_ORG_ADMIN = [
+  "oauth-clients:read",
+  "oauth-clients:write",
+  "oauth-clients:delete",
+  "cli-sessions:read",
+  "cli-sessions:delete",
+  "org-webhooks:read",
+  "org-webhooks:write",
+  "org-webhooks:delete",
+  "billing:read",
+  "billing:manage",
+];
+const MODULE_ORG_MEMBER = ["billing:read"];
+const MODULE_SPACE_AUTHORING = ["webhooks:read", "webhooks:write", "webhooks:delete"];
+
+const orgAll = [...ORG_LEVEL_PERMISSIONS, ...MODULE_ORG_ADMIN] as string[];
+const spaceAll = [...SPACE_LEVEL_PERMISSIONS, ...MODULE_SPACE_AUTHORING] as string[];
 
 // `admin` is owner minus the org's identity — re-slugging is owner-only.
 const ORG_ADMIN = orgAll.filter((p) => p !== "org:delete" && p !== "org:update");
 const ORG_MEMBER = [
+  ...MODULE_ORG_MEMBER,
   "org:read",
   "members:read",
   "spaces:read",

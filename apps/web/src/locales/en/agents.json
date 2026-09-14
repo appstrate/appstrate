@@ -363,7 +363,6 @@
   "run.tabDocuments": "Documents",
   "run.tabManifest": "Manifest",
   "run.tabPrompt": "Prompt",
-  "run.tabFiles": "Files",
   "run.emptyUsage": "No usage data",
   "run.infoTrigger": "Triggered by",
   "run.headerTrigger": "Trigger",
@@ -517,7 +516,7 @@
   "editor.errorPrompt": "Prompt is required.",
   "editor.skillsEmpty": "No skills in packages. Add some from the Packages page.",
   "editor.integrationsEmpty": "No integrations imported. Visit the Integrations marketplace to import one.",
-  "editor.integrationInactive": "Not active in this space",
+  "editor.integrationInactive": "Not active in this workspace",
   "editor.activateIntegration": "Activate",
   "editor.dependencyMissing": "Not installed in this organization",
   "editor.tabGeneral": "General",
@@ -736,8 +735,7 @@
   "ownership.systemAgent": "System agent",
   "ownership.systemAgentTooltip": "Definition supplied and maintained by Appstrate. You can run this agent and configure its installation, but its bundle remains read-only.",
   "ownership.forkedFrom": "Forked from ",
-  "detail.tabConfiguration": "Default settings",
-  "detail.inputSettings.title": "Agent parameters",
+  "detail.tabConfiguration": "Configuration",
   "detail.inputSettings.hint": "Values used when the caller supplies none. A parameter left empty is asked at launch; a locked parameter is imposed and can no longer be supplied at launch.",
   "detail.inputSettings.lock": "Lock",
   "detail.inputSettings.lockHint": "The parameter is no longer asked at launch, and a call that sets it is refused.",
@@ -926,5 +924,7 @@
   "integrationEditor.toolsPolicy.editTitle": "Required scopes: {{name}}",
   "integrationEditor.toolsPolicy.remove": "Remove the policy",
   "integrationEditor.toolsPolicy.nameRequired": "The tool name is required.",
-  "integrationEditor.toolsPolicy.nameTaken": "This tool is already in the catalog."
+  "integrationEditor.toolsPolicy.nameTaken": "This tool is already in the catalog.",
+  "detail.emptyConfig": "This Agent declares no configurable input.",
+  "detail.bundle.inputSchema": "Input schema"
 }

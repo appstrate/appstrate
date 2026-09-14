@@ -16,7 +16,7 @@ import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../../components/page-actions-menu";
@@ -119,11 +119,6 @@ export function OrgSettingsMembersPage() {
   });
 
   const openedUser = members.find((member) => member.userId === userParam.value);
-
-  // Below the hooks: an early return above `useMemberColumns` would change
-  // the hook order between a loading render and a loaded one.
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
     <>
