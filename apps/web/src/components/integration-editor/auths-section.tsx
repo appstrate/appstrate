@@ -8,7 +8,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import { FormField } from "../form-field";
-import { SectionCard } from "../section-card";
+import { EditorSection, type EditorSurface } from "./editor-section";
 import { StringListInput } from "./string-list-input";
 import {
   getAuths,
@@ -20,13 +20,15 @@ import {
 } from "./utils";
 
 interface AuthsSectionProps {
+  /** `settings` inside the edit panel, `card` on the editor page. */
+  surface?: EditorSurface;
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
 }
 
 const AUTH_TYPES: AuthType[] = ["api_key", "oauth2", "basic", "custom"];
 
-export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
+export function AuthsSection({ manifest, onChange, surface = "card" }: AuthsSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   // Local row state preserves in-progress rows (e.g. a momentarily-empty key)
   // that setAuths drops from the manifest. Initialised once per mount; the tab
@@ -60,7 +62,8 @@ export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
   const removeAuth = (idx: number) => commit(rows.filter((_, i) => i !== idx));
 
   return (
-    <SectionCard
+    <EditorSection
+      surface={surface}
       title={t("integrationEditor.auths.title")}
       headerRight={
         <Button type="button" size="sm" variant="outline" onClick={addAuth}>
@@ -215,7 +218,7 @@ export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
           )}
         </div>
       ))}
-    </SectionCard>
+    </EditorSection>
   );
 }
 

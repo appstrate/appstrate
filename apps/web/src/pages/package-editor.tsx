@@ -580,10 +580,15 @@ function IntegrationEditorInner({
   initialState,
   packageId,
   isEdit,
+  presentation = "page",
+  onCancel,
 }: {
   initialState: EditorStateBase;
   packageId: string | undefined;
   isEdit: boolean;
+  /** Same two shapes as the agent editor: a page to create, a panel to edit. */
+  presentation?: "page" | "panel-dialog";
+  onCancel?: () => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
@@ -595,6 +600,8 @@ function IntegrationEditorInner({
     updateManifest,
     blocker,
     error,
+    setError,
+    isDirty,
     jsonEditorKey,
     bumpJsonKey,
     saveDraft,
@@ -618,7 +625,23 @@ function IntegrationEditorInner({
       }
       return null;
     },
+    onSuccess: presentation === "panel-dialog" ? onCancel : undefined,
   });
+
+  const discardChanges = () => {
+    setState(initialState);
+    setError(null);
+    bumpJsonKey();
+  };
+
+  const sectionSurface = presentation === "panel-dialog" ? "settings" : "card";
+  const integrationTabDescriptions: Partial<Record<GenericEditorTab, string>> = {
+    general: t("integrationEditor.description.general"),
+    source: t("integrationEditor.description.source"),
+    auths: t("integrationEditor.description.auths"),
+    tools: t("integrationEditor.description.tools"),
+    json: t("editor.description.json"),
+  };
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
   const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
@@ -652,27 +675,53 @@ function IntegrationEditorInner({
       error={error}
       isPending={isPending}
       onSubmit={onSubmit}
-      onCancel={() =>
-        navigate(
-          isEdit ? packageDetailPath("integration", packageId!) : packageListPath("integration"),
-        )
+      onCancel={
+        onCancel ??
+        (() =>
+          navigate(
+            isEdit ? packageDetailPath("integration", packageId!) : packageListPath("integration"),
+          ))
       }
       hideSubmitBar={activeTab === "json"}
+      presentation={presentation}
+      panelTitle={presentation === "panel-dialog" ? t("integrationEditor.editTitle") : undefined}
+      activeDescription={
+        presentation === "panel-dialog" ? integrationTabDescriptions[activeTab] : undefined
+      }
+      isDirty={isDirty}
+      onDiscardChanges={discardChanges}
     >
       {activeTab === "general" && (
-        <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit} />
+        <MetadataSection
+          value={metadata}
+          onChange={onMetadataChange}
+          isEdit={isEdit}
+          surface={sectionSurface}
+        />
       )}
 
       {activeTab === "source" && (
-        <SourceSection manifest={state.manifest} onChange={onManifestChange} />
+        <SourceSection
+          manifest={state.manifest}
+          onChange={onManifestChange}
+          surface={sectionSurface}
+        />
       )}
 
       {activeTab === "auths" && (
-        <AuthsSection manifest={state.manifest} onChange={onManifestChange} />
+        <AuthsSection
+          manifest={state.manifest}
+          onChange={onManifestChange}
+          surface={sectionSurface}
+        />
       )}
 
       {activeTab === "tools" && (
-        <ToolsPolicySection manifest={state.manifest} onChange={onManifestChange} />
+        <ToolsPolicySection
+          manifest={state.manifest}
+          onChange={onManifestChange}
+          surface={sectionSurface}
+        />
       )}
 
       {activeTab === "json" && (
@@ -689,6 +738,29 @@ function IntegrationEditorInner({
 
       <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
+  );
+}
+
+/**
+ * Editing an integration opens over its page, like editing an agent's bundle:
+ * the same `EditorShell` panel, rail on the left, save bar at the foot.
+ */
+export function IntegrationEditorModal({
+  detail,
+  onClose,
+}: {
+  detail: OrgPackageItemDetail;
+  onClose: () => void;
+}) {
+  return (
+    <IntegrationEditorInner
+      key={detail.id}
+      initialState={{ manifest: detail.manifest ?? {}, lock_version: detail.lock_version }}
+      packageId={detail.id}
+      isEdit
+      presentation="panel-dialog"
+      onCancel={onClose}
+    />
   );
 }
 

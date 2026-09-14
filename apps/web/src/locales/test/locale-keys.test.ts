@@ -172,6 +172,12 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
+  "integration.admin.creation.", // pages/integration-detail.tsx — t(`integration.admin.creation.${value}`)
+  "integration.admin.usage.",
+  "integration.admin.orgDefault.connection.", // pages/integration-detail.tsx — forced / default
+  "integration.structure.type.", // components/package-detail/integration-structure.tsx
+  "integration.structure.concept.", // components/package-detail/integration-structure.tsx
+  "integration.structure.empty.", // components/package-detail/integration-structure.tsx // pages/integration-detail.tsx — t(`integration.admin.usage.${mode}Help`)
   "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
   "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)

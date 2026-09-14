@@ -11,7 +11,18 @@ import {
 } from "@appstrate/ui/components/select";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { Braces, BrainCircuit, Code2, FileText, PackageOpen, Plug, Settings2 } from "lucide-react";
+import {
+  Braces,
+  BrainCircuit,
+  Code2,
+  FileText,
+  KeyRound,
+  PackageOpen,
+  Plug,
+  Server,
+  Settings2,
+  Wrench,
+} from "lucide-react";
 import { Spinner } from "./spinner";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { PanelDialog } from "./panel-dialog";
@@ -74,9 +85,9 @@ const editorTabIcons = {
   skills: BrainCircuit,
   integrations: Plug,
   json: Code2,
-  source: FileText,
-  auths: Settings2,
-  tools: Plug,
+  source: Server,
+  auths: KeyRound,
+  tools: Wrench,
   content: FileText,
 } as const;
 

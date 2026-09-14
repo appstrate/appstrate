@@ -7,7 +7,7 @@
  * OAuth client and connection mutations retain their existing ownership gates.
  */
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { CopyBlock } from "../components/copy-block";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
@@ -77,6 +77,7 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { usePermissions } from "../hooks/use-permissions";
+import { useModalParam } from "../hooks/use-modal-param";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
   useIntegrationDetail,
@@ -113,6 +114,10 @@ import {
 import { useIntegrations } from "../hooks/use-integrations";
 import { useAuth } from "../hooks/use-auth";
 import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
+
+const IntegrationEditorModal = lazy(() =>
+  import("./package-editor").then((module) => ({ default: module.IntegrationEditorModal })),
+);
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 
 // ─────────────────────────────────────────────
@@ -1440,6 +1445,9 @@ export function IntegrationDetailPage() {
     void navigate({ search: params.toString(), hash: "connections" });
   };
   const [forkOpen, setForkOpen] = useState(false);
+  // Editing opens over the page, as an agent's bundle does, and has an
+  // address: reload lands on it, Back closes it.
+  const editor = useModalParam("edit");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
@@ -1506,6 +1514,7 @@ export function IntegrationDetailPage() {
               downloadVersion={version}
               onDownload={downloadPackage}
               onFork={() => setForkOpen(true)}
+              onEdit={() => editor.open()}
               canDeactivate={active}
               onDeactivate={() => setConfirmDeactivate(true)}
               deactivatePending={deactivate.isPending}
@@ -1591,6 +1600,12 @@ export function IntegrationDetailPage() {
           </TabsContent>
         )}
       </Tabs>
+
+      {editor.value !== null && isOwned && pkg && (
+        <Suspense fallback={<LoadingState />}>
+          <IntegrationEditorModal detail={pkg} onClose={editor.close} />
+        </Suspense>
+      )}
 
       <ForkPackageModal
         open={forkOpen}

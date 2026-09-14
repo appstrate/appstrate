@@ -856,5 +856,10 @@
   "integrationEditor.source.serverMissing": "« {{name}} » n’existe pas dans l’organisation : au lancement, l’intégration serait ignorée sans erreur et l’agent tournerait sans ses outils.",
   "integrationEditor.source.serverVersions": "Versions publiées : {{versions}}",
   "integrationEditor.source.serverNoVersion": "Aucune version publiée : le lancement échouera tant qu’une version n’est pas publiée.",
-  "integrationEditor.source.serverVersionUnmatched": "Aucune version publiée ne correspond à « {{range}} » : le lancement échouera."
+  "integrationEditor.source.serverVersionUnmatched": "Aucune version publiée ne correspond à « {{range}} » : le lancement échouera.",
+  "integrationEditor.editTitle": "Modifier l’intégration",
+  "integrationEditor.description.general": "Le nom, la description et l’identité de l’intégration.",
+  "integrationEditor.description.source": "Comment l’intégration joint son service : l’API directement, un serveur MCP distant, ou un serveur MCP local exécuté dans la sandbox.",
+  "integrationEditor.description.auths": "Les méthodes de connexion au compte du service.",
+  "integrationEditor.description.tools": "Les outils exposés aux agents et les droits que chacun demande."
 }

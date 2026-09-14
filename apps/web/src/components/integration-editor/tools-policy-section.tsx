@@ -7,7 +7,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { SectionCard } from "../section-card";
+import { EditorSection, type EditorSurface } from "./editor-section";
 import { StringListInput } from "./string-list-input";
 import {
   getAllowUndeclaredTools,
@@ -19,11 +19,17 @@ import {
 } from "./utils";
 
 interface ToolsPolicySectionProps {
+  /** `settings` inside the edit panel, `card` on the editor page. */
+  surface?: EditorSurface;
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
 }
 
-export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionProps) {
+export function ToolsPolicySection({
+  manifest,
+  onChange,
+  surface = "card",
+}: ToolsPolicySectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   // Local row state preserves in-progress rows (empty tool name) that
   // setToolsPolicy drops from the manifest — without it, "Add" would write a
@@ -59,7 +65,8 @@ export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionPro
   const addPolicy = () => commit([...rows, { name: "", requiredScopes: {} }]);
 
   return (
-    <SectionCard
+    <EditorSection
+      surface={surface}
       title={t("integrationEditor.toolsPolicy.title")}
       headerRight={
         <Button type="button" size="sm" variant="outline" onClick={addPolicy}>
@@ -150,6 +157,6 @@ export function ToolsPolicySection({ manifest, onChange }: ToolsPolicySectionPro
           </div>
         </div>
       ))}
-    </SectionCard>
+    </EditorSection>
   );
 }
