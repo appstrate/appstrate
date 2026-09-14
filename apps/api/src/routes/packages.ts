@@ -16,6 +16,7 @@ import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle
 import { installPackage, hasPackageAccess } from "../services/space-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
+import { unzipPackageArchive } from "../services/package-archive.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -26,12 +27,10 @@ import {
   getPackageById,
   listOrgItems,
   getOrgItem,
-  createOrgItem,
   deleteOrgItem,
   PackageAlreadyExistsError,
 } from "../services/package-items/crud.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { uploadPackageFiles } from "../services/package-items/storage.ts";
 import {
   CONFIG_BY_TYPE,
   assertContentConforms,
@@ -42,7 +41,6 @@ import { validateManifest, type PackageType } from "@appstrate/core/validation";
 import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
 import { SLUG_REGEX, attachmentDisposition } from "@appstrate/core/naming";
 import { ifNoneMatchSatisfied } from "../lib/if-none-match.ts";
-import { unzipPackageArchive } from "../services/package-archive.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import {
   getVersionDetail,
@@ -54,6 +52,7 @@ import {
   computeHasUnpublishedChanges,
   createVersionFromDraft,
   createVersionAndUpload,
+  finalizeDraftPublication,
   deletePackageVersion,
 } from "../services/package-versions.ts";
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
@@ -91,6 +90,7 @@ import {
   fileEtag,
   applyFileOperations,
   validateAuthoredPackageFiles,
+  createPackageDraft,
   type PackageFileOperation,
   type PackageFileSource,
 } from "../services/package-files.ts";
@@ -250,41 +250,37 @@ export const forkSchema = z
 const packageFilePathSchema = z.string().min(1).max(1024);
 
 const packageFileOperationsSchema = z
-  .object({
-    operations: z
-      .array(
-        z.discriminatedUnion("op", [
-          z
-            .object({
-              op: z.literal("write"),
-              path: packageFilePathSchema,
-              text: z.string().optional(),
-              bytes_base64: z.string().optional(),
-            })
-            .strict()
-            .refine((op) => (op.text === undefined) !== (op.bytes_base64 === undefined), {
-              error: "A write operation carries exactly one of `text` or `bytes_base64`",
-            }),
-          z.object({ op: z.literal("delete"), path: packageFilePathSchema }).strict(),
-          z
-            .object({
-              op: z.literal("move"),
-              from: packageFilePathSchema,
-              to: packageFilePathSchema,
-            })
-            .strict(),
-        ]),
-      )
-      .min(1)
-      .max(200),
-  })
-  .strict();
+  .array(
+    z.discriminatedUnion("op", [
+      z
+        .object({
+          op: z.literal("write"),
+          path: packageFilePathSchema,
+          text: z.string().optional(),
+          bytes_base64: z.string().optional(),
+        })
+        .strict()
+        .refine((op) => (op.text === undefined) !== (op.bytes_base64 === undefined), {
+          error: "A write operation carries exactly one of `text` or `bytes_base64`",
+        }),
+      z.object({ op: z.literal("delete"), path: packageFilePathSchema }).strict(),
+      z
+        .object({
+          op: z.literal("move"),
+          from: packageFilePathSchema,
+          to: packageFilePathSchema,
+        })
+        .strict(),
+    ]),
+  )
+  .min(1)
+  .max(200);
 
 export const packageJsonCreateSchema = z
   .object({
     manifest: z.record(z.string(), z.unknown()),
     content: z.string().optional(),
-    operations: packageFileOperationsSchema.shape.operations.optional(),
+    operations: packageFileOperationsSchema.optional(),
   })
   .strict();
 
@@ -305,7 +301,7 @@ export const packageJsonCreateWithContentSchema = z
   .object({
     manifest: z.record(z.string(), z.unknown()),
     content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
-    operations: packageFileOperationsSchema.shape.operations.optional(),
+    operations: packageFileOperationsSchema.optional(),
   })
   .strict();
 
@@ -313,7 +309,7 @@ export const packageJsonUpdateSchema = z
   .object({
     manifest: z.record(z.string(), z.unknown()).optional(),
     content: z.string().optional(),
-    operations: packageFileOperationsSchema.shape.operations.optional(),
+    operations: packageFileOperationsSchema.optional(),
     /**
      * Optimistic-lock token. Mandatory and integral — the value is a row version,
      * never a fraction. This used to be `z.number().optional()` with a hand-rolled
@@ -353,131 +349,53 @@ interface ParsedUpload {
   id: string;
   name?: string;
   description?: string;
-  content: string;
-  normalizedFiles?: Record<string, Uint8Array>;
-  /** Full parsed manifest.json from the ZIP — stored as-is (like the registry). */
-  manifest: Record<string, unknown>;
-  /** Original archive bytes, retained for the canonical AFPS preflight. */
   archive: Uint8Array;
+  manifest: Record<string, unknown>;
 }
 
-/**
- * Parse a package item upload from a Hono context (multipart ZIP or JSON body).
- * Throws ApiError on validation errors.
- */
-async function parsePackageUpload(
-  c: Context<AppEnv>,
-  opts: {
-    /** Required file inside the ZIP (e.g. "SKILL.md") — null to skip check */
-    requiredFile: string | null;
-    /** Find the content file by extension (e.g. ".ts") — null to use requiredFile */
-    contentFileExt: string | null;
-  },
-): Promise<ParsedUpload> {
-  const contentType = c.req.header("content-type") ?? "";
-
-  if (contentType.includes("multipart/form-data")) {
-    const formData = await c.req.formData();
-    const file = formData.get("file");
-    if (!file || !(file instanceof File)) {
-      throw invalidRequest("File is required", "file");
-    }
-
-    if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
-      throw invalidRequest("Only .afps and .zip files are accepted", "file");
-    }
-
-    const id = file.name.replace(/\.(afps|zip)$/i, "");
-    if (!SLUG_REGEX.test(id)) {
-      throw invalidRequest("Invalid file name (kebab-case slug required)", "file");
-    }
-
-    const archive = new Uint8Array(await file.arrayBuffer());
-    let normalizedFiles: Record<string, Uint8Array>;
-    try {
-      normalizedFiles = unzipPackageArchive(archive);
-    } catch {
-      throw invalidRequest("Invalid ZIP file", "file");
-    }
-
-    // Find the content file
-    let contentFile: string | undefined;
-    if (opts.requiredFile) {
-      if (!normalizedFiles[opts.requiredFile]) {
-        throw invalidRequest(`ZIP must contain ${opts.requiredFile}`, "file");
-      }
-      contentFile = opts.requiredFile;
-    }
-    if (opts.contentFileExt) {
-      contentFile = Object.keys(normalizedFiles).find((p) => p.endsWith(opts.contentFileExt!));
-      if (!contentFile) {
-        throw invalidRequest(`ZIP must contain a ${opts.contentFileExt} file`, "file");
-      }
-    }
-
-    // No content file is looked up when both `parseOpts` are null (mcp-server,
-    // whose payload is the manifest) — such a package has no primary content.
-    const contentBytes = contentFile ? normalizedFiles[contentFile] : undefined;
-    const content = contentBytes ? new TextDecoder().decode(contentBytes) : "";
-
-    // manifest.json is mandatory: it is the only part of the archive the AFPS
-    // schema validates, and tolerating its absence let an unvalidated stub
-    // manifest reach the immutable `package_versions` row (issue #987).
-    if (!normalizedFiles["manifest.json"]) {
-      throw invalidRequest("ZIP must contain manifest.json", "file");
-    }
-    let manifest: Record<string, unknown>;
-    try {
-      manifest = parseManifestFromFiles(normalizedFiles);
-    } catch (err) {
-      throw invalidRequest(getErrorMessage(err), "file");
-    }
-
-    // Display fields default to the manifest (not stored back into it)
-    let name = typeof manifest.display_name === "string" ? manifest.display_name : undefined;
-    let description = typeof manifest.description === "string" ? manifest.description : undefined;
-
-    // Allow overriding name/description from form fields
-    const formName = formData.get("name") as string | null;
-    const formDesc = formData.get("description") as string | null;
-    if (formName) name = formName;
-    if (formDesc) description = formDesc;
-
-    return { id, name, description, content, normalizedFiles, manifest, archive };
+async function readPackageUpload(c: Context<AppEnv>): Promise<ParsedUpload> {
+  if (!(c.req.header("content-type") ?? "").includes("multipart/form-data")) {
+    throw new ApiError({
+      status: 415,
+      code: "archive_required",
+      title: "Archive Required",
+      detail: "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
+    });
   }
-
-  // Executable MCP packages are self-contained archives. A JSON manifest can
-  // describe an entry point but cannot carry it; synthesising a fake `content`
-  // file here created packages that validated, versioned and auto-installed,
-  // then failed only when the sidecar tried to boot the missing entry point.
-  throw new ApiError({
-    status: 415,
-    code: "archive_required",
-    title: "Archive Required",
-    detail: "MCP-server packages must be uploaded as a multipart .afps or .zip archive.",
-  });
+  const formData = await c.req.formData();
+  const file = formData.get("file");
+  if (!(file instanceof File)) throw invalidRequest("File is required", "file");
+  if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip"))
+    throw invalidRequest("Only .afps and .zip files are accepted", "file");
+  const id = file.name.replace(/\.(afps|zip)$/i, "");
+  if (!SLUG_REGEX.test(id))
+    throw invalidRequest("Invalid file name (kebab-case slug required)", "file");
+  const name = formData.get("name");
+  const description = formData.get("description");
+  const archive = new Uint8Array(await file.arrayBuffer());
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = parseManifestFromFiles(unzipPackageArchive(archive));
+  } catch (err) {
+    throw invalidRequest(getErrorMessage(err), "file");
+  }
+  return {
+    id,
+    name: typeof name === "string" ? name : undefined,
+    description: typeof description === "string" ? description : undefined,
+    archive,
+    manifest,
+  };
 }
 
-/** Create a version snapshot from files + manifest (non-fatal on error).
- *  All package types are zipped as-is.
- *
- *  SNAPSHOT ONLY WHAT WOULD SURVIVE A PUBLISH. Both create routes call this
- *  right after `createOrgItem`, and a version is immutable — so without the
- *  `requireCallableTools` gate here, `POST /api/packages/agents` froze exactly
- *  the artifact the publish route refuses. The create routes themselves must
- *  stay ungated (they validate `direction: "author"`, and the editor's flow
- *  legitimately passes through the empty state), which is why the gate belongs
- *  on the snapshot rather than on the request.
- *
- *  Skipping is an already-supported outcome, not a new one: the missing/invalid
- *  `version` branch below has always returned without a snapshot. The draft is
- *  created either way and the author fixes it, then publishes. */
+/** Publish a valid initial snapshot; incomplete authoring drafts remain editable. */
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
   userId: string;
   manifest: Record<string, unknown>;
   normalizedFiles: Record<string, Uint8Array>;
+  lockVersion: number;
 }): Promise<boolean> {
   const version = params.manifest.version as string | undefined;
   if (!version || !isValidVersion(version)) {
@@ -504,13 +422,22 @@ async function createVersionSafe(params: {
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(params.manifest, null, 2));
     const zipBuffer = Buffer.from(zipArtifact(entries, 6));
 
-    await createVersionAndUpload({
+    const published = await createVersionAndUpload({
       packageId: params.packageId,
       version,
       createdBy: params.userId,
       zipBuffer,
       manifest: manifestToStore,
     });
+    if (!published) return false;
+    if (published.outcome === "created") {
+      await finalizeDraftPublication({
+        packageId: params.packageId,
+        orgId: params.orgId,
+        lockVersion: params.lockVersion,
+        versionId: published.id,
+      });
+    }
     return true;
   } catch (error) {
     logger.warn("Version upload failed (non-fatal)", { packageId: params.packageId, error });
@@ -524,48 +451,8 @@ interface PackageRouteConfig {
   cfg: PackageTypeConfig;
   /** URL path segment used for routing (e.g. "skills", "integrations"). */
   path: string;
-  parseOpts: {
-    requiredFile: string | null;
-    contentFileExt: string | null;
-  };
-  /**
-   * Which storage file this type's editor `content` is written to — a per-type
-   * editor-wiring fact.
-   *
-   * It answers a DIFFERENT question from `PACKAGE_CONTENT_FILE`
-   * (`@appstrate/core/package-files`), which names the archive entry
-   * `draft_content` mirrors. Both are right where they differ: for
-   * `integration` the SPA editor deliberately sends the manifest JSON as
-   * `content` (`toWireBody`, `apps/web/src/pages/package-editor.tsx`), so
-   * `manifest.json` is exactly where that `content` belongs.
-   *
-   * Do NOT "reconcile" the two maps. Pointing `integration` at
-   * `INTEGRATION.md` would write manifest JSON into the docs file, strand the
-   * real `manifest.json` (nothing refreshes it afterwards), and — because
-   * `createVersionFromDraft` spreads the stored files into the artifact — mint
-   * immutable, integrity-pinned published ZIPs whose `INTEGRATION.md` is
-   * manifest JSON. Unfixable once published.
-   *
-   * Their DISAGREEMENT is load-bearing, not merely tolerated: it is what tells
-   * the update / restore handlers that this type's `content` is a manifest
-   * copy, so they must not put it in `packages.draft_content` (that column's
-   * `INTEGRATION.md` is nobody's editor field) and must rebuild the storage
-   * file from the manifest instead of echoing a carried-forward `content`.
-   */
+  /** Storage entry for the content field: primary text or the portable manifest. */
   storageFileName: string;
-  /** Hook called after a new package is created. */
-  afterCreate?: (params: {
-    packageId: string;
-    orgId: string;
-    manifest: Record<string, unknown>;
-    spaceId?: string;
-  }) => Promise<void>;
-  /** Hook called after a package is updated. */
-  afterUpdate?: (params: {
-    packageId: string;
-    orgId: string;
-    manifest: Record<string, unknown>;
-  }) => Promise<void>;
   /** If true, version create/restore require no running runs (agents). */
   requireMutableForVersionOps?: boolean;
   /** If true, this type uses JSON body for create (not ZIP upload parsing). */
@@ -593,15 +480,11 @@ interface PackageRouteConfig {
   ) => Promise<Record<string, unknown> | null>;
 }
 
-// Every AFPS package type exposes user-facing routes. `Partial` is kept so
-// the `ROUTE_CONFIGS[type]?.` lookups stay null-tolerant, but all four types are
-// wired. `agent`/`skill`/`integration` support JSON creation with files;
-// `mcp-server` creation uses archive import. All four support draft editing.
-const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
+// Three types have JSON creation forms; MCP server creation accepts an archive.
+const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
     path: "skills",
-    parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     storageFileName: "SKILL.md",
     jsonBodyCreate: true,
     requireContent: true,
@@ -609,7 +492,6 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   agent: {
     cfg: CONFIG_BY_TYPE.agent,
     path: "agents",
-    parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "prompt.md",
     jsonBodyCreate: true,
     requireContent: true,
@@ -630,19 +512,13 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   integration: {
     cfg: CONFIG_BY_TYPE.integration,
     path: "integrations",
-    parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "manifest.json",
     jsonBodyCreate: true,
   },
-  // AFPS §3.4 — standalone mcp-server packages. Import-only like
-  // integrations (no editor): authored externally.
-  // AFPS-native manifest carrying MCPB vocabulary fields (server / tools / user_config) verbatim — NOT a strict-MCPB manifest. See AFPS spec §3.4.
-  // Listable, viewable, and importable as `.afps` like the other types.
-  // Referenced by an integration's `source.kind: "local"`.
+  // Standalone MCP bundles are created by import and edited through the shared draft editor.
   "mcp-server": {
     cfg: CONFIG_BY_TYPE["mcp-server"],
     path: "mcp-servers",
-    parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "manifest.json",
     jsonBodyCreate: false,
   },
@@ -686,7 +562,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    // JSON creation stages the complete file tree before the first write.
+    let draft: Parameters<typeof createPackageDraft>[0];
+    // Validate the complete tree before either store is written.
     if (rcfg.jsonBodyCreate) {
       // The two create bodies differ only in whether `content` is mandatory,
       // which is what `requireContent` means. Selecting the schema here — as
@@ -768,175 +645,79 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         });
       }
 
-      const createdItem = await createOrgItem(
+      draft = {
         orgId,
-        { id: packageId, content, createdBy: user.id },
-        rcfg.cfg,
-        validatedManifest as Record<string, unknown>,
-      ).catch((err: unknown) => {
-        // The pre-check above narrows the common case, but a concurrent create
-        // can still lose the race — map the persistence-layer collision to 409
-        // instead of a 500 (mirrors the ZIP/skill create path below).
-        if (err instanceof PackageAlreadyExistsError) {
-          throw conflict("name_collision", err.message);
-        }
+        id: packageId,
+        content,
+        createdBy: user.id,
+        type: rcfg.cfg.type,
+        manifest: validatedManifest,
+        files: normalizedFiles,
+      };
+    } else {
+      const parsed = await readPackageUpload(c);
+      // Report schema/type errors before checking companion files for another type.
+      await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, c, "author");
+      let canonical;
+      try {
+        canonical = parsePackageZip(parsed.archive);
+      } catch (err) {
+        if (err instanceof PackageZipError) throw invalidRequest(err.message, "file");
         throw err;
-      });
-
-      // After-create hook (optional per-type post-create side-effect)
-      if (rcfg.afterCreate) {
-        await rcfg.afterCreate({
-          packageId,
-          orgId,
-          manifest: validatedManifest,
-          spaceId: c.get("spaceId"),
-        });
       }
-
-      // Upload files to S3 storage
-      await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
-
-      // Create initial version (non-fatal). Snapshot the STORED draft
-      // manifest (not the pre-normalization request body): `createOrgItem`
-      // stamps `$schema`/`name`/… and the jsonb round-trip reorders keys, so
-      // snapshotting `validatedManifest` produced a version whose bytes could
-      // never match a later rebuild from the draft. That byte drift defeated
-      // the publish dedup and, before #896, made every create-then-republish
-      // silently overwrite the artifact while keeping the stale integrity row.
-      const versionCreated = await createVersionSafe({
-        packageId,
-        orgId,
-        userId: user.id,
-        manifest: asRecord(createdItem.draftManifest),
-        normalizedFiles,
-      });
-
-      // Auto-install in the current space (non-fatal)
-      const spaceId = c.get("spaceId");
-      if (spaceId && versionCreated) {
-        await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-          logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
+      const packageId = `@${orgSlug}/${parsed.id}`;
+      if (canonical.packageId !== packageId) {
+        throw invalidRequest(
+          `Archive manifest name '${canonical.packageId}' must match upload package id '${packageId}'.`,
+          "manifest.name",
         );
       }
-
-      await recordAuditFromContext(c, {
-        action: "package.created",
-        resourceType: "package",
-        resourceId: packageId,
-        after: { type: rcfg.cfg.type, version: validatedManifest.version ?? null },
-      });
-
-      // Return the created package resource bare — same DTO/serializer as the
-      // GET detail (issue #657). `id` and `lock_version` (the optimistic-lock
-      // token of the draft) are part of the resource; no operation envelope.
-      const detail = await loadPackageDetailDto(c, rcfg, packageId, orgId);
-      if (!detail) {
-        logger.error("Created package could not be re-read", { packageId, orgId });
-        throw internalError();
-      }
-      return c.json(detail, 201);
-    }
-
-    // Import-only create (mcp-server) — archive-only by construction.
-    const parsed = await parsePackageUpload(c, rcfg.parseOpts);
-
-    if (isSystemPackage(parsed.id)) {
-      throw forbidden(
-        `${rcfg.cfg.labelSingular} '${parsed.id}' is a system package and cannot be modified`,
-      );
-    }
-
-    await validateManifestForRoute(parsed.manifest, rcfg.cfg.type, c, "author");
-
-    // Run the canonical AFPS archive parser before the first write. It shares
-    // companion-file enforcement with the runtime bundle loader, so a missing
-    // `server.entry_point` payload is rejected here rather than at sidecar boot.
-    let canonical;
-    try {
-      canonical = parsePackageZip(parsed.archive);
-    } catch (err) {
-      if (err instanceof PackageZipError) throw invalidRequest(err.message, "file");
-      throw err;
-    }
-    const expectedPackageId = `@${orgSlug}/${parsed.id}`;
-    if (canonical.packageId !== expectedPackageId) {
-      throw invalidRequest(
-        `Archive manifest name '${canonical.packageId}' must match upload package id '${expectedPackageId}'.`,
-        "manifest.name",
-      );
-    }
-    parsed.manifest = canonical.manifest as Record<string, unknown>;
-    parsed.content = canonical.content;
-    parsed.normalizedFiles = canonical.files;
-
-    assertContentConforms(rcfg.cfg.type, parsed.content, "content");
-
-    let item;
-    try {
-      item = await createOrgItem(
+      if (isSystemPackage(packageId))
+        throw forbidden(`'${packageId}' is a system package and cannot be created`);
+      assertContentConforms(rcfg.cfg.type, canonical.content, "content");
+      draft = {
         orgId,
-        {
-          id: `@${orgSlug}/${parsed.id}`,
-          name: parsed.name,
-          description: parsed.description,
-          content: parsed.content,
-          createdBy: user.id,
-        },
-        rcfg.cfg,
-        parsed.manifest,
-      );
-    } catch (err) {
-      if (err instanceof PackageAlreadyExistsError) {
-        throw conflict("name_collision", err.message);
-      }
+        id: packageId,
+        name: parsed.name,
+        description: parsed.description,
+        content: canonical.content,
+        createdBy: user.id,
+        type: rcfg.cfg.type,
+        manifest: canonical.manifest,
+        files: canonical.files,
+      };
+    }
+
+    const createdItem = await createPackageDraft(draft).catch((err: unknown) => {
+      if (err instanceof PackageAlreadyExistsError) throw conflict("name_collision", err.message);
       throw err;
-    }
-
-    if (parsed.normalizedFiles) {
-      await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, item.id, parsed.normalizedFiles);
-    }
-
-    // After-create hook
-    if (rcfg.afterCreate) {
-      const finalManifest = asRecord(item.draftManifest);
-      await rcfg.afterCreate({
-        packageId: item.id,
-        orgId,
-        manifest: finalManifest,
-        spaceId: c.get("spaceId"),
-      });
-    }
-
-    // Create initial version (non-fatal)
-    const finalManifest = asRecord(item.draftManifest);
+    });
+    const packageId = createdItem.id;
+    const manifest = asRecord(createdItem.draftManifest);
+    // Snapshot the committed draft manifest, including its storage normalization.
     const versionCreated = await createVersionSafe({
-      packageId: item.id,
+      packageId,
       orgId,
       userId: user.id,
-      manifest: finalManifest,
-      normalizedFiles: parsed.normalizedFiles ?? {},
+      manifest,
+      normalizedFiles: draft.files,
+      lockVersion: createdItem.lockVersion,
     });
-
-    // Auto-install in the current space (non-fatal)
     const spaceId = c.get("spaceId");
     if (spaceId && versionCreated) {
-      await installPackage({ orgId, spaceId }, item.id).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId: item.id, spaceId, err: String(e) }),
+      await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
       );
     }
-
     await recordAuditFromContext(c, {
       action: "package.created",
       resourceType: "package",
-      resourceId: item.id,
-      after: { type: rcfg.cfg.type, version: finalManifest.version ?? null },
+      resourceId: packageId,
+      after: { type: rcfg.cfg.type, version: manifest.version ?? null },
     });
-
-    // Return the created package resource bare — same serializer as the GET
-    // detail (issue #657). `id` and `lock_version` are part of the resource.
-    const detail = await loadPackageDetailDto(c, rcfg, item.id, orgId);
+    const detail = await loadPackageDetailDto(c, rcfg, packageId, orgId);
     if (!detail) {
-      logger.error("Created package could not be re-read", { packageId: item.id, orgId });
+      logger.error("Created package could not be re-read", { packageId, orgId });
       throw internalError();
     }
     return c.json(detail, 201);
@@ -1067,7 +848,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       authoredManifest ?? (existing as { manifest?: Record<string, unknown> }).manifest ?? {};
     const content = body.content ?? existing.content ?? "";
 
-    // Everything downstream — the persisted row, the after-update hook, the
+    // Everything downstream — the persisted row and the
     // id-immutability check — reads the VALIDATED manifest, never the raw one.
     // The create path already did; this one persisted the raw shape, so the
     // normalisation validation had just performed was thrown away on every
@@ -1153,15 +934,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     } catch (error) {
       if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
       throw error;
-    }
-
-    // After-update hook (e.g. agent junction table sync)
-    if (rcfg.afterUpdate) {
-      await rcfg.afterUpdate({
-        packageId: itemId,
-        orgId,
-        manifest: validatedManifest,
-      });
     }
 
     await recordAuditFromContext(c, {
@@ -1485,15 +1257,6 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
         .where(and(eq(packages.id, itemId), eq(packages.orgId, orgId)));
     }
 
-    // After-update hook (e.g. agent junction table sync on restore)
-    if (rcfg.afterUpdate) {
-      await rcfg.afterUpdate({
-        packageId: itemId,
-        orgId,
-        manifest: detail.manifest,
-      });
-    }
-
     await recordAuditFromContext(c, {
       action: "package.version_restored",
       resourceType: "package",
@@ -1741,7 +1504,7 @@ function decodeOperationBytes(value: string, index: number): Uint8Array {
  * decoded, and everything below sees one shape.
  */
 function toDraftFileOperations(
-  operations: z.infer<typeof packageFileOperationsSchema>["operations"],
+  operations: z.infer<typeof packageFileOperationsSchema>,
 ): PackageFileOperation[] {
   const encoder = new TextEncoder();
   return operations.map((op, index) => {
@@ -2177,30 +1940,12 @@ export function createPackagesRouter() {
           }
         }
       }
-    } else {
-      // New package — insert
-      const cfg = ROUTE_CONFIGS[packageType as PackageType]?.cfg;
-      if (!cfg) {
-        throw invalidRequest(`Unknown package type '${packageType}'`);
-      }
-      try {
-        await createOrgItem(
-          orgId,
-          { id: packageId, content, createdBy: user.id },
-          cfg,
-          manifest as Record<string, unknown>,
-        );
-      } catch (err) {
-        if (err instanceof PackageAlreadyExistsError) {
-          throw conflict("name_collision", err.message);
-        }
-        throw err;
-      }
     }
 
-    // Per-type post-install (version, package upsert, storage upload)
+    // Persist the imported draft and publish its version.
     try {
       await postInstallPackage({
+        create: !existing,
         packageType,
         packageId,
         orgId,
@@ -2212,6 +1957,7 @@ export function createPackagesRouter() {
         lockVersion: force ? undefined : existing?.lockVersion,
       });
     } catch (err) {
+      if (err instanceof PackageAlreadyExistsError) throw conflict("name_collision", err.message);
       if (err instanceof ApiError) throw err;
       const message = getErrorMessage(err);
       logger.error("Post-install failed", { packageId, packageType, error: message });
@@ -2220,17 +1966,6 @@ export function createPackagesRouter() {
         code: "post_install_failed",
         title: "Post-Install Failed",
         detail: message,
-      });
-    }
-
-    // After-create hook (e.g. auto-enable provider)
-    const rcfg = ROUTE_CONFIGS[packageType as PackageType];
-    if (rcfg?.afterCreate) {
-      await rcfg.afterCreate({
-        packageId,
-        orgId,
-        manifest: manifest as Record<string, unknown>,
-        spaceId: c.get("spaceId"),
       });
     }
 

@@ -474,6 +474,7 @@ export async function importBundle(
 
     try {
       await postInstallPackage({
+        create: false,
         packageType: parsedZip.type,
         packageId,
         orgId: scope.orgId,

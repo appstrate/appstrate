@@ -11,7 +11,7 @@ import { useOrg } from "../hooks/use-org";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 import { primaryDisplayFile } from "../lib/package-files";
 import { skillFrontmatterError, translateSkillFrontmatterError } from "../lib/skill-frontmatter";
-import { useEditorState, type EditorStateBase } from "../hooks/use-editor-state";
+import { useEditorState, type EditorState } from "../hooks/use-editor-state";
 import { UnsavedChangesModal } from "../components/unsaved-changes-modal";
 import { FormField } from "../components/form-field";
 
@@ -83,7 +83,7 @@ function AgentEditorInner({
   isEdit,
   effectiveTimeoutSeconds,
 }: {
-  initialState: EditorStateBase;
+  initialState: EditorState;
   resolvedDeps: { skills?: unknown[] } | null;
   packageId: string | undefined;
   isEdit: boolean;
@@ -110,7 +110,7 @@ function AgentEditorInner({
     handleSubmit,
     isPending,
     setPreparingFiles,
-  } = useEditorState<EditorStateBase>({
+  } = useEditorState({
     initialState,
     packageType: "agent",
     packageId,
@@ -355,7 +355,7 @@ function PackageEditorInner({
   isEdit,
 }: {
   type: "skill" | "mcp-server";
-  initialState: EditorStateBase;
+  initialState: EditorState;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
@@ -374,7 +374,7 @@ function PackageEditorInner({
     handleSubmit,
     isPending,
     setPreparingFiles,
-  } = useEditorState<EditorStateBase>({
+  } = useEditorState({
     initialState,
     packageType: type,
     packageId,
@@ -470,7 +470,7 @@ function IntegrationEditorInner({
   packageId,
   isEdit,
 }: {
-  initialState: EditorStateBase;
+  initialState: EditorState;
   packageId: string | undefined;
   isEdit: boolean;
 }) {
@@ -490,7 +490,7 @@ function IntegrationEditorInner({
     handleSubmit,
     isPending,
     setPreparingFiles,
-  } = useEditorState<EditorStateBase>({
+  } = useEditorState({
     initialState,
     packageType: "integration",
     packageId,
@@ -627,7 +627,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   // Agent editor
   if (type === "agent") {
     const agentDetail = agentQuery.data;
-    const initialState: EditorStateBase =
+    const initialState: EditorState =
       isEdit && agentDetail
         ? {
             manifest: withNormalizedManifest(agentDetail.manifest ?? {}),
@@ -650,7 +650,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   // Integration editor with structured configuration and the shared file tree.
   if (type === "integration") {
     const intDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
-    const initialState: EditorStateBase =
+    const initialState: EditorState =
       isEdit && intDetail
         ? {
             manifest: intDetail.manifest ?? {},
@@ -671,7 +671,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
   // Skill editor (agent/integration returned early above — pkgQuery is always OrgPackageItemDetail here)
   const pkgDetail = pkgQuery.data as OrgPackageItemDetail | undefined;
 
-  const initialState: EditorStateBase =
+  const initialState: EditorState =
     isEdit && pkgDetail
       ? {
           manifest: pkgDetail.manifest ?? {},

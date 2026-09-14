@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResourceEntry } from "./types";
-import type { EditorStateBase } from "../../hooks/use-editor-state";
+import type { EditorState } from "../../hooks/use-editor-state";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./schema-section";
 import {
@@ -40,7 +40,7 @@ export function caretRange(version: string): string {
 
 // ─── Default state ──────────────────────────────────────────
 
-export function defaultEditorState(orgSlug?: string, userEmail?: string): EditorStateBase {
+export function defaultEditorState(orgSlug?: string, userEmail?: string): EditorState {
   return {
     manifest: {
       $schema: AFPS_SCHEMA_URLS.agent,

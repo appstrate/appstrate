@@ -13,24 +13,24 @@ import { packageDetailPath } from "../lib/package-paths";
 import { packageCreateBody, packageUpdateBody } from "../lib/package-file-drafts";
 import type { PackageFileWriteOperation } from "../lib/package-file-tree";
 
-export interface EditorStateBase {
+export interface EditorState {
   manifest: Record<string, unknown>;
   lock_version?: number;
   operations?: PackageFileWriteOperation[];
 }
 
-interface UseEditorStateOptions<S extends EditorStateBase> {
-  initialState: S;
+interface UseEditorStateOptions {
+  initialState: EditorState;
   packageType: PackageType;
   packageId: string | undefined;
   isEdit: boolean;
   translateError?: (error: Error) => string | null;
-  validate?: (state: S) => { error: string; tab?: string } | null;
+  validate?: (state: EditorState) => { error: string; tab?: string } | null;
 }
 
-interface UseEditorStateReturn<S extends EditorStateBase> {
-  state: S;
-  setState: React.Dispatch<React.SetStateAction<S>>;
+interface UseEditorStateReturn {
+  state: EditorState;
+  setState: React.Dispatch<React.SetStateAction<EditorState>>;
   /** Shallow-merge a patch into `state.manifest`. */
   updateManifest: (patch: Record<string, unknown>) => void;
   isDirty: boolean;
@@ -50,14 +50,14 @@ interface UseEditorStateReturn<S extends EditorStateBase> {
   setPreparingFiles: (busy: boolean) => void;
 }
 
-export function useEditorState<S extends EditorStateBase>({
+export function useEditorState({
   initialState,
   packageType,
   packageId,
   isEdit,
   translateError,
   validate,
-}: UseEditorStateOptions<S>): UseEditorStateReturn<S> {
+}: UseEditorStateOptions): UseEditorStateReturn {
   const navigate = useNavigate();
   const { t } = useTranslation("agents");
   const [state, setState] = useState(initialState);

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
-import { createVersionAndUpload } from "./package-versions.ts";
-import { createOrgItem, getOrgItem } from "./package-items/crud.ts";
-import { mutatePackageDraftFiles } from "./package-files.ts";
-import { CONFIG_BY_TYPE } from "./package-items/config.ts";
+import { createVersionAndUpload, finalizeDraftPublication } from "./package-versions.ts";
+import { createPackageDraft, mutatePackageDraftFiles } from "./package-files.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "@appstrate/core/validation";
 
@@ -20,6 +18,8 @@ export async function postInstallPackage(params: {
   content: string;
   files: Record<string, Uint8Array>;
   zipBuffer: Buffer;
+  /** Preserve the caller's creation intent: a concurrent insertion must conflict. */
+  create: boolean;
   draftManifest?: Record<string, unknown>;
   lockVersion?: number;
   /** Override version instead of auto-detecting from manifest or auto-bumping. */
@@ -38,27 +38,28 @@ export async function postInstallPackage(params: {
   }
   const version: string = rawVersion;
 
-  const cfg = CONFIG_BY_TYPE[packageType];
-  if (!(await getOrgItem(orgId, packageId, cfg))) {
-    await createOrgItem(
-      orgId,
-      { id: packageId, content, createdBy: userId },
-      cfg,
-      params.draftManifest ?? manifest,
-    );
-  }
-  await mutatePackageDraftFiles(
-    { id: packageId, type: packageType, orgId },
-    {
-      precondition: {
-        imported: true,
-        ...(params.lockVersion !== undefined ? { lockVersion: params.lockVersion } : {}),
-      },
-      manifest: params.draftManifest ?? manifest,
-      draftContent: content,
-      replace: files,
-    },
-  );
+  const draft = params.create
+    ? await createPackageDraft({
+        orgId,
+        id: packageId,
+        type: packageType,
+        content,
+        createdBy: userId,
+        manifest: params.draftManifest ?? manifest,
+        files,
+      })
+    : await mutatePackageDraftFiles(
+        { id: packageId, type: packageType, orgId },
+        {
+          precondition: {
+            imported: true,
+            ...(params.lockVersion !== undefined ? { lockVersion: params.lockVersion } : {}),
+          },
+          manifest: params.draftManifest ?? manifest,
+          draftContent: content,
+          replace: files,
+        },
+      );
 
   // No try/catch: a genuine version-creation failure MUST propagate so the
   // caller (e.g. bundle import) aborts rather than committing a `packages`
@@ -80,11 +81,19 @@ export async function postInstallPackage(params: {
   // original upload — otherwise the row is fine while the stored archive is
   // unreadable to `extractRootFromAfps`, and every bundle export and pinned run
   // touching the package fails.
-  await createVersionAndUpload({
+  const published = await createVersionAndUpload({
     packageId,
     version,
     createdBy: userId,
     zipBuffer,
     manifest,
   });
+  if (published?.outcome === "created") {
+    await finalizeDraftPublication({
+      packageId,
+      orgId,
+      lockVersion: draft.lockVersion,
+      versionId: published.id,
+    });
+  }
 }

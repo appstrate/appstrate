@@ -8,7 +8,6 @@ import { Spinner } from "./spinner";
 import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
-// Only agent + skill have an editor route (see app.tsx).
 type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
 
 const emojiMap: Record<EditablePackageType, string> = {

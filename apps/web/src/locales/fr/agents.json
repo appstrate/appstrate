@@ -293,7 +293,6 @@
   "editor.jsonErrorStructure": "Le JSON doit contenir \"manifest\" (objet) et \"prompt\" (string).",
   "editor.jsonInvalid": "JSON invalide : vérifiez la syntaxe.",
   "editor.jsonApply": "Appliquer au formulaire",
-  "editor.promptHint": "Le prompt est envoyé tel quel à l'agent. Les paramètres d'entrée et le point de reprise sont injectés automatiquement dans des sections structurées avant le prompt.",
   "editor.goToPackages": "Aller aux packages",
   "log.copyLogs": "Copier les logs",
   "log.copied": "Copié !",

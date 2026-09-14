@@ -40,6 +40,12 @@ and path errors are associated with their input for assistive technology.
 - `mutatePackageDraftFiles` serializes draft saves, restores and imports through
   an advisory transaction lock, then updates the package row and draft ZIP.
   Imports preserve their original immutable version bytes and manifest.
+- `createPackageDraft` inserts the row and first ZIP under that same lock and
+  transaction. The package becomes visible only once both writes succeed;
+  a failed upload leaves the name available for retry. JSON and archive creation
+  share their persistence, initial publication and installation lifecycle.
+  Imports explicitly distinguish creation from replacement, so a concurrent
+  creation cannot turn an authorized create into an overwrite.
 - `validateAuthoredPackageFiles` validates the resulting content and bundle for
   both creation and draft updates. Required content travels once in the create
   payload and is subject to the same file size limit as ancillary writes.
@@ -47,8 +53,8 @@ and path errors are associated with their input for assistive technology.
   releases it, then validates and publishes that immutable capture. A version
   override updates the draft only after a successful publication, and only if
   its original lock token still matches; that update increments the token without
-  marking already-published changes as dirty. A newer edit stays unpublished even
-  if it completed before the captured version was created.
+  marking already-published changes as dirty. `finalizeDraftPublication` retains
+  newer edits as unpublished for initial versions, imports and explicit publication.
 
 `manifest.json` is edited through the manifest form/JSON tab. Skills require
 valid frontmatter in `SKILL.md`; agents require `prompt.md`. Required content
@@ -72,10 +78,12 @@ the complete response body. Expiration aborts the request and cancels the body
 reader, so stalled storage cannot retain a transaction indefinitely. Streaming
 transfers keep their existing lifetime.
 
-PostgreSQL and object storage do not share a transaction. During draft updates,
-upload failures roll back the row; an upload followed by a failed DB commit can still leave ancillary
-ZIP bytes ahead of the row. The shared lock prevents writers from interleaving;
-it does not claim distributed atomicity. No schema migration is introduced.
+PostgreSQL and object storage do not share a transaction. Draft creation and
+update upload failures roll back the row; an upload followed by a failed DB
+commit can still leave unreferenced bytes or ancillary ZIP bytes ahead of the row.
+The shared lock prevents writers from interleaving; it does not claim distributed
+atomicity. Initial version creation remains non-fatal: a valid draft can be
+published later if that separate step fails. No schema migration is introduced.
 
 ## Validation
 
@@ -94,3 +102,7 @@ path errors, including the narrow layout.
 Creation tests cover the initial version's complete tree and lossless binary
 bytes, rejection before any persistence, retries with the intact draft, tab
 changes and abandonment without a server write.
+Storage regressions cover rollback and retry for all four types. PostgreSQL
+tests verify that an uncommitted creation is invisible, a competing import
+conflicts under the actual advisory lock, and an edit during initial publication
+retains its bytes and unpublished state.

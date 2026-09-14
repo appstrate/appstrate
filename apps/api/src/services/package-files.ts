@@ -5,7 +5,7 @@
  * Draft reads overlay DB-authoritative manifest/content on the stored ZIP;
  * version reads return exactly the pinned bytes. Conditional read validators
  * can avoid downloading a pinned ZIP, while draft validators hash its bytes.
- * Saves, restores and imports share mutatePackageDraftFiles below.
+ * Creation, saves, restores and imports use the same draft lock.
  */
 
 import { and, eq } from "drizzle-orm";
@@ -22,7 +22,7 @@ import {
   SYSTEM_STORAGE_NAMESPACE,
   assertArchiveContentConforms,
 } from "./package-items/config.ts";
-import { updateOrgItem } from "./package-items/crud.ts";
+import { createOrgItem, updateOrgItem, type CreateItemInput } from "./package-items/crud.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import {
   PACKAGE_CONTENT_ENTRY,
@@ -295,56 +295,10 @@ export function applyDraftOverlay(files: Record<string, Uint8Array>, pkg: Packag
 }
 
 /**
- * What to persist into `packages.draft_content` on a write whose `content` is
- * a copy of the MANIFEST rather than the type's content file — the guard on
- * the inverse of {@link applyDraftOverlay}.
- *
- * The package editors and the version-restore route both feed one `content`
- * field. For `agent` / `skill` that field IS `prompt.md` / `SKILL.md`, so it
- * simply wins. For `integration` it is the manifest JSON (the editor authors a
- * manifest and has no `INTEGRATION.md` field at all — see
- * `apps/web/src/pages/package-editor.tsx`), while the COLUMN holds the
- * optional `INTEGRATION.md`. Writing one into the other destroyed the doc: the
- * integration stopped contributing its agent-facing documentation to every
- * agent's platform prompt (`fetchIntegrationPromptDocs`), and the file
- * explorer began serving manifest JSON under the name `INTEGRATION.md`.
- *
- * ## INCOMING's shape is the FIRST question, and it is what gates the guard
- *
- * The guard only engages when the value being WRITTEN is manifest-shaped,
- * because that is the shape the platform generates and can therefore read
- * unambiguously: a manifest-shaped `incoming` can only have come from the
- * manifest editor's `toWireBody`, which has no `INTEGRATION.md` field to have
- * produced it from. A markdown-shaped `incoming` is a caller sending the doc.
- *
- * Gating on STORED's shape ALONE made the field WRITE-ONCE, and silently: a
- * non-SPA client (curl, CI, an agent through the MCP module) that PUT a new
- * `INTEGRATION.md` over a column already holding one got `200` and its
- * markdown dropped on the floor — nowhere at all, since this type's storage
- * sink is `manifest.json`. The same request DID land whenever the column
- * happened to hold the manifest fallback, so the field wrote exactly once per
- * package with no way for the client to tell which mode it was in.
- *
- * So a manifest-shaped write REFRESHES the manifest-text fallback — an
- * integration that legitimately ships no doc must keep a current one — and is
- * declined ONLY over a column that holds the real thing. Every other write,
- * including one that carries an actual `INTEGRATION.md`, lands.
- *
- * ## Known limit: a doc that is ONE template block
- *
- * `isManifestTextFallback` is a `{`…`}` sniff, so an `INTEGRATION.md` whose
- * whole body is `{{ tmpl }}` reads as a manifest. The `stored` half of the
- * condition below therefore still mistakes such a doc for a refreshable
- * fallback and lets an editor save overwrite it. That half cannot simply be
- * dropped: without it, a manifest-shaped write is declined unconditionally and
- * the fallback can never be refreshed — the two requirements are mutually
- * exclusive under a shape test. Closing it needs a stronger predicate
- * (`JSON.parse` + a manifest-shaped check), which this sniff deliberately
- * avoids and which all four of its readers would inherit. Pinned as a known
- * case in `test/unit/package-files.test.ts`.
- *
- * Storage is a separate sink and is deliberately NOT routed through here: the
- * editor's manifest JSON still belongs in the integration's `manifest.json`.
+ * Resolve the public content field for the optional integration companion.
+ * A manifest-shaped value refreshes a manifest copy, but cannot replace stored
+ * documentation. Explicit file operations bypass this overloaded field.
+ * Required primary files and MCP manifest copies accept the supplied value.
  */
 export function resolveDraftContent(
   type: PackageType,
@@ -597,6 +551,29 @@ export function validateAuthoredPackageFiles(
     if (violation) throw new PackageFileWriteError("invalid_bundle", null, violation.message);
   }
   return content;
+}
+
+/** Commit a new draft's row and first archive under the same lock as later edits. */
+export function createPackageDraft(
+  input: CreateItemInput & {
+    orgId: string;
+    type: PackageType;
+    manifest: Record<string, unknown>;
+    files: Record<string, Uint8Array>;
+  },
+) {
+  const cfg = CONFIG_BY_TYPE[input.type];
+  return withPackageDraftLock(input.id, async (tx) => {
+    const row = await createOrgItem(input.orgId, input, cfg, input.manifest, undefined, tx);
+    const files = { ...input.files };
+    if (cfg.manifestIsStoredFile)
+      files[PACKAGE_MANIFEST_FILE] = new TextEncoder().encode(
+        JSON.stringify(row.draftManifest, null, 2),
+      );
+    else delete files[PACKAGE_MANIFEST_FILE];
+    await uploadPackageFiles(cfg.storageFolder, input.orgId, input.id, files);
+    return row;
+  });
 }
 
 export type MutateDraftFilesInput = {

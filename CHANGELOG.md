@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cannot overwrite a newer draft or reuse an old editor token. Concurrent edits
   remain marked as unpublished; a published version override does not. Buffered S3
   requests have a 30-second deadline, including response-body reads.
+  Agent, skill and integration creation forms support the same local file tree.
+  New drafts become visible only after their first archive upload succeeds;
+  a storage failure leaves the name available for retry. Archive creation shares
+  this lifecycle, and an import losing a concurrent creation cannot overwrite it.
 
 - **Two-layer RBAC — an org role, and a role per space.** Organization roles
   gain **`guest`**: an org identity with no implicit reach into any space, for

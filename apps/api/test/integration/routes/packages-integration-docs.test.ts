@@ -1,27 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `packages.draft_content` is OVERLOADED for an integration: `parsePackageZip`
- * stores the bundle's `INTEGRATION.md` when it ships one (AFPS §3.5, an
- * OPTIONAL companion) and the MANIFEST TEXT when it does not, with no
- * discriminator on the column.
- *
- * Two write paths produce the manifest shape unconditionally — the SPA editor
- * (`toWireBody` sends `content: JSON.stringify(manifest)` on every save of
- * every integration, and the Edit affordance is gated on `isMutable` alone, so
- * a save with no edit at all is enough) and version restore (which used to read
- * the version ZIP's `manifest.json`). Either one used to overwrite a real
- * `INTEGRATION.md`, with two consequences:
- *
- *   (a) the integration silently stopped contributing its agent-facing
- *       documentation to EVERY agent's platform prompt, because
- *       `fetchIntegrationPromptDocs` rejects a manifest-shaped column; and
- *   (b) the file explorer served manifest JSON under the name `INTEGRATION.md`
- *       — the entry it pre-selects for an integration — because the real file
- *       was still in storage for the draft overlay to land on.
- *
- * These cases pin the column's meaning end to end: through the update route,
- * through restore, and back out of both readers.
+ * Integration draft content holds either INTEGRATION.md or the manifest when
+ * that optional file is absent. Manifest-shaped PUT.content values and restores
+ * must preserve real documentation in both the file explorer and agent prompts.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -102,8 +84,8 @@ async function lockVersionOf(ctx: TestContext, id: string): Promise<number> {
   return ((await res.json()) as { lock_version: number }).lock_version;
 }
 
-/** The exact body `IntegrationEditorInner.toWireBody` sends on every save. */
-async function saveThroughEditor(
+/** Exercise the public content field with a manifest-shaped value. */
+async function saveManifestContent(
   ctx: TestContext,
   id: string,
   manifest: Record<string, unknown>,
@@ -165,14 +147,16 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
     });
 
     it("keeps its docs in draft_content across an editor save", async () => {
-      const res = await saveThroughEditor(ctx, id, integrationManifest(id, "1.1.0"));
+      const res = await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"));
       expect(res.status).toBe(200);
 
       expect(await draftContentOf(id)).toBe(DOC);
     });
 
     it("still serves the markdown — not manifest JSON — from the file explorer", async () => {
-      expect((await saveThroughEditor(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(200);
+      expect((await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(
+        200,
+      );
 
       const doc = (await listFiles(ctx, id)).find((e) => e.path === "INTEGRATION.md");
       expect(doc).toBeDefined();
@@ -183,7 +167,9 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
     });
 
     it("keeps feeding the platform prompt its agent-facing docs after a save", async () => {
-      expect((await saveThroughEditor(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(200);
+      expect((await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(
+        200,
+      );
 
       const [entry] = await fetchIntegrationPromptDocs([id]);
       expect(entry).toBeDefined();
@@ -195,7 +181,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       // where an integration editor's `content` legitimately belongs, and
       // nothing about protecting the docs may strand it.
       const manifest = integrationManifest(id, "2.0.0");
-      expect((await saveThroughEditor(ctx, id, manifest)).status).toBe(200);
+      expect((await saveManifestContent(ctx, id, manifest)).status).toBe(200);
 
       const stored = await storedFile(ctx.orgId, id, "manifest.json");
       expect(stored).toBeDefined();
@@ -245,14 +231,18 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
     });
 
     it("gains no phantom INTEGRATION.md in the explorer after a save", async () => {
-      expect((await saveThroughEditor(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(200);
+      expect((await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(
+        200,
+      );
 
       const paths = (await listFiles(ctx, id)).map((e) => e.path);
       expect(paths).toEqual(["manifest.json", "server/index.js"]);
     });
 
     it("REFRESHES the manifest-text fallback rather than freezing a stale copy", async () => {
-      expect((await saveThroughEditor(ctx, id, integrationManifest(id, "4.2.0"))).status).toBe(200);
+      expect((await saveManifestContent(ctx, id, integrationManifest(id, "4.2.0"))).status).toBe(
+        200,
+      );
 
       const content = await draftContentOf(id);
       expect(JSON.parse(content!)).toMatchObject({ version: "4.2.0" });
@@ -280,7 +270,9 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
     });
 
     it("reports no prompt doc — a manifest copy is not documentation", async () => {
-      expect((await saveThroughEditor(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(200);
+      expect((await saveManifestContent(ctx, id, integrationManifest(id, "1.1.0"))).status).toBe(
+        200,
+      );
 
       const [entry] = await fetchIntegrationPromptDocs([id]);
       expect(entry!.doc).toBeUndefined();

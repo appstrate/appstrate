@@ -165,43 +165,37 @@ export async function createOrgItem(
   cfg: PackageTypeConfig,
   manifest: Record<string, unknown>,
   forkedFrom?: string,
+  executor: DbOrTx = db,
 ): Promise<Package> {
   const now = new Date();
   const packageId = item.id;
 
   const finalManifest = buildStoredManifest(manifest, cfg, item);
 
-  try {
-    const [row] = await db
-      .insert(packages)
-      .values({
-        id: packageId,
-        orgId,
-        type: cfg.type,
-        source: "local",
-        draftManifest: finalManifest,
-        draftContent: item.content,
-        createdBy: item.createdBy ?? null,
-        createdAt: now,
-        updatedAt: now,
-        forkedFrom: forkedFrom ?? null,
-      })
-      .returning();
+  const [row] = await executor
+    .insert(packages)
+    .values({
+      id: packageId,
+      orgId,
+      type: cfg.type,
+      source: "local",
+      draftManifest: finalManifest,
+      draftContent: item.content,
+      createdBy: item.createdBy ?? null,
+      createdAt: now,
+      updatedAt: now,
+      forkedFrom: forkedFrom ?? null,
+    })
+    .onConflictDoNothing({ target: packages.id })
+    .returning();
 
-    if (!row) throw new Error("Failed to insert package: no row returned");
-    return row;
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && (err as { code: string }).code === "23505") {
-      // Look up the existing package's type for a helpful error message
-      const [existing] = await db
-        .select({ type: packages.type })
-        .from(packages)
-        .where(eq(packages.id, packageId))
-        .limit(1);
-      throw new PackageAlreadyExistsError(packageId, existing?.type ?? cfg.type);
-    }
-    throw err;
-  }
+  if (row) return row;
+  const [existing] = await executor
+    .select({ type: packages.type })
+    .from(packages)
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  throw new PackageAlreadyExistsError(packageId, existing?.type ?? cfg.type);
 }
 
 /**

@@ -733,6 +733,26 @@ export async function createVersionFromDraft(params: {
   // artifact — the caller must bump the version to publish the new content.
   if (result.outcome === "exists") return { error: "version_exists" };
 
+  await finalizeDraftPublication({
+    packageId,
+    orgId,
+    lockVersion: pkg.lockVersion,
+    versionId: result.id,
+    manifest: params.version && params.version !== baseManifest.version ? finalManifest : undefined,
+  });
+  return { id: result.id, version: result.version };
+}
+
+/** Reconcile a published snapshot with the draft without hiding concurrent edits. */
+export async function finalizeDraftPublication(params: {
+  packageId: string;
+  orgId: string;
+  lockVersion: number;
+  versionId: number;
+  /** A published version override, applied only while the captured draft is current. */
+  manifest?: Record<string, unknown>;
+}): Promise<void> {
+  const { packageId, orgId, lockVersion, versionId, manifest } = params;
   await withPackageDraftLock(packageId, async (tx) => {
     const [latest] = await tx
       .select({ id: packageVersions.id })
@@ -742,7 +762,7 @@ export async function createVersionFromDraft(params: {
       .limit(1);
     // Version inserts serialize per package. An older publish must not undo
     // the draft state finalized by a later one.
-    if (latest?.id !== result.id) return;
+    if (latest?.id !== versionId) return;
 
     // A save during validation can precede the version's creation timestamp,
     // even though its changes were not captured. Keep that newer draft dirty
@@ -755,7 +775,7 @@ export async function createVersionFromDraft(params: {
     await tx
       .update(packages)
       .set({
-        updatedAt: sql`CASE WHEN ${packages.lockVersion} = ${pkg.lockVersion}
+        updatedAt: sql`CASE WHEN ${packages.lockVersion} = ${lockVersion}
           THEN LEAST(${packages.updatedAt}, ${publishedAt})
           ELSE GREATEST(${packages.updatedAt}, ${publishedAt} + interval '1 millisecond') END`,
       })
@@ -763,23 +783,22 @@ export async function createVersionFromDraft(params: {
 
     // Reflect an override only in the unchanged draft, after successful publish.
     // Advance its editor token, but not updatedAt: this change is already published.
-    if (params.version && params.version !== baseManifest.version) {
+    if (manifest) {
       await tx
         .update(packages)
         .set({
-          draftManifest: { ...baseManifest, version },
+          draftManifest: manifest,
           lockVersion: sql`${packages.lockVersion} + 1`,
         })
         .where(
           and(
             eq(packages.id, packageId),
             eq(packages.orgId, orgId),
-            eq(packages.lockVersion, pkg.lockVersion),
+            eq(packages.lockVersion, lockVersion),
           ),
         );
     }
   });
-  return { id: result.id, version: result.version };
 }
 
 // ─────────────────────────────────────────────
