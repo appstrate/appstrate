@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   BrainCircuit,
   CalendarClock,
   FolderTree,
   Globe,
+  Pencil,
   Plug,
   SlidersHorizontal,
   Workflow,
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
+import { Button } from "@appstrate/ui/components/button";
 import { usePermissions } from "../../hooks/use-permissions";
 import { RailLink } from "../settings/rail-link";
 import { AgentOverviewTab } from "./agent-overview-tab";
@@ -21,7 +23,17 @@ import { AgentDetailSplit } from "./agent-detail-split";
 
 type AgentSettingsSection = ConfigurationSection | "map" | "files";
 
+/**
+ * The map first, on its own: it is the one view where the package's
+ * definition and this space's setup meet — and it edits both — so it belongs
+ * to neither group. Then what is set HERE (Configuration), then what the
+ * package IS, for every space (Définition).
+ */
 const SETTINGS_GROUPS = [
+  {
+    labelKey: null,
+    items: [{ id: "map", icon: Workflow, labelKey: "detail.overview.map" }],
+  },
   {
     labelKey: "detail.settings.configurationGroup",
     items: [
@@ -33,14 +45,11 @@ const SETTINGS_GROUPS = [
     ],
   },
   {
-    labelKey: "detail.settings.structureGroup",
-    items: [
-      { id: "map", icon: Workflow, labelKey: "detail.overview.map" },
-      { id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" },
-    ],
+    labelKey: "detail.settings.definitionGroup",
+    items: [{ id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" }],
   },
 ] satisfies Array<{
-  labelKey: string;
+  labelKey: string | null;
   items: Array<{ id: AgentSettingsSection; icon: typeof BrainCircuit; labelKey: string }>;
 }>;
 
@@ -113,6 +122,15 @@ export function AgentSettingsView({
     void navigate(sectionHref("files"));
   };
 
+  // The definition is read here and changed in the bundle editor, for every
+  // space at once: an explicit step, never a field edited in place.
+  const canEditDefinition = can("agents:write") && detail.source !== "system" && !isHistorical;
+  const editDefinitionHref = (() => {
+    const search = new URLSearchParams(location.search);
+    search.set("agentBundle", "prompt");
+    return `${location.pathname}?${search.toString()}${location.hash}`;
+  })();
+
   const body =
     activeSection === "map" || activeSection === "files" ? (
       <AgentOverviewTab
@@ -136,6 +154,16 @@ export function AgentSettingsView({
       />
     );
 
+  const content =
+    activeSection === "files" && canEditDefinition ? (
+      <>
+        <DefinitionEditBar href={editDefinitionHref} />
+        {body}
+      </>
+    ) : (
+      body
+    );
+
   return (
     <AgentDetailSplit
       data-agent-settings
@@ -143,10 +171,12 @@ export function AgentSettingsView({
       rail={
         <nav className="space-y-5" aria-label={t("detail.tabSettings")}>
           {groups.map((group) => (
-            <section key={group.labelKey}>
-              <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
-                {t(group.labelKey)}
-              </h2>
+            <section key={group.labelKey ?? "overview"}>
+              {group.labelKey && (
+                <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
+                  {t(group.labelKey)}
+                </h2>
+              )}
               <div className="flex flex-col gap-0.5">
                 {group.items.map((item) => (
                   <RailLink
@@ -162,7 +192,34 @@ export function AgentSettingsView({
         </nav>
       }
     >
-      {body}
+      {content}
     </AgentDetailSplit>
+  );
+}
+
+/** "Modifier" over a definition section: says it applies to every space. */
+export function DefinitionEditBar({ href, onClick }: { href?: string; onClick?: () => void }) {
+  const { t } = useTranslation("agents");
+  const label = (
+    <>
+      <Pencil />
+      {t("detail.settings.editDefinition")}
+    </>
+  );
+  return (
+    <div className="flex items-center justify-end gap-3 px-6 pt-6">
+      <span className="text-muted-foreground text-xs">
+        {t("detail.settings.editDefinitionScope")}
+      </span>
+      {href ? (
+        <Button asChild variant="outline" size="sm">
+          <Link to={href}>{label}</Link>
+        </Button>
+      ) : (
+        <Button type="button" variant="outline" size="sm" onClick={onClick}>
+          {label}
+        </Button>
+      )}
+    </div>
   );
 }

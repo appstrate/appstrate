@@ -117,5 +117,7 @@
   "concept.mcpServers.title": "MCP servers",
   "concept.mcpServers.body": "MCP is the standard protocol through which an agent discovers and calls tools. An MCP server is a tool provider plugged straight into the agent.\n\nThe difference from an integration: an integration adds credential and permission handling on top. An MCP server declared here is used as is.",
   "concept.systemTools.title": "System tools",
-  "concept.systemTools.body": "Tools provided by the platform itself, with no outside service involved: returning a result, writing to the log, keeping a note from one run to the next, publishing a document.\n\nMost must be granted explicitly in the manifest, one by one. Two escape that rule and are always there: reading back the memory archive, and the history of past runs. Reading what the agent itself produced carries no risk, whereas writing to memory or publishing a document does."
+  "concept.systemTools.body": "Tools provided by the platform itself, with no outside service involved: returning a result, writing to the log, keeping a note from one run to the next, publishing a document.\n\nMost must be granted explicitly in the manifest, one by one. Two escape that rule and are always there: reading back the memory archive, and the history of past runs. Reading what the agent itself produced carries no risk, whereas writing to memory or publishing a document does.",
+  "scopeDefinition": "every space",
+  "scopeSpace": "this space"
 }

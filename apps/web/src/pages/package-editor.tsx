@@ -582,6 +582,7 @@ function IntegrationEditorInner({
   isEdit,
   presentation = "page",
   onCancel,
+  initialTab = "general",
 }: {
   initialState: EditorStateBase;
   packageId: string | undefined;
@@ -589,10 +590,11 @@ function IntegrationEditorInner({
   /** Same two shapes as the agent editor: a page to create, a panel to edit. */
   presentation?: "page" | "panel-dialog";
   onCancel?: () => void;
+  initialTab?: GenericEditorTab;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+  const [activeTab, setActiveTab] = useState<GenericEditorTab>(initialTab);
 
   const {
     state,
@@ -748,9 +750,12 @@ function IntegrationEditorInner({
 export function IntegrationEditorModal({
   detail,
   onClose,
+  initialTab,
 }: {
   detail: OrgPackageItemDetail;
   onClose: () => void;
+  /** The section "Modifier" was pressed on, from a definition section. */
+  initialTab?: "source" | "tools" | "json";
 }) {
   return (
     <IntegrationEditorInner
@@ -760,6 +765,7 @@ export function IntegrationEditorModal({
       isEdit
       presentation="panel-dialog"
       onCancel={onClose}
+      initialTab={initialTab}
     />
   );
 }

@@ -78,6 +78,7 @@ import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { usePermissions } from "../hooks/use-permissions";
 import { useModalParam } from "../hooks/use-modal-param";
+import { DefinitionEditBar } from "../components/agent-detail/agent-settings-view";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
   useIntegrationDetail,
@@ -611,6 +612,7 @@ function IntegrationSettings({
   canConfigure,
   onActivate,
   activationPending,
+  onEditDefinition,
 }: {
   packageId: string;
   detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
@@ -618,6 +620,8 @@ function IntegrationSettings({
   canConfigure: boolean;
   onActivate: () => void;
   activationPending: boolean;
+  /** Present when the reader may change the definition: opens the editor on a section. */
+  onEditDefinition?: (tab: "source" | "tools" | "json") => void;
 }) {
   const { t } = useTranslation(["settings", "agents"]);
   const location = useLocation();
@@ -632,7 +636,13 @@ function IntegrationSettings({
           ? "access"
           : "authentication";
   const steps = detail.manifest.setup_guide?.steps ?? [];
+  // Same order as an agent's: the map alone (it shows and edits both layers),
+  // what is set here, then what the integration IS for every space.
   const groups = [
+    {
+      label: null,
+      items: [{ id: "map", label: t("integration.structure.map"), icon: Workflow }],
+    },
     ...(canConfigure
       ? [
           {
@@ -649,15 +659,21 @@ function IntegrationSettings({
         ]
       : []),
     {
-      label: t("detail.settings.structureGroup", { ns: "agents" }),
+      label: t("detail.settings.definitionGroup", { ns: "agents" }),
       items: [
         { id: "functioning", label: t("integration.structure.functioning"), icon: Plug },
         { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
-        { id: "map", label: t("integration.structure.map"), icon: Workflow },
         { id: "files", label: t("detail.overview.explorer", { ns: "agents" }), icon: FolderTree },
       ],
     },
   ];
+  // Where "Modifier" lands in the editor for each definition section.
+  const editorTabFor: Partial<Record<string, "source" | "tools" | "json">> = {
+    functioning: "source",
+    tools: "tools",
+    files: "json",
+  };
+  const editTab = editorTabFor[active];
   return (
     <AgentDetailSplit
       className="max-lg:grid-cols-1"
@@ -665,10 +681,12 @@ function IntegrationSettings({
       rail={
         <nav className="space-y-5" aria-label={t("integration.tabs.configuration")}>
           {groups.map((group) => (
-            <section key={group.label}>
-              <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
-                {group.label}
-              </h2>
+            <section key={group.label ?? "overview"}>
+              {group.label && (
+                <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
+                  {group.label}
+                </h2>
+              )}
               <div className="flex flex-col gap-0.5">
                 {group.items.map((section) => {
                   const next = new URLSearchParams(params);
@@ -692,6 +710,9 @@ function IntegrationSettings({
         </nav>
       }
     >
+      {editTab && onEditDefinition && (
+        <DefinitionEditBar onClick={() => onEditDefinition(editTab)} />
+      )}
       {active === "files" ? (
         <FileExplorer packageId={packageId} type="integration" />
       ) : active === "functioning" || active === "map" ? (
@@ -1578,6 +1599,7 @@ export function IntegrationDetailPage() {
             canConfigure={canConfigure}
             onActivate={onActivate}
             activationPending={activate.isPending}
+            onEditDefinition={isOwned && pkg ? (tab) => editor.open(tab) : undefined}
           />
         </TabsContent>
 
@@ -1603,7 +1625,15 @@ export function IntegrationDetailPage() {
 
       {editor.value !== null && isOwned && pkg && (
         <Suspense fallback={<LoadingState />}>
-          <IntegrationEditorModal detail={pkg} onClose={editor.close} />
+          <IntegrationEditorModal
+            detail={pkg}
+            initialTab={
+              editor.value === "source" || editor.value === "tools" || editor.value === "json"
+                ? editor.value
+                : undefined
+            }
+            onClose={editor.close}
+          />
         </Suspense>
       )}
 

@@ -50,7 +50,7 @@ export function useAgentMap(agentPackageId: string | undefined, version?: string
           ...(isVersioned(version) ? { query: { version } } : {}),
           header: {
             "X-Org-Id": orgId ?? undefined,
-            "X-Application-Id": spaceId ?? undefined,
+            "X-Space-Id": spaceId ?? undefined,
           },
         },
       },

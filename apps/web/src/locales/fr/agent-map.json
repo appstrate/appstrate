@@ -117,5 +117,7 @@
   "concept.mcpServers.title": "Serveurs MCP",
   "concept.mcpServers.body": "MCP est le protocole standard par lequel un agent découvre et appelle des outils. Un serveur MCP est un fournisseur d'outils branché directement sur l'agent.\n\nLa différence avec une intégration : celle-ci ajoute par-dessus la gestion des identifiants et des autorisations. Un serveur MCP déclaré ici est utilisé tel quel.",
   "concept.systemTools.title": "Outils système",
-  "concept.systemTools.body": "Les outils fournis par la plateforme elle-même, sans passer par aucun service extérieur : rendre un résultat, écrire dans le journal, garder une note d'une exécution à l'autre, publier un document.\n\nLa plupart doivent être accordés explicitement dans le manifeste, un par un. Deux échappent à la règle et sont toujours là : la relecture de la mémoire archivée et l'historique des exécutions passées. Lire ce que l'agent a lui-même produit ne présente aucun risque, alors qu'écrire en mémoire ou publier un document en présente un."
+  "concept.systemTools.body": "Les outils fournis par la plateforme elle-même, sans passer par aucun service extérieur : rendre un résultat, écrire dans le journal, garder une note d'une exécution à l'autre, publier un document.\n\nLa plupart doivent être accordés explicitement dans le manifeste, un par un. Deux échappent à la règle et sont toujours là : la relecture de la mémoire archivée et l'historique des exécutions passées. Lire ce que l'agent a lui-même produit ne présente aucun risque, alors qu'écrire en mémoire ou publier un document en présente un.",
+  "scopeDefinition": "tous les espaces",
+  "scopeSpace": "cet espace"
 }

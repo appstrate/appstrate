@@ -33,6 +33,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import i18n from "../../i18n";
 import type { AgentDiagnostic } from "../../hooks/use-agent-diagnostics";
 import { packageDetailPath } from "../../lib/package-paths";
 
@@ -182,7 +183,14 @@ function cardAction<K extends MapEditKind | MapPanelKind>(
 ): { label: string; icon: "plus" | "edit"; onClick: () => void } | undefined {
   const handler = data[slot];
   if (typeof handler !== "function") return undefined;
-  return { label, icon, onClick: () => (handler as (k: K) => void)(kind) };
+  return {
+    // The map edits two different things and the icon cannot tell them apart:
+    // `onEdit` writes the package's definition, for every space it is
+    // installed in; `onPanel` writes this space's setup. The label carries it.
+    label: `${label} · ${i18n.t(slot === "onEdit" ? "agent-map:scopeDefinition" : "agent-map:scopeSpace")}`,
+    icon,
+    onClick: () => (handler as (k: K) => void)(kind),
+  };
 }
 
 function relationProps(data: Record<string, unknown>, id: string) {
