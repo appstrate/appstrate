@@ -288,6 +288,7 @@ export function AgentOverviewTab({
   cardHeaders = false,
   contained = false,
   fileEditHref,
+  initialFilePath,
 }: {
   packageId: string;
   detail: AgentDetail;
@@ -300,6 +301,8 @@ export function AgentOverviewTab({
   cardHeaders?: boolean;
   contained?: boolean;
   fileEditHref?: (path: string) => string | undefined;
+  /** Explorer › Fichiers opened on this bundle file, when a link sent the reader to it. */
+  initialFilePath?: string;
 }) {
   const { t, i18n } = useTranslation("agents");
   const location = useLocation();
@@ -570,6 +573,7 @@ export function AgentOverviewTab({
         currentManifest={currentManifest}
         currentContent={currentContent}
         editHref={fileEditHref}
+        initialPath={initialFilePath}
       />
     );
   }

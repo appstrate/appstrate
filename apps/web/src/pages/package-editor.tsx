@@ -35,9 +35,14 @@ import { ContentEditor } from "../components/package-editor/content-editor";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
+import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
+import type { IntegrationToolInspection } from "@appstrate/core/integration";
 import { Spinner } from "../components/spinner";
 import { EditorShell } from "../components/editor-shell";
-import { DefinitionFileSection, ManifestEditEntry } from "../components/definition-file-section";
+import {
+  ManifestEditEntry,
+  PackageFilesSection,
+} from "../components/package-files/package-files-section";
 
 import type { AgentEditorState } from "../components/agent-editor/types";
 import type { MetadataState } from "../components/agent-editor/metadata-section";
@@ -78,6 +83,7 @@ type GenericEditorTab =
   | "auths"
   | "tools"
   | "content"
+  | "files"
   | "json";
 
 /**
@@ -113,6 +119,7 @@ function AgentEditorInner({
   initialTab = "general",
   tab,
   onTabRequest,
+  filesHref,
 }: {
   initialState: AgentEditorState;
   resolvedDeps: { skills?: unknown[] } | null;
@@ -130,6 +137,8 @@ function AgentEditorInner({
   /** Embedded: the section is the settings rail's, not the editor's. */
   tab?: GenericEditorTab;
   onTabRequest?: (tab: GenericEditorTab) => void;
+  /** Embedded: Explorer › Fichiers, opened on a file. */
+  filesHref?: (path: string) => string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
@@ -254,13 +263,22 @@ function AgentEditorInner({
       id: "general",
       label: presentation === "page" ? t("editor.tabGeneral") : t("editor.tabIdentity"),
     },
-    {
-      id: "prompt",
-      label: presentation === "page" ? primaryDisplayFile("agent").name : t("editor.tabPrompt"),
-    },
+    // Embedded, the prompt is a file of the package, edited from its table.
+    ...(presentation === "embedded"
+      ? []
+      : [
+          {
+            id: "prompt" as const,
+            label:
+              presentation === "page" ? primaryDisplayFile("agent").name : t("editor.tabPrompt"),
+          },
+        ]),
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "integrations", label: t("editor.tabIntegrations") },
+    ...(presentation === "embedded"
+      ? [{ id: "files" as const, label: t("editor.tabPackageFiles") }]
+      : []),
     { id: "json", label: t("editor.tabJson") },
   ];
   const agentTabDescriptions: Partial<Record<GenericEditorTab, string>> = {
@@ -269,6 +287,7 @@ function AgentEditorInner({
     schema: t("editor.description.schema"),
     skills: t("editor.description.skills"),
     integrations: t("editor.description.integrations"),
+    files: t("editor.description.packageFiles"),
     json: t("editor.description.json"),
   };
 
@@ -338,20 +357,27 @@ function AgentEditorInner({
           </div>
         </MetadataSection>
       )}
-      {activeTab === "prompt" &&
-        (presentation === "embedded" ? (
-          <DefinitionFileSection
-            fileName={primaryDisplayFile("agent").name}
-            value={state.prompt}
-            onApply={(prompt) => setState((s) => ({ ...s, prompt }))}
-          />
-        ) : (
-          <PromptEditor
-            value={state.prompt}
-            onChange={(prompt) => setState((s) => ({ ...s, prompt }))}
-            showHint={presentation === "page"}
-          />
-        ))}
+      {activeTab === "prompt" && presentation !== "embedded" && (
+        <PromptEditor
+          value={state.prompt}
+          onChange={(prompt) => setState((s) => ({ ...s, prompt }))}
+          showHint={presentation === "page"}
+        />
+      )}
+      {activeTab === "files" && presentation === "embedded" && packageId && filesHref && (
+        <PackageFilesSection
+          type="agent"
+          packageId={packageId}
+          manifest={state.manifest}
+          documents={{
+            [primaryDisplayFile("agent").name]: {
+              value: state.prompt,
+              onApply: (prompt) => setState((s) => ({ ...s, prompt })),
+            },
+          }}
+          filesHref={filesHref}
+        />
+      )}
       {activeTab === "schema" && (
         <>
           <SchemaSection
@@ -443,7 +469,7 @@ function AgentEditorInner({
         <ManifestEditEntry
           value={state.manifest}
           schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
-          showLink={activeTab !== "prompt"}
+          showLink={activeTab !== "files"}
           onApply={(manifest) => {
             setState((s) => ({ ...s, manifest }));
             setSchemaFields(manifestToSchemaFields(manifest));
@@ -469,7 +495,7 @@ function AgentEditorInner({
 }
 
 export type AgentDefinitionSection =
-  "general" | "prompt" | "schema" | "skills" | "integrations" | "json";
+  "general" | "schema" | "skills" | "integrations" | "files" | "json";
 
 /**
  * An agent's definition, edited where it is read: inside its settings, one
@@ -480,10 +506,12 @@ export function AgentDefinitionEditor({
   detail,
   section,
   onSection,
+  filesHref,
 }: {
   detail: AgentDetail;
   section: AgentDefinitionSection;
   onSection: (section: AgentDefinitionSection) => void;
+  filesHref: (path: string) => string;
 }) {
   return (
     <AgentEditorInner
@@ -500,6 +528,7 @@ export function AgentDefinitionEditor({
       presentation="embedded"
       tab={section}
       onTabRequest={(next) => onSection(next as AgentDefinitionSection)}
+      filesHref={filesHref}
     />
   );
 }
@@ -600,8 +629,9 @@ function PackageEditorInner({
       id: "general",
       label: presentation === "page" ? t("editor.tabGeneral") : t("editor.tabIdentity"),
     },
-    // Named after its file, as the Agent Skills standard names it.
-    { id: "content", label: primaryDisplayFile(type).name },
+    ...(presentation === "embedded"
+      ? [{ id: "files" as const, label: t("editor.tabPackageFiles") }]
+      : [{ id: "content" as const, label: primaryDisplayFile(type).name }]),
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -626,8 +656,8 @@ function PackageEditorInner({
       hideSubmitBar={presentation === "page" && activeTab === "json"}
       presentation={presentation}
       activeDescription={
-        presentation === "embedded" && activeTab === "content"
-          ? t("editor.description.skillContent")
+        presentation === "embedded" && activeTab === "files"
+          ? t("editor.description.packageFiles")
           : undefined
       }
       isDirty={isDirty}
@@ -642,27 +672,33 @@ function PackageEditorInner({
         />
       )}
 
-      {activeTab === "content" &&
-        (presentation === "embedded" ? (
-          <DefinitionFileSection
-            fileName={primaryDisplayFile(type).name}
-            value={state.content}
-            onApply={(content) => setState((s) => ({ ...s, content }))}
-            bundle={packageId && filesHref ? { packageId, filesHref } : undefined}
-          />
-        ) : (
-          <ContentEditor
-            value={state.content}
-            onChange={(content) => setState((s) => ({ ...s, content }))}
-            language="markdown"
-          />
-        ))}
+      {activeTab === "content" && presentation !== "embedded" && (
+        <ContentEditor
+          value={state.content}
+          onChange={(content) => setState((s) => ({ ...s, content }))}
+          language="markdown"
+        />
+      )}
+      {activeTab === "files" && presentation === "embedded" && packageId && filesHref && (
+        <PackageFilesSection
+          type={type}
+          packageId={packageId}
+          manifest={state.manifest}
+          documents={{
+            [primaryDisplayFile(type).name]: {
+              value: state.content,
+              onApply: (content) => setState((s) => ({ ...s, content })),
+            },
+          }}
+          filesHref={filesHref}
+        />
+      )}
 
       {presentation === "embedded" && (
         <ManifestEditEntry
           value={state.manifest}
           schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type]! }}
-          showLink={activeTab === "general"}
+          showLink={activeTab !== "files"}
           onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
         />
       )}
@@ -694,15 +730,21 @@ function IntegrationEditorInner({
   onCancel,
   tab,
   onTabRequest,
+  filesHref,
+  toolInspection,
 }: {
   initialState: PackageEditorState;
   packageId: string | undefined;
   isEdit: boolean;
-  /** A page to create; embedded in the integration's Définition to edit. */
+  /** A page to create; embedded in the integration's Package AFPS to edit. */
   presentation?: "page" | "embedded";
   onCancel?: () => void;
   tab?: GenericEditorTab;
   onTabRequest?: (tab: GenericEditorTab) => void;
+  /** Embedded: Explorer › Fichiers, opened on a file. */
+  filesHref?: (path: string) => string;
+  /** Embedded: the server's reading of the saved tool catalog. */
+  toolInspection?: IntegrationToolInspection;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
@@ -758,6 +800,7 @@ function IntegrationEditorInner({
     auths: t("integrationEditor.description.auths"),
     tools: t("integrationEditor.description.tools"),
     content: t("integrationEditor.description.content"),
+    files: t("editor.description.packageFiles"),
     json: t("editor.description.json"),
   };
 
@@ -788,12 +831,11 @@ function IntegrationEditorInner({
     },
     {
       id: "tools",
-      label:
-        presentation === "page"
-          ? t("integrationEditor.tabTools")
-          : t("integrationEditor.tabToolPolicies"),
+      label: t("integrationEditor.tabTools"),
     },
-    { id: "content", label: INTEGRATION_DOCUMENT },
+    presentation === "embedded"
+      ? { id: "files", label: t("editor.tabPackageFiles") }
+      : { id: "content", label: INTEGRATION_DOCUMENT },
     { id: "json", label: t("editor.tabJson") },
   ];
 
@@ -852,34 +894,47 @@ function IntegrationEditorInner({
         />
       )}
 
-      {activeTab === "tools" && (
-        <ToolsPolicySection
-          manifest={state.manifest}
-          onChange={onManifestChange}
-          surface={sectionSurface}
-        />
-      )}
-
-      {activeTab === "content" &&
+      {activeTab === "tools" &&
         (presentation === "embedded" ? (
-          <DefinitionFileSection
-            fileName={INTEGRATION_DOCUMENT}
-            value={state.content}
-            onApply={(content) => setState((s) => ({ ...s, content }))}
+          <IntegrationToolsSection
+            inspection={toolInspection}
+            edit={{ manifest: state.manifest, onChange: onManifestChange }}
           />
         ) : (
-          <ContentEditor
-            value={state.content}
-            onChange={(content) => setState((s) => ({ ...s, content }))}
-            language="markdown"
+          <ToolsPolicySection
+            manifest={state.manifest}
+            onChange={onManifestChange}
+            surface={sectionSurface}
           />
         ))}
+
+      {activeTab === "content" && presentation !== "embedded" && (
+        <ContentEditor
+          value={state.content}
+          onChange={(content) => setState((s) => ({ ...s, content }))}
+          language="markdown"
+        />
+      )}
+      {activeTab === "files" && presentation === "embedded" && packageId && filesHref && (
+        <PackageFilesSection
+          type="integration"
+          packageId={packageId}
+          manifest={state.manifest}
+          documents={{
+            [INTEGRATION_DOCUMENT]: {
+              value: state.content,
+              onApply: (content) => setState((s) => ({ ...s, content })),
+            },
+          }}
+          filesHref={filesHref}
+        />
+      )}
 
       {presentation === "embedded" && (
         <ManifestEditEntry
           value={state.manifest}
           schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
-          showLink={activeTab !== "content"}
+          showLink={activeTab !== "files"}
           onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
         />
       )}
@@ -901,7 +956,7 @@ function IntegrationEditorInner({
 }
 
 export type IntegrationDefinitionSection =
-  "general" | "source" | "auths" | "tools" | "content" | "json";
+  "general" | "source" | "auths" | "tools" | "files" | "json";
 
 /** An integration's optional companion document, named as the bundle names it. */
 const INTEGRATION_DOCUMENT = "INTEGRATION.md";
@@ -911,10 +966,14 @@ export function IntegrationDefinitionEditor({
   detail,
   section,
   onSection,
+  filesHref,
+  toolInspection,
 }: {
   detail: OrgPackageItemDetail;
   section: IntegrationDefinitionSection;
   onSection: (section: IntegrationDefinitionSection) => void;
+  filesHref: (path: string) => string;
+  toolInspection?: IntegrationToolInspection;
 }) {
   return (
     <IntegrationEditorInner
@@ -929,11 +988,13 @@ export function IntegrationDefinitionEditor({
       presentation="embedded"
       tab={section}
       onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
+      filesHref={filesHref}
+      toolInspection={toolInspection}
     />
   );
 }
 
-export type SkillDefinitionSection = "general" | "content";
+export type SkillDefinitionSection = "general" | "files";
 
 /** A skill's definition, edited inside its settings — see `AgentDefinitionEditor`. */
 export function SkillDefinitionEditor({
@@ -966,8 +1027,6 @@ export function SkillDefinitionEditor({
   );
 }
 
-export type McpServerDefinitionSection = "general";
-
 /**
  * A local MCP server's definition. The server has no content file and no form
  * of its own beyond its identity — `server`, `tools` and `user_config` are
@@ -976,11 +1035,21 @@ export type McpServerDefinitionSection = "general";
  * created here (it arrives by import), which is why this does not go through
  * `useEditorState`, whose create path the type has not got.
  */
-export function McpServerDefinitionEditor({ detail }: { detail: OrgPackageItemDetail }) {
-  return <McpServerDefinitionInner key={`${detail.id}:${detail.lock_version}`} detail={detail} />;
+export type McpServerDefinitionSection = "general" | "files";
+
+interface McpServerDefinitionProps {
+  detail: OrgPackageItemDetail;
+  section: McpServerDefinitionSection;
+  filesHref: (path: string) => string;
 }
 
-function McpServerDefinitionInner({ detail }: { detail: OrgPackageItemDetail }) {
+export function McpServerDefinitionEditor(props: McpServerDefinitionProps) {
+  return (
+    <McpServerDefinitionInner key={`${props.detail.id}:${props.detail.lock_version}`} {...props} />
+  );
+}
+
+function McpServerDefinitionInner({ detail, section, filesHref }: McpServerDefinitionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const qc = useQueryClient();
   const initial = detail.manifest ?? {};
@@ -1020,34 +1089,51 @@ function McpServerDefinitionInner({ detail }: { detail: OrgPackageItemDetail }) 
       packageId={detail.id}
       isEdit
       displayName={(manifest.display_name as string) || detail.id}
-      tabs={[{ id: "general", label: t("editor.tabIdentity") }]}
-      activeTab="general"
+      tabs={[
+        { id: "general", label: t("editor.tabIdentity") },
+        { id: "files", label: t("editor.tabPackageFiles") },
+      ]}
+      activeTab={section}
       onTabChange={() => {}}
       error={error}
       isPending={pending}
       onSubmit={() => void save()}
       onCancel={() => {}}
       presentation="embedded"
-      activeDescription={t("mcpServerEditor.description.general")}
+      activeDescription={t(
+        section === "files"
+          ? "editor.description.packageFiles"
+          : "mcpServerEditor.description.general",
+      )}
       isDirty={isDirty}
       onDiscardChanges={() => {
         setManifest(initial);
         setError(null);
       }}
     >
-      <MetadataSection
-        value={metadata}
-        onChange={(m) => setManifest((prev) => ({ ...prev, ...metadataToManifestPatch(m) }))}
-        isEdit
-        surface="settings"
-      />
+      {section === "general" ? (
+        <MetadataSection
+          value={metadata}
+          onChange={(m) => setManifest((prev) => ({ ...prev, ...metadataToManifestPatch(m) }))}
+          isEdit
+          surface="settings"
+        />
+      ) : (
+        <PackageFilesSection
+          type="mcp-server"
+          packageId={detail.id}
+          manifest={manifest}
+          documents={{}}
+          filesHref={filesHref}
+        />
+      )}
       <ManifestEditEntry
         value={manifest}
         schema={{
           uri: AFPS_SCHEMA_URLS["mcp-server"],
           schema: PACKAGE_SCHEMAS["mcp-server"] ?? {},
         }}
-        showLink
+        showLink={section === "general"}
         onApply={setManifest}
       />
       <UnsavedChangesModal blocker={blocker} />

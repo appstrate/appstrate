@@ -16,6 +16,7 @@ import {
   IntegrationMap,
 } from "../components/package-detail/integration-structure";
 import { PackageFilesView } from "../components/package-files/package-files-view";
+import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 import { CallbackUrlHint } from "../components/package-detail/callback-url-hint";
 
 /** Keep legacy fragments readable after moving files into settings. */
@@ -43,7 +44,7 @@ import {
   Wrench,
   Workflow,
   History,
-  FileText,
+  FileArchive,
   IdCard,
   Server,
 } from "lucide-react";
@@ -68,7 +69,6 @@ import { LoadingState, ErrorState, EmptyState } from "../components/page-states"
 import { DataTable } from "../components/data-table";
 import { useIntegrationClientColumns, useConnectionColumns } from "./integration-columns";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
-import { PackageToolCatalog } from "../components/package-detail/package-tool-catalog";
 import { ListToolbar } from "../components/list-toolbar";
 import {
   AgentDetailSplit,
@@ -126,13 +126,19 @@ const IntegrationDefinitionEditor = lazy(() =>
   })),
 );
 
-/** Rail id → editor section. Distinct ids: "tools" is the read-only tool catalogue. */
+/** Rail id → editor section. `bundle`, because `files` is Explorer's tree. */
 const DEFINITION_RAIL: Record<string, IntegrationDefinitionSection> = {
   identity: "general",
   source: "source",
   "auth-methods": "auths",
+  tools: "tools",
+  bundle: "files",
+};
+
+/** Sections that moved: the policy joined the catalog, the document the files table. */
+const RENAMED_SECTIONS: Record<string, string> = {
   "tool-policies": "tools",
-  documentation: "content",
+  documentation: "bundle",
 };
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 
@@ -588,38 +594,6 @@ function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
   return <IntegrationFunctioning detail={detail} />;
 }
 
-function IntegrationTools({
-  detail,
-  withHeading = false,
-}: {
-  detail: IntegrationDetailWire;
-  withHeading?: boolean;
-}) {
-  const { t } = useTranslation("settings");
-  return (
-    <div className="space-y-4">
-      {detail.allow_undeclared_tools && (
-        <div
-          className="rounded-md border-l-2 border-amber-500/30 bg-amber-500/5 p-3 text-xs"
-          data-testid="integration-tools-wildcard-notice"
-        >
-          <p className="font-medium">{t("integration.tools.wildcardNotice.title")}</p>
-          <p className="text-muted-foreground mt-1">{t("integration.tools.wildcardNotice.body")}</p>
-        </div>
-      )}
-      <PackageToolCatalog
-        title={withHeading ? t("integration.tabs.tools") : undefined}
-        inspection={detail.tool_catalog_inspection}
-        tools={(detail.tool_catalog ?? []).map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          permissions: tool.policy?.required_scopes,
-        }))}
-      />
-    </div>
-  );
-}
-
 function IntegrationSettings({
   packageId,
   detail,
@@ -648,7 +622,17 @@ function IntegrationSettings({
   const location = useLocation();
   const navigate = useNavigate();
   const params = new URLSearchParams(location.search);
-  const requested = params.get("integrationSettings");
+  const requestedRaw = params.get("integrationSettings");
+  const requested = (requestedRaw && RENAMED_SECTIONS[requestedRaw]) ?? requestedRaw;
+  const requestedFile = params.get("file") ?? undefined;
+  const sectionHref = (id: string, extra: Record<string, string> = {}) => {
+    const next = new URLSearchParams(location.search);
+    next.set("integrationSettings", id);
+    // A modal, or the file a link opened, belongs to the section it was opened in.
+    for (const key of ["edit", "editManifest", "file", "toolPolicy"]) next.delete(key);
+    for (const [key, value] of Object.entries(extra)) next.set(key, value);
+    return `?${next.toString()}#configuration`;
+  };
   const active =
     requested === "tools" ||
     requested === "functioning" ||
@@ -662,15 +646,15 @@ function IntegrationSettings({
           ? "access"
           : "authentication";
   const steps = detail.manifest.setup_guide?.steps ?? [];
-  // Same order as an agent's: Explorer (see it: map, tool catalogue, files),
-  // then what is set here, then what the integration IS for every space —
-  // edited in place when the reader may.
+  // Same order as an agent's: Explorer (see it: map, files, versions), then
+  // what is set here, then the AFPS package, what the integration IS for every
+  // space, edited in place when the reader may. The tool catalogue belongs to
+  // the package: nothing about it is set per organisation or per space.
   const groups = [
     {
       label: t("detail.settings.exploreGroup", { ns: "agents" }),
       items: [
         { id: "map", label: t("integration.structure.map"), icon: Workflow },
-        { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
         { id: "files", label: t("detail.overview.explorer", { ns: "agents" }), icon: FolderTree },
         ...(isOwned
           ? [
@@ -713,15 +697,17 @@ function IntegrationSettings({
               label: t("integrationEditor.tabAuthMethods", { ns: "agents" }),
               icon: KeyRound,
             },
+            { id: "tools", label: t("integrationEditor.tabTools", { ns: "agents" }), icon: Wrench },
             {
-              id: "tool-policies",
-              label: t("integrationEditor.tabToolPolicies", { ns: "agents" }),
-              icon: ShieldCheck,
+              id: "bundle",
+              label: t("editor.tabPackageFiles", { ns: "agents" }),
+              icon: FileArchive,
             },
-            // Named after its file, like a skill's SKILL.md.
-            { id: "documentation", label: "INTEGRATION.md", icon: FileText },
           ]
-        : [{ id: "functioning", label: t("integration.structure.functioning"), icon: Plug }],
+        : [
+            { id: "functioning", label: t("integration.structure.functioning"), icon: Plug },
+            { id: "tools", label: t("integrationEditor.tabTools", { ns: "agents" }), icon: Wrench },
+          ],
     },
   ];
   const definitionSection = definition ? DEFINITION_RAIL[active] : undefined;
@@ -738,16 +724,11 @@ function IntegrationSettings({
               </h2>
               <div className="flex flex-col gap-0.5">
                 {group.items.map((section) => {
-                  const next = new URLSearchParams(params);
-                  next.set("integrationSettings", section.id);
-                  // A file modal belongs to the section it was opened in.
-                  next.delete("edit");
-                  next.delete("editManifest");
                   return (
                     <RailLink
                       key={section.id}
                       item={{
-                        to: `?${next.toString()}#configuration`,
+                        to: sectionHref(section.id),
                         icon: section.icon,
                         labelKey: section.label,
                       }}
@@ -771,35 +752,28 @@ function IntegrationSettings({
               const railId = Object.keys(DEFINITION_RAIL).find(
                 (id) => DEFINITION_RAIL[id] === next,
               );
-              const search = new URLSearchParams(location.search);
-              if (railId) search.set("integrationSettings", railId);
-              search.delete("edit");
-              search.delete("editManifest");
-              void navigate({ search: search.toString(), hash: "configuration" });
+              if (railId) void navigate(sectionHref(railId));
             }}
+            filesHref={(path) => sectionHref("files", { file: path })}
+            toolInspection={detail.tool_catalog_inspection}
           />
         </Suspense>
       ) : active === "versions" ? (
         <PackageVersionsSection type="integration" packageId={packageId} isOwned={isOwned} />
       ) : active === "files" ? (
         <PackageFilesView
+          key={requestedFile}
           type="integration"
           packageId={packageId}
+          initialPath={requestedFile}
           editHref={
             definition
-              ? (path) => {
-                  const section =
-                    path === "manifest.json"
-                      ? { rail: "identity", modal: "editManifest" }
-                      : path === "INTEGRATION.md"
-                        ? { rail: "documentation", modal: "edit" }
-                        : null;
-                  if (!section) return undefined;
-                  const search = new URLSearchParams(location.search);
-                  search.set("integrationSettings", section.rail);
-                  search.set(section.modal, "1");
-                  return `?${search.toString()}#configuration`;
-                }
+              ? (path) =>
+                  path === "manifest.json"
+                    ? sectionHref("bundle", { editManifest: "1" })
+                    : path === "INTEGRATION.md"
+                      ? sectionHref("bundle", { edit: path })
+                      : undefined
               : undefined
           }
         />
@@ -818,7 +792,13 @@ function IntegrationSettings({
               renderPanel={(section, openPanel) => {
                 if (section === "files")
                   return <PackageFilesView type="integration" packageId={packageId} />;
-                if (section === "tools") return <IntegrationTools detail={detail} />;
+                if (section === "tools")
+                  return (
+                    <IntegrationToolsSection
+                      inspection={detail.tool_catalog_inspection}
+                      allowUndeclaredTools={detail.allow_undeclared_tools}
+                    />
+                  );
                 if (section === "functioning") return <IntegrationGeneral detail={detail} />;
                 if (section.startsWith("connections:"))
                   return (
@@ -867,7 +847,14 @@ function IntegrationSettings({
         </div>
       ) : active === "tools" ? (
         <div className="p-6">
-          <IntegrationTools detail={detail} withHeading />
+          <AgentDetailSectionHeader
+            title={t("integrationEditor.tabTools", { ns: "agents" })}
+            description={t("integrationEditor.description.tools", { ns: "agents" })}
+          />
+          <IntegrationToolsSection
+            inspection={detail.tool_catalog_inspection}
+            allowUndeclaredTools={detail.allow_undeclared_tools}
+          />
         </div>
       ) : !detail.active ? (
         <div className="p-6">

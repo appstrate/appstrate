@@ -178,6 +178,13 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.structure.type.", // components/package-detail/integration-structure.tsx
   "integration.structure.concept.", // components/package-detail/integration-structure.tsx
   "integration.structure.empty.", // components/package-detail/integration-structure.tsx // pages/integration-detail.tsx — t(`integration.admin.usage.${mode}Help`)
+  "integration.inventory.basis.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.exposure.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.filter.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.origin.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.originDetail.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.reason.", // components/package-detail/package-tool-catalog.tsx
+  "integration.inventory.rules.", // components/package-detail/package-tool-catalog.tsx
   "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
   "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)

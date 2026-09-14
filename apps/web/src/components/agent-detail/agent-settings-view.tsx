@@ -8,7 +8,7 @@ import {
   Braces,
   BrainCircuit,
   CalendarClock,
-  FileText,
+  FileArchive,
   FolderTree,
   Globe,
   History,
@@ -30,8 +30,16 @@ import { PackageVersionsSection } from "../package-detail/package-versions-secti
 import { primaryDisplayFile } from "../../lib/package-files";
 import type { AgentDefinitionSection } from "../../pages/package-editor";
 
+/** Package AFPS › Fichiers is `bundle` in the URL: `files` is Explorer's tree. */
+type DefinitionRailSection = Exclude<AgentDefinitionSection, "files" | "json"> | "bundle";
+
 type AgentSettingsSection =
-  ConfigurationSection | AgentDefinitionSection | "map" | "files" | "versions";
+  ConfigurationSection | DefinitionRailSection | "map" | "files" | "versions";
+
+const toEditorSection = (section: DefinitionRailSection): AgentDefinitionSection =>
+  section === "bundle" ? "files" : section;
+const toRailSection = (section: AgentDefinitionSection): AgentSettingsSection =>
+  section === "files" ? "bundle" : section === "json" ? "general" : section;
 
 /** The editor sections, lazily: the editor weighs more than the page reading it. */
 const AgentDefinitionEditor = lazy(() =>
@@ -40,12 +48,12 @@ const AgentDefinitionEditor = lazy(() =>
   })),
 );
 
-const DEFINITION_SECTION_IDS: readonly AgentDefinitionSection[] = [
+const DEFINITION_SECTION_IDS: readonly DefinitionRailSection[] = [
   "general",
-  "prompt",
   "schema",
   "skills",
   "integrations",
+  "bundle",
 ];
 
 /**
@@ -77,10 +85,10 @@ const SETTINGS_GROUPS = [
     labelKey: "detail.settings.definitionGroup",
     items: [
       { id: "general", icon: IdCard, labelKey: "editor.tabIdentity" },
-      { id: "prompt", icon: FileText, labelKey: "editor.tabPrompt" },
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
       { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
       { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },
+      { id: "bundle", icon: FileArchive, labelKey: "editor.tabPackageFiles" },
     ],
   },
 ] satisfies Array<{
@@ -144,7 +152,11 @@ export function AgentSettingsView({
     ...group,
     items: group.items.filter((item) => visible(item.id)),
   })).filter((group) => group.items.length > 0);
-  const requested = new URLSearchParams(location.search).get("agentSettings");
+  const params = new URLSearchParams(location.search);
+  const requestedRaw = params.get("agentSettings");
+  // The prompt stopped being a section: it is a row of Package AFPS › Fichiers.
+  const requested = requestedRaw === "prompt" ? "bundle" : requestedRaw;
+  const requestedFile = params.get("file") ?? undefined;
   const fallback: AgentSettingsSection = groups[0]?.items[0]?.id ?? "connections";
   const activeSection =
     SETTINGS_SECTION_IDS.includes(requested as AgentSettingsSection) &&
@@ -154,7 +166,7 @@ export function AgentSettingsView({
         ? "model"
         : fallback;
 
-  const sectionHref = (section: AgentSettingsSection) => {
+  const sectionHref = (section: AgentSettingsSection, file?: string) => {
     const search = new URLSearchParams(location.search);
     if (section === "model") search.delete("agentSettings");
     else search.set("agentSettings", section);
@@ -166,26 +178,30 @@ export function AgentSettingsView({
     search.delete("tools");
     search.delete("field-input");
     search.delete("field-output");
+    search.delete("file");
+    if (file) search.set("file", file);
     const query = search.toString();
     return `${location.pathname}${query ? `?${query}` : ""}#settings`;
   };
 
   // The bundle files a Définition section edits, and the section that does.
   const fileEditHref = (path: string) => {
-    // The prompt has its section; the manifest is the raw form of every other
-    // section, so it opens its modal over Identité.
-    const target =
+    // Both open their modal over Package AFPS › Fichiers, where they are listed.
+    const modal =
       path === primaryDisplayFile("agent").name
-        ? { section: "prompt", modal: "edit" }
+        ? { name: "edit", value: path }
         : path === "manifest.json"
-          ? { section: "general", modal: "editManifest" }
+          ? { name: "editManifest", value: "1" }
           : null;
-    if (!target) return undefined;
+    if (!modal) return undefined;
     const search = new URLSearchParams(location.search);
-    search.set("agentSettings", target.section);
-    search.set(target.modal, "1");
+    search.set("agentSettings", "bundle");
+    search.delete("file");
+    search.set(modal.name, modal.value);
     return `${location.pathname}?${search.toString()}#settings`;
   };
+
+  const filesHref = (path: string) => sectionHref("files", path);
 
   const openFiles = () => {
     void navigate(sectionHref("files"));
@@ -198,8 +214,9 @@ export function AgentSettingsView({
       <Suspense fallback={<LoadingState />}>
         <AgentDefinitionEditor
           detail={detail}
-          section={activeSection as AgentDefinitionSection}
-          onSection={(next) => void navigate(sectionHref(next))}
+          section={toEditorSection(activeSection as DefinitionRailSection)}
+          onSection={(next) => void navigate(sectionHref(toRailSection(next)))}
+          filesHref={filesHref}
         />
       </Suspense>
     ) : activeSection === "map" || activeSection === "files" ? (
@@ -210,7 +227,9 @@ export function AgentSettingsView({
         isHistorical={isHistorical}
         currentManifest={currentManifest}
         currentContent={currentContent}
+        key={activeSection === "files" ? requestedFile : undefined}
         surface={activeSection}
+        initialFilePath={requestedFile}
         onOpenFiles={openFiles}
         fileEditHref={canEditDefinition ? fileEditHref : undefined}
       />

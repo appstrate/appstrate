@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Wrench } from "lucide-react";
 import type {
@@ -28,8 +28,14 @@ export function PackageToolCatalog({
   selection,
   inspection,
   title,
+  actions,
+  rowActions,
 }: {
   title?: string;
+  /** The list's one "Actions" menu, when the catalog is edited where it is read. */
+  actions?: ReactNode;
+  /** A row's "…" menu, likewise. */
+  rowActions?: (tool: PackageTool) => ReactNode;
   tools: PackageTool[];
   inspection?: IntegrationToolInspection;
   selection?: {
@@ -198,6 +204,18 @@ export function PackageToolCatalog({
           },
         ]
       : []),
+    ...(rowActions
+      ? [
+          {
+            id: "actions",
+            header: "",
+            width: "48px" as const,
+            align: "end" as const,
+            control: true,
+            cell: (tool: PackageTool) => rowActions(tool),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -226,6 +244,7 @@ export function PackageToolCatalog({
       <ListToolbar
         placement="panel"
         panelFiltersAdjacent
+        actions={actions}
         search={{ value: search, onChange: setSearch, placeholder: t("packageTools.search") }}
         filters={[
           ...(inventory

@@ -1239,7 +1239,14 @@ export const comptaReferencesSkillDetail: Json200<"/api/packages/skills/{scope}/
   auto_installed: false,
   lock_version: 4,
   version: "1.4.0",
-  manifest: {},
+  manifest: {
+    name: "@tractr/compta-references",
+    version: "1.4.0",
+    type: "skill",
+    display_name: "compta-references",
+    description:
+      "Références et scripts de la comptabilité Tractr : année fiscale, règles d'extraction BNC, mapping des marchands.",
+  },
   manifest_name: "@tractr/compta-references",
   version_count: 4,
   has_unarchived_changes: false,

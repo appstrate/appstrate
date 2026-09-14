@@ -4,19 +4,18 @@
  * Paramètres for the packages with nothing set per space — skills and local
  * MCP servers — in the shape an agent's and an integration's have.
  *
- * Two groups, not three: Explorer (the files, read) and Définition (what the
- * package is, edited in place by whoever may write it). A skill's Définition
- * is Identité and Contenu (SKILL.md); a server's is Identité alone, its server
- * block and tools living in the manifest. The raw manifest is not a section —
- * every form writes into it — but a modal reached from under Identité and from
- * `manifest.json` in the files.
+ * Two groups, not three: Explorer (the tree and the versions, read) and
+ * Package AFPS (what the archive holds, edited in place by whoever may write
+ * it): Identité, the manifest's form, and Fichiers, the table of every file
+ * with the main one edited from it. The raw manifest is not a section (every
+ * form writes into it) but a modal reached from under Identité and from
+ * `manifest.json` in the table.
  */
 import { lazy, Suspense, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FileText, FolderTree, History, IdCard } from "lucide-react";
+import { FileArchive, FolderTree, History, IdCard } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
-import type { SkillDefinitionSection } from "../../pages/package-editor";
 import { primaryDisplayFile } from "../../lib/package-files";
 import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { LoadingState } from "../page-states";
@@ -35,7 +34,8 @@ const McpServerDefinitionEditor = lazy(() =>
   })),
 );
 
-type PackageSettingsSection = "files" | "versions" | SkillDefinitionSection;
+/** Package AFPS › Fichiers is `bundle` in the URL: `files` is Explorer's tree. */
+type PackageSettingsSection = "files" | "versions" | "general" | "bundle";
 
 export function PackageSettingsView({
   type,
@@ -61,19 +61,19 @@ export function PackageSettingsView({
   const params = new URLSearchParams(location.search);
   const requested = params.get("packageSettings");
   const requestedFile = params.get("file") ?? undefined;
-  const sections: SkillDefinitionSection[] =
-    type === "skill" ? ["general", "content"] : ["general"];
   const active: PackageSettingsSection =
     requested === "versions" && versions.isOwned
       ? "versions"
-      : editable && sections.includes(requested as SkillDefinitionSection)
-        ? (requested as SkillDefinitionSection)
-        : "files";
+      : editable && (requested === "general" || requested === "bundle")
+        ? requested
+        : // A skill's SKILL.md stopped being a section: it is a row of Fichiers.
+          editable && requested === "content"
+          ? "bundle"
+          : "files";
 
   const sectionHref = (
     section: PackageSettingsSection,
-    modal?: "edit" | "editManifest",
-    file?: string,
+    options: { modal?: { name: "edit" | "editManifest"; value: string }; file?: string } = {},
   ) => {
     const search = new URLSearchParams(location.search);
     if (section === "files") search.delete("packageSettings");
@@ -82,11 +82,12 @@ export function PackageSettingsView({
     search.delete("edit");
     search.delete("editManifest");
     search.delete("file");
-    if (modal) search.set(modal, "1");
-    if (file) search.set("file", file);
+    if (options.modal) search.set(options.modal.name, options.modal.value);
+    if (options.file) search.set("file", options.file);
     const query = search.toString();
     return `${location.pathname}${query ? `?${query}` : ""}#settings`;
   };
+  const filesHref = (path: string) => sectionHref("files", { file: path });
 
   const groups = [
     {
@@ -114,15 +115,7 @@ export function PackageSettingsView({
             label: t("detail.settings.definitionGroup"),
             items: [
               { id: "general" as const, icon: IdCard, label: t("editor.tabIdentity") },
-              ...(type === "skill"
-                ? [
-                    {
-                      id: "content" as const,
-                      icon: FileText,
-                      label: primaryDisplayFile("skill").name,
-                    },
-                  ]
-                : []),
+              { id: "bundle" as const, icon: FileArchive, label: t("editor.tabPackageFiles") },
             ],
           },
         ]
@@ -157,17 +150,21 @@ export function PackageSettingsView({
     >
       {active === "versions" ? (
         <PackageVersionsSection type={type} packageId={packageId} {...versions} />
-      ) : active !== "files" && detail ? (
+      ) : (active === "general" || active === "bundle") && detail ? (
         <Suspense fallback={<LoadingState />}>
           {type === "skill" ? (
             <SkillDefinitionEditor
               detail={detail}
-              section={active}
-              onSection={(next) => void navigate(sectionHref(next))}
-              filesHref={(path) => sectionHref("files", undefined, path)}
+              section={active === "bundle" ? "files" : "general"}
+              onSection={(next) => void navigate(sectionHref(next === "files" ? "bundle" : next))}
+              filesHref={filesHref}
             />
           ) : (
-            <McpServerDefinitionEditor detail={detail} />
+            <McpServerDefinitionEditor
+              detail={detail}
+              section={active === "bundle" ? "files" : "general"}
+              filesHref={filesHref}
+            />
           )}
         </Suspense>
       ) : (
@@ -181,9 +178,9 @@ export function PackageSettingsView({
             editable
               ? (path) =>
                   type === "skill" && path === primaryDisplayFile("skill").name
-                    ? sectionHref("content", "edit")
+                    ? sectionHref("bundle", { modal: { name: "edit", value: path } })
                     : path === "manifest.json"
-                      ? sectionHref("general", "editManifest")
+                      ? sectionHref("bundle", { modal: { name: "editManifest", value: "1" } })
                       : undefined
               : undefined
           }
