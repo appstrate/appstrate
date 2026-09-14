@@ -69,7 +69,12 @@ interface EditorShellProps {
   onSubmit: () => void;
   onCancel: () => void;
   hideSubmitBar?: boolean;
-  presentation?: "page" | "panel-dialog";
+  /**
+   * `page` to create; `embedded` inside a package's Définition, whose settings
+   * rail already lists the sections, so the shell draws only the active one and
+   * the save bar.
+   */
+  presentation?: "page" | "panel-dialog" | "embedded";
   panelTitle?: string;
   activeDescription?: string;
   activeSecondaryDescription?: string;
@@ -144,6 +149,62 @@ export function EditorShell({
       </Button>
     </div>
   );
+
+  const embeddedFooter = !hideSubmitBar ? (
+    <div className="bg-background border-border sticky bottom-0 z-10 flex min-h-16 items-center gap-3 border-t px-6 py-3 max-lg:flex-col max-lg:items-stretch">
+      <span className="text-muted-foreground text-sm">
+        {isDirty ? t("unsaved.title", { ns: "common" }) : t("editor.noUnsavedChanges")}
+      </span>
+      <div className="ml-auto flex items-center gap-2 max-lg:ml-0 max-lg:w-full">
+        <Button
+          variant="outline"
+          type="button"
+          onClick={onDiscardChanges}
+          disabled={!isDirty || !onDiscardChanges}
+          className="max-lg:flex-1"
+        >
+          {t("editor.discardChanges")}
+        </Button>
+        <Button
+          type="button"
+          onClick={onSubmit}
+          disabled={!isDirty || isPending}
+          className="max-lg:flex-1"
+        >
+          {isPending ? <Spinner /> : t("btn.save")}
+        </Button>
+      </div>
+    </div>
+  ) : null;
+
+  if (presentation === "embedded") {
+    return (
+      <div className="flex min-h-full flex-col">
+        <div className="flex-1 space-y-4 p-6">
+          <SettingsHeading
+            title={tabs.find((tab) => tab.id === activeTab)?.label}
+            description={
+              activeDescription || activeSecondaryDescription ? (
+                <>
+                  {activeDescription}
+                  {activeSecondaryDescription && (
+                    <p className="mt-2">{activeSecondaryDescription}</p>
+                  )}
+                </>
+              ) : undefined
+            }
+          />
+          {error && (
+            <div className="bg-destructive/15 text-destructive rounded-md px-3 py-2 text-sm">
+              {error}
+            </div>
+          )}
+          {children}
+        </div>
+        {embeddedFooter}
+      </div>
+    );
+  }
 
   if (presentation === "panel-dialog") {
     const dialogTitle = panelTitle ?? title;

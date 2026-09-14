@@ -3310,6 +3310,7 @@ export const integrationClients: Json200<
 /** The package row behind the integration — the header's source and version. */
 export const integrationPackage: components["schemas"]["OrgPackageItemDetail"] = {
   id: INTEGRATION_ID,
+  lock_version: 1,
   orgId: null,
   name: "google-drive",
   description: "Lire, écrire et organiser les fichiers d'un Drive.",

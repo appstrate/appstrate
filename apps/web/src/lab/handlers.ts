@@ -928,6 +928,26 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: (url) => ({ status: 200, body: agentDetailFixture(typedPackageId(url)) }),
   },
   {
+    // Saving an integration's definition from its settings: the draft moves
+    // forward one lock version and the page reads it back.
+    method: "PUT",
+    pattern: /^\/api\/packages\/integrations\/[^/]+\/[^/]+$/,
+    handler: (url, scenario, _headers, body) => {
+      const update = body as { manifest?: Record<string, unknown>; lock_version?: number } | null;
+      if (!update?.manifest || typeof update.lock_version !== "number") {
+        return { status: 400, body: {} };
+      }
+      const packageId = typedPackageId(url);
+      const updated = {
+        ...integrationPackageFor(packageId),
+        manifest: update.manifest,
+        lock_version: update.lock_version + 1,
+      } as typeof f.integrationPackage;
+      if (scenario !== "error") changedIntegrationPackages.set(packageId, updated);
+      return { status: scenario === "error" ? 500 : 200, body: updated };
+    },
+  },
+  {
     method: "PUT",
     pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+$/,
     handler: (url, scenario, _headers, body) => {
@@ -1391,7 +1411,17 @@ export function resolveHandler(
 }
 
 /** The package row behind an integration, named after the integration asked for. */
-function integrationPackageFor(id: string) {
+/** Integration drafts saved in this lab session. */
+const changedIntegrationPackages = new Map<string, typeof f.integrationPackage>();
+
+function integrationPackageFor(id: string): typeof f.integrationPackage {
+  return (
+    changedIntegrationPackages.get(id) ??
+    (integrationPackageBase(id) as typeof f.integrationPackage)
+  );
+}
+
+function integrationPackageBase(id: string) {
   const row = f.integrations.data.find((integration) => integration.id === id);
   if (!row || row.id === f.integrationPackage.id) return f.integrationPackage;
   return {
@@ -1402,6 +1432,7 @@ function integrationPackageFor(id: string) {
     source: row.source,
     description: row.manifest?.description ?? "",
     version: row.manifest?.version ?? f.integrationPackage.version,
-    manifest: { ...f.integrationPackage.manifest, ...row.manifest },
+    // A manifest carries its own id; the editor refuses to save without it.
+    manifest: { ...f.integrationPackage.manifest, ...row.manifest, name: row.id },
   };
 }

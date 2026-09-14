@@ -63,7 +63,7 @@ describe("agent diagnostics routing", () => {
       ),
     ).toEqual({
       pathname: "/agents/@tractr/demo",
-      search: "?agentBundle=skills&agentSettings=files",
+      search: "?agentSettings=skills",
       hash: "#settings",
     });
   });

@@ -30,7 +30,6 @@ export function AgentActions({
   downloadBundle,
   onCreateVersion,
   onFork,
-  onEditBundle,
 }: {
   packageId: string;
   isOwned: boolean;
@@ -41,7 +40,6 @@ export function AgentActions({
   downloadBundle?: (v?: string) => void;
   onCreateVersion: () => void;
   onFork?: () => void;
-  onEditBundle?: () => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
@@ -103,8 +101,8 @@ export function AgentActions({
         hasPublishedVersion={(detail.version_count ?? 0) > 0}
         onCreateVersion={onCreateVersion}
         onFork={onFork}
-        onEdit={onEditBundle}
-        editLabel={t("editor.editBundle")}
+        // The definition is edited in Paramètres › Définition.
+        showEdit={false}
         runningRuns={detail.running_runs}
         hasRuns={!!runs && runs.length > 0}
         hasMemories={!!memories && memories.length > 0}

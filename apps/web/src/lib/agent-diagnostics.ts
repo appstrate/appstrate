@@ -77,8 +77,8 @@ export function agentDiagnosticCorrectionTarget(
   const search = new URLSearchParams(currentSearch);
   for (const key of AGENT_DIAGNOSTIC_QUERY_KEYS) search.delete(key);
   if (diagnostic.correction.destination === "bundle") {
-    search.set("agentBundle", diagnostic.correction.section ?? "general");
-    search.set("agentSettings", "files");
+    // The bundle is edited in Paramètres › Définition, section by section.
+    search.set("agentSettings", diagnostic.correction.section ?? "general");
     return { pathname, search: `?${search.toString()}`, hash: "#settings" };
   }
   search.set("agentSettings", diagnostic.correction.section ?? "model");

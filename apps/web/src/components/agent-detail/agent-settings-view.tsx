@@ -1,37 +1,60 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
+  Boxes,
+  Braces,
   BrainCircuit,
   CalendarClock,
+  Code2,
+  FileText,
   FolderTree,
   Globe,
-  Pencil,
+  IdCard,
   Plug,
   SlidersHorizontal,
+  Sparkles,
   Workflow,
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import { Button } from "@appstrate/ui/components/button";
 import { usePermissions } from "../../hooks/use-permissions";
 import { RailLink } from "../settings/rail-link";
 import { AgentOverviewTab } from "./agent-overview-tab";
 import { AgentConfigurationView, type ConfigurationSection } from "./agent-configuration-view";
 import { AgentDetailSplit } from "./agent-detail-split";
+import { LoadingState } from "../page-states";
+import type { AgentDefinitionSection } from "../../pages/package-editor";
 
-type AgentSettingsSection = ConfigurationSection | "map" | "files";
+type AgentSettingsSection = ConfigurationSection | AgentDefinitionSection | "map" | "files";
+
+/** The editor sections, lazily: the editor weighs more than the page reading it. */
+const AgentDefinitionEditor = lazy(() =>
+  import("../../pages/package-editor").then((module) => ({
+    default: module.AgentDefinitionEditor,
+  })),
+);
+
+const DEFINITION_SECTION_IDS: readonly AgentDefinitionSection[] = [
+  "general",
+  "prompt",
+  "schema",
+  "skills",
+  "integrations",
+  "json",
+];
 
 /**
- * The map first, on its own: it is the one view where the package's
- * definition and this space's setup meet — and it edits both — so it belongs
- * to neither group. Then what is set HERE (Configuration), then what the
- * package IS, for every space (Définition).
+ * Général holds the map: the one view where the package's definition and this
+ * space's setup meet — it edits both — so it belongs to neither of the other
+ * groups. Then what is set HERE (Configuration), then what the package IS for
+ * every space, edited in place (Définition).
  */
 const SETTINGS_GROUPS = [
   {
-    labelKey: null,
+    labelKey: "detail.settings.generalGroup",
     items: [{ id: "map", icon: Workflow, labelKey: "detail.overview.map" }],
   },
   {
@@ -46,10 +69,18 @@ const SETTINGS_GROUPS = [
   },
   {
     labelKey: "detail.settings.definitionGroup",
-    items: [{ id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" }],
+    items: [
+      { id: "general", icon: IdCard, labelKey: "editor.tabIdentity" },
+      { id: "prompt", icon: FileText, labelKey: "editor.tabPrompt" },
+      { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
+      { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
+      { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },
+      { id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" },
+      { id: "json", icon: Code2, labelKey: "editor.tabManifest" },
+    ],
   },
 ] satisfies Array<{
-  labelKey: string | null;
+  labelKey: string;
   items: Array<{ id: AgentSettingsSection; icon: typeof BrainCircuit; labelKey: string }>;
 }>;
 
@@ -60,6 +91,7 @@ const SETTINGS_SECTION_IDS: readonly AgentSettingsSection[] = [
   "connections",
   "schedules",
   "map",
+  ...DEFINITION_SECTION_IDS,
   "files",
 ];
 
@@ -84,6 +116,7 @@ export function AgentSettingsView({
   const location = useLocation();
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const canEditDefinition = can("agents:write") && detail.source !== "system" && !isHistorical;
   // Three permissions behind one rail: configuring the agent, reading its
   // schedules, reading what it is made of. Connections are open to anyone who
   // reaches the agent.
@@ -93,6 +126,9 @@ export function AgentSettingsView({
     }
     if (section === "schedules") return can("schedules:read");
     if (section === "map" || section === "files") return can("agents:read");
+    // The definition is edited where it is read, by whoever may write it, on
+    // an org-owned draft. Everyone else keeps Fichiers to read it.
+    if ((DEFINITION_SECTION_IDS as readonly string[]).includes(section)) return canEditDefinition;
     return true;
   };
   const groups = SETTINGS_GROUPS.map((group) => ({
@@ -122,47 +158,36 @@ export function AgentSettingsView({
     void navigate(sectionHref("files"));
   };
 
-  // The definition is read here and changed in the bundle editor, for every
-  // space at once: an explicit step, never a field edited in place.
-  const canEditDefinition = can("agents:write") && detail.source !== "system" && !isHistorical;
-  const editDefinitionHref = (() => {
-    const search = new URLSearchParams(location.search);
-    search.set("agentBundle", "prompt");
-    return `${location.pathname}?${search.toString()}${location.hash}`;
-  })();
-
-  const body =
-    activeSection === "map" || activeSection === "files" ? (
-      <AgentOverviewTab
-        packageId={packageId}
+  const body = (DEFINITION_SECTION_IDS as readonly string[]).includes(activeSection) ? (
+    <Suspense fallback={<LoadingState />}>
+      <AgentDefinitionEditor
         detail={detail}
-        version={version}
-        isHistorical={isHistorical}
-        currentManifest={currentManifest}
-        currentContent={currentContent}
-        surface={activeSection}
-        onOpenFiles={openFiles}
+        section={activeSection as AgentDefinitionSection}
+        onSection={(next) => void navigate(sectionHref(next))}
       />
-    ) : (
-      <AgentConfigurationView
-        packageId={packageId}
-        detail={detail}
-        configSchemaOverride={configSchemaOverride}
-        isHistorical={isHistorical}
-        section={activeSection}
-        embedded
-      />
-    );
-
-  const content =
-    activeSection === "files" && canEditDefinition ? (
-      <>
-        <DefinitionEditBar href={editDefinitionHref} />
-        {body}
-      </>
-    ) : (
-      body
-    );
+    </Suspense>
+  ) : activeSection === "map" || activeSection === "files" ? (
+    <AgentOverviewTab
+      packageId={packageId}
+      detail={detail}
+      version={version}
+      isHistorical={isHistorical}
+      currentManifest={currentManifest}
+      currentContent={currentContent}
+      surface={activeSection}
+      onOpenFiles={openFiles}
+    />
+  ) : (
+    <AgentConfigurationView
+      packageId={packageId}
+      detail={detail}
+      configSchemaOverride={configSchemaOverride}
+      isHistorical={isHistorical}
+      // Past the two branches above, only configuration sections remain.
+      section={activeSection as ConfigurationSection}
+      embedded
+    />
+  );
 
   return (
     <AgentDetailSplit
@@ -171,12 +196,10 @@ export function AgentSettingsView({
       rail={
         <nav className="space-y-5" aria-label={t("detail.tabSettings")}>
           {groups.map((group) => (
-            <section key={group.labelKey ?? "overview"}>
-              {group.labelKey && (
-                <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
-                  {t(group.labelKey)}
-                </h2>
-              )}
+            <section key={group.labelKey}>
+              <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
+                {t(group.labelKey)}
+              </h2>
               <div className="flex flex-col gap-0.5">
                 {group.items.map((item) => (
                   <RailLink
@@ -192,34 +215,7 @@ export function AgentSettingsView({
         </nav>
       }
     >
-      {content}
+      {body}
     </AgentDetailSplit>
-  );
-}
-
-/** "Modifier" over a definition section: says it applies to every space. */
-export function DefinitionEditBar({ href, onClick }: { href?: string; onClick?: () => void }) {
-  const { t } = useTranslation("agents");
-  const label = (
-    <>
-      <Pencil />
-      {t("detail.settings.editDefinition")}
-    </>
-  );
-  return (
-    <div className="flex items-center justify-end gap-3 px-6 pt-6">
-      <span className="text-muted-foreground text-xs">
-        {t("detail.settings.editDefinitionScope")}
-      </span>
-      {href ? (
-        <Button asChild variant="outline" size="sm">
-          <Link to={href}>{label}</Link>
-        </Button>
-      ) : (
-        <Button type="button" variant="outline" size="sm" onClick={onClick}>
-          {label}
-        </Button>
-      )}
-    </div>
   );
 }

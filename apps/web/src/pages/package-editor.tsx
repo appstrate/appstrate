@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { usePackageDetail } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
@@ -71,6 +73,26 @@ type GenericEditorTab =
   | "content"
   | "json";
 
+/**
+ * Save from a package's Définition. It saves the draft IN PLACE (no redirect:
+ * the reader is already on the package) and reads back the new lock version;
+ * the parent refetches the package and remounts the editor on it, which is
+ * what clears the unsaved state.
+ */
+async function saveEmbedded(
+  saveDraft: () => Promise<void>,
+  setError: (message: string | null) => void,
+  savedMessage: string,
+) {
+  try {
+    await saveDraft();
+    toast.success(savedMessage);
+  } catch (err) {
+    // `saveDraft` has already shown a validation error; surface the rest.
+    setError(getErrorMessage(err));
+  }
+}
+
 // ─── Agent Editor Inner Form ────────────────────────────────────────
 
 function AgentEditorInner({
@@ -82,6 +104,8 @@ function AgentEditorInner({
   presentation = "page",
   onCancel,
   initialTab = "general",
+  tab,
+  onTabRequest,
 }: {
   initialState: AgentEditorState;
   resolvedDeps: { skills?: unknown[] } | null;
@@ -93,13 +117,19 @@ function AgentEditorInner({
    * the agent detail the page already loaded — undefined when creating.
    */
   effectiveTimeoutSeconds?: number;
-  presentation?: "page" | "panel-dialog";
+  presentation?: "page" | "panel-dialog" | "embedded";
   onCancel?: () => void;
   initialTab?: GenericEditorTab;
+  /** Embedded: the section is the settings rail's, not the editor's. */
+  tab?: GenericEditorTab;
+  onTabRequest?: (tab: GenericEditorTab) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<GenericEditorTab>(initialTab);
+  const [localTab, setLocalTab] = useState<GenericEditorTab>(initialTab);
+  const activeTab = tab ?? localTab;
+  const setActiveTab = (next: GenericEditorTab) =>
+    tab !== undefined ? onTabRequest?.(next) : setLocalTab(next);
 
   const {
     state,
@@ -208,19 +238,23 @@ function AgentEditorInner({
   }, [resolvedSkills, setState]);
 
   const onSubmit = () =>
-    handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));
+    presentation === "embedded"
+      ? void saveEmbedded(saveDraft, setError, t("editor.saved"))
+      : handleSubmit(undefined, (next) => next && setActiveTab(next as GenericEditorTab));
 
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
-    { id: "general", label: t("editor.tabGeneral") },
+    {
+      id: "general",
+      label: presentation === "page" ? t("editor.tabGeneral") : t("editor.tabIdentity"),
+    },
     {
       id: "prompt",
-      label:
-        presentation === "panel-dialog" ? t("editor.tabPrompt") : primaryDisplayFile("agent").name,
+      label: presentation === "page" ? primaryDisplayFile("agent").name : t("editor.tabPrompt"),
     },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "integrations", label: t("editor.tabIntegrations") },
-    { id: "json", label: t("editor.tabJson") },
+    { id: "json", label: presentation === "page" ? t("editor.tabJson") : t("editor.tabManifest") },
   ];
   const agentTabDescriptions: Partial<Record<GenericEditorTab, string>> = {
     general: t("editor.description.general"),
@@ -249,14 +283,10 @@ function AgentEditorInner({
       onCancel={onCancel ?? (() => navigate(isEdit ? `/agents/${packageId}` : "/"))}
       hideSubmitBar={activeTab === "json"}
       presentation={presentation}
-      panelTitle={presentation === "panel-dialog" ? t("editor.editBundle") : undefined}
-      activeDescription={
-        presentation === "panel-dialog" ? agentTabDescriptions[activeTab] : undefined
-      }
+      panelTitle={presentation === "page" ? undefined : t("editor.editBundle")}
+      activeDescription={presentation === "page" ? undefined : agentTabDescriptions[activeTab]}
       activeSecondaryDescription={
-        presentation === "panel-dialog" && activeTab === "prompt"
-          ? t("editor.promptHint")
-          : undefined
+        presentation !== "page" && activeTab === "prompt" ? t("editor.promptHint") : undefined
       }
       isDirty={isDirty}
       onDiscardChanges={discardChanges}
@@ -266,7 +296,7 @@ function AgentEditorInner({
           value={metadata}
           onChange={onMetadataChange}
           isEdit={isEdit}
-          surface={presentation === "panel-dialog" ? "settings" : "card"}
+          surface={presentation === "page" ? "card" : "settings"}
           identityChildren={
             <AgentAppearanceFields manifest={state.manifest} onChange={updateManifest} />
           }
@@ -305,7 +335,7 @@ function AgentEditorInner({
         <PromptEditor
           value={state.prompt}
           onChange={(prompt) => setState((s) => ({ ...s, prompt }))}
-          showHint={presentation !== "panel-dialog"}
+          showHint={presentation === "page"}
         />
       )}
       {activeTab === "schema" && (
@@ -315,21 +345,14 @@ function AgentEditorInner({
             mode="input"
             fields={getSchemaFields("input")}
             onChange={onSchemaChange("input")}
-            surface={presentation === "panel-dialog" ? "settings" : "card"}
+            surface={presentation === "page" ? "card" : "settings"}
           />
           <SchemaSection
             title={t("editor.outputTitle")}
             mode="output"
             fields={getSchemaFields("output")}
             onChange={onSchemaChange("output")}
-            surface={presentation === "panel-dialog" ? "settings" : "card"}
-          />
-          <SchemaSection
-            title={t("editor.inputTitle")}
-            mode="input"
-            fields={getSchemaFields("input")}
-            onChange={onSchemaChange("input")}
-            surface={presentation === "panel-dialog" ? "settings" : "card"}
+            surface={presentation === "page" ? "card" : "settings"}
           />
         </>
       )}
@@ -348,12 +371,12 @@ function AgentEditorInner({
               return { ...s, manifest: m };
             });
           }}
-          surface={presentation === "panel-dialog" ? "settings" : "card"}
+          surface={presentation === "page" ? "card" : "settings"}
         />
       )}
       {activeTab === "integrations" && (
-        <div className={presentation === "panel-dialog" ? "space-y-8" : undefined}>
-          {presentation === "panel-dialog" && (
+        <div className={presentation === "page" ? undefined : "space-y-8"}>
+          {presentation !== "page" && (
             <section className="space-y-4">
               <div>
                 <h3 className="text-sm font-semibold">{t("editor.tabRuntimeTools")}</h3>
@@ -398,7 +421,7 @@ function AgentEditorInner({
                 />
               ) : undefined
             }
-            surface={presentation === "panel-dialog" ? "settings" : "card"}
+            surface={presentation === "page" ? "card" : "settings"}
           />
         </div>
       )}
@@ -420,33 +443,38 @@ function AgentEditorInner({
   );
 }
 
-/** Existing rich Agent editor hosted in the same panel shell as Settings. */
-export function AgentBundleEditorModal({
+export type AgentDefinitionSection =
+  "general" | "prompt" | "schema" | "skills" | "integrations" | "json";
+
+/**
+ * An agent's definition, edited where it is read: inside its settings, one
+ * rail section at a time, over ONE draft — moving from Prompt to Schéma keeps
+ * what was typed. Keyed on the lock version, so a save remounts it clean.
+ */
+export function AgentDefinitionEditor({
   detail,
-  onClose,
-  initialTab,
+  section,
+  onSection,
 }: {
   detail: AgentDetail;
-  onClose: () => void;
-  initialTab?: "general" | "prompt" | "schema" | "skills" | "integrations" | "json";
+  section: AgentDefinitionSection;
+  onSection: (section: AgentDefinitionSection) => void;
 }) {
-  const initialState: AgentEditorState = {
-    manifest: withNormalizedManifest(detail.manifest ?? {}),
-    prompt: detail.prompt || "",
-    lock_version: detail.lock_version,
-  };
-
   return (
     <AgentEditorInner
-      key={detail.id}
-      initialState={initialState}
+      key={`${detail.id}:${detail.lock_version}`}
+      initialState={{
+        manifest: withNormalizedManifest(detail.manifest ?? {}),
+        prompt: detail.prompt || "",
+        lock_version: detail.lock_version,
+      }}
       resolvedDeps={detail.dependencies ?? null}
       packageId={detail.id}
       isEdit
       effectiveTimeoutSeconds={detail.effective_timeout_seconds}
-      presentation="panel-dialog"
-      onCancel={onClose}
-      initialTab={initialTab}
+      presentation="embedded"
+      tab={section}
+      onTabRequest={(next) => onSection(next as AgentDefinitionSection)}
     />
   );
 }
@@ -582,19 +610,24 @@ function IntegrationEditorInner({
   isEdit,
   presentation = "page",
   onCancel,
-  initialTab = "general",
+  tab,
+  onTabRequest,
 }: {
   initialState: EditorStateBase;
   packageId: string | undefined;
   isEdit: boolean;
-  /** Same two shapes as the agent editor: a page to create, a panel to edit. */
-  presentation?: "page" | "panel-dialog";
+  /** A page to create; embedded in the integration's Définition to edit. */
+  presentation?: "page" | "embedded";
   onCancel?: () => void;
-  initialTab?: GenericEditorTab;
+  tab?: GenericEditorTab;
+  onTabRequest?: (tab: GenericEditorTab) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<GenericEditorTab>(initialTab);
+  const [localTab, setLocalTab] = useState<GenericEditorTab>("general");
+  const activeTab = tab ?? localTab;
+  const setActiveTab = (next: GenericEditorTab) =>
+    tab !== undefined ? onTabRequest?.(next) : setLocalTab(next);
 
   const {
     state,
@@ -627,7 +660,6 @@ function IntegrationEditorInner({
       }
       return null;
     },
-    onSuccess: presentation === "panel-dialog" ? onCancel : undefined,
   });
 
   const discardChanges = () => {
@@ -636,7 +668,7 @@ function IntegrationEditorInner({
     bumpJsonKey();
   };
 
-  const sectionSurface = presentation === "panel-dialog" ? "settings" : "card";
+  const sectionSurface = presentation === "page" ? "card" : "settings";
   const integrationTabDescriptions: Partial<Record<GenericEditorTab, string>> = {
     general: t("integrationEditor.description.general"),
     source: t("integrationEditor.description.source"),
@@ -649,17 +681,35 @@ function IntegrationEditorInner({
   const onMetadataChange = (m: MetadataState) => updateManifest(metadataToManifestPatch(m));
 
   const onSubmit = () =>
-    handleSubmit(undefined, (tab) => tab && setActiveTab(tab as GenericEditorTab));
+    presentation === "embedded"
+      ? void saveEmbedded(saveDraft, setError, t("editor.saved"))
+      : handleSubmit(undefined, (next) => next && setActiveTab(next as GenericEditorTab));
 
   const onManifestChange = (manifest: Record<string, unknown>) =>
     setState((s) => ({ ...s, manifest }));
 
+  // Embedded, the labels are the settings rail's, so heading and rail agree.
   const integrationTabs: Array<{ id: GenericEditorTab; label: string }> = [
-    { id: "general", label: t("editor.tabGeneral") },
+    {
+      id: "general",
+      label: presentation === "page" ? t("editor.tabGeneral") : t("editor.tabIdentity"),
+    },
     { id: "source", label: t("integrationEditor.tabSource") },
-    { id: "auths", label: t("integrationEditor.tabAuths") },
-    { id: "tools", label: t("integrationEditor.tabTools") },
-    { id: "json", label: t("editor.tabJson") },
+    {
+      id: "auths",
+      label:
+        presentation === "page"
+          ? t("integrationEditor.tabAuths")
+          : t("integrationEditor.tabAuthMethods"),
+    },
+    {
+      id: "tools",
+      label:
+        presentation === "page"
+          ? t("integrationEditor.tabTools")
+          : t("integrationEditor.tabToolPolicies"),
+    },
+    { id: "json", label: presentation === "page" ? t("editor.tabJson") : t("editor.tabManifest") },
   ];
 
   return (
@@ -686,9 +736,8 @@ function IntegrationEditorInner({
       }
       hideSubmitBar={activeTab === "json"}
       presentation={presentation}
-      panelTitle={presentation === "panel-dialog" ? t("integrationEditor.editTitle") : undefined}
       activeDescription={
-        presentation === "panel-dialog" ? integrationTabDescriptions[activeTab] : undefined
+        presentation === "page" ? undefined : integrationTabDescriptions[activeTab]
       }
       isDirty={isDirty}
       onDiscardChanges={discardChanges}
@@ -743,29 +792,27 @@ function IntegrationEditorInner({
   );
 }
 
-/**
- * Editing an integration opens over its page, like editing an agent's bundle:
- * the same `EditorShell` panel, rail on the left, save bar at the foot.
- */
-export function IntegrationEditorModal({
+export type IntegrationDefinitionSection = "general" | "source" | "auths" | "tools" | "json";
+
+/** An integration's definition, edited inside its settings — see `AgentDefinitionEditor`. */
+export function IntegrationDefinitionEditor({
   detail,
-  onClose,
-  initialTab,
+  section,
+  onSection,
 }: {
   detail: OrgPackageItemDetail;
-  onClose: () => void;
-  /** The section "Modifier" was pressed on, from a definition section. */
-  initialTab?: "source" | "tools" | "json";
+  section: IntegrationDefinitionSection;
+  onSection: (section: IntegrationDefinitionSection) => void;
 }) {
   return (
     <IntegrationEditorInner
-      key={detail.id}
+      key={`${detail.id}:${detail.lock_version}`}
       initialState={{ manifest: detail.manifest ?? {}, lock_version: detail.lock_version }}
       packageId={detail.id}
       isEdit
-      presentation="panel-dialog"
-      onCancel={onClose}
-      initialTab={initialTab}
+      presentation="embedded"
+      tab={section}
+      onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
     />
   );
 }

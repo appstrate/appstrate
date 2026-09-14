@@ -50,6 +50,11 @@ interface PackageActionsDropdownProps {
   onFork?: () => void;
   /** Override route navigation when editing is hosted in the current surface. */
   onEdit?: () => void;
+  /**
+   * False where the definition is edited in the package's own settings (agents,
+   * integrations): one door to it, not a second one in this menu.
+   */
+  showEdit?: boolean;
   editLabel?: string;
   // Agent-specific
   runningRuns?: number;
@@ -92,6 +97,7 @@ export function PackageActionsDropdown({
   onCreateVersion,
   onFork,
   onEdit,
+  showEdit = true,
   editLabel,
   runningRuns = 0,
   hasRuns,
@@ -187,7 +193,7 @@ export function PackageActionsDropdown({
             {hasAgentBuildActions && (
               <>
                 <DropdownMenuLabel>{t("detail.actions.agent")}</DropdownMenuLabel>
-                {isMutable && (
+                {isMutable && showEdit && (
                   <DropdownMenuItem
                     onSelect={() =>
                       onEdit ? onEdit() : navigate(packageEditPath(type, packageId))
@@ -321,7 +327,7 @@ export function PackageActionsDropdown({
                 {t("version.createVersion")}
               </DropdownMenuItem>
             )}
-            {isMutable && (
+            {isMutable && showEdit && (
               <DropdownMenuItem
                 onSelect={() => (onEdit ? onEdit() : navigate(packageEditPath(type, packageId)))}
               >

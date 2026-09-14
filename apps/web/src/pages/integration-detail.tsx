@@ -31,6 +31,8 @@ const INTEGRATION_TABS = [
 import { useTranslation } from "react-i18next";
 import { Navigate, useParams, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import type { OrgPackageItemDetail } from "@appstrate/shared-types";
+import type { IntegrationDefinitionSection } from "./package-editor";
 import {
   Trash2,
   ShieldCheck,
@@ -40,6 +42,9 @@ import {
   FolderTree,
   Wrench,
   Workflow,
+  IdCard,
+  Server,
+  Code2,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { AddIntegrationConnection } from "../components/integration-connect/add-integration-connection";
@@ -77,8 +82,6 @@ import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { usePermissions } from "../hooks/use-permissions";
-import { useModalParam } from "../hooks/use-modal-param";
-import { DefinitionEditBar } from "../components/agent-detail/agent-settings-view";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
   useIntegrationDetail,
@@ -116,9 +119,20 @@ import { useIntegrations } from "../hooks/use-integrations";
 import { useAuth } from "../hooks/use-auth";
 import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
 
-const IntegrationEditorModal = lazy(() =>
-  import("./package-editor").then((module) => ({ default: module.IntegrationEditorModal })),
+const IntegrationDefinitionEditor = lazy(() =>
+  import("./package-editor").then((module) => ({
+    default: module.IntegrationDefinitionEditor,
+  })),
 );
+
+/** Rail id → editor section. Distinct ids: "tools" is the read-only tool catalogue. */
+const DEFINITION_RAIL: Record<string, IntegrationDefinitionSection> = {
+  identity: "general",
+  source: "source",
+  "auth-methods": "auths",
+  "tool-policies": "tools",
+  manifest: "json",
+};
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 
 // ─────────────────────────────────────────────
@@ -612,7 +626,7 @@ function IntegrationSettings({
   canConfigure,
   onActivate,
   activationPending,
-  onEditDefinition,
+  definition,
 }: {
   packageId: string;
   detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
@@ -620,15 +634,22 @@ function IntegrationSettings({
   canConfigure: boolean;
   onActivate: () => void;
   activationPending: boolean;
-  /** Present when the reader may change the definition: opens the editor on a section. */
-  onEditDefinition?: (tab: "source" | "tools" | "json") => void;
+  /**
+   * The package draft, present when the reader may change the definition: its
+   * sections are then edited here, in place. Absent, Définition stays a read.
+   */
+  definition?: OrgPackageItemDetail;
 }) {
   const { t } = useTranslation(["settings", "agents"]);
   const location = useLocation();
+  const navigate = useNavigate();
   const params = new URLSearchParams(location.search);
   const requested = params.get("integrationSettings");
   const active =
-    requested === "tools" || requested === "functioning" || requested === "map"
+    requested === "tools" ||
+    requested === "functioning" ||
+    requested === "map" ||
+    (definition && requested && requested in DEFINITION_RAIL)
       ? requested
       : requested === "files" || !canConfigure
         ? "files"
@@ -636,11 +657,12 @@ function IntegrationSettings({
           ? "access"
           : "authentication";
   const steps = detail.manifest.setup_guide?.steps ?? [];
-  // Same order as an agent's: the map alone (it shows and edits both layers),
-  // what is set here, then what the integration IS for every space.
+  // Same order as an agent's: Général holds the map (it shows and edits both
+  // layers), then what is set here, then what the integration IS for every
+  // space — edited in place when the reader may.
   const groups = [
     {
-      label: null,
+      label: t("detail.settings.generalGroup", { ns: "agents" }),
       items: [{ id: "map", label: t("integration.structure.map"), icon: Workflow }],
     },
     ...(canConfigure
@@ -660,20 +682,44 @@ function IntegrationSettings({
       : []),
     {
       label: t("detail.settings.definitionGroup", { ns: "agents" }),
-      items: [
-        { id: "functioning", label: t("integration.structure.functioning"), icon: Plug },
-        { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
-        { id: "files", label: t("detail.overview.explorer", { ns: "agents" }), icon: FolderTree },
-      ],
+      items: definition
+        ? [
+            { id: "identity", label: t("editor.tabIdentity", { ns: "agents" }), icon: IdCard },
+            {
+              id: "source",
+              label: t("integrationEditor.tabSource", { ns: "agents" }),
+              icon: Server,
+            },
+            {
+              id: "auth-methods",
+              label: t("integrationEditor.tabAuthMethods", { ns: "agents" }),
+              icon: KeyRound,
+            },
+            {
+              id: "tool-policies",
+              label: t("integrationEditor.tabToolPolicies", { ns: "agents" }),
+              icon: ShieldCheck,
+            },
+            { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
+            {
+              id: "files",
+              label: t("detail.overview.explorer", { ns: "agents" }),
+              icon: FolderTree,
+            },
+            { id: "manifest", label: t("editor.tabManifest", { ns: "agents" }), icon: Code2 },
+          ]
+        : [
+            { id: "functioning", label: t("integration.structure.functioning"), icon: Plug },
+            { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
+            {
+              id: "files",
+              label: t("detail.overview.explorer", { ns: "agents" }),
+              icon: FolderTree,
+            },
+          ],
     },
   ];
-  // Where "Modifier" lands in the editor for each definition section.
-  const editorTabFor: Partial<Record<string, "source" | "tools" | "json">> = {
-    functioning: "source",
-    tools: "tools",
-    files: "json",
-  };
-  const editTab = editorTabFor[active];
+  const definitionSection = definition ? DEFINITION_RAIL[active] : undefined;
   return (
     <AgentDetailSplit
       className="max-lg:grid-cols-1"
@@ -681,12 +727,10 @@ function IntegrationSettings({
       rail={
         <nav className="space-y-5" aria-label={t("integration.tabs.configuration")}>
           {groups.map((group) => (
-            <section key={group.label ?? "overview"}>
-              {group.label && (
-                <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
-                  {group.label}
-                </h2>
-              )}
+            <section key={group.label}>
+              <h2 className="text-muted-foreground mb-1 px-2 text-[11px] font-semibold tracking-wide uppercase">
+                {group.label}
+              </h2>
               <div className="flex flex-col gap-0.5">
                 {group.items.map((section) => {
                   const next = new URLSearchParams(params);
@@ -710,10 +754,22 @@ function IntegrationSettings({
         </nav>
       }
     >
-      {editTab && onEditDefinition && (
-        <DefinitionEditBar onClick={() => onEditDefinition(editTab)} />
-      )}
-      {active === "files" ? (
+      {definition && definitionSection ? (
+        <Suspense fallback={<LoadingState />}>
+          <IntegrationDefinitionEditor
+            detail={definition}
+            section={definitionSection}
+            onSection={(next) => {
+              const railId = Object.keys(DEFINITION_RAIL).find(
+                (id) => DEFINITION_RAIL[id] === next,
+              );
+              const search = new URLSearchParams(location.search);
+              if (railId) search.set("integrationSettings", railId);
+              void navigate({ search: search.toString(), hash: "configuration" });
+            }}
+          />
+        </Suspense>
+      ) : active === "files" ? (
         <FileExplorer packageId={packageId} type="integration" />
       ) : active === "functioning" || active === "map" ? (
         <div className="p-6">
@@ -1466,9 +1522,6 @@ export function IntegrationDetailPage() {
     void navigate({ search: params.toString(), hash: "connections" });
   };
   const [forkOpen, setForkOpen] = useState(false);
-  // Editing opens over the page, as an agent's bundle does, and has an
-  // address: reload lands on it, Back closes it.
-  const editor = useModalParam("edit");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
@@ -1535,7 +1588,8 @@ export function IntegrationDetailPage() {
               downloadVersion={version}
               onDownload={downloadPackage}
               onFork={() => setForkOpen(true)}
-              onEdit={() => editor.open()}
+              // The definition is edited in Paramètres › Définition.
+              showEdit={false}
               canDeactivate={active}
               onDeactivate={() => setConfirmDeactivate(true)}
               deactivatePending={deactivate.isPending}
@@ -1599,7 +1653,7 @@ export function IntegrationDetailPage() {
             canConfigure={canConfigure}
             onActivate={onActivate}
             activationPending={activate.isPending}
-            onEditDefinition={isOwned && pkg ? (tab) => editor.open(tab) : undefined}
+            definition={isOwned && can("integrations:write") && pkg ? pkg : undefined}
           />
         </TabsContent>
 
@@ -1622,20 +1676,6 @@ export function IntegrationDetailPage() {
           </TabsContent>
         )}
       </Tabs>
-
-      {editor.value !== null && isOwned && pkg && (
-        <Suspense fallback={<LoadingState />}>
-          <IntegrationEditorModal
-            detail={pkg}
-            initialTab={
-              editor.value === "source" || editor.value === "tools" || editor.value === "json"
-                ? editor.value
-                : undefined
-            }
-            onClose={editor.close}
-          />
-        </Suspense>
-      )}
 
       <ForkPackageModal
         open={forkOpen}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toast } from "sonner";
 import { useParams, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
@@ -49,10 +49,6 @@ import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-
 
 type DetailTab =
   "overview" | "runs" | "settings" | "memory" | "versions" | "diff" | "content" | "usedBy";
-
-const AgentBundleEditorModal = lazy(() =>
-  import("./package-editor").then((module) => ({ default: module.AgentBundleEditorModal })),
-);
 
 // ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
@@ -257,28 +253,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     if (tab === "versions" && source === "system") setTab(defaultTab);
   }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab]);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
-  const [bundleEditorOpen, setBundleEditorOpen] = useState(false);
-  const requestedBundleTab = new URLSearchParams(location.search).get("agentBundle");
-  const bundleEditorInitialTab =
-    requestedBundleTab === "general" ||
-    requestedBundleTab === "prompt" ||
-    requestedBundleTab === "schema" ||
-    requestedBundleTab === "skills" ||
-    requestedBundleTab === "integrations" ||
-    requestedBundleTab === "json"
-      ? requestedBundleTab
-      : undefined;
-  const closeBundleEditor = () => {
-    setBundleEditorOpen(false);
-    if (!requestedBundleTab) return;
-    const search = new URLSearchParams(location.search);
-    search.delete("agentBundle");
-    navigate(
-      { pathname: location.pathname, search: search.toString(), hash: location.hash },
-      { replace: true },
-    );
-  };
-
   // ── Loading / Error ──
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
   if (error || !detail) {
@@ -426,7 +400,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               downloadBundle={downloadBundle}
               onCreateVersion={() => setCreateVersionOpen(true)}
               onFork={() => setForkOpen(true)}
-              onEditBundle={() => setBundleEditorOpen(true)}
             />
           ) : (
             <div className="flex items-center gap-2">
@@ -649,16 +622,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         packageId={packageId}
         hasUnarchivedChanges={hasArchivableChanges}
       />
-
-      {(bundleEditorOpen || Boolean(bundleEditorInitialTab)) && agentDetail && (
-        <Suspense fallback={<LoadingState />}>
-          <AgentBundleEditorModal
-            detail={agentDetail}
-            initialTab={bundleEditorInitialTab}
-            onClose={closeBundleEditor}
-          />
-        </Suspense>
-      )}
 
       <ForkPackageModal
         open={forkOpen}
