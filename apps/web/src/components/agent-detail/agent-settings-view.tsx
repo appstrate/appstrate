@@ -26,6 +26,7 @@ import { AgentOverviewTab } from "./agent-overview-tab";
 import { AgentConfigurationView, type ConfigurationSection } from "./agent-configuration-view";
 import { AgentDetailSplit } from "./agent-detail-split";
 import { LoadingState } from "../page-states";
+import { primaryDisplayFile } from "../../lib/package-files";
 import type { AgentDefinitionSection } from "../../pages/package-editor";
 
 type AgentSettingsSection = ConfigurationSection | AgentDefinitionSection | "map" | "files";
@@ -47,15 +48,18 @@ const DEFINITION_SECTION_IDS: readonly AgentDefinitionSection[] = [
 ];
 
 /**
- * Général holds the map: the one view where the package's definition and this
- * space's setup meet — it edits both — so it belongs to neither of the other
- * groups. Then what is set HERE (Configuration), then what the package IS for
- * every space, edited in place (Définition).
+ * Explorer: two ways to SEE the package — the map (where its definition and
+ * this space's setup meet) and its raw files. Then what is set HERE
+ * (Configuration), then what the package IS for every space (Définition),
+ * where it is changed.
  */
 const SETTINGS_GROUPS = [
   {
-    labelKey: "detail.settings.generalGroup",
-    items: [{ id: "map", icon: Workflow, labelKey: "detail.overview.map" }],
+    labelKey: "detail.settings.exploreGroup",
+    items: [
+      { id: "map", icon: Workflow, labelKey: "detail.overview.map" },
+      { id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" },
+    ],
   },
   {
     labelKey: "detail.settings.configurationGroup",
@@ -75,7 +79,6 @@ const SETTINGS_GROUPS = [
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
       { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
       { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },
-      { id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" },
       { id: "json", icon: Code2, labelKey: "editor.tabManifest" },
     ],
   },
@@ -150,8 +153,25 @@ export function AgentSettingsView({
     if (section === "model") search.delete("agentSettings");
     else search.set("agentSettings", section);
     search.delete("agentConfig");
+    // A file modal belongs to the section it was opened in.
+    search.delete("edit");
     const query = search.toString();
     return `${location.pathname}${query ? `?${query}` : ""}#settings`;
+  };
+
+  // The bundle files a Définition section edits, and the section that does.
+  const fileEditHref = (path: string) => {
+    const section =
+      path === primaryDisplayFile("agent").name
+        ? "prompt"
+        : path === "manifest.json"
+          ? "json"
+          : null;
+    if (!section) return undefined;
+    const search = new URLSearchParams(location.search);
+    search.set("agentSettings", section);
+    search.set("edit", "1");
+    return `${location.pathname}?${search.toString()}#settings`;
   };
 
   const openFiles = () => {
@@ -176,6 +196,7 @@ export function AgentSettingsView({
       currentContent={currentContent}
       surface={activeSection}
       onOpenFiles={openFiles}
+      fileEditHref={canEditDefinition ? fileEditHref : undefined}
     />
   ) : (
     <AgentConfigurationView

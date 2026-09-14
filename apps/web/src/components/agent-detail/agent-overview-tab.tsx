@@ -287,6 +287,7 @@ export function AgentOverviewTab({
   onOpenFiles,
   cardHeaders = false,
   contained = false,
+  fileEditHref,
 }: {
   packageId: string;
   detail: AgentDetail;
@@ -298,6 +299,7 @@ export function AgentOverviewTab({
   onOpenFiles: () => void;
   cardHeaders?: boolean;
   contained?: boolean;
+  fileEditHref?: (path: string) => string | undefined;
 }) {
   const { t, i18n } = useTranslation("agents");
   const location = useLocation();
@@ -566,6 +568,7 @@ export function AgentOverviewTab({
         initialVersion={version}
         currentManifest={currentManifest}
         currentContent={currentContent}
+        editHref={fileEditHref}
       />
     );
   }

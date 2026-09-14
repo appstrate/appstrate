@@ -29,7 +29,8 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { Download, FileWarning } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Download, FileWarning, Pencil } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "@appstrate/core/format";
@@ -53,6 +54,8 @@ interface FilePreviewProps {
   entry: PackageFileEntry;
   className?: string;
   hideHeader?: boolean;
+  /** "Modifier" beside the download, when a Définition section edits this file. */
+  editHref?: string;
 }
 
 export function FilePreview({
@@ -62,6 +65,7 @@ export function FilePreview({
   entry,
   className,
   hideHeader = false,
+  editHref,
 }: FilePreviewProps) {
   const { t } = useTranslation("agents");
   const { resolvedTheme } = useTheme();
@@ -94,6 +98,14 @@ export function FilePreview({
           {/* "Télécharger le fichier", not "Télécharger": the actions dropdown
             already shows a Download-icon "Télécharger" for the WHOLE archive,
             and both are visible on this tab at the same time. */}
+          {editHref && (
+            <Button asChild variant="outline" size="sm" className="shrink-0">
+              <Link to={editHref}>
+                <Pencil size={14} />
+                {t("btn.edit", { ns: "common" })}
+              </Link>
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"

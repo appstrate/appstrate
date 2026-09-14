@@ -31,6 +31,7 @@ import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
 import { EditorShell } from "../components/editor-shell";
+import { DefinitionFileSection } from "../components/definition-file-section";
 
 import type { AgentEditorState } from "../components/agent-editor/types";
 import type { MetadataState } from "../components/agent-editor/metadata-section";
@@ -281,7 +282,7 @@ function AgentEditorInner({
       isPending={isPending}
       onSubmit={onSubmit}
       onCancel={onCancel ?? (() => navigate(isEdit ? `/agents/${packageId}` : "/"))}
-      hideSubmitBar={activeTab === "json"}
+      hideSubmitBar={presentation === "page" && activeTab === "json"}
       presentation={presentation}
       panelTitle={presentation === "page" ? undefined : t("editor.editBundle")}
       activeDescription={presentation === "page" ? undefined : agentTabDescriptions[activeTab]}
@@ -331,13 +332,21 @@ function AgentEditorInner({
           </div>
         </MetadataSection>
       )}
-      {activeTab === "prompt" && (
-        <PromptEditor
-          value={state.prompt}
-          onChange={(prompt) => setState((s) => ({ ...s, prompt }))}
-          showHint={presentation === "page"}
-        />
-      )}
+      {activeTab === "prompt" &&
+        (presentation === "embedded" ? (
+          <DefinitionFileSection
+            kind="markdown"
+            fileName={primaryDisplayFile("agent").name}
+            value={state.prompt}
+            onApply={(prompt) => setState((s) => ({ ...s, prompt }))}
+          />
+        ) : (
+          <PromptEditor
+            value={state.prompt}
+            onChange={(prompt) => setState((s) => ({ ...s, prompt }))}
+            showHint={presentation === "page"}
+          />
+        ))}
       {activeTab === "schema" && (
         <>
           <SchemaSection
@@ -425,18 +434,30 @@ function AgentEditorInner({
           />
         </div>
       )}
-      {activeTab === "json" && (
-        <JsonEditor
-          key={jsonEditorKey}
-          value={state.manifest}
-          onApply={(manifest) => {
-            setState((s) => ({ ...s, manifest }));
-            setSchemaFields(manifestToSchemaFields(manifest));
-            setActiveTab("general");
-          }}
-          schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
-        />
-      )}
+      {activeTab === "json" &&
+        (presentation === "embedded" ? (
+          <DefinitionFileSection
+            kind="json"
+            fileName="manifest.json"
+            value={state.manifest}
+            schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
+            onApply={(manifest) => {
+              setState((s) => ({ ...s, manifest }));
+              setSchemaFields(manifestToSchemaFields(manifest));
+            }}
+          />
+        ) : (
+          <JsonEditor
+            key={jsonEditorKey}
+            value={state.manifest}
+            onApply={(manifest) => {
+              setState((s) => ({ ...s, manifest }));
+              setSchemaFields(manifestToSchemaFields(manifest));
+              setActiveTab("general");
+            }}
+            schema={{ uri: AFPS_SCHEMA_URLS.agent, schema: PACKAGE_SCHEMAS.agent! }}
+          />
+        ))}
 
       <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
@@ -734,7 +755,7 @@ function IntegrationEditorInner({
             isEdit ? packageDetailPath("integration", packageId!) : packageListPath("integration"),
           ))
       }
-      hideSubmitBar={activeTab === "json"}
+      hideSubmitBar={presentation === "page" && activeTab === "json"}
       presentation={presentation}
       activeDescription={
         presentation === "page" ? undefined : integrationTabDescriptions[activeTab]
@@ -775,17 +796,26 @@ function IntegrationEditorInner({
         />
       )}
 
-      {activeTab === "json" && (
-        <JsonEditor
-          key={jsonEditorKey}
-          value={state.manifest}
-          onApply={(manifest) => {
-            setState((s) => ({ ...s, manifest }));
-            setActiveTab("general");
-          }}
-          schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
-        />
-      )}
+      {activeTab === "json" &&
+        (presentation === "embedded" ? (
+          <DefinitionFileSection
+            kind="json"
+            fileName="manifest.json"
+            value={state.manifest}
+            schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
+            onApply={(manifest) => setState((s) => ({ ...s, manifest }))}
+          />
+        ) : (
+          <JsonEditor
+            key={jsonEditorKey}
+            value={state.manifest}
+            onApply={(manifest) => {
+              setState((s) => ({ ...s, manifest }));
+              setActiveTab("general");
+            }}
+            schema={{ uri: AFPS_SCHEMA_URLS.integration, schema: PACKAGE_SCHEMAS.integration! }}
+          />
+        ))}
 
       <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>

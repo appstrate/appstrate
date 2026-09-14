@@ -10,6 +10,7 @@ import {
   FolderOpen,
   GitCompareArrows,
   Link2,
+  Pencil,
   Search,
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -91,11 +92,18 @@ export function AgentFilesView({
   initialVersion,
   currentManifest,
   currentContent,
+  editHref,
 }: {
   packageId: string;
   initialVersion?: string | undefined;
   currentManifest?: Record<string, unknown> | undefined;
   currentContent?: string | null | undefined;
+  /**
+   * Where "Modifier" sends a bundle file the definition can edit (the prompt,
+   * the manifest): its Définition section, modal open. Undefined for a file
+   * nothing edits, or a reader who may not.
+   */
+  editHref?: (path: string) => string | undefined;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const scope = useOrgScope();
@@ -404,6 +412,8 @@ export function AgentFilesView({
               <SelectionHeader
                 selection={activeSelection}
                 resolvedVersion={selectedDependencyDetail?.version ?? null}
+                // Only the draft is edited; a published version is read as it was.
+                editHref={selectedVersion === "draft" ? editHref : undefined}
                 fileVersion={
                   activeSelection.file.source === "bundle"
                     ? selectedVersion === "draft"
@@ -467,10 +477,12 @@ function SelectionHeader({
   selection,
   resolvedVersion,
   fileVersion,
+  editHref,
 }: {
   selection: SelectedItem;
   resolvedVersion: string | null;
   fileVersion?: string;
+  editHref?: (path: string) => string | undefined;
 }) {
   const path = selection.kind === "file" ? selection.file.treeEntry.path : selection.path;
   const dependency = selection.kind === "file" ? selection.file.dependency : selection.dependency;
@@ -511,7 +523,15 @@ function SelectionHeader({
             />
           )}
           {selection.kind === "file" ? (
-            <FileSelectionActions file={selection.file} version={fileVersion} />
+            <FileSelectionActions
+              file={selection.file}
+              version={fileVersion}
+              editHref={
+                selection.file.source === "bundle"
+                  ? editHref?.(selection.file.sourceEntry.path)
+                  : undefined
+              }
+            />
           ) : dependency ? (
             <DependencySelectionActions dependency={dependency} />
           ) : null}
@@ -602,7 +622,15 @@ function DependencyVersion({
   );
 }
 
-function FileSelectionActions({ file, version }: { file: VirtualFile; version?: string }) {
+function FileSelectionActions({
+  file,
+  version,
+  editHref,
+}: {
+  file: VirtualFile;
+  version?: string;
+  editHref?: string;
+}) {
   const { t } = useTranslation("agents");
   const download = usePackageFileDownload(file.packageId, version);
   return (
@@ -614,6 +642,14 @@ function FileSelectionActions({ file, version }: { file: VirtualFile; version?: 
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        {editHref && (
+          <DropdownMenuItem asChild>
+            <Link to={editHref}>
+              <Pencil />
+              {t("btn.edit", { ns: "common" })}
+            </Link>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onSelect={() => void download(file.sourceEntry.path)}>
           <Download />
           {t("files.downloadFile")}

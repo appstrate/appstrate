@@ -8,23 +8,27 @@
  * inside the settings overlay keeps the overlay's background instead of
  * turning it into a full page (the same trap `NavigateKeepingState` exists for).
  * Closing replaces rather than pushes, like the OAuth client editor, so Back
- * after a close does not reopen it.
+ * after a close does not reopen it. The hash rides along too, for the same
+ * reason as the state: it holds the tab the modal was opened from.
  */
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 export function useModalParam(name: string) {
   const location = useLocation();
-  const [params, setParams] = useSearchParams();
-  const set = (next: string | null) =>
-    setParams(
-      (prev) => {
-        const out = new URLSearchParams(prev);
-        if (next === null) out.delete(name);
-        else out.set(name, next);
-        return out;
-      },
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // `setSearchParams` drops the hash, and a detail page's tab lives in it
+  // (`#settings`): a modal opened from a tab would close the tab under it.
+  const set = (next: string | null) => {
+    const out = new URLSearchParams(location.search);
+    if (next === null) out.delete(name);
+    else out.set(name, next);
+    const search = out.toString();
+    navigate(
+      { pathname: location.pathname, search: search ? `?${search}` : "", hash: location.hash },
       { replace: next === null, state: location.state },
     );
+  };
   return {
     /** The parameter's value, or `null` when the modal is closed. */
     value: params.get(name),

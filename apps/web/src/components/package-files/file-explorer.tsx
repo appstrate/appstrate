@@ -26,9 +26,11 @@ interface FileExplorerProps {
   type: PackageType;
   /** Pinned version to read, or `undefined` for the live draft. */
   version?: string;
+  /** Where "Modifier" sends a file the definition edits; see `AgentFilesView`. */
+  editHref?: (path: string) => string | undefined;
 }
 
-export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
+export function FileExplorer({ packageId, type, version, editHref }: FileExplorerProps) {
   const { t } = useTranslation("agents");
   const scope = useOrgScope();
   const [search, setSearch] = useState("");
@@ -110,6 +112,7 @@ export function FileExplorer({ packageId, type, version }: FileExplorerProps) {
           version={version}
           entry={activeEntry}
           className="rounded-none border-0"
+          editHref={version === undefined ? editHref?.(activeEntry.path) : undefined}
         />
       </AgentDetailSplit>
     </div>

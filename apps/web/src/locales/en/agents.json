@@ -861,10 +861,11 @@
   "integrationEditor.description.auths": "The ways to connect the service account.",
   "integrationEditor.description.tools": "The tools exposed to agents and the scopes each one asks for.",
   "detail.settings.definitionGroup": "Definition",
-  "detail.settings.generalGroup": "General",
   "editor.tabIdentity": "Identity",
   "editor.tabManifest": "AFPS manifest",
   "editor.saved": "Definition saved",
   "integrationEditor.tabAuthMethods": "Authentication methods",
-  "integrationEditor.tabToolPolicies": "Tool policies"
+  "integrationEditor.tabToolPolicies": "Tool policies",
+  "editor.editFile": "Edit {{name}}",
+  "detail.settings.exploreGroup": "Explore"
 }

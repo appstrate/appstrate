@@ -657,13 +657,17 @@ function IntegrationSettings({
           ? "access"
           : "authentication";
   const steps = detail.manifest.setup_guide?.steps ?? [];
-  // Same order as an agent's: Général holds the map (it shows and edits both
-  // layers), then what is set here, then what the integration IS for every
-  // space — edited in place when the reader may.
+  // Same order as an agent's: Explorer (see it: map, tool catalogue, files),
+  // then what is set here, then what the integration IS for every space —
+  // edited in place when the reader may.
   const groups = [
     {
-      label: t("detail.settings.generalGroup", { ns: "agents" }),
-      items: [{ id: "map", label: t("integration.structure.map"), icon: Workflow }],
+      label: t("detail.settings.exploreGroup", { ns: "agents" }),
+      items: [
+        { id: "map", label: t("integration.structure.map"), icon: Workflow },
+        { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
+        { id: "files", label: t("detail.overview.explorer", { ns: "agents" }), icon: FolderTree },
+      ],
     },
     ...(canConfigure
       ? [
@@ -700,23 +704,9 @@ function IntegrationSettings({
               label: t("integrationEditor.tabToolPolicies", { ns: "agents" }),
               icon: ShieldCheck,
             },
-            { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
-            {
-              id: "files",
-              label: t("detail.overview.explorer", { ns: "agents" }),
-              icon: FolderTree,
-            },
             { id: "manifest", label: t("editor.tabManifest", { ns: "agents" }), icon: Code2 },
           ]
-        : [
-            { id: "functioning", label: t("integration.structure.functioning"), icon: Plug },
-            { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
-            {
-              id: "files",
-              label: t("detail.overview.explorer", { ns: "agents" }),
-              icon: FolderTree,
-            },
-          ],
+        : [{ id: "functioning", label: t("integration.structure.functioning"), icon: Plug }],
     },
   ];
   const definitionSection = definition ? DEFINITION_RAIL[active] : undefined;
@@ -735,6 +725,8 @@ function IntegrationSettings({
                 {group.items.map((section) => {
                   const next = new URLSearchParams(params);
                   next.set("integrationSettings", section.id);
+                  // A file modal belongs to the section it was opened in.
+                  next.delete("edit");
                   return (
                     <RailLink
                       key={section.id}
@@ -765,12 +757,27 @@ function IntegrationSettings({
               );
               const search = new URLSearchParams(location.search);
               if (railId) search.set("integrationSettings", railId);
+              search.delete("edit");
               void navigate({ search: search.toString(), hash: "configuration" });
             }}
           />
         </Suspense>
       ) : active === "files" ? (
-        <FileExplorer packageId={packageId} type="integration" />
+        <FileExplorer
+          packageId={packageId}
+          type="integration"
+          editHref={
+            definition
+              ? (path) => {
+                  if (path !== "manifest.json") return undefined;
+                  const search = new URLSearchParams(location.search);
+                  search.set("integrationSettings", "manifest");
+                  search.set("edit", "1");
+                  return `?${search.toString()}#configuration`;
+                }
+              : undefined
+          }
+        />
       ) : active === "functioning" || active === "map" ? (
         <div className="p-6">
           <AgentDetailSectionHeader
