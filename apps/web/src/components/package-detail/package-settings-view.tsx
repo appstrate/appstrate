@@ -11,10 +11,10 @@
  * every form writes into it — but a modal reached from under Identité and from
  * `manifest.json` in the files.
  */
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FileText, FolderTree, IdCard } from "lucide-react";
+import { FileText, FolderTree, History, IdCard } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { SkillDefinitionSection } from "../../pages/package-editor";
 import { primaryDisplayFile } from "../../lib/package-files";
@@ -22,6 +22,7 @@ import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { LoadingState } from "../page-states";
 import { FileExplorer } from "../package-files/file-explorer";
 import { RailLink } from "../settings/rail-link";
+import { PackageVersionsSection } from "./package-versions-section";
 
 const SkillDefinitionEditor = lazy(() =>
   import("../../pages/package-editor").then((module) => ({
@@ -34,7 +35,7 @@ const McpServerDefinitionEditor = lazy(() =>
   })),
 );
 
-type PackageSettingsSection = "files" | SkillDefinitionSection;
+type PackageSettingsSection = "files" | "versions" | SkillDefinitionSection;
 
 export function PackageSettingsView({
   type,
@@ -42,7 +43,9 @@ export function PackageSettingsView({
   detail,
   version,
   canEditDefinition,
+  versions,
 }: {
+  versions: Omit<ComponentProps<typeof PackageVersionsSection>, "type" | "packageId">;
   type: "skill" | "mcp-server";
   packageId: string;
   detail: OrgPackageItemDetail | undefined;
@@ -59,9 +62,11 @@ export function PackageSettingsView({
   const sections: SkillDefinitionSection[] =
     type === "skill" ? ["general", "content"] : ["general"];
   const active: PackageSettingsSection =
-    editable && sections.includes(requested as SkillDefinitionSection)
-      ? (requested as SkillDefinitionSection)
-      : "files";
+    requested === "versions" && versions.isOwned
+      ? "versions"
+      : editable && sections.includes(requested as SkillDefinitionSection)
+        ? (requested as SkillDefinitionSection)
+        : "files";
 
   const sectionHref = (section: PackageSettingsSection, modal?: "edit" | "editManifest") => {
     const search = new URLSearchParams(location.search);
@@ -78,7 +83,22 @@ export function PackageSettingsView({
   const groups = [
     {
       label: t("detail.settings.exploreGroup"),
-      items: [{ id: "files" as const, icon: FolderTree, label: t("detail.overview.explorer") }],
+      items: [
+        {
+          id: "files" as PackageSettingsSection,
+          icon: FolderTree,
+          label: t("detail.overview.explorer"),
+        },
+        ...(versions.isOwned
+          ? [
+              {
+                id: "versions" as PackageSettingsSection,
+                icon: History,
+                label: t("detail.settings.versions"),
+              },
+            ]
+          : []),
+      ],
     },
     ...(editable
       ? [
@@ -121,7 +141,9 @@ export function PackageSettingsView({
         </nav>
       }
     >
-      {active !== "files" && detail ? (
+      {active === "versions" ? (
+        <PackageVersionsSection type={type} packageId={packageId} {...versions} />
+      ) : active !== "files" && detail ? (
         <Suspense fallback={<LoadingState />}>
           {type === "skill" ? (
             <SkillDefinitionEditor

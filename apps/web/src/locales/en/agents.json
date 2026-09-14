@@ -908,5 +908,6 @@
   "editor.toolsAll": "All tools",
   "editor.toolsNone": "No tool",
   "editor.toolsEdit": "Edit allowed tools",
-  "editor.toolsTitle": "Allowed tools: {{name}}"
+  "editor.toolsTitle": "Allowed tools: {{name}}",
+  "detail.settings.versions": "Versions"
 }

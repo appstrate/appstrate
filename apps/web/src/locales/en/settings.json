@@ -943,7 +943,6 @@
   "integration.tabs.connections": "Connections",
   "integration.tabs.configuration": "Settings",
   "integration.tabs.tools": "Tool catalog",
-  "integration.tabs.versions": "Versions",
   "integration.tools.wildcardNotice.title": "Wildcard tools permitted",
   "integration.tools.wildcardNotice.body": "This integration lets an agent opt into every tool the upstream MCP server advertises via tools: \"*\". The catalog below is indicative — additional tools may appear at runtime. OAuth scopes used will be the selected auth's default_scopes.",
   "integration.auth.none": "This integration declares no authentication — nothing to connect.",

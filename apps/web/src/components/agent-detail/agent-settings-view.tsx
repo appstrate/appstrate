@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ComponentProps } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -11,6 +11,7 @@ import {
   FileText,
   FolderTree,
   Globe,
+  History,
   IdCard,
   Plug,
   SlidersHorizontal,
@@ -25,10 +26,12 @@ import { AgentOverviewTab } from "./agent-overview-tab";
 import { AgentConfigurationView, type ConfigurationSection } from "./agent-configuration-view";
 import { AgentDetailSplit } from "./agent-detail-split";
 import { LoadingState } from "../page-states";
+import { PackageVersionsSection } from "../package-detail/package-versions-section";
 import { primaryDisplayFile } from "../../lib/package-files";
 import type { AgentDefinitionSection } from "../../pages/package-editor";
 
-type AgentSettingsSection = ConfigurationSection | AgentDefinitionSection | "map" | "files";
+type AgentSettingsSection =
+  ConfigurationSection | AgentDefinitionSection | "map" | "files" | "versions";
 
 /** The editor sections, lazily: the editor weighs more than the page reading it. */
 const AgentDefinitionEditor = lazy(() =>
@@ -57,6 +60,7 @@ const SETTINGS_GROUPS = [
     items: [
       { id: "map", icon: Workflow, labelKey: "detail.overview.map" },
       { id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" },
+      { id: "versions", icon: History, labelKey: "detail.settings.versions" },
     ],
   },
   {
@@ -93,6 +97,7 @@ const SETTINGS_SECTION_IDS: readonly AgentSettingsSection[] = [
   "map",
   ...DEFINITION_SECTION_IDS,
   "files",
+  "versions",
 ];
 
 export function AgentSettingsView({
@@ -103,7 +108,9 @@ export function AgentSettingsView({
   configSchemaOverride,
   currentManifest,
   currentContent,
+  versions,
 }: {
+  versions: Omit<ComponentProps<typeof PackageVersionsSection>, "type" | "packageId">;
   packageId: string;
   detail: AgentDetail;
   version?: string;
@@ -126,6 +133,8 @@ export function AgentSettingsView({
     }
     if (section === "schedules") return can("schedules:read");
     if (section === "map" || section === "files") return can("agents:read");
+    // A system agent has no history of its own to browse.
+    if (section === "versions") return can("agents:read") && detail.source !== "system";
     // The definition is edited where it is read, by whoever may write it, on
     // an org-owned draft. Everyone else keeps Fichiers to read it.
     if ((DEFINITION_SECTION_IDS as readonly string[]).includes(section)) return canEditDefinition;
@@ -182,37 +191,40 @@ export function AgentSettingsView({
     void navigate(sectionHref("files"));
   };
 
-  const body = (DEFINITION_SECTION_IDS as readonly string[]).includes(activeSection) ? (
-    <Suspense fallback={<LoadingState />}>
-      <AgentDefinitionEditor
+  const body =
+    activeSection === "versions" ? (
+      <PackageVersionsSection type="agent" packageId={packageId} {...versions} />
+    ) : (DEFINITION_SECTION_IDS as readonly string[]).includes(activeSection) ? (
+      <Suspense fallback={<LoadingState />}>
+        <AgentDefinitionEditor
+          detail={detail}
+          section={activeSection as AgentDefinitionSection}
+          onSection={(next) => void navigate(sectionHref(next))}
+        />
+      </Suspense>
+    ) : activeSection === "map" || activeSection === "files" ? (
+      <AgentOverviewTab
+        packageId={packageId}
         detail={detail}
-        section={activeSection as AgentDefinitionSection}
-        onSection={(next) => void navigate(sectionHref(next))}
+        version={version}
+        isHistorical={isHistorical}
+        currentManifest={currentManifest}
+        currentContent={currentContent}
+        surface={activeSection}
+        onOpenFiles={openFiles}
+        fileEditHref={canEditDefinition ? fileEditHref : undefined}
       />
-    </Suspense>
-  ) : activeSection === "map" || activeSection === "files" ? (
-    <AgentOverviewTab
-      packageId={packageId}
-      detail={detail}
-      version={version}
-      isHistorical={isHistorical}
-      currentManifest={currentManifest}
-      currentContent={currentContent}
-      surface={activeSection}
-      onOpenFiles={openFiles}
-      fileEditHref={canEditDefinition ? fileEditHref : undefined}
-    />
-  ) : (
-    <AgentConfigurationView
-      packageId={packageId}
-      detail={detail}
-      configSchemaOverride={configSchemaOverride}
-      isHistorical={isHistorical}
-      // Past the two branches above, only configuration sections remain.
-      section={activeSection as ConfigurationSection}
-      embedded
-    />
-  );
+    ) : (
+      <AgentConfigurationView
+        packageId={packageId}
+        detail={detail}
+        configSchemaOverride={configSchemaOverride}
+        isHistorical={isHistorical}
+        // Past the two branches above, only configuration sections remain.
+        section={activeSection as ConfigurationSection}
+        embedded
+      />
+    );
 
   return (
     <AgentDetailSplit

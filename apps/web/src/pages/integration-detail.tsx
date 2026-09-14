@@ -42,6 +42,7 @@ import {
   FolderTree,
   Wrench,
   Workflow,
+  History,
   IdCard,
   Server,
 } from "lucide-react";
@@ -76,7 +77,7 @@ import { RailLink } from "../components/settings/rail-link";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
-import { VersionHistory } from "../components/version-history";
+import { PackageVersionsSection } from "../components/package-detail/package-versions-section";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
@@ -625,6 +626,7 @@ function IntegrationSettings({
   onActivate,
   activationPending,
   definition,
+  isOwned,
 }: {
   packageId: string;
   detail: NonNullable<ReturnType<typeof useIntegrationDetail>["data"]>;
@@ -637,6 +639,8 @@ function IntegrationSettings({
    * sections are then edited here, in place. Absent, Définition stays a read.
    */
   definition?: OrgPackageItemDetail;
+  /** A system integration has no version history of its own. */
+  isOwned: boolean;
 }) {
   const { t } = useTranslation(["settings", "agents"]);
   const location = useLocation();
@@ -647,6 +651,7 @@ function IntegrationSettings({
     requested === "tools" ||
     requested === "functioning" ||
     requested === "map" ||
+    (requested === "versions" && isOwned) ||
     (definition && requested && requested in DEFINITION_RAIL)
       ? requested
       : requested === "files" || !canConfigure
@@ -665,6 +670,15 @@ function IntegrationSettings({
         { id: "map", label: t("integration.structure.map"), icon: Workflow },
         { id: "tools", label: t("integration.tabs.tools"), icon: Wrench },
         { id: "files", label: t("detail.overview.explorer", { ns: "agents" }), icon: FolderTree },
+        ...(isOwned
+          ? [
+              {
+                id: "versions",
+                label: t("detail.settings.versions", { ns: "agents" }),
+                icon: History,
+              },
+            ]
+          : []),
       ],
     },
     ...(canConfigure
@@ -761,6 +775,8 @@ function IntegrationSettings({
             }}
           />
         </Suspense>
+      ) : active === "versions" ? (
+        <PackageVersionsSection type="integration" packageId={packageId} isOwned={isOwned} />
       ) : active === "files" ? (
         <FileExplorer
           packageId={packageId}
@@ -1531,6 +1547,12 @@ export function IntegrationDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
+  // Versions moved into Paramètres › Explorer.
+  if (storedTab === "versions") {
+    const params = new URLSearchParams(location.search);
+    params.set("integrationSettings", "versions");
+    return <Navigate replace to={{ search: params.toString(), hash: "#configuration" }} />;
+  }
   if (storedTab === "content" || storedTab === "tools") {
     const params = new URLSearchParams(location.search);
     params.set("integrationSettings", storedTab === "tools" ? "tools" : "files");
@@ -1621,11 +1643,6 @@ export function IntegrationDetailPage() {
           <DetailTabsTrigger value="configuration" data-testid="tab-configuration">
             {t("integration.tabs.configuration")}
           </DetailTabsTrigger>
-          {!isBuiltIn && (
-            <DetailTabsTrigger value="versions" data-testid="tab-versions">
-              {t("integration.tabs.versions")}
-            </DetailTabsTrigger>
-          )}
         </DetailTabsList>
 
         {/* One connected-accounts table, with each row retaining its auth context. */}
@@ -1660,6 +1677,7 @@ export function IntegrationDetailPage() {
             onActivate={onActivate}
             activationPending={activate.isPending}
             definition={isOwned && can("integrations:write") && pkg ? pkg : undefined}
+            isOwned={isOwned}
           />
         </TabsContent>
 
@@ -1674,13 +1692,6 @@ export function IntegrationDetailPage() {
             onConfigureAuth={canConfigure ? openAuthentication : undefined}
           />
         </TabsContent>
-
-        {/* ─── Versions (read-only history; non-system only) ─── */}
-        {!isBuiltIn && (
-          <TabsContent value="versions" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
-            <VersionHistory packageId={packageId} type="integration" isOwned={isOwned} />
-          </TabsContent>
-        )}
       </Tabs>
 
       <ForkPackageModal

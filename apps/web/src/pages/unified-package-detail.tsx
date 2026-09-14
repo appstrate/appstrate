@@ -30,8 +30,6 @@ import { ConfirmModal } from "../components/confirm-modal";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
-import { VersionHistory } from "../components/version-history";
-import { DiffTab } from "../components/diff-tab";
 import { PackageOverview } from "../components/package-detail/package-overview";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
@@ -236,10 +234,14 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   useEffect(() => {
     if (type !== "agent") return;
     const legacyTab = location.hash.replace(/^#/, "");
-    if (legacyTab !== "map" && legacyTab !== "files" && legacyTab !== "configuration") return;
+    if (!["map", "files", "configuration", "versions", "diff"].includes(legacyTab)) return;
     const search = new URLSearchParams(location.search);
     const section =
-      legacyTab === "configuration" ? search.get("agentConfig") || "model" : legacyTab;
+      legacyTab === "configuration"
+        ? search.get("agentConfig") || "model"
+        : legacyTab === "diff"
+          ? "versions"
+          : legacyTab;
     if (section === "model") search.delete("agentSettings");
     else search.set("agentSettings", section);
     search.delete("agentConfig");
@@ -250,11 +252,29 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   }, [location.hash, location.pathname, location.search, navigate, type]);
   // Reset tab if it becomes invalid
   useEffect(() => {
-    if (tab === "diff" && (!hasArchivableChanges || isVersionView)) setTab(defaultTab);
-    if (tab === "versions" && source === "system") setTab(defaultTab);
+    // Versions and their diff moved into Paramètres › Explorer.
+    if (type !== "agent" && (tab === "versions" || tab === "diff")) {
+      const search = new URLSearchParams(location.search);
+      search.set("packageSettings", "versions");
+      navigate(
+        { pathname: location.pathname, search: `?${search.toString()}`, hash: "settings" },
+        { replace: true },
+      );
+      return;
+    }
     // A package's files moved into Paramètres › Explorer.
     if (tab === "content") setTab("settings");
-  }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab, type]);
+  }, [
+    tab,
+    hasArchivableChanges,
+    isVersionView,
+    source,
+    defaultTab,
+    setTab,
+    type,
+    location,
+    navigate,
+  ]);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
   // ── Loading / Error ──
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
@@ -348,18 +368,16 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     { id: "usedBy", label: t("packages.usedBy") },
   ];
 
-  // Shared tabs appended to all package types
-  const sharedTabs: Array<{ id: DetailTab; label: string }> =
-    type === "agent"
-      ? []
-      : [
-          ...(!isBuiltIn ? [{ id: "versions" as DetailTab, label: t("version.archives") }] : []),
-          ...(hasArchivableChanges && !isVersionView
-            ? [{ id: "diff" as DetailTab, label: t("version.diff") }]
-            : []),
-        ];
+  const tabDefs = type === "agent" ? agentTabs : pkgTabs;
 
-  const tabDefs = [...(type === "agent" ? agentTabs : pkgTabs), ...sharedTabs];
+  // Versions live in Paramètres › Explorer for every type.
+  const versionsProps = {
+    isOwned: !isBuiltIn,
+    latestVersion: latestVersionForDiff,
+    currentManifest,
+    currentContent,
+    hasUnarchivedChanges: hasArchivableChanges && !isVersionView,
+  };
 
   const versionLabel = isHistoricalVersion ? versionDetail?.version : undefined;
 
@@ -541,6 +559,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
             >
               <AgentSettingsView
+                versions={versionsProps}
                 packageId={packageId}
                 detail={agentDetail}
                 version={versionLabel}
@@ -593,6 +612,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
             >
               <PackageSettingsView
+                versions={versionsProps}
                 type={type}
                 packageId={packageId}
                 detail={pkgDetail}
@@ -608,21 +628,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
           <TabsContent value="usedBy" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
             {pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />}
-          </TabsContent>
-
-          <TabsContent value="versions" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
-            <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />
-          </TabsContent>
-
-          <TabsContent value="diff" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
-            {latestVersionForDiff && (
-              <DiffTab
-                type={type}
-                latestVersion={latestVersionForDiff}
-                currentManifest={currentManifest}
-                currentContent={currentContent}
-              />
-            )}
           </TabsContent>
         </Tabs>
       )}

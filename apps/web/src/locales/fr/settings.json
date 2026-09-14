@@ -943,7 +943,6 @@
   "integration.tabs.connections": "Connexions",
   "integration.tabs.configuration": "Paramètres",
   "integration.tabs.tools": "Catalogue d’outils",
-  "integration.tabs.versions": "Versions",
   "integration.tools.wildcardNotice.title": "Caractère générique autorisé",
   "integration.tools.wildcardNotice.body": "Cette intégration permet à un agent de sélectionner tous les outils annoncés par le serveur MCP en utilisant tools: \"*\". Le catalogue ci-dessous est indicatif — d'autres outils peuvent apparaître à l'exécution. Les scopes OAuth utilisés seront les default_scopes de la méthode d'authentification sélectionnée.",
   "integration.auth.none": "Cette intégration ne déclare aucune authentification — rien à connecter.",
