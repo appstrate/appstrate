@@ -340,6 +340,7 @@ export function ListToolbar({
   onViewChange,
   actions,
   adjacentActions,
+  tabs,
   placement = "page",
   panelFiltersAdjacent = false,
 }: {
@@ -366,6 +367,12 @@ export function ListToolbar({
   actions?: ReactNode;
   /** Compact controls that belong directly beside panel search and filters. */
   adjacentActions?: ReactNode;
+  /**
+   * `CollectionTabs` splitting the list, drawn FIRST on the bar's line — the
+   * part you are in, then how to search it. On a phone the line has no room
+   * for both, so the tabs take a line of their own above it.
+   */
+  tabs?: ReactNode;
   /** A panel keeps its compact, always-visible search instead of page-level responsive chrome. */
   placement?: "page" | "panel";
   /** Keep the filter trigger beside search while panel actions stay on the right. */
@@ -386,6 +393,7 @@ export function ListToolbar({
       <div data-list-toolbar="panel" className="@container/bar mb-4 space-y-2">
         <div className="flex items-center gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-2">
+            {tabs}
             {search && (
               <Input
                 value={search.value}
@@ -461,7 +469,9 @@ export function ListToolbar({
 
   return (
     <div data-list-toolbar="page" className="@container/bar mb-3 space-y-2">
+      {tabs && <div className="sm:hidden">{tabs}</div>}
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
+        {tabs && <div className="hidden sm:block">{tabs}</div>}
         {search && (
           <Input
             value={search.value}

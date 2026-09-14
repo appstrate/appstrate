@@ -7,8 +7,7 @@ import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
-import { Tabs } from "@appstrate/ui/components/tabs";
-import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
+import { CollectionTabs } from "../components/collection-tabs";
 import { CardGrid } from "../components/card-grid";
 import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
@@ -165,25 +164,22 @@ export function IntegrationsPage() {
         <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>
       </PageHeader>
 
-      <Tabs
-        className="mb-4"
-        value={execution}
-        // One URL update: two in the same tick read the same location and the
-        // second would undo the first (see `useListParams`). A protocol filter
-        // left in the URL is simply not applied on the local tab.
-        onValueChange={(next) => list.setValues("execution")(next === "local" ? ["local"] : [])}
-      >
-        <DetailTabsList aria-label={t("integrations.execution.label")}>
-          {INTEGRATION_EXECUTIONS.map((value) => (
-            <DetailTabsTrigger key={value} value={value}>
-              {t(`integrations.execution.${value}`)}
-              <span className="text-muted-foreground ml-1.5 tabular-nums">{countOf(value)}</span>
-            </DetailTabsTrigger>
-          ))}
-        </DetailTabsList>
-      </Tabs>
-
       <ListToolbar
+        tabs={
+          <CollectionTabs
+            value={execution}
+            label={t("integrations.execution.label")}
+            // One URL update: two in the same tick read the same location and
+            // the second would undo the first (see `useListParams`). A protocol
+            // filter left in the URL is simply not applied on the local tab.
+            onChange={(next) => list.setValues("execution")(next === "local" ? ["local"] : [])}
+            options={INTEGRATION_EXECUTIONS.map((value) => ({
+              value,
+              label: t(`integrations.execution.${value}`),
+              count: countOf(value),
+            }))}
+          />
+        }
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={[
           {

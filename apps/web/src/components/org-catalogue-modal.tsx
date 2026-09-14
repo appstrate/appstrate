@@ -55,8 +55,7 @@ import {
   integrationProtocol,
   type IntegrationExecution,
 } from "../lib/integration-collection";
-import { Tabs } from "@appstrate/ui/components/tabs";
-import { DetailTabsList, DetailTabsTrigger } from "./agent-detail/agent-local-tabs";
+import { CollectionTabs } from "./collection-tabs";
 import { usePackageViewStore } from "../stores/list-view-store";
 import type { CardItem } from "../pages/package-list";
 import { CataloguePreview } from "./catalogue-preview";
@@ -443,28 +442,22 @@ export function OrgCatalogueModal({
           list={list}
           view={view}
           onViewChange={setView}
-          header={
-            <>
-              <SettingsHeading className="mb-4" title={t(kind.titleKey)} />
-              {active === "integration" && (
-                <Tabs
-                  className="mb-4"
-                  value={execution}
-                  onValueChange={(next) => {
-                    setSelected(new Set());
-                    setExecution(next as IntegrationExecution);
-                  }}
-                >
-                  <DetailTabsList aria-label={t("integrations.execution.label")}>
-                    {INTEGRATION_EXECUTIONS.map((value) => (
-                      <DetailTabsTrigger key={value} value={value}>
-                        {t(`integrations.execution.${value}`)}
-                      </DetailTabsTrigger>
-                    ))}
-                  </DetailTabsList>
-                </Tabs>
-              )}
-            </>
+          header={<SettingsHeading className="mb-4" title={t(kind.titleKey)} />}
+          tabs={
+            active === "integration" ? (
+              <CollectionTabs
+                value={execution}
+                label={t("integrations.execution.label")}
+                onChange={(next) => {
+                  setSelected(new Set());
+                  setExecution(next);
+                }}
+                options={INTEGRATION_EXECUTIONS.map((value) => ({
+                  value,
+                  label: t(`integrations.execution.${value}`),
+                }))}
+              />
+            ) : undefined
           }
           // The page's own bar, not a panel variant of it: same icon-only
           // filter and column buttons, in the same place, at the same size.

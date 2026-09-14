@@ -82,8 +82,10 @@ export interface PackageCollectionProps {
   cardRun?: boolean;
   /** Drawn at the right end of the bar, where a list's actions always are. */
   actions?: ReactNode;
-  /** Above the bar: what this collection is, and any tabs that narrow it. */
+  /** Above the bar: what this collection is. */
   header?: ReactNode;
+  /** `CollectionTabs` for the bar's line, before the search. */
+  tabs?: ReactNode;
   /** Open a row in place rather than on its own page. */
   rowAction?: (item: CardItem) => void;
   /** Ahead of the name: the catalogue's tick. */
@@ -117,6 +119,7 @@ export function PackageCollection({
   cardRun = true,
   actions,
   header,
+  tabs,
   rowAction,
   leadingColumns = NO_COLUMNS,
   trailingColumns = NO_COLUMNS,
@@ -207,6 +210,7 @@ export function PackageCollection({
     <>
       {header}
       <ListToolbar
+        tabs={tabs}
         placement={placement}
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={filters}

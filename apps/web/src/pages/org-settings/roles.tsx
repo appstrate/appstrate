@@ -12,7 +12,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 import { ApiError } from "../../api/client";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
@@ -41,7 +40,7 @@ import { LoadingState, ErrorState, EmptyState } from "../../components/page-stat
 import { Spinner } from "../../components/spinner";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
-import { DetailTabsList, DetailTabsTrigger } from "../../components/agent-detail/agent-local-tabs";
+import { CollectionTabs } from "../../components/collection-tabs";
 import { ViewToggle } from "../../components/view-toggle";
 import { OrgRolesList, OrgRolesMatrix } from "./org-roles";
 import {
@@ -189,25 +188,28 @@ export function OrgSettingsRolesPage() {
         </SettingsPageActions>
       )}
 
-      <Tabs value={tab} onValueChange={(next) => setParam("tab", next, "org")}>
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <DetailTabsList aria-label={t("roles.tabTitle")}>
-            <DetailTabsTrigger value="org">{t("roles.tabOrg")}</DetailTabsTrigger>
-            <DetailTabsTrigger value="space">{t("roles.tabSpace")}</DetailTabsTrigger>
-          </DetailTabsList>
-          <ViewToggle
-            value={view}
-            onChange={(next) => setParam("view", next, "list")}
-            options={[
-              { id: "list", icon: Rows3, label: t("roles.viewList") },
-              { id: "matrix", icon: Grid3x3, label: t("roles.viewMatrix") },
-            ]}
-          />
-        </div>
-        <TabsContent value="org" className="mt-0">
-          {view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList />}
-        </TabsContent>
-        <TabsContent value="space" className="mt-0">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <CollectionTabs
+          value={tab}
+          label={t("roles.tabTitle")}
+          onChange={(next) => setParam("tab", next, "org")}
+          options={[
+            { value: "org", label: t("roles.tabOrg") },
+            { value: "space", label: t("roles.tabSpace") },
+          ]}
+        />
+        <ViewToggle
+          value={view}
+          onChange={(next) => setParam("view", next, "list")}
+          options={[
+            { id: "list", icon: Rows3, label: t("roles.viewList") },
+            { id: "matrix", icon: Grid3x3, label: t("roles.viewMatrix") },
+          ]}
+        />
+      </div>
+      {tab === "org" && (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList />)}
+      {tab === "space" && (
+        <>
           {!customRolesEnabled && (
             <Alert className="mb-6">
               <AlertDescription>{t("roles.customUnavailable")}</AlertDescription>
@@ -258,8 +260,8 @@ export function OrgSettingsRolesPage() {
               </SettingsGroup>
             </>
           )}
-        </TabsContent>
-      </Tabs>
+        </>
+      )}
 
       {requested === "new" && canWrite && (
         <RoleFormModal key="new" role={null} onClose={roleParam.close} />
