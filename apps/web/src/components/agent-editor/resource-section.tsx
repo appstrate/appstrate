@@ -22,7 +22,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Button } from "@appstrate/ui/components/button";
-import { ShieldCheck, AlertTriangle, ArrowUpRight, SearchX } from "lucide-react";
+import { ShieldCheck, AlertTriangle, ArrowUpRight, Plus, SearchX, Trash2 } from "lucide-react";
 import { Spinner } from "../spinner";
 import { ListToolbar } from "../list-toolbar";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -31,6 +31,10 @@ import { useActivateIntegration } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { TableRowActions } from "../table-row-actions";
+import { Modal } from "../modal";
+import { useModalParam } from "../../hooks/use-modal-param";
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
 
@@ -389,14 +393,33 @@ export function ResourceSection({
 
   if (surface === "settings") {
     return (
-      <section aria-label={title} className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-semibold">{t("editor.resourceSelection")}</h3>
-          <Badge variant="secondary">{selectedEntries.length}</Badge>
-        </div>
-        {toolbar}
-        {content}
-      </section>
+      <SelectedResources
+        type={type}
+        title={title}
+        emptyLabel={emptyLabel}
+        items={items}
+        isLoading={isLoading}
+        error={error}
+        selectedEntries={selectedEntries}
+        missingIds={inactiveDeclaredIds}
+        uploadButton={uploadButton}
+        onToggle={toggle}
+        onVersion={updateVersion}
+        onReplace={replaceEntry}
+        onAdd={(ids) =>
+          onChange((prev) => [
+            ...prev,
+            ...ids
+              .filter((id) => !prev.some((e) => e.id === id))
+              .map((id) => {
+                const item = items?.find((i) => i.id === id);
+                return { id, version: item?.version ? caretRange(item.version) : "*" };
+              }),
+          ])
+        }
+        onActivate={(id) => activate.mutate({ params: { path: { packageId: id } } })}
+        activating={activate.isPending}
+      />
     );
   }
 
@@ -405,5 +428,255 @@ export function ResourceSection({
       {toolbar}
       {content}
     </SectionCard>
+  );
+}
+
+type CatalogItem = NonNullable<ReturnType<typeof usePackageList>["data"]>[number];
+
+/**
+ * The Définition's view of an agent's skills or integrations: ONLY what the
+ * agent uses, as rows, and "Ajouter" to pick more.
+ *
+ * The page editor lists the whole catalogue with a box per item, which stops
+ * reading once an organisation has twenty skills: what the agent actually uses
+ * drowns in what it could. Here the rows are the dependencies, each with its
+ * version, its tools for an integration, and a "…" menu to open or remove it;
+ * the catalogue is a modal, opened on purpose.
+ */
+function SelectedResources({
+  type,
+  title,
+  emptyLabel,
+  items,
+  isLoading,
+  error,
+  selectedEntries,
+  missingIds,
+  uploadButton,
+  onToggle,
+  onVersion,
+  onReplace,
+  onAdd,
+  onActivate,
+  activating,
+}: {
+  type: PackageType;
+  title: string;
+  emptyLabel: string;
+  items: CatalogItem[] | undefined;
+  isLoading: boolean;
+  error: unknown;
+  selectedEntries: ResourceEntry[];
+  missingIds: string[];
+  uploadButton: ReactNode;
+  onToggle: (id: string) => void;
+  onVersion: (id: string, version: string) => void;
+  onReplace: (id: string, next: ResourceEntry) => void;
+  onAdd: (ids: string[]) => void;
+  onActivate: (id: string) => void;
+  activating: boolean;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const picker = useModalParam("add");
+  const byId = new Map((items ?? []).map((item) => [item.id, item] as const));
+  const missing = new Set(missingIds);
+  const rows = selectedEntries;
+
+  return (
+    <section aria-label={title} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <Badge variant="secondary">{rows.length}</Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          {uploadButton}
+          <Button type="button" size="sm" onClick={() => picker.open()}>
+            <Plus />
+            {t("editor.resourceAdd")}
+          </Button>
+        </div>
+      </div>
+
+      {error ? (
+        <ErrorState message={String(error)} compact />
+      ) : isLoading ? (
+        <div className="text-muted-foreground flex items-center justify-center py-6">
+          <Spinner />
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState message={emptyLabel} icon={SearchX} compact />
+      ) : (
+        <div className="border-border divide-border divide-y rounded-lg border">
+          {rows.map((entry) => {
+            const item = byId.get(entry.id);
+            const isMissing = missing.has(entry.id);
+            return (
+              <div key={entry.id} className={cn("px-4 py-3", isMissing && "bg-destructive/5")}>
+                <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                      {item?.name || entry.id}
+                      {item?.source === "system" && (
+                        <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
+                      )}
+                    </span>
+                    {isMissing ? (
+                      <span className="text-destructive inline-flex items-center gap-1 text-xs">
+                        <AlertTriangle className="size-3.5 shrink-0" />
+                        {type === "integration"
+                          ? t("editor.integrationInactive")
+                          : t("editor.dependencyMissing")}
+                      </span>
+                    ) : (
+                      item?.description && (
+                        <span className="text-muted-foreground truncate text-xs">
+                          {item.description}
+                        </span>
+                      )
+                    )}
+                  </div>
+                  {isMissing && type === "integration" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={activating}
+                      onClick={() => onActivate(entry.id)}
+                    >
+                      {activating ? <Spinner /> : t("editor.activateIntegration")}
+                    </Button>
+                  )}
+                  {!isMissing && (
+                    <VersionSelect
+                      type={type}
+                      packageId={entry.id}
+                      value={entry.version ?? "*"}
+                      onChange={(v) => onVersion(entry.id, v)}
+                    />
+                  )}
+                  <TableRowActions
+                    menuLabel={t("editor.resourceActions", { name: item?.name || entry.id })}
+                  >
+                    <DropdownMenuItem asChild>
+                      <Link
+                        to={packageDetailPath(type, entry.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ArrowUpRight />
+                        {t("editor.resourceOpen", { name: item?.name || entry.id })}
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => onToggle(entry.id)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 />
+                      {t("editor.resourceRemove")}
+                    </DropdownMenuItem>
+                  </TableRowActions>
+                </div>
+                {type === "integration" && !isMissing && (
+                  <div className="pt-3">
+                    <IntegrationToolPicker
+                      packageId={entry.id}
+                      entry={entry}
+                      onChange={(next) => onReplace(entry.id, next)}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {picker.value !== null && (
+        <ResourcePicker
+          title={t("editor.resourceAddTitle", { kind: title })}
+          items={(items ?? []).filter((item) => !selectedEntries.some((e) => e.id === item.id))}
+          onClose={picker.close}
+          onAdd={(ids) => {
+            onAdd(ids);
+            picker.close();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+/** The catalogue of what can be added, searched and ticked, in a modal. */
+function ResourcePicker({
+  title,
+  items,
+  onClose,
+  onAdd,
+}: {
+  title: string;
+  items: CatalogItem[];
+  onClose: () => void;
+  onAdd: (ids: string[]) => void;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const [search, setSearch] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const needle = search.trim().toLocaleLowerCase();
+  const shown = items.filter((item) =>
+    `${item.id} ${item.name ?? ""} ${item.description ?? ""}`.toLocaleLowerCase().includes(needle),
+  );
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={title}
+      className="sm:max-w-2xl"
+      actions={
+        <Button type="button" disabled={picked.length === 0} onClick={() => onAdd(picked)}>
+          {t("editor.resourceAddSelection", { count: picked.length })}
+        </Button>
+      }
+    >
+      <ListToolbar
+        placement="panel"
+        search={{ value: search, onChange: setSearch, placeholder: t("editor.resourceSearch") }}
+        filters={[]}
+      />
+      <div className="border-border max-h-[50dvh] divide-y overflow-y-auto rounded-lg border">
+        {shown.length === 0 ? (
+          <EmptyState icon={SearchX} message={t("editor.resourceNoMatch")} compact />
+        ) : (
+          shown.map((item) => (
+            <label
+              key={item.id}
+              className="hover:bg-muted/30 flex cursor-pointer items-center gap-3 px-4 py-3"
+            >
+              <Checkbox
+                checked={picked.includes(item.id)}
+                onCheckedChange={() =>
+                  setPicked((prev) =>
+                    prev.includes(item.id)
+                      ? prev.filter((id) => id !== item.id)
+                      : [...prev, item.id],
+                  )
+                }
+              />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                  {item.name || item.id}
+                  {item.source === "system" && (
+                    <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
+                  )}
+                </span>
+                {item.description && (
+                  <span className="text-muted-foreground truncate text-xs">{item.description}</span>
+                )}
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+    </Modal>
   );
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { SettingsHeading } from "../settings/settings-heading";
+import { SchemaFieldList } from "./schema-field-list";
 import {
   Select,
   SelectContent,
@@ -429,12 +429,7 @@ export function SchemaSection({
   );
 
   if (surface === "settings") {
-    return (
-      <section className="space-y-4">
-        <SettingsHeading level="group" title={title} />
-        <div className="space-y-3">{content}</div>
-      </section>
-    );
+    return <SchemaFieldList title={title} mode={mode} fields={fields} onChange={onChange} />;
   }
 
   return <SectionCard title={title}>{content}</SectionCard>;

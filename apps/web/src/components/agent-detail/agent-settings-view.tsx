@@ -153,6 +153,7 @@ export function AgentSettingsView({
     // A file modal belongs to the section it was opened in.
     search.delete("edit");
     search.delete("editManifest");
+    search.delete("add");
     const query = search.toString();
     return `${location.pathname}${query ? `?${query}` : ""}#settings`;
   };

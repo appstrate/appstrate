@@ -1369,9 +1369,22 @@ export const mcpServerDetails = [githubGitMcpServerDetail, qboMcpServerDetail];
 
 type PackageFileIndex = Json200<"/api/packages/{scope}/{name}/files", "get">;
 
-function skillFileIndex(content: string): PackageFileIndex {
+/**
+ * A skill's bundle as the API serves it: the draft overlays `manifest.json`
+ * and `SKILL.md` on the stored archive.
+ */
+function skillFileIndex(content: string, manifest: unknown): PackageFileIndex {
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
   return {
-    entries: [{ path: "SKILL.md", size: content.length, media_kind: "text", inline: content }],
+    entries: [
+      { path: "SKILL.md", size: content.length, media_kind: "text", inline: content },
+      {
+        path: "manifest.json",
+        size: manifestText.length,
+        media_kind: "text",
+        inline: manifestText,
+      },
+    ],
   };
 }
 
@@ -1435,6 +1448,12 @@ export const comptaReferencesSkillFiles: Json200<"/api/packages/{scope}/{name}/f
       inline: comptaReferencesSkillDetail.content ?? "",
     },
     {
+      path: "manifest.json",
+      size: `${JSON.stringify(comptaReferencesSkillDetail.manifest, null, 2)}\n`.length,
+      media_kind: "text",
+      inline: `${JSON.stringify(comptaReferencesSkillDetail.manifest, null, 2)}\n`,
+    },
+    {
       path: "references/fiscal-year.md",
       size: fiscalYearReference.length,
       media_kind: "text",
@@ -1449,9 +1468,9 @@ export const comptaReferencesSkillFiles: Json200<"/api/packages/{scope}/{name}/f
   ],
 };
 export const triageSentimentSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
-  skillFileIndex(triageSentimentSkillDetail.content ?? "");
+  skillFileIndex(triageSentimentSkillDetail.content ?? "", triageSentimentSkillDetail.manifest);
 export const wikiBrainSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
-  skillFileIndex(wikiBrainSkillDetail.content ?? "");
+  skillFileIndex(wikiBrainSkillDetail.content ?? "", wikiBrainSkillDetail.manifest);
 export const githubGitMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
   mcpServerFileIndex(githubGitMcpServerDetail.manifest);
 export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> = {

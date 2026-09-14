@@ -104,7 +104,7 @@ function MarkdownFileEditor({
       <ContentEditor value={value} onChange={setValue} language="markdown" height="560px" />
       <div className="flex justify-end">
         <Button type="button" onClick={() => onApply(value)}>
-          {t("editor.jsonApply")}
+          {t("editor.apply")}
         </Button>
       </div>
     </div>
