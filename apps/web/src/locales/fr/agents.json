@@ -899,5 +899,14 @@
   "editor.fieldDefaultLabel": "Valeur par défaut",
   "editor.fieldPlaceholderLabel": "Texte d’exemple",
   "editor.fieldEnumLabel": "Valeurs possibles (séparées par des virgules)",
-  "editor.apply": "Appliquer"
+  "editor.apply": "Appliquer",
+  "editor.fieldRequiredYes": "Oui",
+  "editor.resourceName": "Nom",
+  "editor.resourceVersionHead": "Version",
+  "editor.resourceTools": "Outils autorisés",
+  "editor.toolsDefault": "Outils par défaut de l’intégration",
+  "editor.toolsAll": "Tous les outils",
+  "editor.toolsNone": "Aucun outil",
+  "editor.toolsEdit": "Modifier les outils autorisés",
+  "editor.toolsTitle": "Outils autorisés : {{name}}"
 }

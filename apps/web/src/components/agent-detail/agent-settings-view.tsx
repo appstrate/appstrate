@@ -154,6 +154,9 @@ export function AgentSettingsView({
     search.delete("edit");
     search.delete("editManifest");
     search.delete("add");
+    search.delete("tools");
+    search.delete("field-input");
+    search.delete("field-output");
     const query = search.toString();
     return `${location.pathname}${query ? `?${query}` : ""}#settings`;
   };

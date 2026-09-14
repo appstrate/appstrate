@@ -22,7 +22,16 @@ import {
 } from "@appstrate/ui/components/select";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Button } from "@appstrate/ui/components/button";
-import { ShieldCheck, AlertTriangle, ArrowUpRight, Plus, SearchX, Trash2 } from "lucide-react";
+import {
+  ShieldCheck,
+  AlertTriangle,
+  ArrowUpRight,
+  Plus,
+  SearchX,
+  Trash2,
+  Upload,
+  Wrench,
+} from "lucide-react";
 import { Spinner } from "../spinner";
 import { ListToolbar } from "../list-toolbar";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -34,6 +43,15 @@ import { IntegrationToolPicker } from "./integration-tool-picker";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { TableRowActions } from "../table-row-actions";
 import { Modal } from "../modal";
+import { PageActionsMenu } from "../page-actions-menu";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@appstrate/ui/components/table";
 import { useModalParam } from "../../hooks/use-modal-param";
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
@@ -402,7 +420,18 @@ export function ResourceSection({
         error={error}
         selectedEntries={selectedEntries}
         missingIds={inactiveDeclaredIds}
-        uploadButton={uploadButton}
+        importInput={
+          <input
+            type="file"
+            accept=".afps"
+            ref={fileInputRef}
+            onChange={handleUpload}
+            className="hidden"
+            disabled={upload.isPending}
+          />
+        }
+        onImport={() => fileInputRef.current?.click()}
+        importing={upload.isPending}
         onToggle={toggle}
         onVersion={updateVersion}
         onReplace={replaceEntry}
@@ -435,13 +464,13 @@ type CatalogItem = NonNullable<ReturnType<typeof usePackageList>["data"]>[number
 
 /**
  * The Définition's view of an agent's skills or integrations: ONLY what the
- * agent uses, as rows, and "Ajouter" to pick more.
+ * agent uses, in a table, and the list's one "Actions" menu to add or import.
  *
  * The page editor lists the whole catalogue with a box per item, which stops
- * reading once an organisation has twenty skills: what the agent actually uses
- * drowns in what it could. Here the rows are the dependencies, each with its
- * version, its tools for an integration, and a "…" menu to open or remove it;
- * the catalogue is a modal, opened on purpose.
+ * reading once an organisation has twenty skills. Here the rows are the
+ * dependencies — stock shadcn `Table` — each with its version and, for an
+ * integration, the tools it allows summed up in one line; changing those opens
+ * a modal, from the row's "…" menu. Adding opens the catalogue in a modal too.
  */
 function SelectedResources({
   type,
@@ -452,7 +481,9 @@ function SelectedResources({
   error,
   selectedEntries,
   missingIds,
-  uploadButton,
+  importInput,
+  onImport,
+  importing,
   onToggle,
   onVersion,
   onReplace,
@@ -468,7 +499,10 @@ function SelectedResources({
   error: unknown;
   selectedEntries: ResourceEntry[];
   missingIds: string[];
-  uploadButton: ReactNode;
+  /** The hidden file input the "Importer" item clicks. */
+  importInput: ReactNode;
+  onImport: () => void;
+  importing: boolean;
   onToggle: (id: string) => void;
   onVersion: (id: string, version: string) => void;
   onReplace: (id: string, next: ResourceEntry) => void;
@@ -476,26 +510,42 @@ function SelectedResources({
   onActivate: (id: string) => void;
   activating: boolean;
 }) {
-  const { t } = useTranslation(["agents", "common"]);
+  const { t } = useTranslation(["agents", "settings", "common"]);
   const picker = useModalParam("add");
+  const toolsFor = useModalParam("tools");
   const byId = new Map((items ?? []).map((item) => [item.id, item] as const));
   const missing = new Set(missingIds);
   const rows = selectedEntries;
+  const toolsEntry = rows.find((entry) => entry.id === toolsFor.value);
+  const isIntegration = type === "integration";
+
+  const toolsSummary = (entry: ResourceEntry) =>
+    entry.tools === undefined
+      ? t("editor.toolsDefault")
+      : entry.tools === "*"
+        ? t("editor.toolsAll")
+        : entry.tools.length === 0
+          ? t("editor.toolsNone")
+          : entry.tools.join(", ");
 
   return (
-    <section aria-label={title} className="space-y-4">
+    <section aria-label={title} className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">{title}</h3>
           <Badge variant="secondary">{rows.length}</Badge>
         </div>
-        <div className="flex items-center gap-2">
-          {uploadButton}
-          <Button type="button" size="sm" onClick={() => picker.open()}>
+        {importInput}
+        <PageActionsMenu>
+          <DropdownMenuItem onSelect={() => picker.open()}>
             <Plus />
             {t("editor.resourceAdd")}
-          </Button>
-        </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={importing} onSelect={onImport}>
+            <Upload />
+            {t("editor.importZip")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </div>
 
       {error ? (
@@ -507,87 +557,105 @@ function SelectedResources({
       ) : rows.length === 0 ? (
         <EmptyState message={emptyLabel} icon={SearchX} compact />
       ) : (
-        <div className="border-border divide-border divide-y rounded-lg border">
-          {rows.map((entry) => {
-            const item = byId.get(entry.id);
-            const isMissing = missing.has(entry.id);
-            return (
-              <div key={entry.id} className={cn("px-4 py-3", isMissing && "bg-destructive/5")}>
-                <div className="flex items-center gap-3">
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="flex items-center gap-1.5 truncate text-sm font-medium">
-                      {item?.name || entry.id}
-                      {item?.source === "system" && (
-                        <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
-                      )}
-                    </span>
-                    {isMissing ? (
-                      <span className="text-destructive inline-flex items-center gap-1 text-xs">
-                        <AlertTriangle className="size-3.5 shrink-0" />
-                        {type === "integration"
-                          ? t("editor.integrationInactive")
-                          : t("editor.dependencyMissing")}
-                      </span>
-                    ) : (
-                      item?.description && (
-                        <span className="text-muted-foreground truncate text-xs">
-                          {item.description}
+        <div className="border-border overflow-hidden rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("editor.resourceName")}</TableHead>
+                <TableHead className="w-32">{t("editor.resourceVersionHead")}</TableHead>
+                {isIntegration && <TableHead>{t("editor.resourceTools")}</TableHead>}
+                <TableHead className="w-12" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((entry) => {
+                const item = byId.get(entry.id);
+                const isMissing = missing.has(entry.id);
+                const name = item?.name || entry.id;
+                return (
+                  <TableRow key={entry.id} className={cn(isMissing && "bg-destructive/5")}>
+                    <TableCell>
+                      <div className="flex min-w-0 flex-col">
+                        <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                          {name}
+                          {item?.source === "system" && (
+                            <ShieldCheck className="text-muted-foreground size-3.5 shrink-0" />
+                          )}
                         </span>
-                      )
+                        {isMissing ? (
+                          <span className="text-destructive inline-flex items-center gap-1 text-xs">
+                            <AlertTriangle className="size-3.5 shrink-0" />
+                            {isIntegration
+                              ? t("editor.integrationInactive")
+                              : t("editor.dependencyMissing")}
+                          </span>
+                        ) : (
+                          item?.description && (
+                            <span className="text-muted-foreground max-w-[24rem] truncate text-xs">
+                              {item.description}
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {isMissing ? (
+                        isIntegration && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={activating}
+                            onClick={() => onActivate(entry.id)}
+                          >
+                            {activating ? <Spinner /> : t("editor.activateIntegration")}
+                          </Button>
+                        )
+                      ) : (
+                        <VersionSelect
+                          type={type}
+                          packageId={entry.id}
+                          value={entry.version ?? "*"}
+                          onChange={(v) => onVersion(entry.id, v)}
+                        />
+                      )}
+                    </TableCell>
+                    {isIntegration && (
+                      <TableCell className="text-muted-foreground max-w-[20rem] truncate text-sm">
+                        {isMissing ? "—" : toolsSummary(entry)}
+                      </TableCell>
                     )}
-                  </div>
-                  {isMissing && type === "integration" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={activating}
-                      onClick={() => onActivate(entry.id)}
-                    >
-                      {activating ? <Spinner /> : t("editor.activateIntegration")}
-                    </Button>
-                  )}
-                  {!isMissing && (
-                    <VersionSelect
-                      type={type}
-                      packageId={entry.id}
-                      value={entry.version ?? "*"}
-                      onChange={(v) => onVersion(entry.id, v)}
-                    />
-                  )}
-                  <TableRowActions
-                    menuLabel={t("editor.resourceActions", { name: item?.name || entry.id })}
-                  >
-                    <DropdownMenuItem asChild>
-                      <Link
-                        to={packageDetailPath(type, entry.id)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        <ArrowUpRight />
-                        {t("editor.resourceOpen", { name: item?.name || entry.id })}
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => onToggle(entry.id)}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 />
-                      {t("editor.resourceRemove")}
-                    </DropdownMenuItem>
-                  </TableRowActions>
-                </div>
-                {type === "integration" && !isMissing && (
-                  <div className="pt-3">
-                    <IntegrationToolPicker
-                      packageId={entry.id}
-                      entry={entry}
-                      onChange={(next) => onReplace(entry.id, next)}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                    <TableCell className="text-right">
+                      <TableRowActions menuLabel={t("editor.resourceActions", { name })}>
+                        {isIntegration && !isMissing && (
+                          <DropdownMenuItem onSelect={() => toolsFor.open(entry.id)}>
+                            <Wrench />
+                            {t("editor.toolsEdit")}
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem asChild>
+                          <Link
+                            to={packageDetailPath(type, entry.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <ArrowUpRight />
+                            {t("editor.resourceOpen", { name })}
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => onToggle(entry.id)}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 />
+                          {t("editor.resourceRemove")}
+                        </DropdownMenuItem>
+                      </TableRowActions>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       )}
 
@@ -602,7 +670,57 @@ function SelectedResources({
           }}
         />
       )}
+
+      {toolsEntry && (
+        <ToolsModal
+          name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
+          entry={toolsEntry}
+          onClose={toolsFor.close}
+          onApply={(next) => {
+            onReplace(toolsEntry.id, next);
+            toolsFor.close();
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/** An integration's allowed tools, edited on a copy and applied to the draft. */
+function ToolsModal({
+  name,
+  entry,
+  onClose,
+  onApply,
+}: {
+  name: string;
+  entry: ResourceEntry;
+  onClose: () => void;
+  onApply: (entry: ResourceEntry) => void;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const [draft, setDraft] = useState(entry);
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t("editor.toolsTitle", { name })}
+      className="sm:max-w-2xl"
+      actions={
+        <>
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t("btn.cancel", { ns: "common" })}
+          </Button>
+          <Button type="button" onClick={() => onApply(draft)}>
+            {t("editor.apply")}
+          </Button>
+        </>
+      }
+    >
+      <div className="max-h-[60dvh] overflow-y-auto">
+        <IntegrationToolPicker packageId={entry.id} entry={draft} onChange={setDraft} />
+      </div>
+    </Modal>
   );
 }
 

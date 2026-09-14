@@ -7,9 +7,13 @@
  * The page editor puts every option of every field on screen at once — a
  * dozen inputs per field, most of them empty for most fields — which buried
  * the three facts a field is mostly about (its name, its type, whether it is
- * required). Here those are the row; everything else is in the modal, the
- * essentials first and the options for the field's type folded under them.
- * Rows keep their drag handle: order is what the run form shows.
+ * required). Here those are a table's columns; everything else is in the
+ * modal, the essentials first and the options for the field's type folded
+ * under them.
+ *
+ * Stock parts only: shadcn's `Table`, with `@dnd-kit` sortable rows the way
+ * shadcn's own `dashboard-01` block drags them, and the row's deeds behind the
+ * standard "…" menu — the row itself is not a button.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -33,6 +37,14 @@ import { CSS } from "@dnd-kit/utilities";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@appstrate/ui/components/table";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -93,7 +105,7 @@ export function SchemaFieldList({
           <h3 className="text-sm font-semibold">{title}</h3>
           <Badge variant="secondary">{fields.length}</Badge>
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={() => editing.open("new")}>
+        <Button type="button" size="sm" onClick={() => editing.open("new")}>
           <Plus />
           {t("editor.fieldAdd")}
         </Button>
@@ -102,20 +114,37 @@ export function SchemaFieldList({
       {fields.length === 0 ? (
         <EmptyState message={t("editor.fieldEmpty")} icon={Braces} compact />
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-          <SortableContext items={fields.map((f) => f._id)} strategy={verticalListSortingStrategy}>
-            <div className="border-border divide-border divide-y rounded-lg border">
-              {fields.map((field) => (
-                <FieldRow
-                  key={field._id}
-                  field={field}
-                  onEdit={() => editing.open(field._id)}
-                  onRemove={() => onChange(fields.filter((f) => f._id !== field._id))}
-                />
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
+        <div className="border-border overflow-hidden rounded-lg border">
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-8" />
+                  <TableHead>{t("editor.fieldKeyLabel")}</TableHead>
+                  <TableHead>{t("editor.fieldTypeLabel")}</TableHead>
+                  <TableHead>{t("editor.fieldRequired")}</TableHead>
+                  <TableHead>{t("editor.fieldDescLabel")}</TableHead>
+                  <TableHead className="w-12" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <SortableContext
+                  items={fields.map((f) => f._id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {fields.map((field) => (
+                    <FieldRow
+                      key={field._id}
+                      field={field}
+                      onEdit={() => editing.open(field._id)}
+                      onRemove={() => onChange(fields.filter((f) => f._id !== field._id))}
+                    />
+                  ))}
+                </SortableContext>
+              </TableBody>
+            </Table>
+          </DndContext>
+        </div>
       )}
 
       {target && (
@@ -165,43 +194,49 @@ function FieldRow({
     id: field._id,
   });
   return (
-    <div
+    <TableRow
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className="bg-card flex items-center gap-3 px-3 py-2.5"
+      className="relative data-[dragging=true]:z-10"
     >
-      <button
-        type="button"
-        className="text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing"
-        aria-label={t("editor.fieldReorder", { name: field.key })}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical className="size-4" />
-      </button>
-      <button type="button" onClick={onEdit} className="flex min-w-0 flex-1 flex-col text-left">
-        <span className="flex items-center gap-2">
-          <span className="truncate font-mono text-sm">{field.key || "—"}</span>
-          <Badge variant="outline" className="font-normal">
-            {field.isFile ? t("editor.fieldTypeFile") : field.type}
-          </Badge>
-          {field.required && <Badge variant="secondary">{t("editor.fieldRequired")}</Badge>}
-        </span>
-        {field.description && (
-          <span className="text-muted-foreground truncate text-xs">{field.description}</span>
-        )}
-      </button>
-      <TableRowActions menuLabel={t("editor.fieldActions", { name: field.key })}>
-        <DropdownMenuItem onSelect={onEdit}>
-          <Pencil />
-          {t("btn.edit", { ns: "common" })}
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onRemove} className="text-destructive focus:text-destructive">
-          <Trash2 />
-          {t("btn.delete", { ns: "common" })}
-        </DropdownMenuItem>
-      </TableRowActions>
-    </div>
+      <TableCell>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground size-7 cursor-grab active:cursor-grabbing"
+          aria-label={t("editor.fieldReorder", { name: field.key })}
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="size-4" />
+        </Button>
+      </TableCell>
+      <TableCell className="font-mono text-sm">{field.key || "—"}</TableCell>
+      <TableCell>
+        <Badge variant="outline" className="font-normal">
+          {field.isFile ? t("editor.fieldTypeFile") : field.type}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-muted-foreground text-sm">
+        {field.required ? t("editor.fieldRequiredYes") : "—"}
+      </TableCell>
+      <TableCell className="text-muted-foreground max-w-[20rem] truncate text-sm">
+        {field.description || "—"}
+      </TableCell>
+      <TableCell className="text-right">
+        <TableRowActions menuLabel={t("editor.fieldActions", { name: field.key })}>
+          <DropdownMenuItem onSelect={onEdit}>
+            <Pencil />
+            {t("btn.edit", { ns: "common" })}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onRemove} className="text-destructive focus:text-destructive">
+            <Trash2 />
+            {t("btn.delete", { ns: "common" })}
+          </DropdownMenuItem>
+        </TableRowActions>
+      </TableCell>
+    </TableRow>
   );
 }
 

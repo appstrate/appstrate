@@ -899,5 +899,14 @@
   "editor.fieldDefaultLabel": "Default value",
   "editor.fieldPlaceholderLabel": "Placeholder",
   "editor.fieldEnumLabel": "Allowed values (comma separated)",
-  "editor.apply": "Apply"
+  "editor.apply": "Apply",
+  "editor.fieldRequiredYes": "Yes",
+  "editor.resourceName": "Name",
+  "editor.resourceVersionHead": "Version",
+  "editor.resourceTools": "Allowed tools",
+  "editor.toolsDefault": "Integration default tools",
+  "editor.toolsAll": "All tools",
+  "editor.toolsNone": "No tool",
+  "editor.toolsEdit": "Edit allowed tools",
+  "editor.toolsTitle": "Allowed tools: {{name}}"
 }
