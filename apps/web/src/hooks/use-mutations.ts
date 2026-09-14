@@ -8,7 +8,7 @@ import i18n from "../i18n";
 import { ApiError, client, type components } from "../api/client";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
-import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { splitPackageRef } from "../lib/package-paths";
 import {
   packageKeys,
   agentsKeys,
@@ -345,7 +345,6 @@ export function useDeleteAllMemories(packageId: string) {
 
 export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   return useMutation({
     // Exactly the keys the editor sends: the skill/integration branches forward
     // this object whole and the create schemas are `.strict()`, so a key
@@ -355,6 +354,7 @@ export function useCreatePackage(type: PackageType) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
+      operations?: components["schemas"]["PackageFileWriteOperation"][];
     }): Promise<{ id: string }> => {
       // 201 → the created package resource, bare (issue #657).
       switch (type) {
@@ -369,8 +369,8 @@ export function useCreatePackage(type: PackageType) {
             // `content` stays checked, and the server validates the manifest
             // against the AFPS schema.
             body: {
+              ...body,
               manifest: body.manifest as components["schemas"]["AgentManifest"],
-              content: body.content,
             },
           });
           return { id: data!.id };
@@ -385,13 +385,10 @@ export function useCreatePackage(type: PackageType) {
         }
       }
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.all });
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
-      if (data.id) {
-        navigate(packageDetailPath(type, data.id));
-      }
     },
     onError: onMutationError,
   });

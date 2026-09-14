@@ -823,3 +823,152 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
     });
   });
 });
+
+describe("file operations at package creation", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "create-files" });
+  });
+
+  for (const type of ["agent", "skill", "integration"] as const) {
+    it(`${type}: creates the draft and first version with every staged file`, async () => {
+      const id = `@create-files/new-${type}`;
+      const manifest =
+        type === "integration"
+          ? apiIntegrationManifest({ name: id, auths: { primary: { type: "api_key" } } })
+          : {
+              name: id,
+              type,
+              schema_version: "0.2",
+              version: "1.0.0",
+              display_name: "New package",
+              description: "Created with files",
+            };
+      const content = type === "skill" ? SKILL_MD : type === "agent" ? "Initial prompt" : "";
+      const operations: WriteOperation[] = [
+        { op: "write", path: "notes.md", text: "Notes" },
+        { op: "move", from: "notes.md", to: "docs/README.md" },
+        { op: "write", path: "removed.txt", text: "discarded" },
+        { op: "delete", path: "removed.txt" },
+        { op: "write", path: "asset.bin", bytes_base64: "AP+A" },
+        ...(type === "integration"
+          ? [{ op: "write" as const, path: "INTEGRATION.md", text: "Integration docs" }]
+          : []),
+      ];
+      const response = await app.request(`/api/packages/${type}s`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: JSON.stringify({ manifest, content, operations }),
+      });
+      expect(response.status, await response.clone().text()).toBe(201);
+      for (const version of [undefined, "1.0.0"]) {
+        const suffix = version ? `?version=${version}` : "";
+        const index = await app.request(`/api/packages/${id}/files${suffix}`, {
+          headers: authHeaders(ctx),
+        });
+        expect(index.status, await index.clone().text()).toBe(200);
+        const body = (await index.json()) as { entries: FileEntry[] };
+        expect(body.entries.map((entry) => entry.path)).toEqual(
+          expect.arrayContaining(["manifest.json", "docs/README.md", "asset.bin"]),
+        );
+        expect(body.entries.map((entry) => entry.path)).not.toContain("removed.txt");
+        expect(body.entries.find((entry) => entry.path === "docs/README.md")?.inline).toBe("Notes");
+        if (type === "integration")
+          expect(body.entries.find((entry) => entry.path === "INTEGRATION.md")?.inline).toBe(
+            "Integration docs",
+          );
+        const binary = await app.request(
+          `/api/packages/${id}/files/content?path=asset.bin${version ? `&version=${version}` : ""}`,
+          { headers: authHeaders(ctx) },
+        );
+        expect(binary.status).toBe(200);
+        expect(new Uint8Array(await binary.arrayBuffer())).toEqual(new Uint8Array([0, 255, 128]));
+      }
+      const [row] = await db.select().from(packages).where(eq(packages.id, id));
+      expect(row?.draftContent).toBe(type === "integration" ? "Integration docs" : content);
+    });
+  }
+
+  it("applies the write limit to content even without ancillary operations", async () => {
+    const response = await app.request("/api/packages/skills", {
+      method: "POST",
+      headers: authHeaders(ctx),
+      body: JSON.stringify({
+        manifest: skillManifest(),
+        content: SKILL_MD + "中".repeat(PACKAGE_FILE_INLINE_MAX_BYTES / 3),
+      }),
+    });
+    expect(response.status).toBe(413);
+    expect(await db.select().from(packages).where(eq(packages.id, SKILL_ID))).toEqual([]);
+  });
+
+  const invalidBatches = [
+    {
+      label: "traversal",
+      operations: [{ op: "write", path: "../escape", text: "x" }],
+      status: 400,
+    },
+    {
+      label: "case collision",
+      operations: [{ op: "write", path: "skill.md", text: "x" }],
+      status: 400,
+    },
+    {
+      label: "reserved manifest",
+      operations: [{ op: "write", path: "manifest.json", text: "{}" }],
+      status: 400,
+    },
+    {
+      label: "required file deletion",
+      operations: [{ op: "delete", path: "SKILL.md" }],
+      status: 400,
+    },
+    {
+      label: "binary content",
+      operations: [{ op: "write", path: "SKILL.md", bytes_base64: "/w==" }],
+      status: 400,
+    },
+    {
+      label: "invalid frontmatter",
+      operations: [{ op: "write", path: "SKILL.md", text: "no frontmatter" }],
+      status: 400,
+    },
+    {
+      label: "invalid base64",
+      operations: [{ op: "write", path: "asset.bin", bytes_base64: "%%%" }],
+      status: 400,
+    },
+    {
+      label: "oversized file",
+      operations: [
+        { op: "write", path: "big.txt", text: "x".repeat(PACKAGE_FILE_INLINE_MAX_BYTES + 1) },
+      ],
+      status: 413,
+    },
+    {
+      label: "ambiguous write",
+      operations: [{ op: "write", path: "x.txt", text: "x", bytes_base64: "eA==" }],
+      status: 400,
+    },
+    {
+      label: "missing source",
+      operations: [{ op: "move", from: "absent", to: "new" }],
+      status: 404,
+    },
+  ];
+  for (const { label, operations, status } of invalidBatches) {
+    it(`rejects ${label} before creating a package or archive`, async () => {
+      const response = await app.request("/api/packages/skills", {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: JSON.stringify({ manifest: skillManifest(), content: SKILL_MD, operations }),
+      });
+      expect(response.status, await response.clone().text()).toBe(status);
+      expect(await db.select().from(packages).where(eq(packages.id, SKILL_ID))).toEqual([]);
+      expect(
+        await downloadPackageFiles("skills", ctx.orgId, SKILL_ID, undefined, "org"),
+      ).toBeNull();
+    });
+  }
+});

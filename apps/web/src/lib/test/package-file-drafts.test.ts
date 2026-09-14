@@ -5,6 +5,8 @@ import {
   stageFileOperations,
   packageUpdateBody,
   uploadedFileOperation,
+  packageCreateBody,
+  newPackageContent,
 } from "../package-file-drafts";
 import type { PackageFileEntry } from "../package-file-tree";
 const entries: PackageFileEntry[] = [
@@ -13,6 +15,56 @@ const entries: PackageFileEntry[] = [
 ];
 
 describe("package draft operations", () => {
+  it("creates from the final primary buffer and preserves ancillary operations", async () => {
+    const binary = await uploadedFileOperation(
+      "asset.bin",
+      new Blob([new Uint8Array([0, 255, 128])]),
+    );
+    const state = {
+      manifest: { name: "@org/new" },
+      operations: stageFileOperations(
+        [],
+        [
+          { op: "write", path: "prompt.md", text: "old" },
+          { op: "write", path: "notes.md", text: "notes" },
+          { op: "move", from: "notes.md", to: "README.md" },
+          { op: "write", path: "prompt.md", text: "final prompt" },
+          binary,
+        ],
+      ),
+    };
+    expect(packageCreateBody(state, "agent")).toEqual({
+      manifest: state.manifest,
+      content: "final prompt",
+      operations: [
+        { op: "write", path: "notes.md", text: "notes" },
+        { op: "move", from: "notes.md", to: "README.md" },
+        binary,
+      ],
+    });
+    expect(newPackageContent("agent", state.operations)).toBe("final prompt");
+  });
+  it("reads an uploaded UTF-8 skill without losing its BOM", async () => {
+    const op = await uploadedFileOperation("SKILL.md", new Blob(["\uFEFFbody"]));
+    expect(packageCreateBody({ manifest: {}, operations: [op] }, "skill")).toEqual({
+      manifest: {},
+      content: "\uFEFFbody",
+    });
+    expect(
+      newPackageContent("skill", [{ op: "write", path: "SKILL.md", bytes_base64: "/w==" }]),
+    ).toBe("");
+  });
+  it("keeps optional integration documentation in the file tree", () => {
+    const state = {
+      manifest: { type: "integration" },
+      operations: [{ op: "write" as const, path: "INTEGRATION.md", text: "docs" }],
+    };
+    expect(packageCreateBody(state, "integration")).toEqual({
+      manifest: state.manifest,
+      content: JSON.stringify(state.manifest, null, 2),
+      operations: state.operations,
+    });
+  });
   it("coalesces typing without crossing a rename", () => {
     const operations = stageFileOperations(
       [],

@@ -205,7 +205,7 @@ describe("defaultEditorState", () => {
     // Canonical AFPS 0.x draft manifest version.
     expect(state.manifest.schema_version).toBe("0.2");
     expect(state.manifest.schemaVersion).toBeUndefined();
-    expect(state.prompt).toBe("");
+    expect(state.operations).toEqual([{ op: "write", path: "prompt.md", text: "" }]);
   });
 
   it("handles missing org slug", () => {

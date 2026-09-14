@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentEditorState, ResourceEntry } from "./types";
+import type { ResourceEntry } from "./types";
+import type { EditorStateBase } from "../../hooks/use-editor-state";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./schema-section";
 import {
@@ -39,7 +40,7 @@ export function caretRange(version: string): string {
 
 // ─── Default state ──────────────────────────────────────────
 
-export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentEditorState {
+export function defaultEditorState(orgSlug?: string, userEmail?: string): EditorStateBase {
   return {
     manifest: {
       $schema: AFPS_SCHEMA_URLS.agent,
@@ -53,7 +54,7 @@ export function defaultEditorState(orgSlug?: string, userEmail?: string): AgentE
       timeout: 300,
       dependencies: {},
     },
-    prompt: "",
+    operations: [{ op: "write", path: "prompt.md", text: "" }],
   };
 }
 

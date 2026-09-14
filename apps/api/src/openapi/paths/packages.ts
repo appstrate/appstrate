@@ -69,7 +69,7 @@ const fileOperationsProperty = {
   maxItems: 200,
   items: { $ref: "#/components/schemas/PackageFileWriteOperation" },
   description:
-    "Ordered file edits saved with the manifest under the same lock_version. A stale draft returns 409 without applying the batch. All package types support this field. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations.",
+    "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations.",
 } as const;
 
 export const packagesPaths = {
@@ -735,6 +735,7 @@ export const packagesPaths = {
               // file is (`agent`, `skill`) — the handler refuses a blank one.
               required: ["manifest", "content"],
               properties: {
+                operations: fileOperationsProperty,
                 manifest: {
                   type: "object",
                   additionalProperties: true,
@@ -771,6 +772,22 @@ export const packagesPaths = {
           $ref: "#/components/responses/ValidationError",
           description:
             "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "A file operation refers to a missing file.",
+        },
+        "409": {
+          description: "A package with this name already exists.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "File or resulting package exceeds the editing limits.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1199,6 +1216,7 @@ export const packagesPaths = {
               // file is (`agent`, `skill`) — the handler refuses a blank one.
               required: ["manifest", "content"],
               properties: {
+                operations: fileOperationsProperty,
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: {
                   type: "string",
@@ -1221,6 +1239,22 @@ export const packagesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "A file operation refers to a missing file.",
+        },
+        "409": {
+          description: "A package with this name already exists.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "File or resulting package exceeds the editing limits.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1722,6 +1756,7 @@ export const packagesPaths = {
               type: "object",
               required: ["manifest"],
               properties: {
+                operations: fileOperationsProperty,
                 manifest: {
                   type: "object",
                   additionalProperties: true,
@@ -1749,6 +1784,22 @@ export const packagesPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "A file operation refers to a missing file.",
+        },
+        "409": {
+          description: "A package with this name already exists.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "413": {
+          description: "File or resulting package exceeds the editing limits.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

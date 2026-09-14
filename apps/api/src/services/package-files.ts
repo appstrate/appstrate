@@ -560,6 +560,45 @@ export function applyFileOperations(
   return result;
 }
 
+/** Validate authored bytes before creating or updating either stored representation. */
+export function validateAuthoredPackageFiles(
+  files: Record<string, Uint8Array>,
+  type: PackageType,
+  manifest: Record<string, unknown>,
+  validateBundle: boolean,
+): string {
+  const entry = PACKAGE_CONTENT_ENTRY[type];
+  const bytes = entry ? files[entry.path] : undefined;
+  let content: string;
+  try {
+    content = bytes
+      ? new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
+      : entry
+        ? ""
+        : JSON.stringify(manifest, null, 2);
+  } catch {
+    throw new PackageFileWriteError(
+      "invalid_bundle",
+      entry?.path ?? null,
+      "Package content must be valid UTF-8 text",
+    );
+  }
+  assertArchiveContentConforms(type, files, "file");
+  assertTreeSize(files);
+  if (entry?.required && !content.trim()) {
+    throw new PackageFileWriteError(
+      "content_entry_immovable",
+      entry.path,
+      "Required content cannot be empty",
+    );
+  }
+  if (validateBundle) {
+    const violation = checkCompanionFiles(manifest, companionFilesFromRecord(files));
+    if (violation) throw new PackageFileWriteError("invalid_bundle", null, violation.message);
+  }
+  return content;
+}
+
 export type MutateDraftFilesInput = {
   /** Authoring requires a token; imports may deliberately replace a draft. */
   precondition: { lockVersion: number } | { imported: true; lockVersion?: number };
@@ -639,46 +678,17 @@ export async function mutatePackageDraftFiles(
         JSON.stringify(input.manifest, null, 2),
       );
     const entry = PACKAGE_CONTENT_ENTRY[target.type];
-    const contentBytes = entry ? mutated[entry.path] : undefined;
-    let content: string;
-    try {
-      // Content columns are text. Authoring must never replace malformed bytes
-      // with U+FFFD when the next read overlays the DB copy onto the archive.
-      content = contentBytes
-        ? new TextDecoder("utf-8", {
-            ignoreBOM: true,
-            fatal: !("imported" in input.precondition),
-          }).decode(contentBytes)
-        : entry
-          ? ""
-          : (row.draftContent ?? "");
-    } catch {
-      throw new PackageFileWriteError(
-        "invalid_bundle",
-        entry?.path ?? null,
-        "Package content must be valid UTF-8 text",
-      );
-    }
-    if (!("imported" in input.precondition)) {
-      assertArchiveContentConforms(target.type, mutated, "file");
-      assertTreeSize(mutated);
-      if (entry?.required && !content.trim()) {
-        throw new PackageFileWriteError(
-          "content_entry_immovable",
-          entry.path,
-          "Required content cannot be empty",
-        );
-      }
-      // Reuse the archive parser's reference check on the resulting tree;
-      // the route already validated the manifest, so no ZIP round-trip is needed.
-      if (input.validateBundle) {
-        const violation = checkCompanionFiles(
-          input.manifest ?? asRecord(row.draftManifest),
-          companionFilesFromRecord(mutated),
-        );
-        if (violation) throw new PackageFileWriteError("invalid_bundle", null, violation.message);
-      }
-    }
+    const content =
+      "imported" in input.precondition
+        ? entry
+          ? new TextDecoder("utf-8", { ignoreBOM: true }).decode(mutated[entry.path])
+          : (row.draftContent ?? "")
+        : validateAuthoredPackageFiles(
+            mutated,
+            target.type,
+            input.manifest ?? asRecord(row.draftManifest),
+            input.validateBundle === true,
+          );
 
     const draftContent = input.draftContent ?? content;
 

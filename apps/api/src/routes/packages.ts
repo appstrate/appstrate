@@ -90,6 +90,7 @@ import {
   indexEtag,
   fileEtag,
   applyFileOperations,
+  validateAuthoredPackageFiles,
   type PackageFileOperation,
   type PackageFileSource,
 } from "../services/package-files.ts";
@@ -97,7 +98,7 @@ import {
   PackageFileWriteError,
   type PackageFileWriteErrorCode,
 } from "@appstrate/core/package-file-operations";
-import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
+import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
@@ -246,33 +247,6 @@ export const forkSchema = z
  * (`docs/NO_TRANSITIONAL_CODE.md` §1), which is the rule that closed the four
  * launch surfaces in #1187; the barrier is generic and names no field.
  */
-export const packageJsonCreateSchema = z
-  .object({
-    manifest: z.record(z.string(), z.unknown()),
-    content: z.string().optional(),
-  })
-  .strict();
-
-/**
- * The create body of a type whose content file is MANDATORY — `agent` and
- * `skill`, i.e. every {@link PackageRouteConfig} carrying `requireContent`.
- *
- * The requirement is spelled here rather than as a handler check so the
- * published body can state it: the create schemas back the spec's request
- * bodies through `zod-schema-registry.ts`, and a handler-only rule left
- * `POST /api/packages/agents {"manifest": …}` documented as valid and
- * answered with a 400. Blank-but-present content is refused by the same rule
- * — an all-whitespace prompt is the empty prompt with extra characters — and
- * it is a `refine` rather than `.min(1)` because "not blank" has no JSON
- * Schema spelling, so the published body says `required` and nothing more.
- */
-export const packageJsonCreateWithContentSchema = z
-  .object({
-    manifest: z.record(z.string(), z.unknown()),
-    content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
-  })
-  .strict();
-
 const packageFilePathSchema = z.string().min(1).max(1024);
 
 const packageFileOperationsSchema = z
@@ -303,6 +277,35 @@ const packageFileOperationsSchema = z
       )
       .min(1)
       .max(200),
+  })
+  .strict();
+
+export const packageJsonCreateSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()),
+    content: z.string().optional(),
+    operations: packageFileOperationsSchema.shape.operations.optional(),
+  })
+  .strict();
+
+/**
+ * The create body of a type whose content file is MANDATORY — `agent` and
+ * `skill`, i.e. every {@link PackageRouteConfig} carrying `requireContent`.
+ *
+ * The requirement is spelled here rather than as a handler check so the
+ * published body can state it: the create schemas back the spec's request
+ * bodies through `zod-schema-registry.ts`, and a handler-only rule left
+ * `POST /api/packages/agents {"manifest": …}` documented as valid and
+ * answered with a 400. Blank-but-present content is refused by the same rule
+ * — an all-whitespace prompt is the empty prompt with extra characters — and
+ * it is a `refine` rather than `.min(1)` because "not blank" has no JSON
+ * Schema spelling, so the published body says `required` and nothing more.
+ */
+export const packageJsonCreateWithContentSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()),
+    content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
+    operations: packageFileOperationsSchema.shape.operations.optional(),
   })
   .strict();
 
@@ -592,8 +595,8 @@ interface PackageRouteConfig {
 
 // Every AFPS package type exposes user-facing routes. `Partial` is kept so
 // the `ROUTE_CONFIGS[type]?.` lookups stay null-tolerant, but all four types are
-// wired. `agent`/`skill`/`integration` have JSON-body editors; only `mcp-server`
-// is import-only (no editor — authored externally and lands via ZIP).
+// wired. `agent`/`skill`/`integration` support JSON creation with files;
+// `mcp-server` creation uses archive import. All four support draft editing.
 const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
@@ -683,7 +686,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    // JSON body create path: { manifest, content? } — and nothing else.
+    // JSON creation stages the complete file tree before the first write.
     if (rcfg.jsonBodyCreate) {
       // The two create bodies differ only in whether `content` is mandatory,
       // which is what `requireContent` means. Selecting the schema here — as
@@ -696,7 +699,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
 
       const manifest = body.manifest;
-      const content = body.content ?? "";
+      let content = body.content ?? "";
 
       const validatedManifest = await validateManifestForRoute(
         manifest,
@@ -706,6 +709,44 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       );
 
       assertContentConforms(rcfg.cfg.type, content, "content");
+
+      const manifestText = JSON.stringify(validatedManifest, null, 2);
+      let normalizedFiles: Record<string, Uint8Array> = {
+        [rcfg.storageFileName]: new TextEncoder().encode(
+          rcfg.cfg.manifestIsStoredFile ? manifestText : content,
+        ),
+      };
+      if (body.operations || rcfg.requireContent) {
+        try {
+          normalizedFiles = applyFileOperations(
+            { ...normalizedFiles, [PACKAGE_MANIFEST_FILE]: new TextEncoder().encode(manifestText) },
+            [
+              // The primary file travels as content, but has the same write limit.
+              ...(rcfg.requireContent
+                ? [
+                    {
+                      op: "write" as const,
+                      path: rcfg.storageFileName,
+                      bytes: normalizedFiles[rcfg.storageFileName]!,
+                    },
+                  ]
+                : []),
+              ...toDraftFileOperations(body.operations ?? []),
+            ],
+            { type: rcfg.cfg.type },
+          );
+          content = validateAuthoredPackageFiles(
+            normalizedFiles,
+            rcfg.cfg.type,
+            validatedManifest,
+            body.operations !== undefined,
+          );
+          if (!rcfg.cfg.manifestIsStoredFile) delete normalizedFiles[PACKAGE_MANIFEST_FILE];
+        } catch (error) {
+          if (error instanceof PackageFileWriteError) throw draftFileWriteApiError(error);
+          throw error;
+        }
+      }
 
       const packageId = validatedManifest.name;
 
@@ -753,9 +794,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       }
 
       // Upload files to S3 storage
-      const normalizedFiles: Record<string, Uint8Array> = {
-        [rcfg.storageFileName]: new TextEncoder().encode(content),
-      };
       await uploadPackageFiles(rcfg.cfg.storageFolder, orgId, packageId, normalizedFiles);
 
       // Create initial version (non-fatal). Snapshot the STORED draft

@@ -10,7 +10,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import { useCreatePackage, useUpdatePackage } from "./use-mutations";
 import { useUnsavedChanges } from "./use-unsaved-changes";
 import { packageDetailPath } from "../lib/package-paths";
-import { packageUpdateBody } from "../lib/package-file-drafts";
+import { packageCreateBody, packageUpdateBody } from "../lib/package-file-drafts";
 import type { PackageFileWriteOperation } from "../lib/package-file-tree";
 
 export interface EditorStateBase {
@@ -24,8 +24,6 @@ interface UseEditorStateOptions<S extends EditorStateBase> {
   packageType: PackageType;
   packageId: string | undefined;
   isEdit: boolean;
-  /** Create payload only. Existing drafts use the common manifest/operations contract. */
-  toWireBody: (state: S) => Record<string, unknown>;
   translateError?: (error: Error) => string | null;
   validate?: (state: S) => { error: string; tab?: string } | null;
 }
@@ -57,7 +55,6 @@ export function useEditorState<S extends EditorStateBase>({
   packageType,
   packageId,
   isEdit,
-  toWireBody,
   translateError,
   validate,
 }: UseEditorStateOptions<S>): UseEditorStateReturn<S> {
@@ -115,6 +112,7 @@ export function useEditorState<S extends EditorStateBase>({
     onValidationError?: (tab: string | undefined) => void,
   ) => {
     event?.preventDefault();
+    if (saving.current || preparingFiles || createPkg.isPending) return;
     const invalid = validate?.(state);
     if (invalid) {
       setError(invalid.error);
@@ -130,11 +128,23 @@ export function useEditorState<S extends EditorStateBase>({
         () => {},
       );
     } else {
-      allowNavigation();
-      createPkg.mutate(toWireBody(state) as Parameters<typeof createPkg.mutate>[0], {
+      saving.current = true;
+      setError(null);
+      createPkg.mutate(packageCreateBody(state, packageType), {
+        onSettled: () => {
+          saving.current = false;
+        },
+        onSuccess: (data) => {
+          allowNavigation();
+          navigate(packageDetailPath(packageType, data.id));
+        },
         onError: (failure) => {
-          allowNavigation(false);
-          setError(translateError?.(failure) ?? failure.message);
+          const key = packageFilesErrorKey(failure);
+          setError(
+            key
+              ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) })
+              : (translateError?.(failure) ?? failure.message),
+          );
         },
       });
     }

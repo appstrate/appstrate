@@ -535,5 +535,6 @@
   "manifest.sensitive": "Sensitive",
   "manifest.toolsPolicy": "Tools policy",
   "files.pendingHint": "File changes are applied with the manifest when you click Save.",
+  "files.createHint": "Files will be saved with the package when you click Create.",
   "package.actions": "Package actions"
 }

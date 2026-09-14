@@ -48,7 +48,7 @@ import { usePackageFile, usePackageFileDownload } from "./use-package-file";
 interface FilePreviewProps {
   /** Target of the tree's `aria-controls` — see `FileExplorer`. */
   id: string;
-  packageId: string;
+  packageId: string | undefined;
   version: string | undefined;
   entry: PackageFileEntry;
   /**

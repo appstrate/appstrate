@@ -43,7 +43,7 @@ export function packageFileText(query: { isSuccess: boolean; data: unknown }): s
  * the hook the entire index as well.
  */
 export function usePackageFile(
-  packageId: string,
+  packageId: string | undefined,
   version: string | undefined,
   entry: PackageFileEntry,
   fresh = false,
@@ -66,14 +66,14 @@ export function usePackageFile(
     "/api/packages/{scope}/{name}/files/content",
     {
       params: {
-        path: splitPackageRef(packageId),
+        path: splitPackageRef(packageId ?? ""),
         query: { path: entry.path, version },
         header: scope.header,
       },
       parseAs: "text",
     },
     {
-      enabled: scope.enabled && needsFetch,
+      enabled: scope.enabled && !!packageId && needsFetch,
       ...(fresh ? { staleTime: 0, gcTime: 0, refetchOnMount: "always" as const } : {}),
     },
   );
@@ -103,12 +103,13 @@ export function usePackageFile(
  * guards apply here too. A non-2xx throws in the client middleware and lands in
  * the catch below.
  */
-export function usePackageFileDownload(packageId: string, version: string | undefined) {
+export function usePackageFileDownload(packageId: string | undefined, version: string | undefined) {
   const { t } = useTranslation("common");
   const scope = useOrgScope();
   const header = scope.header;
   return useCallback(
     async (path: string) => {
+      if (!packageId) return;
       try {
         const { data } = await client.GET("/api/packages/{scope}/{name}/files/content", {
           params: {

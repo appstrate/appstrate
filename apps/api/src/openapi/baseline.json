@@ -14929,6 +14929,15 @@
                 "type": "object",
                 "required": ["manifest", "content"],
                 "properties": {
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "manifest": {
                     "type": "object",
                     "additionalProperties": true,
@@ -14973,6 +14982,30 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "A file operation refers to a missing file."
+          },
+          "409": {
+            "description": "A package with this name already exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or resulting package exceeds the editing limits.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -15452,7 +15485,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest under the same lock_version. A stale draft returns 409 without applying the batch. All package types support this field. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
                   },
                   "lock_version": {
                     "type": "integer",
@@ -15650,6 +15683,15 @@
                 "type": "object",
                 "required": ["manifest", "content"],
                 "properties": {
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
                   },
@@ -15691,6 +15733,30 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "A file operation refers to a missing file."
+          },
+          "409": {
+            "description": "A package with this name already exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or resulting package exceeds the editing limits.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -15794,7 +15860,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest under the same lock_version. A stale draft returns 409 without applying the batch. All package types support this field. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
                   },
                   "lock_version": {
                     "type": "integer",
@@ -16476,6 +16542,15 @@
                 "type": "object",
                 "required": ["manifest"],
                 "properties": {
+                  "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                      "$ref": "#/components/schemas/PackageFileWriteOperation"
+                    },
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                  },
                   "manifest": {
                     "type": "object",
                     "additionalProperties": true,
@@ -16519,6 +16594,30 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "A file operation refers to a missing file."
+          },
+          "409": {
+            "description": "A package with this name already exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or resulting package exceeds the editing limits.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -16993,7 +17092,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest under the same lock_version. A stale draft returns 409 without applying the batch. All package types support this field. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
                   },
                   "lock_version": {
                     "type": "integer",
@@ -17706,7 +17805,7 @@
                     "items": {
                       "$ref": "#/components/schemas/PackageFileWriteOperation"
                     },
-                    "description": "Ordered file edits saved with the manifest under the same lock_version. A stale draft returns 409 without applying the batch. All package types support this field. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
+                    "description": "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates use the same lock_version as the manifest; a stale draft returns 409 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. Written files are limited to 1 MiB; the tree to 50 MB and 10,000 entries. Legacy content, when supplied, is applied before operations."
                   },
                   "lock_version": {
                     "type": "integer",

@@ -11,6 +11,13 @@ one request to the existing `PUT /api/packages/{type}/{scope}/{name}` with
 `manifest`, optional ordered `operations` and the original `lock_version`.
 The existing `content` request field remains supported for API clients.
 
+The agent, skill and integration creation forms use this same editor with an
+in-memory tree and no file-read requests. Create sends the final required content
+and optional ancillary operations in one POST to the existing per-type route.
+The complete tree is validated before the package is inserted and is included
+in its first version. A failed request retains the form; leaving without saving
+creates nothing. MCP servers are still created by archive import.
+
 The draft owns its manifest and pending file operations. The file tree is a
 projection of its initial index plus those operations; it cannot acquire a
 fresh write token from an independent file request. A concurrent change rejects
@@ -33,6 +40,9 @@ and path errors are associated with their input for assistive technology.
 - `mutatePackageDraftFiles` serializes draft saves, restores and imports through
   an advisory transaction lock, then updates the package row and draft ZIP.
   Imports preserve their original immutable version bytes and manifest.
+- `validateAuthoredPackageFiles` validates the resulting content and bundle for
+  both creation and draft updates. Required content travels once in the create
+  payload and is subject to the same file size limit as ancillary writes.
 - Publication captures its package row and stored ZIP under the same draft lock,
   releases it, then validates and publishes that immutable capture. A version
   override updates the draft only after a successful publication, and only if
@@ -62,8 +72,8 @@ the complete response body. Expiration aborts the request and cancels the body
 reader, so stalled storage cannot retain a transaction indefinitely. Streaming
 transfers keep their existing lifetime.
 
-PostgreSQL and object storage do not share a transaction. Upload failures roll
-back the row; an upload followed by a failed DB commit can still leave ancillary
+PostgreSQL and object storage do not share a transaction. During draft updates,
+upload failures roll back the row; an upload followed by a failed DB commit can still leave ancillary
 ZIP bytes ahead of the row. The shared lock prevents writers from interleaving;
 it does not claim distributed atomicity. No schema migration is introduced.
 
@@ -81,3 +91,6 @@ Pure tests exercise ordered operations and canonical path collisions. Browser
 tests exercise real saves, local staging, navigation guards, conflicts and
 controls while saving, import collisions, explicit replacement and accessible
 path errors, including the narrow layout.
+Creation tests cover the initial version's complete tree and lossless binary
+bytes, rejection before any persistence, retries with the intact draft, tab
+changes and abandonment without a server write.

@@ -535,5 +535,6 @@
   "manifest.sensitive": "Sensible",
   "manifest.toolsPolicy": "Politique des outils",
   "files.pendingHint": "Les modifications des fichiers seront appliquées avec le manifeste en cliquant sur Enregistrer.",
+  "files.createHint": "Les fichiers seront enregistrés avec le package en cliquant sur Créer.",
   "package.actions": "Actions du package"
 }

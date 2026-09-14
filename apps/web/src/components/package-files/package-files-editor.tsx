@@ -42,7 +42,7 @@ import { usePackageFile } from "./use-package-file";
 type Dialog = { kind: "create" } | { kind: "rename" | "delete"; path: string } | null;
 
 interface Props {
-  packageId: string;
+  packageId: string | undefined;
   type: PackageType;
   active: boolean;
   operations: readonly PackageFileWriteOperation[];
@@ -69,13 +69,15 @@ export function PackageFilesEditor({
     "get",
     "/api/packages/{scope}/{name}/files",
     {
-      params: { path: splitPackageRef(packageId), header: scope.header },
+      params: { path: splitPackageRef(packageId ?? ""), header: scope.header },
     },
-    { enabled: scope.enabled, staleTime: 0, gcTime: 0, refetchOnMount: "always" },
+    { enabled: scope.enabled && !!packageId, staleTime: 0, gcTime: 0, refetchOnMount: "always" },
   );
   // Keep the tree this draft started from. Refetches cannot silently rebase it;
   // the parent's original lock_version rejects any intervening server write.
-  const [base, setBase] = useState<readonly PackageFileEntry[] | null>(null);
+  const [base, setBase] = useState<readonly PackageFileEntry[] | null>(() =>
+    packageId ? null : [{ path: PACKAGE_MANIFEST_FILE, size: 0, media_kind: "text", inline: "" }],
+  );
   if (base === null && query.isSuccess && query.isFetchedAfterMount) setBase(query.data.entries);
   const [selected, setSelected] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -90,9 +92,10 @@ export function PackageFilesEditor({
   if (!base)
     return query.isError ? <ErrorState message={t("files.errorLoad")} /> : <LoadingState />;
 
+  const manifestText = JSON.stringify(manifest, null, 2);
   const entries = projectDraftFiles(base, operations, type).map((entry) =>
     entry.path === PACKAGE_MANIFEST_FILE
-      ? { ...entry, inline: JSON.stringify(manifest, null, 2) }
+      ? { ...entry, inline: manifestText, size: new TextEncoder().encode(manifestText).byteLength }
       : entry,
   );
   const current = pickActiveEntry(entries, selected, primaryDisplayFile(type).name);
@@ -166,7 +169,9 @@ export function PackageFilesEditor({
     ) : null;
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground text-sm">{t("files.pendingHint")}</p>
+      <p className="text-muted-foreground text-sm">
+        {t(packageId ? "files.pendingHint" : "files.createHint")}
+      </p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
         <FileTree
           entries={entries}
@@ -207,7 +212,7 @@ export function PackageFilesEditor({
               packageId={packageId}
               version={undefined}
               entry={current}
-              downloadPath={current.sourcePath ?? null}
+              downloadPath={packageId ? (current.sourcePath ?? null) : null}
               actions={replacementAction}
             />
           ))}
@@ -266,7 +271,7 @@ function DraftFilePane({
   onChange,
 }: {
   id: string;
-  packageId: string;
+  packageId: string | undefined;
   entry: DraftFile;
   disabled: boolean;
   actions: ReactNode;
