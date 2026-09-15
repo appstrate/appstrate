@@ -791,3 +791,17 @@ The obvious SOTA shape (Vercel, GitHub). Rejected on the Apache-2.0 boundary: th
 ### 13.6 Space-level custom roles editable by space admins
 
 Notion lets teamspace owners set defaults; nobody lets a sub-container admin define permission bundles. A definer who does not hold every permission needs a ceiling check on every edit; org admins hold everything, so restricting definition to them removes the problem instead of solving it.
+
+### 13.7 Keeping an org-level catalogue authority (`home_space_id IS NULL`)
+
+The shape this spec had before §6.9: a package with no home belonged to "the organization's catalogue", and owners and admins wrote it — an authority attached to no container, held by an org role. `0067` and `scripts/migration/0014` end it: every organization package is homed, and the packages that belong to no team are homed in the DEFAULT space, where the space's own `<type>:write` governs them.
+
+That is a real WIDENING on inherited rows, and it is the point rather than a side effect. A builder of the default space — and an API key pinned to it carrying `<type>:write` — gains the edit of packages that previously needed an org admin. The cohort is exactly the one `0014`'s third case names, packages installed nowhere; the pre-flight in `scripts/migration/README.md` counts it before the window so the blast radius is measured rather than assumed.
+
+Keeping the old authority was rejected for two reasons.
+
+**No comparable has one.** Content lives in a container and the container's roles govern it, everywhere: a Google Shared Drive owns its files and Managers / Content managers edit them; a Notion page lives in a teamspace whose owner sets its permissions; an n8n workflow lives in a project, personal or team, and the project role decides. Dust is the closest system to this one — spaces, agents, a default "Company Data" space — and it is moving the same way rather than the other: [dust-tt/dust#32073](https://github.com/dust-tt/dust/pull/32073) gives Company Data a member list precisely so that writing to it stops being admin-only, and refuses to let it be marked restricted because "read on Company Data is workspace-wide by construction". An org-level content authority is the anomaly, not the safeguard.
+
+**It is a second authority, and §6.9 exists to have one.** `managesOrgCatalog` was a rule no space could express, which meant every reader of write authority had to ask two questions and every new surface had to remember the second. One home, one predicate (`holdsHomeAuthority`), one reader (`assertPackageMutationAccess`).
+
+A setting — "only admins write default-space packages" — was considered and rejected with it: it would reintroduce exactly the second authority, addressed by org role, that removing the NULL home deleted. **The lever is membership of the default space**, which is the same answer Dust gives: an organization that does not want its builders writing team-less packages removes them from the default space, or moves those packages to a team space with `PATCH /api/packages/{scope}/{name}`.
