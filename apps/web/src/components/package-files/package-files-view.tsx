@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import {
   Check,
   ChevronDown,
+  FilePlus,
   Download,
   FolderOpen,
   GitCompareArrows,
@@ -34,6 +35,8 @@ import {
   Search,
   TextCursorInput,
   Trash2,
+  Upload,
+  type LucideIcon,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -198,6 +201,7 @@ export function PackageFilesView({
   const [selectedVersion, setSelectedVersion] = useState(initialVersion ?? "draft");
   const [compareVersion, setCompareVersion] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
 
   const { data: versions } = usePackageVersions(type, packageId);
@@ -499,97 +503,17 @@ export function PackageFilesView({
         railClassName="flex min-h-[610px] flex-col text-left"
         rail={
           <>
+            {/* The version comes first: only the draft is edited, so it decides
+                what every control below can do. */}
             <AgentDetailPaneHeader>
-              <div className="relative w-full">
-                <Search
-                  className="text-muted-foreground absolute top-2 left-2.5 size-4"
-                  aria-hidden
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => {
-                    setQuery(event.target.value);
-                    setSelected(null);
-                  }}
-                  placeholder={t("common:switcher.searchPlaceholder")}
-                  className="h-8 pl-8"
-                />
-              </div>
-            </AgentDetailPaneHeader>
-            <div className="min-h-0 flex-1 overflow-hidden">
-              {bundleError ? (
-                <ErrorState
-                  message={t(
-                    bundleError instanceof ApiError && bundleError.status === 404
-                      ? "agents:files.errorMissingArtifact"
-                      : "agents:files.errorLoad",
-                  )}
-                  compact
-                />
-              ) : !bundleIndex || dependenciesLoading ? (
-                <LoadingState />
-              ) : (
-                <FileTree
-                  entries={visibleFiles.map((file) => file.treeEntry)}
-                  directories={[
-                    "Bundle AFPS",
-                    ...(skills.length > 0 ? ["Dépendances", "Dépendances/Skills"] : []),
-                    ...(mcpServers.length > 0 ? ["Dépendances", "Dépendances/Serveurs MCP"] : []),
-                  ]}
-                  initialCollapsedPaths={["Dépendances/Skills", "Dépendances/Serveurs MCP"]}
-                  selectedPath={
-                    activeSelection?.kind === "file"
-                      ? activeSelection.file.treeEntry.path
-                      : (activeSelection?.path ?? null)
-                  }
-                  onSelect={(path) => {
-                    const file = fileByPath.get(path);
-                    if (file) setSelected({ kind: "file", file });
-                  }}
-                  onSelectNode={(node) => {
-                    if (node.kind === "dir") selectPath(node.path, node);
-                  }}
-                  label={t("agents:files.treeLabel")}
-                  controlsId="agent-file-preview"
-                  className="h-full w-full p-1 text-left"
-                  actions={
-                    editing
-                      ? {
-                          onCreate: () => setDialog({ kind: "create" }),
-                          onUpload: () => pickUpload(null),
-                          onRename: (path) =>
-                            path.startsWith(BUNDLE_ROOT) &&
-                            setDialog({ kind: "rename", path: path.slice(BUNDLE_ROOT.length) }),
-                          onDelete: (path) =>
-                            path.startsWith(BUNDLE_ROOT) &&
-                            setDialog({ kind: "delete", path: path.slice(BUNDLE_ROOT.length) }),
-                          // Dependencies are other packages: never renamed or deleted here.
-                          isPinned: (path) =>
-                            !path.startsWith(BUNDLE_ROOT) ||
-                            isPinned(path.slice(BUNDLE_ROOT.length)),
-                          isBusy: busy,
-                          labels: {
-                            newFile: t("files.newFile"),
-                            upload: t("files.upload"),
-                            rename: t("files.rename"),
-                            delete: t("files.delete"),
-                          },
-                        }
-                      : undefined
-                  }
-                />
-              )}
-            </div>
-            <div className="bg-card shrink-0 space-y-1.5 border-t p-3">
-              <span className="text-muted-foreground text-xs font-medium">
-                {t("agents:detail.files.version")}
-              </span>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="outline"
                     size="sm"
                     className="w-full justify-between"
+                    aria-label={t("agents:detail.files.version")}
+                    title={t("agents:detail.files.version")}
                     // Staged edits belong to the draft: finish them before reading a version.
                     disabled={dirty}
                   >
@@ -649,6 +573,125 @@ export function PackageFilesView({
                   </DropdownMenuSub>
                 </DropdownMenuContent>
               </DropdownMenu>
+            </AgentDetailPaneHeader>
+            <div className="border-border flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+              <IconAction
+                icon={Search}
+                label={t("common:switcher.searchPlaceholder")}
+                pressed={searchOpen}
+                onClick={() => {
+                  if (searchOpen) setQuery("");
+                  setSearchOpen(!searchOpen);
+                }}
+              />
+              {editing && (
+                <>
+                  <IconAction
+                    icon={FilePlus}
+                    label={t("files.newFile")}
+                    disabled={busy}
+                    onClick={() => setDialog({ kind: "create" })}
+                  />
+                  <IconAction
+                    icon={Upload}
+                    label={t("files.upload")}
+                    disabled={busy}
+                    onClick={() => pickUpload(null)}
+                  />
+                </>
+              )}
+            </div>
+            {searchOpen && (
+              <div className="border-border shrink-0 border-b p-2">
+                <div className="relative w-full">
+                  <Search
+                    className="text-muted-foreground absolute top-2 left-2.5 size-4"
+                    aria-hidden
+                  />
+                  <Input
+                    autoFocus
+                    value={query}
+                    onChange={(event) => {
+                      setQuery(event.target.value);
+                      setSelected(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setQuery("");
+                        setSearchOpen(false);
+                      }
+                    }}
+                    placeholder={t("common:switcher.searchPlaceholder")}
+                    className="h-8 pl-8"
+                  />
+                </div>
+              </div>
+            )}
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {bundleError ? (
+                <ErrorState
+                  message={t(
+                    bundleError instanceof ApiError && bundleError.status === 404
+                      ? "agents:files.errorMissingArtifact"
+                      : "agents:files.errorLoad",
+                  )}
+                  compact
+                />
+              ) : !bundleIndex || dependenciesLoading ? (
+                <LoadingState />
+              ) : (
+                <FileTree
+                  entries={visibleFiles.map((file) => file.treeEntry)}
+                  directories={[
+                    "Bundle AFPS",
+                    ...(skills.length > 0 ? ["Dépendances", "Dépendances/Skills"] : []),
+                    ...(mcpServers.length > 0 ? ["Dépendances", "Dépendances/Serveurs MCP"] : []),
+                  ]}
+                  initialCollapsedPaths={["Dépendances/Skills", "Dépendances/Serveurs MCP"]}
+                  selectedPath={
+                    activeSelection?.kind === "file"
+                      ? activeSelection.file.treeEntry.path
+                      : (activeSelection?.path ?? null)
+                  }
+                  onSelect={(path) => {
+                    const file = fileByPath.get(path);
+                    if (file) setSelected({ kind: "file", file });
+                  }}
+                  onSelectNode={(node) => {
+                    if (node.kind === "dir") selectPath(node.path, node);
+                  }}
+                  label={t("agents:files.treeLabel")}
+                  controlsId="agent-file-preview"
+                  className="h-full w-full p-1 text-left"
+                  // Its new-file and import buttons live in the bar above.
+                  showToolbar={false}
+                  actions={
+                    editing
+                      ? {
+                          onCreate: () => setDialog({ kind: "create" }),
+                          onUpload: () => pickUpload(null),
+                          onRename: (path) =>
+                            path.startsWith(BUNDLE_ROOT) &&
+                            setDialog({ kind: "rename", path: path.slice(BUNDLE_ROOT.length) }),
+                          onDelete: (path) =>
+                            path.startsWith(BUNDLE_ROOT) &&
+                            setDialog({ kind: "delete", path: path.slice(BUNDLE_ROOT.length) }),
+                          // Dependencies are other packages: never renamed or deleted here.
+                          isPinned: (path) =>
+                            !path.startsWith(BUNDLE_ROOT) ||
+                            isPinned(path.slice(BUNDLE_ROOT.length)),
+                          isBusy: busy,
+                          labels: {
+                            newFile: t("files.newFile"),
+                            upload: t("files.upload"),
+                            rename: t("files.rename"),
+                            delete: t("files.delete"),
+                          },
+                        }
+                      : undefined
+                  }
+                />
+              )}
             </div>
           </>
         }
@@ -1157,5 +1200,36 @@ function FileTextEditorBody({
         </Button>
       </div>
     </div>
+  );
+}
+
+/** One of the tree bar's icon buttons: named for a screen reader, titled for a pointer. */
+function IconAction({
+  icon: Icon,
+  label,
+  onClick,
+  disabled = false,
+  pressed,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  pressed?: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      variant={pressed ? "secondary" : "ghost"}
+      size="icon"
+      className="size-8"
+      aria-label={label}
+      aria-pressed={pressed}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Icon className="size-4" />
+    </Button>
   );
 }

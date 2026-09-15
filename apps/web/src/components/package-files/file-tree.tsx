@@ -83,6 +83,8 @@ interface FileTreeProps {
   controlsId?: string;
   /** Present on the authoring surface only; absent, the tree is read-only. */
   actions?: FileTreeActions;
+  /** Off when the surface draws the new-file and import buttons itself. */
+  showToolbar?: boolean;
   className?: string;
 }
 
@@ -96,6 +98,7 @@ export function FileTree({
   label,
   controlsId,
   actions,
+  showToolbar = true,
   className,
 }: FileTreeProps) {
   const tree = useMemo(() => buildFileTree(entries, directories), [directories, entries]);
@@ -213,7 +216,7 @@ export function FileTree({
 
   return (
     <div className={cn("flex flex-col", className)}>
-      {actions && (
+      {actions && showToolbar && (
         <div className="border-border flex shrink-0 flex-wrap items-center gap-1 border-b p-1">
           <Button
             variant="ghost"

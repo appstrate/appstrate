@@ -183,6 +183,8 @@ export function FilePreview({
             fontFamily: "'SF Mono', 'Fira Code', monospace",
             scrollBeyondLastLine: false,
             wordWrap: "on",
+            // Air between the pane header and the first line of the file.
+            padding: { top: 16, bottom: 16 },
           }}
         />
       )}
