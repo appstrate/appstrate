@@ -313,8 +313,14 @@ const SEED = `
   --    row. With no row on either table there was nothing for those steps to
   --    suppress, so deleting both from the script changed no test outcome. The
   --    trigger test below now watches them fire.
-  INSERT INTO packages (id, org_id, type, created_by)
-  VALUES ('@m0003/agent', '${ORG}', 'agent', 'u_m0003_platform');
+  -- Homed in the pre-rename default space, because that is the only row an
+  -- organization's package can be: \`packages_org_package_has_home\` (drizzle
+  -- \`0067\`) rejects an org package with no home. It also makes
+  -- \`packages.home_space_id\` a NON-VACUOUS term in the survivor sweep below —
+  -- the FK is in the catalog either way, but only a row proves the script
+  -- re-mints it.
+  INSERT INTO packages (id, org_id, home_space_id, type, created_by)
+  VALUES ('@m0003/agent', '${ORG}', '${APP_A}', 'agent', 'u_m0003_platform');
 
   INSERT INTO runs (id, org_id, space_id, package_id, user_id, status)
   VALUES ('run_m0003_a', '${ORG}', '${APP_A}', '@m0003/agent', 'u_m0003_platform', 'success');
@@ -413,7 +419,8 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
              (SELECT space_id FROM webhooks WHERE id = 'wh_m0003_app')                  AS webhook,
              (SELECT space_id FROM webhooks WHERE id = 'wh_m0003_org')                  AS webhook_org,
              (SELECT referenced_space_id FROM oauth_clients WHERE id = 'oc_m0003_a')    AS oauth_client,
-             (SELECT referenced_space_id FROM oauth_clients WHERE id = 'oc_m0003_i')    AS oauth_client_instance
+             (SELECT referenced_space_id FROM oauth_clients WHERE id = 'oc_m0003_i')    AS oauth_client_instance,
+             (SELECT home_space_id FROM packages WHERE id = '@m0003/agent')            AS package_home
     `);
     expect(child).toEqual({
       api_key: SPC_A,
@@ -425,6 +432,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       webhook_org: null, // an org-level webhook has no space and must stay NULL
       oauth_client: SPC_A,
       oauth_client_instance: null,
+      package_home: SPC_A,
     });
   });
 
