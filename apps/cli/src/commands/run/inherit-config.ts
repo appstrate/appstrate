@@ -17,8 +17,8 @@
  *   4. Built-in defaults (none for these fields)
  *
  * 404 from the run-config endpoint is "no inheritance, fall back to
- * flags + defaults" — typical for a system agent that hasn't been
- * installed in the space. Anything else bubbles as a hard error, and so
+ * flags + defaults" — typical for a system agent that carries no
+ * placement row in the space. Anything else bubbles as a hard error, and so
  * does a 200 whose body is not the current wire shape (see
  * `fetchRunConfigPayload`).
  */

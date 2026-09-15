@@ -45,13 +45,13 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackage,
   seedPackageVersion,
   seedSpace,
 } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
 import { eq } from "drizzle-orm";
@@ -161,7 +161,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       draftManifest: agentManifest(AGENT_ID, { withSkillDep: true }),
       draftContent: "You are the agent.",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
     await publish(AGENT_ID, "1.0.0", agentManifest(AGENT_ID, { withSkillDep: true }), {
       "prompt.md": enc("You are the agent."),
     });
@@ -177,7 +177,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       draftManifest: skillManifest("1.0.0"),
       draftContent: SKILL_MD,
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
     await uploadPackageFiles("skills", ctx.orgId, SKILL_ID, {
       "manifest.json": enc(JSON.stringify(skillManifest("1.0.0"), null, 2)),
       "SKILL.md": enc(SKILL_MD),
@@ -195,7 +195,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // would pass on a package that was never confined at all.
     await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
     await db.update(packages).set({ homeSpaceId: hidden.id }).where(eq(packages.id, SKILL_ID));
-    await seedInstalledPackage(hidden.id, SKILL_ID);
+    await seedSpacePackage(hidden.id, SKILL_ID);
     // `agents:write` rides along because `?source=draft` answers to the AGENT's
     // write authority (handing over a working copy is running it, once
     // `--local` is in the picture). Without it the draft half would 403 on that
@@ -309,7 +309,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       draftManifest: agentManifest(BARE_AGENT_ID, { withSkillDep: false }),
       draftContent: "Bare agent.",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, BARE_AGENT_ID);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, BARE_AGENT_ID);
     // No `skills:read` — that is the point. `agents:write` is the draft
     // export's own gate and is orthogonal to the dependency scope under test.
     const rawKey = await keyWithScopes(ctx, ["agents:read", "agents:write"]);

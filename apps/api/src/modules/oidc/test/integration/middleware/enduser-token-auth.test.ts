@@ -569,10 +569,10 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
 
     expect((await app.request("/api/agents", { headers })).status).toBe(200);
 
-    const { seedPackage, seedInstalledPackage } =
+    const { seedPackage, seedSpacePackage } =
       await import("../../../../../../test/helpers/seed.ts");
     await seedPackage({ orgId, id: "@oidc/agent", type: "agent" });
-    await seedInstalledPackage(spaceId, "@oidc/agent");
+    await seedSpacePackage(spaceId, "@oidc/agent");
     const ran = await app.request("/api/agents/@oidc/agent/run", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },

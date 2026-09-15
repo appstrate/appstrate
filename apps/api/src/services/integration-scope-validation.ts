@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1 — install-time validation that an agent's
+ * Phase 1 — import-time validation that an agent's
  * `integrations_configuration[id]` selections (tools / scopes, §4.4)
  * are consistent with the catalog declared on each referenced
  * integration's manifest.
@@ -16,10 +16,10 @@
  * Short-circuit cases (no validation, no error):
  *  - Agent declares the integration with no `integrations_configuration`
  *    entry → nothing to validate.
- *  - Integration not (yet) installed / not visible to the org →
+ *  - Integration not (yet) present / not visible to the org →
  *    validation is skipped silently. The run-readiness check
  *    (`agent-readiness.ts`) is the authority on "integration must be
- *    installed", not us.
+ *    active in the space", not us.
  *  - Integration declares no `tools_policy` block or no `scope_catalog`
  *    catalog → the corresponding subset check is skipped (matches the
  *    Phase 0 schema semantics).
@@ -184,9 +184,9 @@ interface ValidateAgentIntegrationSelectionsInput {
    *
    * Without it a self-contained bundle bypassed the gate entirely: its
    * integration is not in the registry yet, the DB lookup misses, and
-   * "not installed → skip silently" waved the agent through into an immutable
-   * version. The catalog a bundle must be judged against is
-   * `incoming ∪ already-installed`, not the DB alone. Resolution models the
+   * "not in the catalog → skip silently" waved the agent through into an
+   * immutable version. The catalog a bundle must be judged against is
+   * `incoming ∪ already-published`, not the DB alone. Resolution models the
    * post-import catalog, including yanks, dist-tags and `latest` movement.
    *
    * KEYED BY ID BUT VERSIONED. A bundle can legitimately carry several versions
@@ -386,7 +386,7 @@ export async function validateAgentIntegrationSelections(
       ? { manifest: postImportManifest as unknown as IntegrationManifest }
       : await getIntegration(orgId, entry.id);
     if (!integration) {
-      // Integration not visible / not installed — defer to run-time
+      // Integration not visible / not in the catalog — defer to run-time
       // dependency validation rather than emit a misleading error
       // about scopes against a non-existent catalog.
       continue;

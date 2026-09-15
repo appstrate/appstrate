@@ -251,19 +251,19 @@ describe("fetchBundleForRun — errors", () => {
     });
   });
 
-  it("maps 404 `agent_not_installed_in_space` to package_not_installed_in_space with install hint", async () => {
+  it("maps 404 `agent_not_active_in_space` to package_not_active_in_space with an activation hint", async () => {
     // The bundle route distinguishes "doesn't exist in org" from "exists
-    // in org but not installed in space" via the `code` field on the
+    // in org but not active in space" via the `code` field on the
     // problem+json body. The CLI surfaces a different message for each so
-    // users hit "install it" instead of "is the spelling right?".
+    // users hit "activate it" instead of "is the spelling right?".
     const fetchImpl = stubFetch({
       status: 404,
       body: JSON.stringify({
         type: "about:blank",
-        title: "Agent Not Installed",
+        title: "Agent Not Active",
         status: 404,
-        code: "agent_not_installed_in_space",
-        detail: "Agent '@me/x' exists in this organization but is not installed",
+        code: "agent_not_active_in_space",
+        detail: "Agent '@me/x' is placed in space 'spc_test' but not active there.",
       }),
     });
     await expect(
@@ -277,7 +277,7 @@ describe("fetchBundleForRun — errors", () => {
       }),
     ).rejects.toMatchObject({
       name: "BundleFetchError",
-      code: "package_not_installed_in_space",
+      code: "package_not_active_in_space",
       hint: expect.stringContaining("/api/spaces/spc_test/packages"),
     });
   });

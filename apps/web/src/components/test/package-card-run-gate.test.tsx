@@ -5,9 +5,9 @@
  * carries per row.
  *
  * `GET /api/agents` lists what the space READS — homed here, offered here, or
- * system — while a run needs an installation in that space on top
- * (`AgentListItem.installed`). The card is where a reader meets both: it must
- * say which of the two is missing instead of letting the click come back a 404.
+ * system — while a run needs that placement switched ON in this space
+ * (`AgentListItem.active`). The card is where a reader meets both: it must say
+ * which of the two is missing instead of letting the click come back a 404.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -30,7 +30,7 @@ const i18n = i18nModule.default;
 const ORG_ID = "org_a";
 
 /** Render one agent card for a caller who holds `agents:run`. */
-function cardFor(installed: boolean): string {
+function cardFor(active: boolean): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     ["orgs"],
@@ -56,7 +56,7 @@ function cardFor(installed: boolean): string {
         displayName="Worker"
         type="agent"
         source="local"
-        installed={installed}
+        active={active}
       />,
       { queryClient },
     );
@@ -76,18 +76,23 @@ function launchButton(html: string): { tag: string; disabled: boolean } {
   return { tag: tag!, disabled: / disabled=""/.test(tag!) };
 }
 
-describe("an agent readable here but installed nowhere", () => {
-  it("greys the launcher out and names the missing installation", () => {
-    const button = launchButton(cardFor(false));
+describe("an agent readable here but not active here", () => {
+  it("greys the launcher out and names the missing activation", () => {
+    const html = cardFor(false);
+    const button = launchButton(html);
     expect(button.disabled).toBe(true);
-    expect(button.tag).toContain(i18n.t("detail.titleNotInstalled", { ns: "agents" }));
+    expect(button.tag).toContain(i18n.t("detail.titleNotActive", { ns: "agents" }));
+    // And the card says so beside the name, not only in a tooltip nobody hovers.
+    expect(html).toContain(i18n.t("list.badgeInactive", { ns: "agents" }));
   });
 });
 
-describe("an agent installed here", () => {
-  it("CONTROL: leaves the launcher live, so `installed` is the gate", () => {
-    const button = launchButton(cardFor(true));
+describe("an agent active here", () => {
+  it("CONTROL: leaves the launcher live, so `active` is the gate", () => {
+    const html = cardFor(true);
+    const button = launchButton(html);
     expect(button.disabled).toBe(false);
     expect(button.tag).toContain(i18n.t("detail.run", { ns: "agents" }));
+    expect(html).not.toContain(i18n.t("list.badgeInactive", { ns: "agents" }));
   });
 });

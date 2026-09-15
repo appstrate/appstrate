@@ -143,7 +143,7 @@ describe("auditEmptyIntegrationSelections", () => {
     const reachable = findings.filter(isReachable);
     expect(reachable).toHaveLength(1);
     expect(reachable[0]?.artifact).toBe("draft");
-    expect(reachable[0]?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(reachable[0]?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(reachable[0]?.activeIn).toEqual([]);
     expect(findings.filter(isBlocking)).toHaveLength(0);
   });
@@ -155,7 +155,7 @@ describe("auditEmptyIntegrationSelections", () => {
     const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
     expect(reachable).toHaveLength(1);
     expect(reachable[0]?.artifact).toBe("draft");
-    expect(reachable[0]?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(reachable[0]?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(reachable[0]?.activeIn).toEqual([]);
     expect(reachable.filter(isBlocking)).toHaveLength(0);
   });
@@ -174,7 +174,7 @@ describe("auditEmptyIntegrationSelections", () => {
 
     const findings = await auditEmptyIntegrationSelections();
     const latest = findings.find((f) => f.artifact === "2.0.0");
-    expect(latest?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(latest?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(latest?.activeIn).toEqual([ctx.defaultSpaceId]);
     expect(latest && isBlocking(latest)).toBe(true);
   });
@@ -193,7 +193,7 @@ describe("auditEmptyIntegrationSelections", () => {
 
     const findings = await auditEmptyIntegrationSelections();
     const old = findings.find((f) => f.artifact === historical.version);
-    expect(old?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(old?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(old?.activeIn).toEqual([]);
     expect(old && isBlocking(old)).toBe(false);
   });

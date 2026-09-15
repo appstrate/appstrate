@@ -20,7 +20,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedSpace, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
 import { integrationConnections } from "@appstrate/db/schema";
@@ -200,6 +200,7 @@ describe("Me API (/api/me)", () => {
       await seedPackage({
         id: "@ctx/triage",
         orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
         draftManifest: {
           name: "@ctx/triage",
           version: "0.1.0",
@@ -209,14 +210,22 @@ describe("Me API (/api/me)", () => {
           input: { schema: { type: "object", properties: { folder: { type: "string" } } } },
         },
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/triage");
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/triage");
 
       // Installed but disabled in the space → must NOT appear.
-      await seedPackage({ id: "@ctx/disabled", orgId: ctx.orgId });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/disabled", { enabled: false });
+      await seedPackage({
+        id: "@ctx/disabled",
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/disabled", { enabled: false });
 
       // Owned by the org but NOT installed in this space → must NOT appear.
-      await seedPackage({ id: "@ctx/uninstalled", orgId: ctx.orgId });
+      await seedPackage({
+        id: "@ctx/uninstalled",
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+      });
 
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
@@ -249,6 +258,7 @@ describe("Me API (/api/me)", () => {
         id: "@ctx/web-research",
         orgId: ctx.orgId,
         type: "skill",
+        homeSpaceId: ctx.defaultSpaceId,
         draftManifest: {
           name: "@ctx/web-research",
           version: "1.2.0",
@@ -257,14 +267,24 @@ describe("Me API (/api/me)", () => {
           description: "Searches the web.",
         },
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/web-research");
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/web-research");
 
       // Installed but disabled in the space → must NOT appear.
-      await seedPackage({ id: "@ctx/skill-disabled", orgId: ctx.orgId, type: "skill" });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/skill-disabled", { enabled: false });
+      await seedPackage({
+        id: "@ctx/skill-disabled",
+        orgId: ctx.orgId,
+        type: "skill",
+        homeSpaceId: ctx.defaultSpaceId,
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/skill-disabled", { enabled: false });
 
       // Owned by the org but NOT installed in this space → must NOT appear.
-      await seedPackage({ id: "@ctx/skill-uninstalled", orgId: ctx.orgId, type: "skill" });
+      await seedPackage({
+        id: "@ctx/skill-uninstalled",
+        orgId: ctx.orgId,
+        type: "skill",
+        homeSpaceId: ctx.defaultSpaceId,
+      });
 
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);

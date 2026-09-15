@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
 import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
@@ -48,6 +48,10 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
       },
     }),
   });
+  // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
+  // the package is placed in, so switching an unplaced integration on leaves it
+  // inactive.
+  await seedPackageShare(ctx.defaultSpaceId, PACKAGE_ID);
   await db.insert(spacePackages).values({
     spaceId: ctx.defaultSpaceId,
     packageId: PACKAGE_ID,

@@ -187,7 +187,7 @@ router.post("/", async (c) => {
     return null;
   });
 
-  // Provision default hello-world agent + install in default space (non-fatal)
+  // Provision default hello-world agent + activate in the default space (non-fatal)
   if (defaultSpace) {
     await provisionDefaultAgentForOrg(org.id, org.slug, user.id, defaultSpace.id).catch(() => {});
   }

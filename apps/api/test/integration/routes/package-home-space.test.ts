@@ -12,7 +12,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { packages, packageShares, spacePackages } from "@appstrate/db/schema";
+import { auditEvents, packages, packageShares, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem, getDbRow } from "../../helpers/assertions.ts";
@@ -25,7 +25,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackageShare,
   seedPackage,
   seedPackageVersion,
@@ -140,14 +140,14 @@ beforeEach(async () => {
     draftManifest: MANIFEST,
     draftContent: CONTENT,
   });
-  await seedInstalledPackage(alphaId, ID);
+  await seedSpacePackage(alphaId, ID);
   // Beta is a SECOND PLACEMENT — offered, then installed, which is the only
   // shape a non-home installation can have (RBAC spec §6.9, and what
   // `scripts/migration/0016` writes for the ones that predate the rule). What
   // this file pins is that a placement is not authority: Beta's builder reads
   // the package and still may not write it.
   await seedPackageShare(betaId, ID);
-  await seedInstalledPackage(betaId, ID);
+  await seedSpacePackage(betaId, ID);
 
   alpha = await builderIn(alphaId);
   beta = await builderIn(betaId);
@@ -302,19 +302,25 @@ describe("the home is a read grant", () => {
   });
 
   it("says on the agents index that a placement is not an activation", async () => {
-    // The row is READ here and cannot RUN here: the launch gate is an installed
+    // The row is READ here and cannot RUN here: the launch gate is an ENABLED
     // `space_packages` row, which this agent has in no space. Both facts travel
     // on the row so a launcher greys its own control out rather than
     // discovering the refusal on click.
-    const res = await app.request("/api/agents", { headers: alpha });
-    expect(res.status, await res.clone().text()).toBe(200);
-    const body = (await res.json()) as { data: { id: string; installed: boolean }[] };
-    expect(body.data.find((agent) => agent.id === AGENT)?.installed).toBe(false);
+    const agentRow = async () => {
+      const res = await app.request("/api/agents", { headers: alpha });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as { data: { id: string; active: boolean }[] };
+      return body.data.find((agent) => agent.id === AGENT);
+    };
+    expect((await agentRow())?.active).toBe(false);
 
-    await seedInstalledPackage(alphaId, AGENT);
-    const after = await app.request("/api/agents", { headers: alpha });
-    const afterBody = (await after.json()) as { data: { id: string; installed: boolean }[] };
-    expect(afterBody.data.find((agent) => agent.id === AGENT)?.installed).toBe(true);
+    await seedSpacePackage(alphaId, AGENT);
+    expect((await agentRow())?.active).toBe(true);
+
+    // And a placement switched OFF reads exactly like no placement at all —
+    // that is the whole of "deactivated means it does not run".
+    await seedSpacePackage(alphaId, AGENT, { enabled: false });
+    expect((await agentRow())?.active).toBe(false);
   });
 
   it("opens nothing in a space that is neither the home nor a placement", async () => {
@@ -327,9 +333,9 @@ describe("the home is a read grant", () => {
   });
 
   // The home opens READS. Running is a separate gate — `hasPackageAccess`, an
-  // installed `space_packages` row in the space the run happens in — and the
-  // two must not be conflated: an agent a space governs but has not installed
-  // is not thereby executable there, with that space's credentials.
+  // ENABLED `space_packages` row in the space the run happens in — and the two
+  // must not be conflated: an agent a space governs but has not activated is
+  // not thereby executable there, with that space's credentials.
   describe("and not a right to execute", () => {
     let agentHeaders: Record<string, string>;
 
@@ -359,40 +365,143 @@ describe("the home is a read grant", () => {
         }),
       });
 
-    it("refuses a run of an agent homed here but installed nowhere", async () => {
-      await expectProblem(await runAgent(), 404, { code: "agent_not_found" });
+    it("refuses a run of an agent homed here but active nowhere", async () => {
+      // `agent_not_active_in_space`, not the opaque code: the space HOLDS this
+      // agent, so naming the switch tells the caller nothing they could not
+      // already read — and it is the difference between "activate it" and "you
+      // mistyped the id".
+      await expectProblem(await runAgent(), 404, { code: "agent_not_active_in_space" });
       // The read gates DO open — so the 404 is the execution rule speaking, not
       // an unreachable package.
       expect(
         (await app.request(`/api/packages/agents/${AGENT}`, { headers: owner() })).status,
       ).toBe(200);
 
-      await seedInstalledPackage(alphaId, AGENT);
+      await seedSpacePackage(alphaId, AGENT);
       const launched = await runAgent();
       expect(launched.status, await launched.clone().text()).toBe(201);
       await waitForRunPipelineSettled();
+
+      // …and switching it off closes the gate again. The row is still there,
+      // so this is `enabled` deciding and not the placement (R19).
+      await seedSpacePackage(alphaId, AGENT, { enabled: false });
+      await expectProblem(await runAgent(), 404, { code: "agent_not_active_in_space" });
     });
 
-    it("refuses a schedule of an agent homed here but installed nowhere", async () => {
-      await expectProblem(await scheduleAgent(), 404, { code: "agent_not_found" });
+    it("refuses a schedule of an agent homed here but active nowhere", async () => {
+      await expectProblem(await scheduleAgent(), 404, { code: "agent_not_active_in_space" });
 
-      await seedInstalledPackage(alphaId, AGENT);
+      await seedSpacePackage(alphaId, AGENT);
       const created = await scheduleAgent();
       expect(created.status, await created.clone().text()).toBe(201);
     });
+
+    it("keeps the OPAQUE code for an agent this space holds no placement for", async () => {
+      // The other half of the distinction, and the one that must stay silent: a
+      // space with no placement learns nothing about the agent from the
+      // refusal. Homed in GAMMA, never offered to alpha.
+      const elsewhere = "@homeorg/elsewhere";
+      await seedAgent({ id: elsewhere, orgId: ctx.orgId, homeSpaceId: gammaId });
+      await expectProblem(
+        await app.request(`/api/agents/${elsewhere}/run`, {
+          method: "POST",
+          headers: agentHeaders,
+          body: JSON.stringify({}),
+        }),
+        404,
+        { code: "agent_not_found" },
+      );
+    });
   });
 
-  it("moves with the home, with no installation in the destination", async () => {
+  it("moves with the home, and ACTIVATES the package in the destination", async () => {
+    // A package lives where it is written, and creating one activates it at
+    // home (`makeCreateHandler`); moving the home is the same act performed
+    // later, so it does the same thing. Arriving in a space that could read the
+    // package but not run it would make the move a two-step act with no second
+    // button on the page that performed it.
     expect((await move(owner(), gammaId)).status).toBe(200);
 
     const gamma = await builderIn(gammaId);
     expect((await detailOf(gamma)).status).toBe(200);
     expect(await librarySkillIds(gamma)).toContain(ID);
     expect((await editSkill(gamma)).status).toBe(200);
+    const placed = await getDbRow(
+      spacePackages,
+      and(eq(spacePackages.packageId, ID), eq(spacePackages.spaceId, gammaId))!,
+    );
+    expect(placed.enabled).toBe(true);
 
-    // Alpha is now neither home nor installation and loses sight of it.
+    // Alpha is now neither home nor placement and loses sight of it.
     await expectProblem(await detailOf(alpha), 404);
     expect(await librarySkillIds(alpha)).not.toContain(ID);
+  });
+
+  it("activates through the activation door, so the act is AUDITED like any other", async () => {
+    // `space_packages` has one writer. A second INSERT here would be an
+    // activation with no `package.activated` entry behind it, and the log could
+    // no longer answer "when did this space start running this package".
+    expect((await move(owner(), gammaId)).status).toBe(200);
+
+    const [activated] = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "package.activated"), eq(auditEvents.resourceId, ID))!);
+    expect(activated).toBeDefined();
+    // The actor is the caller who moved it, and the entry says which act it
+    // was — a move, not a click on a switch nobody pressed.
+    expect(activated!.after).toEqual({ spaceId: gammaId, via: "move" });
+  });
+
+  it("refuses the whole move when the destination could not ACTIVATE the package", async () => {
+    // The activation door refuses an mcp-server whose `latest` archive is
+    // missing or unreadable (422 `bundle_invalid`); going through that door
+    // means the move inherits the refusal instead of landing an executable
+    // nothing can execute. Franc failure, not a silent half-move.
+    const MCP = "@homeorg/unbuildable-mcp";
+    await seedPackage({
+      id: MCP,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      homeSpaceId: alphaId,
+      draftManifest: { name: MCP, version: "0.1.0", type: "mcp-server" },
+    });
+
+    const res = await app.request(`/api/packages/${MCP}`, {
+      method: "PATCH",
+      headers: { ...owner(), "Content-Type": "application/json" },
+      body: JSON.stringify({ home_space_id: gammaId }),
+    });
+    await expectProblem(res, 422, { code: "bundle_invalid" });
+
+    // Nothing moved and nothing was placed: the transaction never opened.
+    expect((await getDbRow(packages, eq(packages.id, MCP))).homeSpaceId).toBe(alphaId);
+    const rows = await db
+      .select()
+      .from(spacePackages)
+      .where(and(eq(spacePackages.packageId, MCP), eq(spacePackages.spaceId, gammaId))!);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("leaves a destination that had deliberately switched the package OFF switched off", async () => {
+    // The move transfers AUTHORITY over a package, not a verdict about what any
+    // space runs. A destination that answered `false` keeps its answer, and
+    // nothing is audited because nothing changed.
+    await seedPackageShare(gammaId, ID);
+    await seedSpacePackage(gammaId, ID, { enabled: false });
+
+    expect((await move(owner(), gammaId)).status).toBe(200);
+
+    const placed = await getDbRow(
+      spacePackages,
+      and(eq(spacePackages.packageId, ID), eq(spacePackages.spaceId, gammaId))!,
+    );
+    expect(placed.enabled).toBe(false);
+    const activated = await db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.action, "package.activated"), eq(auditEvents.resourceId, ID))!);
+    expect(activated).toHaveLength(0);
   });
 });
 

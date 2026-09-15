@@ -23,7 +23,7 @@ import { packages } from "@appstrate/db/schema";
 import { db } from "./db.ts";
 import { seedAgent } from "./seed.ts";
 import { createVersionFromDraft } from "../../src/services/package-versions.ts";
-import { installPackage } from "../../src/services/space-packages.ts";
+import { activatePackage } from "../../src/services/space-packages.ts";
 
 /** Minimal agent manifest — `version` is what publish snapshots under. */
 function agentManifest(id: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -55,7 +55,7 @@ export async function publishAndInstall(args: {
   if ("error" in published) {
     throw new Error(`fixture failed to publish ${args.id}: ${published.error}`);
   }
-  await installPackage({ orgId: args.orgId, spaceId: args.spaceId }, args.id);
+  await activatePackage({ orgId: args.orgId, spaceId: args.spaceId }, args.id);
 }
 
 /**

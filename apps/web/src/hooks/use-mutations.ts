@@ -229,7 +229,7 @@ export function useImportPackage() {
       // pre-import index and the pre-import `inline` bodies until the query
       // goes stale.
       invalidatePackageFiles(qc);
-      // Non-blocking install-time warnings (AFPS §7.7) —
+      // Non-blocking import-time warnings (AFPS §7.7) —
       // surface each one as a sonner warning toast so publishers see them
       // immediately after a successful import.
       if (data.warnings && data.warnings.length > 0) {

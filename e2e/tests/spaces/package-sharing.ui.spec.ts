@@ -6,11 +6,11 @@
  * What a route test cannot show: that the two halves of the flow actually meet
  * in the SPA. An administrator shares an agent from the package page's own
  * dialog, and the guest — an external identity with no reach into any space —
- * finds it under "Partagé avec moi" in their agent list and adds it to their own
- * space with one button — the same `POST /api/spaces/{spaceId}/packages` an
- * admin uses from the library, because there is only one door. Only then does
- * the platform let them launch it, and the administrator still cannot see
- * inside that space.
+ * finds it in their own space's package list as a PLACEMENT nobody has switched
+ * on yet ("Proposé"), and switches it on with the same `POST
+ * /api/spaces/{spaceId}/packages` an admin uses from the library, because there
+ * is only one door. Only then does the platform let them launch it, and the
+ * administrator still cannot see inside that space.
  *
  * What the recipient then runs is the author's LATEST published version, not a
  * frozen copy and never the draft: the tail of this test publishes a second
@@ -129,10 +129,11 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     await adminPage.context().close();
   }
 
-  // ── The guest finds it and adds it to their own space ──
-  // It is READABLE now, and still not runnable: offered is not activated.
-  // No `?version=` selector anywhere in this test but the negative control
-  // below — an omitted selector is what resolves the latest published version.
+  // ── The guest finds it and switches it on in their own space ──
+  // It is READABLE now, and still not runnable: a placement nobody activated
+  // runs nowhere. No `?version=` selector anywhere in this test but the
+  // negative control below — an omitted selector is what resolves the latest
+  // published version.
   expect((await guestClient.get(`/packages/agents/${scope}/${name}`)).status()).toBe(200);
   expect((await guestClient.post(`/agents/${scope}/${name}/run`, {})).status()).toBe(404);
 
@@ -145,23 +146,56 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     await expect(
       guestPage.getByText(/Vous n'avez pas accès|You do not have access/).first(),
     ).toBeVisible();
+
+    // The index LISTS what the space reads, so the agent is already on it —
+    // and says, on the card itself, that it does not run here yet.
     await guestPage.goto("/agents");
-    await expect(guestPage.getByText(/Partagé avec moi|Shared with me/)).toBeVisible();
-    // THE door, and the only one: adding an offer to one's own space is the
-    // same route the library's checkboxes call for a team space.
-    const installed = guestPage.waitForResponse(
+    await expect(guestPage.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
+    await expect(guestPage.getByText(/^(Inactif|Inactive)$/).first()).toBeVisible();
+
+    // THE door, and the only one: switching an offer on in one's own space is
+    // the same route the organization catalog's checkboxes call for a team
+    // space. A guest holds no `agents:configure` anywhere — owning the space is
+    // the authorization (RBAC spec §3.6).
+    await guestPage.goto("/space/packages");
+    const row = guestPage.getByRole("row").filter({ hasText: `Test Agent ${name}` });
+    await expect(row.getByText(/Proposé|Offered/)).toBeVisible();
+    const activated = guestPage.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${guestSpaceId}/packages`),
     );
-    await guestPage.getByRole("button", { name: /Ajouter à mon espace|Add to my space/ }).click();
-    expect((await installed).status()).toBe(201);
+    await row.getByRole("checkbox").click();
+    expect((await activated).status()).toBe(201);
+    await expect(row.getByRole("checkbox")).toBeChecked();
+
+    // Off again, and back on. Deactivating keeps the placement and its
+    // settings; the status reports the STATE CHANGE, so switching it back on is
+    // another 201 and only an already-on package answers 200.
+    const deactivated = guestPage.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().includes(`/packages/${scope}/${name}`),
+    );
+    await row.getByRole("checkbox").click();
+    expect((await deactivated).status()).toBe(204);
+    await expect(row.getByText(/Désactivé|Inactive/)).toBeVisible();
+    expect((await guestClient.post(`/agents/${scope}/${name}/run`, {})).status()).toBe(404);
+
+    const reactivated = guestPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith(`/spaces/${guestSpaceId}/packages`),
+    );
+    await row.getByRole("checkbox").click();
+    expect((await reactivated).status()).toBe(201);
+    await expect(row.getByRole("checkbox")).toBeChecked();
   } finally {
     await guestPage.context().close();
   }
 
-  // Installed in the guest's own space, and the run route no longer refuses
-  // them: the execution gate is the installation, which is now theirs.
+  // Active in the guest's own space, and the run route no longer refuses them:
+  // the execution gate is the activation, which is now theirs.
   const placed = await guestClient.get(`/spaces/${guestSpaceId}/packages`);
   expect(placed.status()).toBe(200);
   expect(
@@ -172,7 +206,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   expect((await firstRun.json()).version_ref).toBe("0.1.0");
 
   // The negative control the pin concealed: the draft is the author's working
-  // copy. Installing the package in your space does not make it yours to run —
+  // copy. Activating the package in your space does not make it yours to run —
   // this exact call answered 404 before the share, and the moment it stopped
   // doing so it would have executed the admin's uncommitted bytes.
   const guestDraft = await guestClient.post(`/agents/${scope}/${name}/run?version=draft`, {});
@@ -201,7 +235,7 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   expect((await adminRuns.json()).data ?? []).toHaveLength(0);
 });
 
-test("an offer opens in its destination space and accepting refreshes an already visited agent list", async ({
+test("an offer opens in its destination space and activating refreshes an already visited agent list", async ({
   request,
   browser,
   browserCtx,
@@ -239,27 +273,39 @@ test("an offer opens in its destination space and accepting refreshes an already
     const detailResponse = page.waitForResponse((response) =>
       response.url().includes(`/api/packages/agents/${scope}/${name}`),
     );
-    await page.getByRole("link", { name: `Test Agent ${name}`, exact: true }).click();
+    // The card itself is the link: the whole tile navigates, so the name is a
+    // heading inside it and not an anchor of its own.
+    await page.getByText(`Test Agent ${name}`, { exact: true }).first().click();
     const detail = await detailResponse;
     expect(detail.status()).toBe(200);
     expect(detail.request().headers()["x-space-id"]).toBe(personalId);
     await expect(page).toHaveURL(new RegExp(`/agents/${scope}/${name}$`));
 
     // Stay in one SPA session: a reload would discard the cache under test.
+    // The index lists the placement even before anybody switches it on, and
+    // marks it as not running here.
     await page.locator('a[href="/agents"]').first().click();
-    await expect(page.getByText(/Aucun agent disponible|No agents available/)).toBeVisible();
+    await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/^(Inactif|Inactive)$/).first()).toBeVisible();
     await page.getByTestId("org-switcher-button").click();
     await expect(page.locator('a[href="/library"]')).toHaveCount(0);
     await page.locator('a[href="/space/packages"]').first().click();
-    const accepted = page.waitForResponse(
+    const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${personalId}/packages`),
     );
-    await page.getByRole("button", { name: /Ajouter à mon espace|Add to my space/ }).click();
-    expect((await accepted).status()).toBe(201);
+    await page
+      .getByRole("row")
+      .filter({ hasText: `Test Agent ${name}` })
+      .getByRole("checkbox")
+      .click();
+    expect((await activated).status()).toBe(201);
+    // Back on the index, the same card no longer says it is off — the caches
+    // the activation invalidates are what makes that true without a reload.
     await page.locator('a[href="/agents"]').first().click();
     await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/^(Inactif|Inactive)$/)).toHaveCount(0);
   } finally {
     await page.context().close();
   }
@@ -332,8 +378,8 @@ test("a draft-only agent is published from the share dialog itself, then offered
     await page.context().close();
   }
 
-  // The recipient really has the offer, and adding it to their own space needs
-  // no grant — owning the space is the authorization.
+  // The recipient really has the offer, and switching it on in their own space
+  // needs no grant — owning the space is the authorization.
   const personalId = await personalSpaceOf(request, member.cookie, orgId);
   const memberClient = createApiClient(request, {
     cookie: member.cookie,
@@ -346,7 +392,7 @@ test("a draft-only agent is published from the share dialog itself, then offered
   expect(added.status(), await added.text()).toBe(201);
 });
 
-test("a non-admin builder manages a team offer from the space package view", async ({
+test("a non-admin builder switches a team offer on and off from the space package view", async ({
   request,
   browser,
   browserCtx,
@@ -386,14 +432,18 @@ test("a non-admin builder manages a team offer from the space package view", asy
   const page = await (await createAuthedContext(browser, member, orgId, spaceId)).newPage();
   try {
     await page.goto("/space/packages");
-    const installed = page.waitForResponse(
+    // One row, one switch: the offer and the packages already running here sit
+    // in the same list, told apart by a badge rather than by a second section
+    // with a button of its own.
+    const row = page.getByRole("row").filter({ hasText: `Test Agent ${name}` });
+    await expect(row.getByText(/Proposé|Offered/)).toBeVisible();
+    const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
         response.url().endsWith(`/spaces/${spaceId}/packages`),
     );
-    await page.getByRole("button", { name: /Installer dans|Install in/ }).click();
-    expect((await installed).status()).toBe(201);
-    const row = page.getByRole("row").filter({ hasText: `Test Agent ${name}` });
+    await row.getByRole("checkbox").click();
+    expect((await activated).status()).toBe(201);
     await expect(row.getByRole("checkbox")).toBeChecked();
     const removed = page.waitForResponse(
       (response) =>
@@ -402,7 +452,8 @@ test("a non-admin builder manages a team offer from the space package view", asy
     );
     await row.getByRole("checkbox").click();
     expect((await removed).status()).toBe(204);
-    await expect(page.getByRole("button", { name: /Installer dans|Install in/ })).toBeVisible();
+    // The row survives the switch — deactivating is not a removal.
+    await expect(row.getByText(/Désactivé|Inactive/)).toBeVisible();
   } finally {
     await page.context().close();
   }

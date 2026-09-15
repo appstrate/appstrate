@@ -24,7 +24,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackage,
   seedSpaceMember,
   seedSpaceRole,
@@ -469,8 +469,15 @@ describe("custom space roles", () => {
 
   describe("a custom role is assignable and grants exactly its permissions", () => {
     beforeEach(async () => {
-      await seedPackage({ orgId: owner.orgId, id: "@roles/agent", type: "agent" });
-      await seedInstalledPackage(owner.defaultSpaceId, "@roles/agent");
+      // Homed in the space these cases act in: `requireAgent()` reads the
+      // placement rule, and a row with no home and no offer places nothing.
+      await seedPackage({
+        orgId: owner.orgId,
+        id: "@roles/agent",
+        type: "agent",
+        homeSpaceId: owner.defaultSpaceId,
+      });
+      await seedSpacePackage(owner.defaultSpaceId, "@roles/agent");
     });
 
     const runAgent = (ctx: TestContext) =>

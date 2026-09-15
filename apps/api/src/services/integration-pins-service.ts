@@ -44,7 +44,7 @@ import {
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { isSystemIntegration } from "./integration-client-registry.ts";
+import { activatePackageWithin, hasPackageAccess } from "./space-packages.ts";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
@@ -72,47 +72,46 @@ type PinSummary = IntegrationPin;
 /**
  * Toggle the per-(space, integration) lock.
  *
- * An existing `space_packages` row is updated in place. With NO row, a
- * SYSTEM integration is auto-active without an explicit install (see
- * `isIntegrationActive`) — materialize the row so the toggle persists, rather
- * than 404ing the operator out of a setting they can legitimately reach.
- * `enabled` defaults to true on insert, so recording the block flag never
- * deactivates an auto-active integration. A genuinely-not-installed,
- * non-system integration still 404s (unchanged).
+ * An existing `space_packages` row is updated in place. With NO row the toggle
+ * still has to persist somewhere, and the row it needs is a PLACEMENT row —
+ * which makes creating it an activation, not a side effect. It therefore goes
+ * through the one door that writes them (`activatePackageWithin`), inside this
+ * transaction, instead of spelling the INSERT a second time here.
+ *
+ * The door reports whether the package was ALREADY active; only that case may
+ * proceed. An integration the deployment offers (`SYSTEM_INTEGRATIONS`) is
+ * active with no row at all, so materializing one records the block flag and
+ * changes no verdict — which is why this act writes no `package.activated`
+ * audit and needs no activation grant. Anything else would be switched ON by
+ * the row, and recording a connection lock is not a decision to switch an
+ * integration on: the throw rolls the whole transaction back, row included, and
+ * the caller gets the same 404 it always got.
  */
 export async function setBlockUserConnections(
   scope: SpaceScope,
   integrationId: string,
   blocked: boolean,
 ): Promise<{ blocked: boolean }> {
-  const result = await db
-    .update(spacePackages)
-    .set({ blockUserConnections: blocked, updatedAt: new Date() })
-    .where(
-      and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, integrationId)),
-    )
-    .returning({ blockUserConnections: spacePackages.blockUserConnections });
-  if (result.length > 0) {
-    return { blocked: result[0]!.blockUserConnections };
-  }
-  // No row. Only a system integration is auto-active without one; anything else
-  // is genuinely not installed.
-  if (!isSystemIntegration(integrationId)) {
-    throw notFound(`Integration '${integrationId}' is not installed in this space`);
-  }
-  const [inserted] = await db
-    .insert(spacePackages)
-    .values({
-      spaceId: scope.spaceId,
-      packageId: integrationId,
-      blockUserConnections: blocked,
-    })
-    .onConflictDoUpdate({
-      target: [spacePackages.spaceId, spacePackages.packageId],
-      set: { blockUserConnections: blocked, updatedAt: new Date() },
-    })
-    .returning({ blockUserConnections: spacePackages.blockUserConnections });
-  return { blocked: inserted!.blockUserConnections };
+  return db.transaction(async (tx) => {
+    const writeFlag = () =>
+      tx
+        .update(spacePackages)
+        .set({ blockUserConnections: blocked, updatedAt: new Date() })
+        .where(
+          and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, integrationId)),
+        )
+        .returning({ blockUserConnections: spacePackages.blockUserConnections });
+
+    const updated = await writeFlag();
+    if (updated.length > 0) return { blocked: updated[0]!.blockUserConnections };
+
+    const activation = await activatePackageWithin(tx, scope, integrationId);
+    if (!activation.wasActive) {
+      throw notFound(`Integration '${integrationId}' is not active in this space`);
+    }
+    const [materialized] = await writeFlag();
+    return { blocked: materialized!.blockUserConnections };
+  });
 }
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
@@ -158,9 +157,9 @@ export async function listIntegrationPins(
 }
 
 /**
- * R2 — agents installed in the space that declare the given integration
+ * R2 — agents placed in the space that declare the given integration
  * in their dependencies. Powers the centralised pin management table on the
- * integration detail page (so the admin can pick which installed agent to
+ * integration detail page (so the admin can pick which placed agent to
  * pin without leaving the integration view).
  */
 export async function listAgentsConsumingIntegration(
@@ -243,7 +242,7 @@ async function upsertPin(args: {
 }): Promise<PinSummary> {
   const { scope, agentPackageId, integrationId, connectionId, userIdValue, createdBy } = args;
   const conn = await validatePinTarget(scope, integrationId, connectionId, args.validateOpts);
-  await assertAgentInstalled(scope, agentPackageId);
+  await assertAgentPlacedHere(scope, agentPackageId);
 
   const now = new Date();
   const userPredicate =
@@ -312,7 +311,7 @@ export async function deleteIntegrationPin(
   return { deleted: result.length > 0 };
 }
 
-async function assertAgentInstalled(scope: SpaceScope, agentPackageId: string): Promise<void> {
+async function assertAgentPlacedHere(scope: SpaceScope, agentPackageId: string): Promise<void> {
   const [row] = await db
     .select({ id: spacePackages.packageId })
     .from(spacePackages)
@@ -320,7 +319,7 @@ async function assertAgentInstalled(scope: SpaceScope, agentPackageId: string): 
       and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, agentPackageId)),
     )
     .limit(1);
-  if (!row) throw notFound(`Agent '${agentPackageId}' is not installed in this space`);
+  if (!row) throw notFound(`Agent '${agentPackageId}' is not active in this space`);
 }
 
 export async function validatePinTarget(
@@ -750,9 +749,15 @@ async function resolveAgentIntegrationPick(args: {
 
 /** Bulk per-agent connection readiness — one call covering badge, picker, and pre-run check. */
 interface AgentConnectionReadiness {
-  /** True iff the run-kickoff would reject with 412 (run semantics — identical authority). */
+  /** True iff the run would be refused — an inactive agent, or a connection the resolver rejects. */
   blocks_run: boolean;
-  /** The integration portion of the 412 envelope (same `field: integrations.<id>` shape). */
+  /**
+   * What blocks the run. The integration portion of the 412 envelope (same
+   * `field: integrations.<id>` shape), plus `agent_not_active` when the SPACE
+   * has switched the agent off: the three execution doors answer that with a
+   * 404, and this read reports it instead, because a panel that 404s cannot
+   * tell anyone what to fix.
+   */
   errors: ValidationFieldError[];
   /** Every declared integration with its management verdict (includeInert) + run-blocking flag. */
   integrations: Array<{
@@ -794,6 +799,13 @@ export async function resolveAgentConnectionReadiness(args: {
   const { scope, agentPackageId, actor, canConfigureIntegrations, version } = args;
   const loaded = await getPackage(agentPackageId, scope.orgId);
   if (!loaded) throw notFound(`Agent '${agentPackageId}' not found in this organization`);
+  // The SPACE's own switch, asked here and reported rather than thrown. The run
+  // doors refuse a switched-off agent with `404 agent_not_active_in_space`
+  // (`requireActiveAgent`); readiness is the panel that EXPLAINS a refusal, so
+  // it answers 200 and carries the cause next to `integration_not_active`. The
+  // rest of the readiness still resolves: an operator about to switch the agent
+  // back on wants to know what ELSE is missing, in one pass.
+  const agentActive = await hasPackageAccess(scope, agentPackageId);
   const { agent } = await resolveAgentRunVersion(loaded, version);
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);
@@ -875,9 +887,21 @@ export async function resolveAgentConnectionReadiness(args: {
     ),
   );
 
+  const errors: ValidationFieldError[] = runResolution.errors.map(translateResolutionError);
+  if (!agentActive) {
+    // First in the list: every other entry describes something to configure,
+    // and none of it can run while the space has the agent switched off.
+    errors.unshift({
+      field: "agent",
+      code: "agent_not_active",
+      title: "Agent Not Active",
+      message: `Agent '${agent.id}' is not active in this space.`,
+    });
+  }
+
   return {
-    blocks_run: runResolution.errors.length > 0,
-    errors: runResolution.errors.map(translateResolutionError),
+    blocks_run: errors.length > 0,
+    errors,
     integrations: declared.map((e, i) => ({
       integration_id: e.id,
       run_blocking: blockingIds.has(e.id),

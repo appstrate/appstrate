@@ -34,7 +34,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   mcpServerManifest,
@@ -136,7 +136,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -176,7 +176,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("3.0.0"),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -198,7 +198,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -223,7 +223,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,

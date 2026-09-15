@@ -54,7 +54,10 @@ export const openApiInfo = {
       name: "Roles",
       description: "Space-role presets and organization-defined custom role bundles",
     },
-    { name: "Space Packages", description: "Manage packages installed in a space" },
+    {
+      name: "Space Packages",
+      description: "Activate, configure and deactivate packages in a space",
+    },
     { name: "End Users", description: "End-user management for headless API" },
     { name: "Uploads", description: "Direct-upload protocol for agent input files" },
     { name: "Files", description: "Durable file store — inputs and agent outputs" },

@@ -93,9 +93,17 @@ export interface PlannedSkill extends ResolvedSkill {
 /**
  * Sorted by package id, which is what makes collision resolution reproducible
  * rather than server-order dependent. System packages are the platform's.
+ *
+ * `?active=true`: the ACTIVE set, not merely the placed one. Activation is what
+ * a space OFFERS — a skill switched off there is one somebody decided the space
+ * would not use, and writing it into the local Claude Code checkout anyway
+ * would hand the switch no meaning outside the dashboard. A skill switched back
+ * on reappears on the next sync, because the sync reads this list every time.
  */
 export async function listSyncableSkills(profileName: string, spaceId?: string): Promise<string[]> {
-  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills", { spaceId });
+  const rows = await apiList<SkillListRow>(profileName, "/api/packages/skills?active=true", {
+    spaceId,
+  });
   return rows
     .filter((row) => row.source !== "system" && typeof row.id === "string" && row.id.length > 0)
     .map((row) => row.id)

@@ -16,7 +16,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackageShare,
   seedPackage,
   seedSpace,
@@ -30,10 +30,15 @@ interface OrgDetail {
   members: unknown[];
   invitations: unknown[];
 }
+interface Placement {
+  space_id: string;
+  via: "home" | "shared" | "system";
+  state: "active" | "inactive" | "none";
+  shared_by: { user_id: string; name: string } | null;
+}
 interface Library {
   spaces: { id: string }[];
-  packages: { skill: { id: string; installed_in: string[] }[] };
-  shared: { id: string; space_id: string }[];
+  packages: { skill: { id: string; placements: Placement[] }[] };
 }
 
 const ID = "@catalog/secret";
@@ -46,20 +51,20 @@ let headers: Record<string, string>;
 let guestId: string;
 let privateId: string;
 
-const installIn = (spaceId: string) => seedInstalledPackage(spaceId, ID);
+const activateIn = (spaceId: string) => seedSpacePackage(spaceId, ID);
 
 /**
- * PLACE the skill in a space and install it there — the only shape a non-home
- * installation can have (RBAC spec §6.9): a package is present in a space
- * through its home or a `package_shares` row, and an installation outside the
- * home is always backed by one (the install route writes it, and
+ * PLACE the skill in a space and activate it there — the only shape a non-home
+ * placement can have (RBAC spec §6.9): a package is present in a space through
+ * its home or a `package_shares` row, and a `space_packages` row outside the
+ * home is always backed by one (the activation door writes it, and
  * `scripts/migration/0016` wrote it for every row that predates the rule).
- * `installIn` alone is kept for the cases that assert the refusal a NON-placed
- * installation gets.
+ * `activateIn` alone is kept for the cases that assert the refusal an UNPLACED
+ * row gets.
  */
 const placeIn = async (spaceId: string) => {
   await seedPackageShare(spaceId, ID);
-  await seedInstalledPackage(spaceId, ID);
+  await seedSpacePackage(spaceId, ID);
 };
 
 /**
@@ -266,27 +271,27 @@ describe("organization library administration", () => {
     await seedPackageShare(ctx.defaultSpaceId, ID);
     const body = await library(headers);
     expect(body.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
-    // An untaken offer is a candidate presented in `shared`, and nowhere else:
-    // the matrix answers "where is this activated, and where can I activate it
-    // in one click", and a decision still owed belongs to the section that
-    // carries who made the offer. Either way, nothing about the SOURCE space's
-    // installation state leaks — the id named here is the caller's own.
-    expect(body.packages.skill).toEqual([]);
-    expect(body.shared).toMatchObject([{ id: ID, space_id: ctx.defaultSpaceId }]);
-    const installed = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
+    // An untaken offer is a PLACEMENT with `state: "none"` on the package's own
+    // row — one row, one switch. Nothing about the SOURCE space leaks with it:
+    // the only space id named is the caller's own.
+    expect(body.packages.skill[0]?.placements).toEqual([
+      { space_id: ctx.defaultSpaceId, via: "shared", state: "none", shared_by: null },
+    ]);
+    const activated = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({ packageId: ID }),
     });
-    expect(installed.status).toBe(201);
+    expect(activated.status, await activated.clone().text()).toBe(201);
     const after = await library(headers);
-    expect(after.shared).toEqual([]);
-    expect(after.packages.skill[0]?.installed_in).toEqual([ctx.defaultSpaceId]);
+    expect(after.packages.skill[0]?.placements).toMatchObject([
+      { space_id: ctx.defaultSpaceId, via: "shared", state: "active" },
+    ]);
   });
 
   it("keeps the local package view available to a builder and pins keys to their space", async () => {
     await homeIn(ctx.defaultSpaceId);
-    await installIn(ctx.defaultSpaceId);
+    await activateIn(ctx.defaultSpaceId);
     const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/library`, { headers });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Library;
@@ -301,7 +306,7 @@ describe("organization library administration", () => {
 
 describe("library visibility", () => {
   it("hides private and inaccessible closed spaces and their package metadata", async () => {
-    await installIn(privateId);
+    await activateIn(privateId);
     await seedSpace({ orgId: ctx.orgId, name: "Closed space", visibility: "closed" });
     const body = await library(headers);
     expect(body.spaces.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
@@ -310,17 +315,22 @@ describe("library visibility", () => {
     expect(JSON.stringify(body)).not.toContain(privateId);
   });
 
-  it("lists only readable types and installation mappings for accessible spaces", async () => {
+  it("lists only readable types and placements for accessible spaces", async () => {
     await homeIn(ctx.defaultSpaceId);
-    await installIn(ctx.defaultSpaceId);
+    await activateIn(ctx.defaultSpaceId);
     await placeIn(privateId);
-    expect((await library(headers)).packages.skill[0]?.installed_in).toEqual([ctx.defaultSpaceId]);
+    expect((await library(headers)).packages.skill[0]?.placements.map((p) => p.space_id)).toEqual([
+      ctx.defaultSpaceId,
+    ]);
     await assignGuestCustomRole(["agents:read"]);
     expect((await library(headers)).packages.skill).toEqual([]);
   });
 
-  it("filters installed package metadata by the credential's type read scopes", async () => {
-    await installIn(ctx.defaultSpaceId);
+  it("filters placement metadata by the credential's type read scopes", async () => {
+    // `placeIn`, not `activateIn`: the claim here is about the credential's
+    // type scopes, so the package has to be genuinely placed — a row nothing
+    // places is filtered for a reason this test does not mean to assert.
+    await placeIn(ctx.defaultSpaceId);
     const path = `/api/spaces/${ctx.defaultSpaceId}/packages`;
     const restricted = await app.request(path, { headers: await keyHeaders(["spaces:read"]) });
     expect(restricted.status).toBe(200);
@@ -344,7 +354,7 @@ describe("library visibility", () => {
 
 describe("shared package authority", () => {
   it("denies hidden package reads, versions, mutations and guessed installation without changing state", async () => {
-    await installIn(privateId);
+    await activateIn(privateId);
     for (const [method, path, init] of routesUnderAuthority()) {
       const response = await app.request(path, {
         method,
@@ -376,8 +386,8 @@ describe("shared package authority", () => {
 
   it("authorizes file edits from the home even when another installation is read-only", async () => {
     await homeIn(ctx.defaultSpaceId);
-    await installIn(ctx.defaultSpaceId);
-    await installIn(privateId);
+    await activateIn(ctx.defaultSpaceId);
+    await activateIn(privateId);
     await seedSpaceMember({ spaceId: privateId, userId: guestId, presetRole: "viewer" });
     expect((await saveFiles(headers)).status).toBe(200);
     await homeIn(privateId);
@@ -386,8 +396,8 @@ describe("shared package authority", () => {
 
   it("authorizes deletion from the home space alone, whatever other spaces hold it", async () => {
     await homeIn(ctx.defaultSpaceId);
-    await installIn(ctx.defaultSpaceId);
-    await installIn(privateId);
+    await activateIn(ctx.defaultSpaceId);
+    await activateIn(privateId);
     // A `viewer` row in the other installation used to veto the delete. The
     // home is the authority now, so it does not.
     await seedSpaceMember({ spaceId: privateId, userId: guestId, presetRole: "viewer" });
@@ -397,7 +407,7 @@ describe("shared package authority", () => {
   it("refuses a builder of another placement once the home moves away", async () => {
     await homeIn(privateId);
     await placeIn(ctx.defaultSpaceId);
-    await installIn(privateId);
+    await activateIn(privateId);
     // Reachable through the offer to their own space — so 403, not 404 — but
     // governed elsewhere.
     expect((await deleteSkill(headers)).status).toBe(403);
@@ -407,7 +417,7 @@ describe("shared package authority", () => {
   it("tells a write-only key nothing about a package homed elsewhere", async () => {
     await homeIn(privateId);
     await placeIn(ctx.defaultSpaceId);
-    await installIn(privateId);
+    await activateIn(privateId);
     // 404 because `skills:delete` alone holds `skills:read` in NO space, so the
     // key may not know this id exists at all — the home never enters it. The
     // sibling below is the case where the home IS the reason.
@@ -417,7 +427,7 @@ describe("shared package authority", () => {
   it("cannot use a key pinned to A to mutate a package homed in B", async () => {
     await homeIn(privateId);
     await placeIn(ctx.defaultSpaceId);
-    await installIn(privateId);
+    await activateIn(privateId);
     // With `skills:read` the key sees the package through the offer to its own
     // pinned space — so the refusal owes the caller a 403 — and the home, in a
     // space the key cannot reach, is what refuses it.
@@ -429,12 +439,12 @@ describe("shared package authority", () => {
 
   it("preserves write-only credentials for packages homed in their pinned space", async () => {
     await homeIn(ctx.defaultSpaceId);
-    await installIn(ctx.defaultSpaceId);
+    await activateIn(ctx.defaultSpaceId);
     expect((await deleteSkill(await keyHeaders(["skills:delete"]))).status).toBe(204);
   });
 
   it("refuses a force import of a hidden existing package before it writes", async () => {
-    await installIn(privateId);
+    await activateIn(privateId);
     const form = skillArchiveForm(ID, { force: "true" });
     const response = await importArchive("/api/packages/import", form, headers);
     expect(response.status, await response.clone().text()).toBe(404);
@@ -449,7 +459,7 @@ describe("shared package authority", () => {
       authorization,
     );
     expect(created.status, await created.clone().text()).toBe(201);
-    await installIn(privateId);
+    await activateIn(privateId);
     const overwritten = await importArchive(
       "/api/packages/import?force=true",
       skillArchiveForm(ID),
@@ -459,7 +469,7 @@ describe("shared package authority", () => {
   });
 
   it("preserves unchanged dependency references for a write-only credential", async () => {
-    await installIn(privateId);
+    await activateIn(privateId);
     const agentId = "@catalog/editable";
     await seedPackage({
       id: agentId,
@@ -477,7 +487,7 @@ describe("shared package authority", () => {
       },
       draftContent: "Prompt",
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, agentId);
+    await seedSpacePackage(ctx.defaultSpaceId, agentId);
     const response = await app.request(`/api/agents/${agentId}/skills`, {
       method: "PUT",
       headers: { ...(await keyHeaders(["agents:write"])), "Content-Type": "application/json" },
@@ -520,7 +530,7 @@ describe("shared package authority", () => {
   });
 
   it("rejects a carried hidden package during bundle authorization before any import write", async () => {
-    await installIn(privateId);
+    await activateIn(privateId);
     const response = await importArchive(
       "/api/packages/import-bundle",
       skillArchiveForm(),
@@ -531,7 +541,7 @@ describe("shared package authority", () => {
   });
 
   it("refuses hidden dependencies before creating an agent", async () => {
-    await installIn(privateId);
+    await activateIn(privateId);
     const response = await app.request("/api/packages/agents", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },

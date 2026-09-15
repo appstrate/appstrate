@@ -29,15 +29,11 @@ import type { Permission } from "../../../src/lib/permissions.ts";
 import type { AppEnv } from "../../../src/types/index.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import {
-  seedInstalledPackage,
-  seedPackage,
-  seedPackageShare,
-  seedSpace,
-} from "../../helpers/seed.ts";
+import { seedSpacePackage, seedPackage, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
 import { packageShares } from "@appstrate/db/schema";
 import { listOrgItems } from "../../../src/services/package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
+import { initSystemIntegrations } from "../../../src/services/integration-client-registry.ts";
 
 type AccessibleSpaces = Awaited<ReturnType<typeof packageAccessSpaces>>;
 
@@ -95,6 +91,11 @@ async function refusal(promise: Promise<unknown>): Promise<ApiError> {
 
 beforeEach(async () => {
   await truncateAll();
+  // `activeHereSql` reads the system-integration registry — the deployment's
+  // list of OFFERED integrations is half of the "active without a row" default
+  // — and the registry fails fast when boot never populated it. This suite
+  // calls the services directly, so it does boot's job for them.
+  initSystemIntegrations([]);
   ctx = await createTestContext({ orgSlug: "home" });
   homeId = ctx.defaultSpaceId;
   otherId = (await seedSpace({ orgId: ctx.orgId, name: "Other", visibility: "closed" })).id;
@@ -110,8 +111,8 @@ beforeEach(async () => {
 
 describe("assertPackageMutationAccess", () => {
   it("accepts a builder of the home even when another installation is out of reach", async () => {
-    await seedInstalledPackage(homeId, SKILL);
-    await seedInstalledPackage(otherId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
+    await seedSpacePackage(otherId, SKILL);
     const accessible: AccessibleSpaces = [space(homeId, BUILDER_SKILLS)];
     await assertPackageMutationAccess(
       caller({ orgRole: "member", permissions: BUILDER_SKILLS }),
@@ -122,9 +123,9 @@ describe("assertPackageMutationAccess", () => {
   });
 
   it("refuses a builder of another placement, and says so rather than hiding it", async () => {
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     await seedPackageShare(otherId, SKILL);
-    await seedInstalledPackage(otherId, SKILL);
+    await seedSpacePackage(otherId, SKILL);
     // Reachable — the package is OFFERED where they read — but not theirs.
     const accessible: AccessibleSpaces = [space(otherId, BUILDER_SKILLS)];
     const refused = await refusal(
@@ -140,7 +141,7 @@ describe("assertPackageMutationAccess", () => {
   });
 
   it("answers 404 when the caller cannot see the package at all", async () => {
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     const accessible: AccessibleSpaces = [space(otherId, BUILDER_SKILLS)];
     const refused = await refusal(
       assertPackageMutationAccess(
@@ -158,7 +159,7 @@ describe("assertPackageMutationAccess", () => {
     // OFFERED where the member reads, so the refusal below is about authority
     // and not about reach: a NULL-home package they cannot see would be a 404.
     await seedPackageShare(homeId, SKILL);
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     const accessible: AccessibleSpaces = [space(homeId, BUILDER_SKILLS)];
 
     const refused = await refusal(
@@ -191,7 +192,7 @@ describe("assertPackageMutationAccess", () => {
   });
 
   it("refuses when the HOME withholds the permission, whatever the current space grants", async () => {
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     // The caller reads the home and nothing more there, while their coarse
     // current-space set carries the full builder bundle. The old rule asked
     // both and refused on the weaker; the rule asks the home, so it refuses on
@@ -211,7 +212,7 @@ describe("assertPackageMutationAccess", () => {
   });
 
   it("accepts a home that grants it while the current space grants nothing", async () => {
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     const accessible: AccessibleSpaces = [space(homeId, BUILDER_SKILLS)];
     // No `permissions` on the context at all: there is no current-space check
     // left to satisfy, which is the whole point of the home rule.
@@ -289,11 +290,11 @@ describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirro
    * re-addition would look like.
    */
   const placements = {
-    "installed only": { install: true, share: false, home: false },
-    "shared only": { install: false, share: true, home: false },
-    "shared and installed": { install: true, share: true, home: false },
-    "homed only": { install: false, share: false, home: true },
-    "placed nowhere": { install: false, share: false, home: false },
+    "with a row only": { row: true, share: false, home: false },
+    "shared only": { row: false, share: true, home: false },
+    "shared and with a row": { row: true, share: true, home: false },
+    "homed only": { row: false, share: false, home: true },
+    "placed nowhere": { row: false, share: false, home: false },
   } as const;
 
   for (const [label, placement] of Object.entries(placements)) {
@@ -305,13 +306,13 @@ describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirro
         .update(packages)
         .set({ homeSpaceId: placement.home ? otherId : null })
         .where(eq(packages.id, SKILL));
-      if (placement.install) await seedInstalledPackage(otherId, SKILL);
+      if (placement.row) await seedSpacePackage(otherId, SKILL);
       if (placement.share) {
         await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
       }
 
-      // The installation is NOT a term: "installed only" is expected to read
-      // as unplaced, which is the whole point of the rule this pins.
+      // A `space_packages` row is NOT a term of the rule: "with a row only" is
+      // expected to read as unplaced, which is the whole point of this pin.
       const expected = placement.share || placement.home;
 
       // The TS reader, from the same facts the SQL sees.
@@ -333,10 +334,12 @@ describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirro
     });
   }
 
-  it("keeps `activeOnly` install-only — neither a home nor an offer is an instance", async () => {
+  it("keeps `activeOnly` on the ACTIVATION rule — neither a home nor an offer is an instance", async () => {
     // The one place the two rules deliberately DIVERGE, so it is pinned rather
     // than left to be discovered: the integration picker asks for usable
-    // instances, and a package merely homed or offered here is not one.
+    // instances, and a package merely homed or offered here is not one. For a
+    // local package that means a row saying `enabled`; a system one is on by
+    // the deployment's default, which `space-package-door-semantics` covers.
     await db.update(packages).set({ homeSpaceId: otherId }).where(eq(packages.id, SKILL));
     await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
     const active = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId, {
@@ -417,7 +420,7 @@ describe("assertPackageShareAccess", () => {
     // Offered where the key looks, so the refusal is the authority one (403)
     // and not the unreachable-id one (404).
     await seedPackageShare(homeId, SKILL);
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     const accessible: AccessibleSpaces = [space(homeId, [...BUILDER_SKILLS, "skills:share"])];
     const refused = await refusal(
       assertPackageShareAccess(

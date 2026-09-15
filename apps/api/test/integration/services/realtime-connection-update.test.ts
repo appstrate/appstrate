@@ -19,7 +19,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { eventData } from "../../helpers/sse.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   addSubscriber,
   removeSubscriber,
@@ -121,7 +121,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
       source: "local",
       draftManifest: buildIntegrationManifest(INTEG),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
   });
 
   afterEach(() => {

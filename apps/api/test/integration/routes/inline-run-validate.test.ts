@@ -17,7 +17,7 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
@@ -328,7 +328,7 @@ describe("POST /api/runs/inline/validate", () => {
         draftManifest: manifest,
       });
       await seedPackageVersion({ packageId: INTEGRATION, version: "1.0.0", manifest });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
     }
 
     function manifestSelecting(selection: Record<string, unknown>) {
@@ -469,7 +469,7 @@ describe("POST /api/runs/inline/validate", () => {
           version: "1.0.0",
           manifest: svcManifest(["published_tool"]),
         });
-        await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, PINNED);
+        await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, PINNED);
       }
 
       function agentSelecting(tools: string[]) {

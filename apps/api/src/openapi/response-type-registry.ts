@@ -120,8 +120,8 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
   },
   {
     specSchemaName: "SpacePackage",
-    sharedTypeName: "InstalledPackage",
-    description: "SpacePackage ↔ InstalledPackage",
+    sharedTypeName: "SpacePackage",
+    description: "SpacePackage",
   },
   // Inline run-config response — the CLI's only source for the per-space model /
   // generation / proxy / stored input layer. Unregistered, the
@@ -246,6 +246,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   User: "Better-Auth-shaped minimal user; no shared-type",
   ProfileBatchItem: "profiles/batch list item; SPA uses the generated spec type",
   LibraryPackageList: "SPA consumes components['schemas']['LibraryPackageList'] directly",
+  PackagePlacement:
+    "LibraryPackageList item sub-object; read through LibraryPackageList's generated spec type",
   PackageShare:
     "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   ShareTarget:

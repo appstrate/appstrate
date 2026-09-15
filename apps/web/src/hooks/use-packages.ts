@@ -315,7 +315,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
  * Export an agent as a multi-package `.afps-bundle` (its transitive
  * dependency graph in one self-contained archive). Triggers a browser
  * download via the shared `triggerBlobDownload`. Optional `version` pins the
- * export to a specific release; defaults to the version installed in the
+ * export to a specific release; defaults to the version resolved in the
  * current space.
  */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {

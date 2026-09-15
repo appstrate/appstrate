@@ -653,7 +653,7 @@ interface ResolveConnectionsForRunInput {
    * caller already refused them for a more precise reason.
    *
    * The readiness gate passes the ids it flagged `integration_not_active`. An
-   * integration that is not installed/enabled in the space has no business also
+   * integration that is not ACTIVE in the space has no business also
    * producing a `not_connected` — the run is refused either way, but the second
    * error names a remedy (connect your account) that does not apply and, for a
    * caller opted into the connect-offer relay, gets a live link minted for it.

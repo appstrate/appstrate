@@ -50,7 +50,7 @@ import {
   seedSpaceMember,
   seedSpaceRole,
 } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -168,7 +168,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       draftManifest: buildIntegrationManifest(id),
     });
     await seedPackageShare(ctx.defaultSpaceId, id);
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
   async function seedConnection(integrationId: string, userId: string): Promise<string> {
@@ -201,7 +201,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     // Deliberately NO connection seeded for the actor.
 
@@ -241,7 +241,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       // Declares the integration dependency but selects zero tools.
       draftManifest: buildAgentManifestNoTools([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedPackage({
       id: INTEGRATION,
       homeSpaceId: ctx.defaultSpaceId,
@@ -250,7 +250,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       source: "local",
       draftManifest: buildRequiredIntegrationManifest(INTEGRATION),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
     // No connection seeded — the required auth must still block despite no tools.
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
@@ -275,7 +275,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION, SECOND_INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     await seedIntegration(SECOND_INTEGRATION);
     // Both integrations declared + installed, no connections.
@@ -312,7 +312,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
 
     // Seed TWO connections for the same actor + integration. No pin / no
@@ -354,7 +354,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
     // Second candidate (unbound) — its existence is what makes the resolver
@@ -396,7 +396,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
 
     const [row] = await db
@@ -446,7 +446,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     // A live, resolvable connection exists — the connection gate would pass.
     await seedConnection(INTEGRATION, ctx.user.id);
@@ -483,7 +483,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     // Seed the integration PACKAGE but do NOT install it on the space.
     await seedPackage({
       id: INTEGRATION,
@@ -520,7 +520,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     // No connection for the actor: without the skip this is exactly the shape
     // that produced a second `not_connected` on the same field.
@@ -563,7 +563,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     // Deliberately no integration package seeded.
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
@@ -594,7 +594,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     // A package with that id exists but is a SKILL, not an integration.
     await seedPackage({
       id: INTEGRATION,
@@ -628,7 +628,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     // Integration package of the right TYPE but with a manifest that fails
     // `integrationManifestSchema` (missing every required field).
     await seedPackage({
@@ -639,7 +639,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       source: "local",
       draftManifest: { not: "a valid integration manifest" },
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
@@ -668,7 +668,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest([INTEGRATION]),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     await seedConnection(INTEGRATION, ctx.user.id);
 
@@ -746,7 +746,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       manifest: manifest as unknown as Record<string, unknown>,
     });
     await seedPackageShare(ctx.defaultSpaceId, id);
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
   it("412s an agent that declares the dependency only, when the integration's default_tools make it active", async () => {
@@ -757,7 +757,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedDefaultToolsIntegration(INTEGRATION);
     // No connection — the integration WILL be spawned (default_tools), so the
     // cascade must demand a connection instead of treating it as inert.
@@ -787,7 +787,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedDefaultToolsIntegration(INTEGRATION);
     const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
     const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
@@ -817,7 +817,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifestBareDependency(INTEGRATION),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegration(INTEGRATION);
     // No connection — and none required.
 
@@ -865,7 +865,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
           tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
         }) as unknown as Record<string, unknown>,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
       await seedAgent({
         id: AGENT,
         homeSpaceId: ctx.defaultSpaceId,
@@ -873,7 +873,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         createdBy: ctx.user.id,
         draftManifest: buildAgentManifest([OAUTH_INTEGRATION]),
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
       // PUBLISHED, because `launchAs` below launches as members who hold
       // `agents:run` and nothing else: the draft runs for whoever can WRITE the
       // agent (plan decision 4), so a `?version=draft` launch by them would be
@@ -1294,7 +1294,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
         createdBy: ctx.user.id,
         draftManifest: buildAgentManifest([INTEGRATION]),
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
       await seedIntegration(INTEGRATION);
 
       const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });

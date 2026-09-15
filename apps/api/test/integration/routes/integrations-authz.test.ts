@@ -35,8 +35,8 @@ import {
 } from "../../helpers/auth.ts";
 import { seedPackage, seedApiKey, seedSpace } from "../../helpers/seed.ts";
 import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
-import { eq } from "drizzle-orm";
-import { integrationConnections, spacePackages } from "@appstrate/db/schema";
+import { and, eq } from "drizzle-orm";
+import { auditEvents, integrationConnections, spacePackages } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -81,13 +81,19 @@ function gmailManifest(name = "@myorg/gmail"): IntegrationManifest {
   });
 }
 
-async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
+/**
+ * `homeSpaceId` is the PLACEMENT, not decoration: a `space_packages` row only
+ * speaks for a space the package is placed in, so an integration seeded with
+ * no home and activated in a space would read as inactive everywhere.
+ */
+async function seedIntegration(orgId: string, manifest: IntegrationManifest, homeSpaceId?: string) {
   return seedPackage({
     id: manifest.name,
     orgId,
     type: "integration",
     source: "local",
     draftManifest: manifest,
+    ...(homeSpaceId ? { homeSpaceId } : {}),
   });
 }
 
@@ -119,7 +125,7 @@ describe("block_user_connections workflow", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"), ctx.defaultSpaceId);
     await activate(ctx.defaultSpaceId, "@myorg/gmail");
   });
 
@@ -277,7 +283,20 @@ describe("block_user_connections — auto-active system integration", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
     // Seed gmail but DO NOT activate it — no space_packages row exists.
-    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    // `source: "system"` because that is what an integration the DEPLOYMENT
+    // offers actually is: `system-packages/` imports them that way, and
+    // `SYSTEM_INTEGRATIONS` names that subset. It matters here because
+    // materializing the placement row now goes through the activation door,
+    // which asks the placement rule — and a `local` package homed nowhere is
+    // placed nowhere, so a fixture spelling it that way would be asserting
+    // against a state no deployment produces.
+    await seedPackage({
+      id: "@myorg/gmail",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "system",
+      draftManifest: gmailManifest("@myorg/gmail"),
+    });
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/clickup"));
     // gmail ships a system client → auto-active. clickup does not.
     initSystemIntegrations([
@@ -319,6 +338,21 @@ describe("block_user_connections — auto-active system integration", () => {
       .where(eq(spacePackages.packageId, "@myorg/gmail"));
     expect(row?.enabled).toBe(true);
     expect(row?.blocked).toBe(true);
+
+    // …written through the ONE door that creates placement rows
+    // (`activatePackageWithin`), and audited as what it is: nothing. The
+    // integration was already on by the deployment's default, so the row
+    // records no decision and `package.activated` has nothing to say.
+    const activated = await db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "package.activated"),
+          eq(auditEvents.resourceId, "@myorg/gmail"),
+        ),
+      );
+    expect(activated).toHaveLength(0);
   });
 
   it("404s when toggling block on a non-system integration that is not installed", async () => {

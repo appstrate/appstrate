@@ -214,7 +214,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns the agents READABLE from the space named by `X-Space-Id`, with running run counts — the placement rule: homed in that space, offered to it, or a system agent. Reading is not running: an agent placed here but not activated here carries `installed: false` and the launch routes refuse it until `POST /api/spaces/{spaceId}/packages` installs it. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
+         * @description Returns the agents READABLE from the space named by `X-Space-Id`, with running run counts — the placement rule: homed in that space, offered to it, or a system agent. Reading is not running: an agent placed here but switched off here carries `active: false` and the launch routes refuse it until `POST /api/spaces/{spaceId}/packages` activates it. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -254,7 +254,7 @@ export interface paths {
         };
         /**
          * Bulk integration connection readiness for an agent
-         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict (identical to the run-kickoff 412 — run semantics, includeInert false + required-auth carve-out). `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.
+         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 412 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.
          */
         get: operations["getAgentConnectionReadiness"];
         put?: never;
@@ -1492,23 +1492,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/integrations/{packageId}/activate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Activate an integration in the current space */
-        post: operations["activateIntegration"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/integrations/{packageId}/auths/{authKey}/clients": {
         parameters: {
             query?: never;
@@ -1674,30 +1657,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List installed agents whose deps declare this integration
-         * @description Drives the centralised pin management table on the integration detail page (R2): admins pick an installed-agent target without leaving the integration view.
+         * List the space's agents whose deps declare this integration
+         * @description Drives the centralised pin management table on the integration detail page (R2): admins pick an agent target without leaving the integration view.
          */
         get: operations["listAgentsConsumingIntegration"];
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/integrations/{packageId}/deactivate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Deactivate an integration in the current space (non-destructive) */
-        delete: operations["deactivateIntegration"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1812,8 +1778,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Organization library (owners and admins)
-         * @description Returns packages readable in an accessible space, plus readable system packages, grouped by type. Organization owners and admins also see uninstalled organization packages with their read permissions. Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings also require the package type's read permission in that space. This is the catalogue, not an inbox: it carries NO `shared` section — an offer is addressed to a space, and `GET /api/spaces/{spaceId}/library` is where it is presented and taken up.
+         * Organization library — the placement map (owners and admins)
+         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Organization owners and admins also see organization-catalogue packages (`home_space_id: null`) placed nowhere, with their read permissions. Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the caller can enter, and each package type also requires that type's read permission in the space. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — creating the offer that places it when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -2821,7 +2787,7 @@ export interface paths {
         };
         /**
          * List agent packages
-         * @description List the agent packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.
+         * @description List the agent packages available to the current space (`X-Space-Id`): system packages, plus organization packages placed in this space. Organization packages that exist but are not placed here are NOT returned — for the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listAgentPackages"];
         put?: never;
@@ -2850,13 +2816,13 @@ export interface paths {
         get: operations["getAgentPackage"];
         /**
          * Update a user agent
-         * @description Update manifest and content of a user agent with optimistic locking. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Update manifest and content of a user agent with optimistic locking. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         put: operations["updateAgent"];
         post?: never;
         /**
          * Delete a user agent
-         * @description Delete a user agent. Built-in agents cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Delete a user agent. Built-in agents cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteAgent"];
         options?: never;
@@ -2879,7 +2845,7 @@ export interface paths {
         put?: never;
         /**
          * Create an agent version from draft
-         * @description Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["createAgentVersion"];
         delete?: never;
@@ -2924,7 +2890,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an agent version
-         * @description Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteAgentVersion"];
         options?: never;
@@ -2943,7 +2909,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an agent version into the draft
-         * @description Restore a published version into the draft. Requires no runs in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Restore a published version into the draft. Requires no runs in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["restoreAgentVersion"];
         delete?: never;
@@ -2983,7 +2949,7 @@ export interface paths {
         put?: never;
         /**
          * Import a multi-package .afps-bundle
-         * @description Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current space. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).
+         * @description Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is activated in the current space. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).
          */
         post: operations["importBundle"];
         delete?: never;
@@ -3021,7 +2987,7 @@ export interface paths {
         };
         /**
          * List integration packages
-         * @description List the integration packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.
+         * @description List the integration packages available to the current space (`X-Space-Id`): system packages, plus organization packages placed in this space. Organization packages that exist but are not placed here are NOT returned — for the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listIntegrationPackages"];
         put?: never;
@@ -3050,13 +3016,13 @@ export interface paths {
         get: operations["getIntegrationPackage"];
         /**
          * Update an integration package
-         * @description Update an integration package in the organization packages. Built-in integration packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Update an integration package in the organization packages. Built-in integration packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         put: operations["updateIntegrationPackage"];
         post?: never;
         /**
          * Delete an integration package
-         * @description Delete an integration package from the organization packages. Built-in integration packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Delete an integration package from the organization packages. Built-in integration packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteIntegrationPackage"];
         options?: never;
@@ -3079,7 +3045,7 @@ export interface paths {
         put?: never;
         /**
          * Create a version from draft
-         * @description Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["createIntegrationPackageVersion"];
         delete?: never;
@@ -3124,7 +3090,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an integration package version
-         * @description Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteIntegrationPackageVersion"];
         options?: never;
@@ -3143,7 +3109,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an integration package version into the draft
-         * @description Restore a previously published version into the integration package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Restore a previously published version into the integration package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["restoreIntegrationPackageVersion"];
         delete?: never;
@@ -3161,7 +3127,7 @@ export interface paths {
         };
         /**
          * List MCP-server packages
-         * @description List the MCP-server packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.
+         * @description List the MCP-server packages available to the current space (`X-Space-Id`): system packages, plus organization packages placed in this space. Organization packages that exist but are not placed here are NOT returned — for the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listMcpServerPackages"];
         put?: never;
@@ -3190,13 +3156,13 @@ export interface paths {
         get: operations["getMcpServerPackage"];
         /**
          * Update an MCP-server package
-         * @description Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         put: operations["updateMcpServerPackage"];
         post?: never;
         /**
          * Delete an MCP-server package
-         * @description Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteMcpServerPackage"];
         options?: never;
@@ -3219,7 +3185,7 @@ export interface paths {
         put?: never;
         /**
          * Create a version from draft
-         * @description Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["createMcpServerPackageVersion"];
         delete?: never;
@@ -3264,7 +3230,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an MCP-server package version
-         * @description Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteMcpServerPackageVersion"];
         options?: never;
@@ -3283,7 +3249,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an MCP-server package version into the draft
-         * @description Restore a previously published version into the MCP-server package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Restore a previously published version into the MCP-server package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["restoreMcpServerPackageVersion"];
         delete?: never;
@@ -3301,7 +3267,7 @@ export interface paths {
         };
         /**
          * List skills
-         * @description List the skills available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.
+         * @description List the skills available to the current space (`X-Space-Id`): system packages, plus organization packages placed in this space. Organization packages that exist but are not placed here are NOT returned — for the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listSkills"];
         put?: never;
@@ -3330,13 +3296,13 @@ export interface paths {
         get: operations["getSkill"];
         /**
          * Update a skill
-         * @description Update a skill in the organization packages. Built-in skills cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Update a skill in the organization packages. Built-in skills cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         put: operations["updateSkill"];
         post?: never;
         /**
          * Delete a skill
-         * @description Delete a skill from the organization packages. Built-in skills cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Delete a skill from the organization packages. Built-in skills cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteSkill"];
         options?: never;
@@ -3359,7 +3325,7 @@ export interface paths {
         put?: never;
         /**
          * Create a version from draft
-         * @description Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["createSkillVersion"];
         delete?: never;
@@ -3404,7 +3370,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a skill version
-         * @description Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteSkillVersion"];
         options?: never;
@@ -3423,7 +3389,7 @@ export interface paths {
         put?: never;
         /**
          * Restore a skill version into the draft
-         * @description Restore a previously published version into the skill draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Restore a previously published version into the skill draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["restoreSkillVersion"];
         delete?: never;
@@ -3447,7 +3413,7 @@ export interface paths {
         head?: never;
         /**
          * Move a package to another home space
-         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. It also reconciles PLACEMENT in the same transaction: every space where the package is installed and which is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through the installation alone), and the destination's own share, if any, is dropped since a package is not offered to the space it lives in. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one uninstalls the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.
+         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.
          */
         patch: operations["movePackageHome"];
         trace?: never;
@@ -3527,7 +3493,7 @@ export interface paths {
         put?: never;
         /**
          * Share a package with a person or a space
-         * @description Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.
+         * @description Offer the package to a space — its AUDIENCE, never its activation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.
          */
         post: operations["sharePackage"];
         delete?: never;
@@ -3548,7 +3514,7 @@ export interface paths {
         post?: never;
         /**
          * Withdraw a package share
-         * @description Remove the offer AND the installation it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.
+         * @description Remove the offer AND the placement it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.
          */
         delete: operations["revokePackageShare"];
         options?: never;
@@ -4467,7 +4433,7 @@ export interface paths {
         put?: never;
         /**
          * Sweep an orphaned personal space now
-         * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space has it installed) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).
+         * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).
          */
         post: operations["sweepPersonalSpace"];
         delete?: never;
@@ -4484,8 +4450,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Discover packages and pending shares for a space
-         * @description Accessible to readers of the target space. The candidates are exactly what the caller could put there, so the listing never offers a package the install would refuse. For a TEAM destination: packages already PLACED in it (homed there or shared with it), plus packages the caller may place there — those whose home space grants them the type's `share` permission (`home_shareable`), since installing then creates the offer — plus the organization catalogue for an owner or admin, plus system packages. For a PERSONAL destination: placed packages only, plus system packages other than integrations — an offer into somebody's own space is somebody else's act, and arrives in `shared`. Each package type requires read permission in the target space. Installation remains subject to the target space permissions. Personal spaces remain private and API keys remain pinned to their space.
+         * One space's placements, and what the caller could still place there
+         * @description Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, offered here, or shipped with the platform, with `state` saying whether the space runs it — `none` is exactly a pending offer, taken up with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then creates the offer) and the organization catalogue for an owner or admin; for a PERSONAL destination, nothing beyond what is already placed — an offer into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.
          */
         get: operations["getSpaceLibrary"];
         put?: never;
@@ -4504,16 +4470,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List installed packages
-         * @description List packages installed in this space, with their model/proxy/version overrides. Returns only package types the caller has permission to read, within the credential scope ceiling.
+         * List this space's package placements
+         * @description List the packages PLACED in this space — active and inactive alike — with their `enabled` flag and their model/proxy overrides. A row survives deactivation, so an inactive entry still carries the settings the space chose. Returns only package types the caller has permission to read, within the credential scope ceiling.
          */
-        get: operations["listInstalledPackages"];
+        get: operations["listSpacePackages"];
         put?: never;
         /**
-         * Install a package
-         * @description Install a package into this space — the ONE installation door, for a personal space as for a team one. A package must be PLACED here first: homed in this space, or shared with it (`POST /api/packages/{scope}/{name}/shares`); system packages are placed everywhere. If it is not, this call can create the share itself, but only for a caller holding the package type's `share` permission in the package's HOME space — `403` otherwise, `404` when the package id is not reachable at all. An API key never carries `share`, so it installs only what is already placed. In the caller's OWN personal space the type's install grant is not required: ownership is the authorization, which is how a guest takes up a package offered to them. The installation carries no version: the package runs its latest published version, and its draft runs for whoever can write it.
+         * Activate a package in this space
+         * @description Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. A package must be PLACED here first: homed in this space, or shared with it (`POST /api/packages/{scope}/{name}/shares`); system packages are placed everywhere. If it is not, this call can create the share itself, but only for a caller holding the package type's `share` permission in the package's HOME space — `403` otherwise, `404` when the package id is not reachable at all. An API key never carries `share`, so it activates only what is already placed. In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest takes up a package offered to them. The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.
          */
-        post: operations["installPackage"];
+        post: operations["activatePackage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4528,21 +4494,21 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get installed package
-         * @description Get an installed package detail with its model and proxy overrides.
+         * Get one placement
+         * @description Get one of this space's package placements with its `enabled` flag and its model and proxy overrides.
          */
-        get: operations["getInstalledPackage"];
+        get: operations["getSpacePackage"];
         /**
-         * Update installed package overrides
-         * @description Update the model/proxy overrides, generation settings or enabled flag of an installed package. Two different acts share this body, and each answers to its own permission: `enabled` is a switch of PRESENCE, gated exactly as an install (`true`) or an uninstall (`false`) — so in the caller's OWN personal space ownership is the authorization and no grant is required, the same exemption `POST /api/spaces/{spaceId}/packages` applies. `modelId`, `proxyId` and `generationConfig` choose how a present package RUNS and need the type's `configure` grant everywhere, personal space included: selecting a model spends the organization's budget. A body carrying both must clear both gates. There is no version field: an installation carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.
+         * Configure how this space runs a placed package
+         * @description Update the model/proxy overrides and generation settings of a package PLACED in this space. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.
          */
-        put: operations["updateInstalledPackage"];
+        put: operations["updateSpacePackage"];
         post?: never;
         /**
-         * Uninstall a package
-         * @description Remove a package from this space.
+         * Deactivate a package in this space
+         * @description Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only revoking the share that placed the package removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row and is not a system package: an offer nobody has taken up is not on, so there is nothing to switch off, and it stays an offer rather than becoming a refusal its recipient never made.
          */
-        delete: operations["uninstallPackage"];
+        delete: operations["deactivatePackage"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4768,8 +4734,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Fetch live credentials + HTTP delivery plans for an installed integration
-         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: "link"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.
+         * Fetch live credentials + HTTP delivery plans for an active integration
+         * @description Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is ACTIVE in the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: "link"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.
          */
         get: operations["getIntegrationCredentials"];
         put?: never;
@@ -4790,7 +4756,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Force-refresh OAuth2 credentials for an installed integration
+         * Force-refresh OAuth2 credentials for an active integration
          * @description Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
          */
         post: operations["refreshIntegrationCredentials"];
@@ -4809,7 +4775,7 @@ export interface paths {
         };
         /**
          * Fetch the AFPS bundle bytes for a referenced mcp-server package
-         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).
+         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).
          */
         get: operations["getMcpServerBundle"];
         put?: never;
@@ -4944,11 +4910,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description Bulk integration connection readiness for an agent. `blocks_run`/`errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries every declared integration's management verdict for the Connexions tab. */
+        /** @description What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 412, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab. */
         AgentConnectionReadiness: {
-            /** @description True iff POST /api/agents/{scope}/{name}/run would reject with 412. */
+            /** @description True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (412), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty. */
             blocks_run: boolean;
-            /** @description Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors). Shares the single ResolutionFieldError component so the shape can't drift from the 412 error items. */
+            /** @description What blocks the run. The integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 412 error items. */
             errors: components["schemas"]["ResolutionFieldError"][];
             integrations: {
                 integration_id: string;
@@ -5029,16 +4995,18 @@ export interface components {
             version_count?: number;
             /** @description Source package ID if forked */
             forked_from?: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** @description Whether the active version has changes not yet archived as a version */
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
             effective_timeout_seconds: number;
+            /** @description Whether the agent is ACTIVE in the space this detail was read from — the same rule as `AgentListItem.active`: the placement row's `enabled` when the space has one, the deployment's default when it has none. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. Always emitted. */
+            active: boolean;
         };
         /** @description The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged. */
         AgentInputSettings: {
@@ -5068,8 +5036,8 @@ export interface components {
              */
             type: "agent" | "skill" | "mcp-server" | "integration";
             running_runs: number;
-            /** @description Whether the agent is activated in the space this listing was read from (an installed `space_packages` row, or a system package). The listing itself follows the READ rule — homed in this space, offered to it, or system — which a RUN does not: when this is `false` the launch routes answer `404 agent_not_found` here until somebody installs it through `POST /api/spaces/{spaceId}/packages`. Always emitted. */
-            installed: boolean;
+            /** @description Whether the agent is ACTIVE in the space this listing was read from — the placement row's `enabled` when the space has one, the deployment's default (a system package) when it has none. The listing itself follows the READ rule — homed in this space, offered to it, or system — which a RUN does not: when this is `false` the launch routes answer `404 agent_not_active_in_space` here until somebody activates it through `POST /api/spaces/{spaceId}/packages`. Always emitted. */
+            active: boolean;
             dependencies: {
                 /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: {
@@ -5420,7 +5388,7 @@ export interface components {
                 is_own: boolean;
             }[];
         };
-        /** @description Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default). */
+        /** @description Live credentials + per-auth HTTP delivery plans + per-auth expiries for an active integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default). */
         IntegrationCredentialsResponse: {
             auths: {
                 auth_key: string;
@@ -5458,7 +5426,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description Packages of a single type visible to the org. Each entry carries an `installed_in` array listing the caller-org spaces where the package is currently installed (empty array = not installed in any of the caller's spaces). */
+        /** @description Packages of a single type visible to the org. Each entry carries its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`) and whether that space runs it (`state`). */
         LibraryPackageList: {
             /** @description Package id (`pkg_…`). */
             id: string;
@@ -5470,14 +5438,14 @@ export interface components {
             name: string;
             /** @description Description from the package draft manifest; empty string when not provided. */
             description: string;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
-            /** @description Space ids (`spc_…`) belonging to the caller's org where this package is installed. */
-            installed_in: string[];
+            /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (the organization catalogue they administer, or a package whose home grants them `<type>:share`). */
+            placements: components["schemas"]["PackagePlacement"][];
         }[];
         /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
         ModelGenerationCapabilities: {
@@ -5690,11 +5658,11 @@ export interface components {
             auto_installed: boolean;
             /** @description Source package ID if forked */
             forked_from: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             /** Format: date-time */
             createdAt: string;
@@ -5732,11 +5700,11 @@ export interface components {
             has_unarchived_changes?: boolean;
             /** @description Source package ID if forked */
             forked_from: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
+            /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
             agents: {
                 id: string;
@@ -5841,12 +5809,32 @@ export interface components {
             bytes_base64?: string;
         };
         PackageFileWriteOperation: components["schemas"]["PackageFileWriteEntry"] | components["schemas"]["PackageFileDeleteEntry"] | components["schemas"]["PackageFileMoveEntry"];
-        /** @description One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to install; it is never an installation, and no execution path consults it. */
+        /** @description One (package, space) cell of the library map: why the package reaches that space, and whether the space runs it. */
+        PackagePlacement: {
+            /** @description Space id (`spc_…`) — always one the caller reads. */
+            space_id: string;
+            /**
+             * @description WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (it was offered to this space), `system` (a built-in package, readable in every space).
+             * @enum {string}
+             */
+            via: "home" | "shared" | "system";
+            /**
+             * @description Whether the space RUNS it. `active`: yes. `inactive`: it was switched off here, and its per-space model, proxy and input settings are kept. `none`: nothing has switched it on yet — a pending offer is exactly this. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.
+             * @enum {string}
+             */
+            state: "active" | "inactive" | "none";
+            /** @description Who offered it — on `via: "shared"` placements only. `null` there when the offer came from a home move rather than from a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`. */
+            shared_by: {
+                user_id: string;
+                name: string;
+            } | null;
+        };
+        /** @description One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it. */
         PackageShare: {
             /** @enum {string} */
             object: "package_share";
             target: components["schemas"]["ShareTargetView"];
-            /** @description Who shared it. `null` once that account is gone. */
+            /** @description Who shared it. `null` once that account is gone, and `null` once they have left this organization. */
             shared_by: {
                 user_id: string;
                 name: string;
@@ -6329,7 +6317,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description A package installed in a space with its model/proxy overrides. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it. */
+        /** @description A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the share that placed the package is revoked. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it. */
         SpacePackage: {
             /** @enum {string} */
             object?: "space_package";
@@ -6349,7 +6337,7 @@ export interface components {
             package_type: "agent" | "skill" | "mcp-server" | "integration";
             /** @enum {string} */
             package_source: "system" | "local";
-            /** @description Raw draft manifest JSONB for the installed package. */
+            /** @description Raw draft manifest JSONB for the placed package. */
             draft_manifest: Record<string, never> | null;
         };
         SpaceSweepResult: {
@@ -6357,9 +6345,9 @@ export interface components {
             object: "space_sweep";
             /** @description The personal space that was swept and deleted */
             space_id: string;
-            /** @description Packages this space homed that another space has installed: handed to the organization catalogue (`home_space_id = null`) rather than deleted */
+            /** @description Packages this space homed that another space has placed: handed to the organization catalogue (`home_space_id = null`) rather than deleted */
             rehomed_packages: number;
-            /** @description Packages this space homed that no other space had installed: deleted */
+            /** @description Packages this space homed that no other space had placed: deleted */
             deleted_packages: number;
         };
         TestResult: {
@@ -6731,7 +6719,7 @@ export interface components {
         PackageScope: string;
         /** @description Package name */
         PackageName: string;
-        /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+        /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
         PackageActiveFilter: "true";
     };
     requestBodies: never;
@@ -7123,7 +7111,7 @@ export interface operations {
                      *           "version": "1.2.0",
                      *           "type": "agent",
                      *           "running_runs": 1,
-                     *           "installed": true,
+                     *           "active": true,
                      *           "dependencies": {
                      *             "skills": {},
                      *             "mcp_servers": {},
@@ -7146,7 +7134,7 @@ export interface operations {
                      *           "version": "2.0.0",
                      *           "type": "agent",
                      *           "running_runs": 0,
-                     *           "installed": true,
+                     *           "active": true,
                      *           "dependencies": {
                      *             "skills": {
                      *               "@appstrate/summarize": "^1.0.0"
@@ -7219,6 +7207,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, or `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent. */
             403: components["responses"]["Forbidden"];
+            /** @description `agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. */
             404: components["responses"]["NotFound"];
             /** @description The bundle cannot be assembled from stored artifacts. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY` */
             422: {
@@ -7838,6 +7827,7 @@ export interface operations {
             };
             /** @description Insufficient permissions — including `draft_not_writable` when `version=draft`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE (the message names it). */
             403: components["responses"]["Forbidden"];
+            /** @description `agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`. */
             404: components["responses"]["NotFound"];
             /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference) */
             409: {
@@ -8148,6 +8138,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Insufficient permissions — including `draft_not_writable` when `version_override` is `draft` and the caller cannot WRITE the agent, or a `dependency_overrides` entry is `draft` on a dependency they cannot WRITE (the message names it). Authority is checked at this write; the scheduler does not re-check at fire time. */
             403: components["responses"]["Forbidden"];
+            /** @description `no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`). */
             404: components["responses"]["NoPublishedVersion"];
             429: components["responses"]["RateLimited"];
         };
@@ -11550,116 +11541,6 @@ export interface operations {
             };
         };
     };
-    activateIntegration: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": Record<string, never>;
-            };
-        };
-        responses: {
-            /** @description Activated — returns the bare integration detail resource */
-            201: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        manifest: {
-                            [key: string]: unknown;
-                        };
-                        auths: {
-                            auth_key: string;
-                            /**
-                             * @description Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`.
-                             * @enum {string}
-                             */
-                            type: "oauth2" | "api_key" | "basic" | "mtls" | "custom";
-                            required: boolean;
-                            scopes: string[];
-                            /** @description RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC. */
-                            resource: string | null;
-                            connections: {
-                                /** Format: uuid */
-                                id: string;
-                                packageId: string;
-                                auth_key: string;
-                                account_id: string;
-                                identity_claims: {
-                                    [key: string]: unknown;
-                                } | null;
-                                scopes_granted: string[];
-                                needs_reconnection: boolean;
-                                /** Format: date-time */
-                                expiresAt: string | null;
-                                /** @enum {string} */
-                                owner_type: "user" | "end_user";
-                                owner_id: string;
-                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
-                                owner_name?: string | null;
-                                label?: string | null;
-                                shared_with_org?: boolean;
-                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
-                                client_ref: string | null;
-                                /** Format: date-time */
-                                createdAt: string;
-                                /** Format: date-time */
-                                updatedAt: string;
-                            }[];
-                            /** @description Server-authoritative usability: true when ≥1 connection here is not flagged for reconnection. Single source so clients never re-derive connection state. Agent-agnostic — a run's authoritative readiness still comes from validateInlineRun. */
-                            ready: boolean;
-                            has_oauth_client: boolean;
-                            /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when the org has not registered its own client, so the auth is connectable without a pre-registered org client. */
-                            has_system_client: boolean;
-                            /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
-                            client_auto_provisioned: boolean;
-                        }[];
-                        tool_catalog: {
-                            name: string;
-                            description?: string;
-                            policy?: {
-                                required_scopes?: {
-                                    [key: string]: string[];
-                                };
-                            };
-                        }[];
-                        default_tools?: string[] | "*";
-                        allow_undeclared_tools: boolean;
-                        active: boolean;
-                        block_user_connections: boolean;
-                        /** Format: uri */
-                        platform_redirect_uri: string;
-                    };
-                };
-            };
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Wrong package type (not an integration) */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     listIntegrationClients: {
         parameters: {
             query?: never;
@@ -12244,45 +12125,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    deactivateIntegration: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deactivated — empty response. The integration detail remains GET-able. */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description Wrong package type */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     getIntegrationOrgDefault: {
         parameters: {
             query?: never;
@@ -12744,7 +12586,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Organization catalogue snapshot. Carries no `shared` section. */
+            /** @description Organization placement map. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -12778,8 +12620,22 @@ export interface operations {
                      *             "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *             "home_writable": true,
                      *             "home_shareable": true,
-                     *             "installed_in": [
-                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *             "placements": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "via": "home",
+                     *                 "state": "active",
+                     *                 "shared_by": null
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "via": "shared",
+                     *                 "state": "none",
+                     *                 "shared_by": {
+                     *                   "user_id": "usr_1",
+                     *                   "name": "Alex"
+                     *                 }
+                     *               }
                      *             ]
                      *           }
                      *         ],
@@ -12795,9 +12651,19 @@ export interface operations {
                      *             "home_space_id": null,
                      *             "home_writable": false,
                      *             "home_shareable": false,
-                     *             "installed_in": [
-                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                     *               "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
+                     *             "placements": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "via": "system",
+                     *                 "state": "active",
+                     *                 "shared_by": null
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "via": "system",
+                     *                 "state": "inactive",
+                     *                 "shared_by": null
+                     *               }
                      *             ]
                      *           }
                      *         ]
@@ -13368,7 +13234,7 @@ export interface operations {
                         }[];
                         /** @description True when the skill list was capped (full list via `listSkills`). */
                         skills_truncated: boolean;
-                        /** @description Total installed skills before the cap. */
+                        /** @description Total active skills before the cap. */
                         skills_total: number;
                     };
                 };
@@ -16028,7 +15894,7 @@ export interface operations {
     listAgentPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+                /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -16566,7 +16432,7 @@ export interface operations {
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
-                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted. */
+                        /** @description Non-blocking import-time warnings (AFPS §7.7) — e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted. */
                         warnings?: string[];
                     };
                 };
@@ -16640,11 +16506,11 @@ export interface operations {
                             /** @description Package type (agent, skill, mcp-server, integration). Present on `inserted` entries only. */
                             type?: string;
                         }[];
-                        /** @description Whether the root was installed in the calling space (false if it was already installed). */
-                        root_installed: boolean;
+                        /** @description Whether the root package is ACTIVE in the calling space after the import. False when the root lives in another space and the caller may not offer it out of that home — the import still landed every package it carried. */
+                        root_active: boolean;
                         root_package_id: string;
                         root_version: string;
-                        /** @description Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded. */
+                        /** @description Non-blocking import-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded. */
                         warnings: string[];
                     };
                 };
@@ -16708,7 +16574,7 @@ export interface operations {
                         type: string;
                         /** @description Imported manifest version (semver). Omitted when the manifest carries no version field. */
                         version?: string;
-                        /** @description Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted. */
+                        /** @description Non-blocking import-time warnings (AFPS §7.7) — e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted. */
                         warnings?: string[];
                     };
                 };
@@ -16739,7 +16605,7 @@ export interface operations {
     listIntegrationPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+                /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -17231,7 +17097,7 @@ export interface operations {
     listMcpServerPackages: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+                /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -17702,7 +17568,7 @@ export interface operations {
     listSkills: {
         parameters: {
             query?: {
-                /** @description When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row. */
+                /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
                 active?: components["parameters"]["PackageActiveFilter"];
             };
             header?: {
@@ -18261,6 +18127,26 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json. */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "about:blank",
+                     *       "title": "Invalid MCP Server Bundle",
+                     *       "status": 422,
+                     *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
+                     *       "code": "bundle_invalid",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listPackageFiles: {
@@ -18294,7 +18180,7 @@ export interface operations {
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     /** @description Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact's integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag. */
                     ETag?: string;
-                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read. */
+                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being deactivated in the space. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read. */
                     "Cache-Control"?: string;
                     /** @description Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse this body across organizations or spaces. */
                     Vary?: string;
@@ -18372,7 +18258,7 @@ export interface operations {
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     /** @description Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match. */
                     ETag?: string;
-                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space. */
+                    /** @description Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being deactivated in the space. */
                     "Cache-Control"?: string;
                     /** @description Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse these bytes across organizations or spaces. */
                     Vary?: string;
@@ -18599,7 +18485,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Share (and any installation behind it) removed. */
+            /** @description Share (and any placement behind it) removed. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -19821,7 +19707,7 @@ export interface operations {
                          * @enum {string}
                          */
                         stage?: "draft" | "published";
-                        /** @description Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the space, then to the `latest` dist-tag. */
+                        /** @description Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the `latest` dist-tag. */
                         spec?: string;
                         /** @description Optional SRI digest (`sha256-…`) the runner received with the bundle download. Triggers a structured warn-log when the resolved version's stored artifact integrity diverges (dist-tag drift, mid-flight draft edit). Never a rejection signal. */
                         integrity?: string;
@@ -21918,7 +21804,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Space library snapshot: the matrix, plus the offers awaiting a decision. */
+            /** @description This space's placement map, plus what the caller could still place here. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -21952,8 +21838,22 @@ export interface operations {
                      *             "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *             "home_writable": true,
                      *             "home_shareable": true,
-                     *             "installed_in": [
-                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
+                     *             "placements": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "via": "home",
+                     *                 "state": "active",
+                     *                 "shared_by": null
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "via": "shared",
+                     *                 "state": "none",
+                     *                 "shared_by": {
+                     *                   "user_id": "usr_1",
+                     *                   "name": "Alex"
+                     *                 }
+                     *               }
                      *             ]
                      *           }
                      *         ],
@@ -21969,28 +21869,23 @@ export interface operations {
                      *             "home_space_id": null,
                      *             "home_writable": false,
                      *             "home_shareable": false,
-                     *             "installed_in": [
-                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-                     *               "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
+                     *             "placements": [
+                     *               {
+                     *                 "space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *                 "via": "system",
+                     *                 "state": "active",
+                     *                 "shared_by": null
+                     *               },
+                     *               {
+                     *                 "space_id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                     *                 "via": "system",
+                     *                 "state": "inactive",
+                     *                 "shared_by": null
+                     *               }
                      *             ]
                      *           }
                      *         ]
-                     *       },
-                     *       "shared": [
-                     *         {
-                     *           "id": "@acme/weekly-digest",
-                     *           "type": "agent",
-                     *           "source": "local",
-                     *           "name": "Weekly Digest",
-                     *           "description": "Summarises the week's threads.",
-                     *           "space_id": "spc_9a1b3c5d-7e9f-4a1b-8c3d-5e7f9a1b3c5d",
-                     *           "personal": true,
-                     *           "shared_by": {
-                     *             "user_id": "usr_1",
-                     *             "name": "Alex"
-                     *           }
-                     *         }
-                     *       ]
+                     *       }
                      *     }
                      */
                     "application/json": {
@@ -22010,25 +21905,6 @@ export interface operations {
                             "mcp-server": components["schemas"]["LibraryPackageList"];
                             integration: components["schemas"]["LibraryPackageList"];
                         };
-                        /** @description Packages OFFERED to this space and not installed in it — "shared with me", i.e. the offers still waiting on a decision, and their ONLY place in this response: a package whose sole placement here is an untaken offer is deliberately absent from `packages`, so one act is never behind two buttons. Installing it (`POST /api/spaces/{spaceId}/packages`) moves it out of this list and into `packages` with an `installed_in` entry. Empty when nobody has offered anything. */
-                        shared: {
-                            /** @description Package id (`@scope/name`). */
-                            id: string;
-                            /** @enum {string} */
-                            type: "agent" | "skill" | "mcp-server" | "integration";
-                            source: string;
-                            name: string;
-                            description: string;
-                            /** @description The space the package is offered to (`spc_…`) — always one the caller reads, so no private id is disclosed. */
-                            space_id: string;
-                            /** @description The offered space is the caller's OWN personal space. Either way the offer is taken up with `POST /api/spaces/{spaceId}/packages` on `space_id` — there is no separate accept route; in a personal space the owner needs no install grant, in a team space the caller does. */
-                            personal: boolean;
-                            /** @description Who shared it. `null` once that account is gone. */
-                            shared_by: {
-                                user_id: string;
-                                name: string;
-                            } | null;
-                        }[];
                     };
                 };
             };
@@ -22037,7 +21913,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    listInstalledPackages: {
+    listSpacePackages: {
         parameters: {
             query?: {
                 /** @description Filter by package type */
@@ -22054,7 +21930,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Installed packages list */
+            /** @description Placement list */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -22075,7 +21951,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    installPackage: {
+    activatePackage: {
         parameters: {
             query?: never;
             header?: {
@@ -22096,7 +21972,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Package installed */
+            /** @description Already active here — nothing changed. A package the deployment switches on without any placement row (a system package, an integration named by `SYSTEM_INTEGRATIONS`) was active before this call, so its first activation answers `200` too and writes no audit entry. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpacePackage"];
+                };
+            };
+            /** @description This call turned the package on here — it was not active before, and now it is. */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -22108,21 +21994,32 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the package type's install grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space. */
+            /** @description The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Package already installed in this space */
-            409: {
+            /** @description The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json. */
+            422: {
                 headers: {
+                    "Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {
+                    /**
+                     * @example {
+                     *       "type": "about:blank",
+                     *       "title": "Invalid MCP Server Bundle",
+                     *       "status": 422,
+                     *       "detail": "MCP-server package '@myorg/tools' has no activatable published version.",
+                     *       "code": "bundle_invalid",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
         };
     };
-    getInstalledPackage: {
+    getSpacePackage: {
         parameters: {
             query?: never;
             header?: {
@@ -22140,7 +22037,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Installed package detail */
+            /** @description Placement detail */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -22155,7 +22052,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    updateInstalledPackage: {
+    updateSpacePackage: {
         parameters: {
             query?: never;
             header?: {
@@ -22177,12 +22074,11 @@ export interface operations {
                     generationConfig?: components["schemas"]["ModelGenerationSettings"] | null;
                     modelId?: string | null;
                     proxyId?: string | null;
-                    enabled?: boolean;
                 };
             };
         };
         responses: {
-            /** @description Updated installed package */
+            /** @description Updated placement */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -22194,12 +22090,12 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description The caller lacks the grant the body's fields require: the type's install/uninstall grant for `enabled`, its `configure` grant for `modelId` / `proxyId` / `generationConfig`. */
+            /** @description The caller lacks the package type's `configure` grant in this space. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
-    uninstallPackage: {
+    deactivatePackage: {
         parameters: {
             query?: never;
             header?: {
@@ -22217,7 +22113,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Package uninstalled */
+            /** @description Switched off here, or already off. No audit entry when nothing changed. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -23079,7 +22975,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. */
+            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not active in the space. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23135,7 +23031,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not installed. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. A fourth cause is unique to this operation: `connect_run_no_refresh` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched. */
+            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not active in the space. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. A fourth cause is unique to this operation: `connect_run_no_refresh` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23194,7 +23090,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Agent does not reference this mcp-server through an installed integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired). */
+            /** @description Agent does not reference this mcp-server through an active integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired). */
             404: {
                 headers: {
                     [name: string]: unknown;

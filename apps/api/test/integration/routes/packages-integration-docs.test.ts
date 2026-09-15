@@ -15,7 +15,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import {
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackage,
   seedPackageShare,
   seedPackageVersion,
@@ -145,7 +145,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
         draftContent: DOC,
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
       await uploadPackageFiles("integrations", ctx.orgId, id, {
         "manifest.json": encoder.encode(JSON.stringify(integrationManifest(id), null, 2)),
         "INTEGRATION.md": encoder.encode(DOC),
@@ -230,7 +230,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
         draftContent: JSON.stringify(integrationManifest(id), null, 2),
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
       await uploadPackageFiles("integrations", ctx.orgId, id, {
         "manifest.json": encoder.encode(JSON.stringify(integrationManifest(id), null, 2)),
         "server/index.js": encoder.encode("export default 1;"),
@@ -302,7 +302,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
         draftContent: "# Draft docs, edited since publish\n",
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
 
       const zip = zipArtifact(
         {
@@ -357,7 +357,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       draftContent: JSON.stringify(integrationManifest(id), null, 2),
     });
     await seedPackageShare(ctx.defaultSpaceId, id);
-    await seedInstalledPackage(ctx.defaultSpaceId, id);
+    await seedSpacePackage(ctx.defaultSpaceId, id);
     await uploadPackageFiles("integrations", ctx.orgId, id, {
       "manifest.json": encoder.encode("{}"),
       "INTEGRATION.md": encoder.encode(DOC),

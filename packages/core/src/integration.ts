@@ -3,7 +3,7 @@
 
 /**
  * AFPS Integration manifest — Zod schema, TypeScript types, and the
- * install-time scope/tool helpers Appstrate builds on top of the spec.
+ * import-time scope/tool helpers Appstrate builds on top of the spec.
  *
  * Appstrate fully adopts AFPS (`docs`/`afps-spec/spec.md` §2, §3.5, §7)
  * as its integration manifest format. The base schemas are imported from
@@ -101,7 +101,7 @@ export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = [
  * `$ref` whose string value does NOT start with `#`. Used by the §7.5 / §8.7
  * SSRF guard to forbid non-fragment `$ref` inside `credentials.schema` —
  * external `$ref` would otherwise let a malicious manifest steer the validator
- * into a network fetch at install time.
+ * into a network fetch at import time.
  */
 function walkForNonFragmentRefs(
   node: unknown,
@@ -158,7 +158,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // (1c) §7.6 install gate — `delivery.http.in` other than "header" is not
     // yet implemented by the Appstrate sidecar MITM injector (only "header"
     // dispatch exists in `packages/connect/src/afps-delivery.ts`). Rejecting
-    // at install time gives manifest authors a loud error instead of a
+    // at import time gives manifest authors a loud error instead of a
     // silent runtime no-op.
     const httpDelivery = (
       auth as { delivery?: { http?: { in?: string; name?: string; prefix?: string } } }
@@ -195,7 +195,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // (1e) §7.2 + §7.6 install gate — `mtls` + `delivery.http` cannot be
     // honoured: the MITM proxy terminates upstream TLS and re-fetches, so
     // there is no first-class way to drive a client-cert handshake on the
-    // upstream leg. Reject at install time; the integration author should
+    // upstream leg. Reject at import time; the integration author should
     // use `delivery.files` to deliver the cert + key to the spawned runner
     // and let the runner's own HTTP client perform the mtls handshake.
     if (auth.type === "mtls") {
@@ -750,7 +750,7 @@ function readApiMetaAuths(
  * expose api_call. Returns `[]` when the integration declares none.
  *
  * Each opted-in auth must reference a declared `auths.{key}`; unknown keys are
- * skipped (the install-time superRefine rejects them, so this is defence in
+ * skipped (the import-time superRefine rejects them, so this is defence in
  * depth for already-stored manifests). Tool naming: a single opted-in auth →
  * `api_call`; multiple → an auth-scoped `api_call__{token}` per auth. Short
  * auth keys remain verbatim; long AFPS-valid keys use a stable bounded token
@@ -767,7 +767,7 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
     try {
       assertUniqueApiToolAuthTokens(authKeys);
     } catch {
-      // The install-time schema reports the exact collision. Already-stored or
+      // The import-time schema reports the exact collision. Already-stored or
       // hand-constructed manifests fail closed by exposing no synthetic tools.
       return [];
     }
@@ -795,7 +795,7 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
  * field on the integration manifest (validated by {@link integrationManifestSchema}
  * but not yet part of the base structural type), so it is read via a narrowed
  * cast. Returns the wildcard literal `"*"`, a string array, or `undefined` when
- * absent / malformed (defence in depth — the install-time superRefine already
+ * absent / malformed (defence in depth — the import-time superRefine already
  * rejects malformed values).
  */
 export function readDefaultTools(

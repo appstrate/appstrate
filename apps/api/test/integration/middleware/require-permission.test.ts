@@ -19,7 +19,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -156,7 +156,7 @@ describe("RBAC — Permission enforcement", () => {
         homeSpaceId: owner.defaultSpaceId,
         orgId: owner.orgId,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
         "@rbac-test/test-agent",
       );
@@ -179,7 +179,7 @@ describe("RBAC — Permission enforcement", () => {
         homeSpaceId: owner.defaultSpaceId,
         orgId: owner.orgId,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
         "@rbac-test/test-agent",
       );

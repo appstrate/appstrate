@@ -588,7 +588,7 @@ export const mePaths = {
                   },
                   skills_total: {
                     type: "integer",
-                    description: "Total installed skills before the cap.",
+                    description: "Total active skills before the cap.",
                   },
                 },
               },

@@ -32,7 +32,7 @@ import {
 import {
   seedAgent,
   seedApiKey,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackageShare,
   seedRun,
   seedSpace,
@@ -674,7 +674,7 @@ describe("view as role", () => {
     });
     expect(created.status, await created.clone().text()).toBe(201);
     await seedPackageShare(vault.id, "@view-as-source/shared");
-    await seedInstalledPackage(vault.id, "@view-as-source/shared");
+    await seedSpacePackage(vault.id, "@view-as-source/shared");
 
     // Persona `builder` in the previewing owner's OWN org, so the write half of
     // the fork is satisfied there and the only question left is the source org.
@@ -849,7 +849,7 @@ describe("view as role", () => {
       // depends on the persona's overlay and on nothing else.
       const closed = await space("Closed", "closed");
       await seedAgent({ id: "@view-as/in-closed", homeSpaceId: closed.id, orgId: owner.orgId });
-      await seedInstalledPackage(closed.id, "@view-as/in-closed");
+      await seedSpacePackage(closed.id, "@view-as/in-closed");
 
       const persona = {
         orgId: owner.orgId,

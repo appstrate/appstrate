@@ -343,7 +343,7 @@ function projectConnectionsUsed(
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
   return {
     ...runRowToWireDto(r.run),
-    // Resolved input includes editor-imposed values. Current installation locks
+    // Resolved input includes editor-imposed values. The placement's current locks
     // cannot protect historical values after an unlock or reinstall, so readers
     // without agents:read get no registered-agent input. Inline input is entirely
     // caller-provided. Storage remains complete for execution and server-side rerun.

@@ -337,7 +337,7 @@ const integrationDetailSchema = {
     allow_undeclared_tools: { type: "boolean" },
     // Activation state in the current space — resource state shared
     // with the list endpoint, returned by every detail-shaped response
-    // (GET detail, POST activate, PATCH settings).
+    // (GET detail, PATCH settings).
     active: { type: "boolean" },
     // Admin gate (`block_user_connections`): when `true`, only org admins
     // may create personal connections. `false` when not activated.
@@ -525,87 +525,6 @@ export const integrationsPaths = {
           description: "Integration detail",
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationDetailSchema } },
-        },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Wrong package type",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/integrations/{packageId}/activate": {
-    post: {
-      operationId: "activateIntegration",
-      tags: ["Integrations"],
-      summary: "Activate an integration in the current space",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        packageIdParam,
-      ],
-      requestBody: {
-        required: false,
-        content: {
-          "application/json": {
-            schema: { type: "object", additionalProperties: false },
-          },
-        },
-      },
-      responses: {
-        "201": {
-          // Activation is a flag upsert (enabled=true) — idempotent: repeat
-          // activation of an already-active integration succeeds (201), it is
-          // not a 409.
-          description: "Activated — returns the bare integration detail resource",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              // Bare integration resource — same serializer as
-              // GET /integrations/:packageId. Activation state is the
-              // resource's `active` field, not an operation scrap (#657).
-              schema: integrationDetailSchema,
-            },
-          },
-        },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Wrong package type (not an integration)",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-      },
-    },
-  },
-  "/api/integrations/{packageId}/deactivate": {
-    delete: {
-      operationId: "deactivateIntegration",
-      tags: ["Integrations"],
-      summary: "Deactivate an integration in the current space (non-destructive)",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        packageIdParam,
-      ],
-      responses: {
-        "204": {
-          // Deactivation flips `enabled` to false (an upsert — the row is the
-          // explicit opt-out, persisted, not deleted: deleting it would let a
-          // system integration re-trigger its auto-active default). The strict
-          // mutation convention still applies: DELETE → 204 empty (#657). The
-          // integration detail stays GET-able afterwards (connections, OAuth
-          // clients, pins and org defaults survive) and serves `active: false`.
-          description: "Deactivated — empty response. The integration detail remains GET-able.",
-          headers: STD_RESPONSE_HEADERS,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -1286,10 +1205,10 @@ export const integrationsPaths = {
     get: {
       operationId: "listAgentsConsumingIntegration",
       tags: ["Integrations"],
-      summary: "List installed agents whose deps declare this integration",
+      summary: "List the space's agents whose deps declare this integration",
       description:
         "Drives the centralised pin management table on the integration detail page " +
-        "(R2): admins pick an installed-agent target without leaving the integration view.",
+        "(R2): admins pick an agent target without leaving the integration view.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

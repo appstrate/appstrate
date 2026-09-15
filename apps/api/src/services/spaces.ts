@@ -21,6 +21,7 @@ import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
+import { reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
@@ -634,13 +635,24 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  * Empty a personal space of the packages it HOMES and then delete it.
  *
  * A homed package's write authority is this space (§6.9), so it cannot follow
- * the space out and `deleteSpace` refuses while one exists. The rule:
+ * the space out and `deleteSpace` refuses while one exists. The rule, and the
+ * question it turns on is TAKEN UP ELSEWHERE — does another space of the
+ * organization hold a `space_packages` row for it:
  *
- *   - installed in ANOTHER space → `home_space_id = NULL`, the organization
- *     catalogue. Somebody else is running it, so it is already not private, and
- *     owners/admins are the right authority for an author who has left.
- *   - installed nowhere else → deleted, with its published artifacts enqueued
- *     for physical removal. It was private to a person who is gone.
+ *   - yes → `home_space_id = NULL`, the organization catalogue, AND the offer
+ *     that keeps each of those spaces placed
+ *     ({@link reconcilePlacementsAfterRehome}). Somebody else is running it, so
+ *     it is already not private, and owners/admins are the right authority for
+ *     an author who has left. The offer is not a courtesy: a row without one is
+ *     a placement nothing places, and the space would silently lose the package
+ *     from every page while its schedules failed each tick.
+ *   - no → deleted, with its published artifacts enqueued for physical
+ *     removal. It was private to a person who is gone. An OFFER nobody took up
+ *     does not save it, deliberately: nothing runs on an offer, and keeping a
+ *     dead author's draft alive because somebody was once shown its name would
+ *     hand the organization catalogue a package no one asked for. The revoke
+ *     of that offer is the space's own act and this one does not pre-empt it —
+ *     the `package_shares` row goes with the package, by cascade.
  *
  * ONE transaction, and every refusal comes BEFORE the first package mutation.
  * Both properties are load-bearing:
@@ -721,6 +733,19 @@ export async function emptyAndDeletePersonalSpace(
           .update(packages)
           .set({ homeSpaceId: null, updatedAt: new Date() })
           .where(eq(packages.id, pkg.id));
+        // Re-homing MOVES one of the two placements, and every space that
+        // still holds a `space_packages` row needs the other or it is left
+        // with a placement nothing places. The same reconciliation the home
+        // MOVE runs, called for the same reason — see
+        // `reconcilePlacementsAfterRehome`. Without it this sweeper was the
+        // one live producer of the orphan rows the rest of the platform
+        // refuses to honour, and the spaces still running the package would
+        // have lost it from every page while their schedules failed each tick.
+        await reconcilePlacementsAfterRehome(tx, {
+          packageId: pkg.id,
+          orgId,
+          newHomeSpaceId: null,
+        });
         rehomedPackages++;
         continue;
       }

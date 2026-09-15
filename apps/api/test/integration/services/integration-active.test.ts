@@ -57,9 +57,17 @@ describe("integration activation precedence", () => {
       },
       { id: DCR_INTEGRATION },
     ]);
-    await seedPackage({ id: SYSTEM_INTEGRATION, orgId: ctx.orgId, type: "integration" });
-    await seedPackage({ id: DCR_INTEGRATION, orgId: ctx.orgId, type: "integration" });
-    await seedPackage({ id: PLAIN_INTEGRATION, orgId: ctx.orgId, type: "integration" });
+    // Homed in the space under test: a `space_packages` row only speaks for a
+    // space the package is PLACED in, and what these cases separate is the
+    // activation precedence, not the placement.
+    const home = {
+      orgId: ctx.orgId,
+      type: "integration" as const,
+      homeSpaceId: ctx.defaultSpaceId,
+    };
+    await seedPackage({ id: SYSTEM_INTEGRATION, ...home });
+    await seedPackage({ id: DCR_INTEGRATION, ...home });
+    await seedPackage({ id: PLAIN_INTEGRATION, ...home });
   });
 
   afterEach(() => {

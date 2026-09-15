@@ -109,7 +109,7 @@ export function createUserAgentsRouter() {
       // Return the updated agent resource bare — same serializer as the GET
       // agent detail (issue #657). The new skill references appear in
       // `dependencies.skills`. `requireAccess: false`: the caller just wrote
-      // this agent in their org, so the app-install gate must not 404 a
+      // this agent in their org, so the space activation gate must not 404 a
       // successful write.
       const detail = await buildAgentDetailDto(c, {
         itemId: packageId,

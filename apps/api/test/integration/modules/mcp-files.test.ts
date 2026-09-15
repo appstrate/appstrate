@@ -34,7 +34,7 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedInstalledPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
 import { setPlatformApp } from "../../../src/lib/platform-app.ts";
 import { resetCatalog } from "../../../src/modules/mcp/catalog.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
@@ -550,7 +550,7 @@ describe("mcp file-backed package workflow", () => {
   it("hides private catalog conflicts and rejects importing a package confined to another space", async () => {
     const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
     await seedPackage({ id: "@mcppkgdoc/file-server", orgId: ctx.orgId, type: "mcp-server" });
-    await seedInstalledPackage(hidden.id, "@mcppkgdoc/file-server");
+    await seedSpacePackage(hidden.id, "@mcppkgdoc/file-server");
     const runId = await seedRun(scope);
     const docId = await publishDoc(
       scope,
@@ -583,7 +583,7 @@ describe("mcp file-backed package workflow", () => {
     // does: the offer is written with the installation when the caller may make
     // one. The REST import route passes `holdsPackageShareAuthority`; this tool
     // passed NOTHING, so `mayShareRoot?.() ?? false` was the fail-closed
-    // answer for every caller and `root_installed` was permanently `false`
+    // answer for every caller and `root_active` was permanently `false`
     // here. One act, two behaviours — decided by which door asked.
     //
     // The fixture puts the root in the ORGANIZATION CATALOGUE (`home_space_id
@@ -613,7 +613,7 @@ describe("mcp file-backed package workflow", () => {
     });
     const result = toolData(envelope);
     expect(result.isError, JSON.stringify(envelope)).toBe(false);
-    expect(result.data).toMatchObject({ root_package_id: packageId, root_installed: true });
+    expect(result.data).toMatchObject({ root_package_id: packageId, root_active: true });
 
     // The offer AND the installation, in the same transaction — asserting only
     // the flag would pass on an install that placed the package with no

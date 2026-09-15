@@ -20,15 +20,13 @@ import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import {
   listReadablePackages,
-  updateInstalledPackage,
-  getInstalledPackageSettings,
-  hasPackageAccess,
+  updateSpacePackage,
+  getSpacePackageSettings,
 } from "../services/space-packages.ts";
-import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
-import { requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
@@ -200,7 +198,7 @@ export function createAgentsRouter() {
 
     // Single query: the placement rule (homed here ∨ offered here ∨ system) via
     // LEFT JOIN — what this space READS. Running is a second question, answered
-    // per row by `installed`.
+    // per row by `active`.
     const [rows, runningCounts] = await Promise.all([
       listReadablePackages(scope, "agent"),
       getRunningRunCounts(scope, runVisibilityFilter(c)),
@@ -231,11 +229,11 @@ export function createAgentsRouter() {
           integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },
         running_runs: runningCounts[row.id] ?? 0,
-        // Readable here is not runnable here: an agent homed in this space and
-        // installed in none of them is listed and refused a run. Saying so on
-        // the row is what lets a launcher grey its own control out instead of
-        // discovering the refusal on click.
-        installed: row.installed,
+        // Readable here is not runnable here: an agent placed in this space but
+        // switched off is listed and refused a run. Saying so on the row is
+        // what lets a launcher grey its own control out instead of discovering
+        // the refusal on click.
+        active: row.active,
         source: row.source ?? "local",
         // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
         // list output is directly usable as `{scope}` path-param input — one
@@ -314,7 +312,7 @@ export function createAgentsRouter() {
       // AND unsatisfiable — every run would fail and nobody could see why.
       assertLockedFieldsSatisfiable(schema, body.locked_fields, values);
 
-      await updateInstalledPackage(scope, agent.id, {
+      await updateSpacePackage(scope, agent.id, {
         inputSettings: { values, locked: body.locked_fields },
       });
 
@@ -350,8 +348,7 @@ export function createAgentsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
-      const spaceId = c.get("spaceId");
-      const { proxyId } = await getInstalledPackageSettings(spaceId, agent.id);
+      const { proxyId } = await getSpacePackageSettings(getSpaceScope(c), agent.id);
 
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
@@ -363,11 +360,11 @@ export function createAgentsRouter() {
   //
   // Same resolver, same pinned manifests as the run-kickoff 412 — but not the
   // whole kickoff gate: readiness also refuses an integration that is not
-  // installed/enabled in the space and excludes those ids from the resolver
-  // (`skipIntegrationIds`). This endpoint runs no install/enable gate, so such
+  // active in the space and excludes those ids from the resolver
+  // (`skipIntegrationIds`). This endpoint runs no activation gate, so such
   // an integration surfaces here as a connection problem. Adding the skip alone
   // would make it worse (the item would drop out of `blocks_run` while the run
-  // still refuses it); closing the gap means giving this DTO the install/enable
+  // still refuses it); closing the gap means giving this DTO the activation
   // verdict too — a wire change to the Connexions tab. The kickoff remains the
   // authority; this is what the badge renders.
   router.get(
@@ -413,7 +410,7 @@ export function createAgentsRouter() {
       const scope = getSpaceScope(c);
       const data = await readJsonBody(c, proxyIdSchema);
 
-      await updateInstalledPackage(scope, agent.id, { proxyId: data.proxyId });
+      await updateSpacePackage(scope, agent.id, { proxyId: data.proxyId });
 
       await recordAuditFromContext(c, {
         action: "agent.proxy_updated",
@@ -423,8 +420,8 @@ export function createAgentsRouter() {
       });
 
       // Return the bare proxy-setting resource — same shape and read path
-      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/proxy (#657).
-      const { proxyId } = await getInstalledPackageSettings(scope.spaceId, agent.id);
+      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/proxy (#657).
+      const { proxyId } = await getSpacePackageSettings(scope, agent.id);
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
   );
@@ -434,8 +431,7 @@ export function createAgentsRouter() {
   // run will resolve to, and the body carries no manifest and no prompt.
   router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgentRead, requireAgent(), async (c) => {
     const agent = c.get("package");
-    const spaceId = c.get("spaceId");
-    const { modelId, generationConfig } = await getInstalledPackageSettings(spaceId, agent.id);
+    const { modelId, generationConfig } = await getSpacePackageSettings(getSpaceScope(c), agent.id);
 
     return c.json({ modelId, generation: generationConfig });
   });
@@ -451,7 +447,7 @@ export function createAgentsRouter() {
       const data = await readJsonBody(c, modelIdSchema);
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
-      const current = await getInstalledPackageSettings(scope.spaceId, agent.id);
+      const current = await getSpacePackageSettings(scope, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
@@ -468,7 +464,7 @@ export function createAgentsRouter() {
         );
       }
 
-      await updateInstalledPackage(scope, agent.id, {
+      await updateSpacePackage(scope, agent.id, {
         modelId: data.modelId,
         ...(generation !== undefined ? { generationConfig: generation } : {}),
       });
@@ -481,11 +477,8 @@ export function createAgentsRouter() {
       });
 
       // Return the bare model-setting resource — same shape and read path
-      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/model (#657).
-      const { modelId, generationConfig } = await getInstalledPackageSettings(
-        scope.spaceId,
-        agent.id,
-      );
+      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/model (#657).
+      const { modelId, generationConfig } = await getSpacePackageSettings(scope, agent.id);
       return c.json({ modelId, generation: generationConfig });
     },
   );
@@ -684,22 +677,23 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/bundle — export the agent as an .afps-bundle
   // (multi-package archive with pinned versions of every transitive dep).
   //
-  // We deliberately don't use `requireAgent()` here: that middleware folds
-  // "doesn't exist in org" and "exists in org but not installed in space"
-  // into a single opaque 404. The CLI's run-by-id flow needs to tell the
-  // two cases apart so it can prompt the user to install rather than
-  // suggest the package is mistyped. Inline check below distinguishes
-  // them via `agent_not_installed_in_space`.
+  // An EXECUTION door despite the verb: the bundle is what the CLI runs, so it
+  // mounts `requireActiveAgent()` like the other two. That middleware is what
+  // tells "not placed here" from "placed but switched off", which is the
+  // distinction the CLI's run-by-id flow needs to prompt for an activation
+  // rather than suggest a typo — and it lives there, once, so the three doors
+  // answer this agent the same way.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
     requirePermission("agents", "read"),
+    requireAgent(),
+    requireActiveAgent(),
     async (c) => {
       const scopeParam = c.req.param("scope")!;
       const nameParam = c.req.param("name")!;
       const packageId = `${scopeParam}/${nameParam}`;
       const orgId = c.get("orgId");
-      const spaceId = c.get("spaceId")!;
       const versionSpec = c.req.query("version") ?? null;
       const sourceQuery = c.req.query("source");
       // `source=draft` exports the agent's current draft state instead of a
@@ -726,29 +720,11 @@ export function createAgentsRouter() {
         });
       }
 
-      const agent = await getPackage(packageId, orgId);
-      if (!agent) {
-        throw new ApiError({
-          status: 404,
-          code: "agent_not_found",
-          title: "Agent Not Found",
-          detail: `Agent '${packageId}' not found in this organization`,
-        });
-      }
-      if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
-        throw new ApiError({
-          status: 404,
-          code: "agent_not_installed_in_space",
-          title: "Agent Not Installed",
-          detail:
-            `Agent '${packageId}' exists in this organization but is not installed in space '${spaceId}'. ` +
-            `Install it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
-        });
-      }
+      const agent = c.get("package");
       // A bundle is the agent AND every transitive dependency's stored files in
       // one archive the caller walks away with — a COPY leaving the platform,
       // which is exactly what `org_settings.restrict_package_copy` governs
-      // (plan decision 12, RBAC spec §6.10). Read + installed is not enough for
+      // (plan decision 12, RBAC spec §6.10). Read + active is not enough for
       // it: without this gate, a restricted organization's `download` refusal
       // was one `--local` run away from being pointless. Gated on the ROOT
       // agent only — the dependencies keep their own read-scope gate below —

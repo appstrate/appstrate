@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { attachConnectOffers } from "../../../src/services/connect/preflight-connect-offer.ts";
@@ -70,7 +70,7 @@ describe("attachConnectOffers — block_user_connections", () => {
       source: "local",
       draftManifest: oauthManifest() as unknown as Record<string, unknown>,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
     await db
       .update(spacePackages)
       .set({ blockUserConnections: true })

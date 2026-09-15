@@ -6,8 +6,11 @@
  * Routes (all mounted under `/api/integrations`, space-scoped):
  *
  *   - `GET    /`                                     — list available + active status
- *   - `POST   /:packageId/activate`                  — activate in current space
- *   - `DELETE /:packageId/deactivate`                — deactivate (non-destructive)
+ *
+ * Activating and deactivating an integration are NOT here: they are the same
+ * act as activating any other package type, on the one pair of doors that
+ * spells it — `POST /api/spaces/{spaceId}/packages` and
+ * `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` (RBAC spec §6.10).
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
  *   - `PUT    /:packageId/auths/:authKey/default-client` — admin: choose the default client
@@ -72,7 +75,6 @@ import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
-import { updateInstalledPackage } from "../services/space-packages.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
   assertIsIntegration,
@@ -542,63 +544,6 @@ export function createIntegrationsRouter() {
     return c.json(status);
   });
 
-  // ─── Activate / deactivate ─────────────────
-  //
-  // Activation is the `space_packages.enabled` flag, NOT row presence.
-  // Both routes upsert the flag (never delete the row) so the rule holds
-  // uniformly for every integration — including a SYSTEM integration that is
-  // auto-active with no row: deleting the row there would re-trigger the
-  // auto-active default, so "deactivate" must persist an explicit `enabled =
-  // false` opt-out (sticky across runs). For a plain integration the observable
-  // result is unchanged (active ⇄ inactive). Deactivation stays non-destructive:
-  // connections, OAuth clients, pins and org defaults FK to (package,
-  // space) — not to space_packages — so they survive and are reused
-  // on reactivation (mirrors how disabling a provider keeps its credentials).
-
-  router.post(
-    "/:packageId{@[^/]+/[^/]+}/activate",
-    requirePermission("integrations", "install"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const scope = getSpaceScope(c);
-      const actor = getActor(c);
-      await assertIsIntegration(scope, packageId);
-      await updateInstalledPackage(scope, packageId, { enabled: true });
-      await recordAuditFromContext(c, {
-        action: "integration.activated",
-        resourceType: "integration",
-        resourceId: packageId,
-      });
-      // 201 + the bare integration resource — same serializer as
-      // GET /integrations/:packageId (issue #657). Activation state is part
-      // of the resource (`active`), not an operation scrap.
-      const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
-      return c.json(detail, 201);
-    },
-  );
-
-  router.delete(
-    "/:packageId{@[^/]+/[^/]+}/deactivate",
-    requirePermission("integrations", "uninstall"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      const scope = getSpaceScope(c);
-      await assertIsIntegration(scope, packageId);
-      await updateInstalledPackage(scope, packageId, { enabled: false });
-      await recordAuditFromContext(c, {
-        action: "integration.deactivated",
-        resourceType: "integration",
-        resourceId: packageId,
-      });
-      // 204: deactivation flips `enabled` to false (upsert, so it also works
-      // for a never-installed auto-active system integration). Under the strict
-      // mutation convention (issue #657) the response is empty. The integration
-      // detail stays GET-able — `GET /integrations/:packageId` serves the
-      // resource with `active: false`.
-      return c.body(null, 204);
-    },
-  );
-
   // ─── OAuth client registration (admin) ─────
 
   // List every OAuth client registered for this auth: the org's custom
@@ -840,7 +785,7 @@ export function createIntegrationsRouter() {
       //     what that account already authorized. Empty for a fresh connect
       //     (no row yet), so fresh connects stay at the default scope set.
       //
-      // The kickoff deliberately does NOT walk installed agents anymore — that
+      // The kickoff deliberately does NOT walk the space's agents — that
       // would leak unrelated agents' scopes into a plain "connect" and made the
       // integration page's connect request more than its defaults. Scope
       // upgrades are an explicit, per-agent action on the agent's Connexions
@@ -1199,7 +1144,7 @@ export function createIntegrationsRouter() {
   );
 
   /**
-   * R2 — installed agents in the space that declare this integration
+   * R2 — the space's agents that declare this integration
    * in their dependencies. Drives the "pin a new agent" picker on the
    * integration detail page so admins can manage pins from one place.
    */

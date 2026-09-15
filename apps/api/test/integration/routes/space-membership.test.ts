@@ -22,12 +22,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import {
-  seedSpace,
-  seedSpaceMember,
-  seedPackage,
-  seedInstalledPackage,
-} from "../../helpers/seed.ts";
+import { seedSpace, seedSpaceMember, seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 
 const app = getTestApp();
@@ -54,7 +49,7 @@ describe("space membership", () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "membership" });
     await seedPackage({ orgId: owner.orgId, id: "@membership/agent", type: "agent" });
-    await seedInstalledPackage(owner.defaultSpaceId, "@membership/agent");
+    await seedSpacePackage(owner.defaultSpaceId, "@membership/agent");
   });
 
   const member = (role: OrgRole) => memberContext(owner, role);

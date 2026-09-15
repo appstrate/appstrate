@@ -7,9 +7,9 @@ import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
  * integrations / mcp-servers) — only the leading noun differs.
  */
 const listPackagesSharedDescription =
-  "system packages, plus organization packages installed in this space. " +
-  "Organization packages that exist but are not installed here are NOT returned — for " +
-  "the organization-wide catalogue with per-space install state, use " +
+  "system packages, plus organization packages placed in this space. " +
+  "Organization packages that exist but are not placed here are NOT returned — for " +
+  "the organization-wide map of placements, use " +
   "`GET /api/library`.";
 
 /**
@@ -110,7 +110,7 @@ function versionRestoreResponseSchema(detailRef: string) {
  * `X-Space-Id` is not what authorizes them.
  */
 const PACKAGE_MUTATION_AUTHORITY =
-  " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes an installation and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.";
+  " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.";
 
 const fileOperationsProperty = {
   type: "array",
@@ -128,7 +128,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a multi-package .afps-bundle",
       description:
-        "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current space. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
+        "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is activated in the current space. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -168,7 +168,7 @@ export const packagesPaths = {
                 type: "object",
                 required: [
                   "imported",
-                  "root_installed",
+                  "root_active",
                   "root_package_id",
                   "root_version",
                   "warnings",
@@ -202,10 +202,10 @@ export const packagesPaths = {
                       },
                     },
                   },
-                  root_installed: {
+                  root_active: {
                     type: "boolean",
                     description:
-                      "Whether the root was installed in the calling space (false if it was already installed).",
+                      "Whether the root package is ACTIVE in the calling space after the import. False when the root lives in another space and the caller may not offer it out of that home — the import still landed every package it carried.",
                   },
                   root_package_id: { type: "string" },
                   root_version: { type: "string" },
@@ -213,7 +213,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking install-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded.",
+                      "Non-blocking import-time warnings (AFPS §7.7) — e.g. `connect.login` selector/criteria patterns the runtime engine cannot evaluate, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded.",
                   },
                 },
               },
@@ -305,7 +305,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted.",
+                      "Non-blocking import-time warnings (AFPS §7.7) — e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted.",
                   },
                 },
               },
@@ -391,7 +391,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking install warnings (e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling). Present only when warnings were emitted.",
+                      "Non-blocking import-time warnings (AFPS §7.7) — e.g. connect.login engine-subset, _meta soft-fails, or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted.",
                   },
                 },
               },
@@ -466,7 +466,7 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being deactivated in the space. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
               schema: { type: "string" },
             },
             Vary: {
@@ -579,7 +579,7 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space.",
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being deactivated in the space.",
               schema: { type: "string" },
             },
             Vary: {
@@ -1692,7 +1692,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Move a package to another home space",
       description:
-        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. It also reconciles PLACEMENT in the same transaction: every space where the package is installed and which is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through the installation alone), and the destination's own share, if any, is dropped since a package is not offered to the space it lives in. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one uninstalls the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1739,6 +1739,28 @@ export const packagesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        // The destination is activated through the activation door, which
+        // refuses an mcp-server whose `latest` archive does not parse. The move
+        // fails with it rather than landing the package switched on in a space
+        // that cannot execute it.
+        "422": {
+          description:
+            "The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Invalid MCP Server Bundle",
+                status: 422,
+                detail: "MCP-server package '@myorg/tools' has no activatable published version.",
+                code: "bundle_invalid",
+                requestId: "req_abc123",
+              },
+            },
+          },
+        },
       },
     },
   },
@@ -1789,7 +1811,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Share a package with a person or a space",
       description:
-        "Offer the package to a space — its AUDIENCE, never its installation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.",
+        "Offer the package to a space — its AUDIENCE, never its activation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1841,7 +1863,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Withdraw a package share",
       description:
-        "Remove the offer AND the installation it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.",
+        "Remove the offer AND the placement it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1857,7 +1879,7 @@ export const packagesPaths = {
         },
       ],
       responses: {
-        "204": { description: "Share (and any installation behind it) removed." },
+        "204": { description: "Share (and any placement behind it) removed." },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

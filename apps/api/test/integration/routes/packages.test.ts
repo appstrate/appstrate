@@ -17,13 +17,13 @@ import {
   seedPackageVersion,
   seedSpace,
   seedSpaceMember,
-  seedInstalledPackage,
+  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
@@ -75,7 +75,10 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/list-agent");
+      await activatePackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@pkgorg/list-agent",
+      );
 
       const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
@@ -142,7 +145,7 @@ describe("Packages API", () => {
         },
         draftContent: "# My Skill\nDo something useful.",
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-skill");
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-skill");
 
       const res = await app.request("/api/packages/skills", {
         headers: authHeaders(ctx),
@@ -191,7 +194,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/space-a-agent",
       );
@@ -222,7 +225,7 @@ describe("Packages API", () => {
         },
         draftContent: "# Space A",
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/space-a-skill",
       );
@@ -249,7 +252,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/detail-agent",
       );
@@ -273,7 +276,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/encoded-detail-agent",
       );
@@ -294,7 +297,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/versioned-agent",
       );
@@ -370,7 +373,7 @@ describe("Packages API", () => {
         },
         draftContent: "# Detail Skill",
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/detail-skill",
       );
@@ -446,7 +449,7 @@ describe("Packages API", () => {
         },
         draftContent: "# Installed",
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@pkgorg/installed-skill");
+      await activatePackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@pkgorg/installed-skill");
 
       const res = await app.request("/api/packages/skills/@pkgorg/installed-skill", {
         headers: { ...authHeaders(ctx), "X-Space-Id": customApp.id },
@@ -518,7 +521,7 @@ describe("Packages API", () => {
         draftManifest,
         draftContent: DRAFT_BODY,
       });
-      await seedInstalledPackage(homeId, id);
+      await seedSpacePackage(homeId, id);
     });
 
     /** A member of the org holding `preset` in the package's home space. */
@@ -638,7 +641,7 @@ describe("Packages API", () => {
         draftManifest: { name: sysId, version: "1.0.0", type: "skill" },
         draftContent: "# system",
       });
-      await seedInstalledPackage(homeId, sysId);
+      await seedSpacePackage(homeId, sysId);
       const headers = await memberIn("viewer");
 
       const res = await app.request(`/api/packages/skills/${sysId}`, { headers });
@@ -687,7 +690,7 @@ describe("Packages API", () => {
         draftManifest: mcpDraft,
         draftContent: JSON.stringify(mcpDraft, null, 2),
       });
-      await seedInstalledPackage(homeId, mcpId);
+      await seedSpacePackage(homeId, mcpId);
       const zip = zipArtifact(
         {
           "manifest.json": new TextEncoder().encode(JSON.stringify(mcpPublished, null, 2)),
@@ -902,7 +905,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         type: "integration",
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, INSTALLED, { enabled: true });
+      await seedSpacePackage(ctx.defaultSpaceId, INSTALLED, { enabled: true });
     });
 
     afterEach(() => {
@@ -934,7 +937,7 @@ describe("Packages API", () => {
     });
 
     it("excludes a SYSTEM integration with a sticky explicit disable", async () => {
-      await seedInstalledPackage(ctx.defaultSpaceId, ENV_SYSTEM, { enabled: false });
+      await seedSpacePackage(ctx.defaultSpaceId, ENV_SYSTEM, { enabled: false });
       const ids = await activeIds();
       expect(ids.has(ENV_SYSTEM)).toBe(false);
     });
@@ -1499,7 +1502,7 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // Niveau 2 Phase 1 — install-time integration scope validation
+  // Niveau 2 Phase 1 — import-time integration scope validation
   // (assertAgentIntegrationScopesValid in routes/packages.ts)
   // ═══════════════════════════════════════════════
 
@@ -2811,14 +2814,14 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-agent");
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-agent");
       await seedAgent({
         id: "@isolatedorg/their-agent",
         homeSpaceId: otherCtx.defaultSpaceId,
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
-      await installPackage(
+      await activatePackage(
         { orgId: otherCtx.orgId, spaceId: otherCtx.defaultSpaceId },
         "@isolatedorg/their-agent",
       );
@@ -3590,10 +3593,10 @@ describe("Packages API", () => {
       // Pin the id the rest of the test reads its rows by — a change in how the
       // route derives it would otherwise surface as "row not found".
       expect(((await res.json()) as { id: string }).id).toBe(targetId);
-      // The route auto-installs the fork in the calling space, which is
-      // what satisfies the explorer's `hasPackageAccess` gate below — so no
-      // install of our own, which would 409 as `already_installed`. The `200`
-      // asserted in `fileIndex` is the proof that it happened.
+      // The route activates the fork in the calling space, which is what
+      // satisfies the explorer's `hasPackageAccess` gate below — so no
+      // activation of our own. The `200` asserted in `fileIndex` is the proof
+      // that it happened.
     }
 
     async function draftContentOf(packageId: string): Promise<string | null> {

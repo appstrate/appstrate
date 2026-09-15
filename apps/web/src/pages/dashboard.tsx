@@ -47,7 +47,7 @@ export function DashboardPage() {
       source?: string;
       keywords?: string[];
       running_runs?: number;
-      installed?: boolean;
+      active?: boolean;
     }
   >();
   if (agents) {
@@ -58,7 +58,7 @@ export function DashboardPage() {
         source: f.source,
         keywords: f.keywords,
         running_runs: f.running_runs,
-        installed: f.installed,
+        active: f.active,
       });
     }
   }
@@ -143,7 +143,7 @@ export function DashboardPage() {
                     runningRuns={agent?.running_runs}
                     keywords={agent?.keywords}
                     unreadCount={unreadCounts?.[agentId]}
-                    installed={agent?.installed}
+                    active={agent?.active}
                   />
                 </div>
               );

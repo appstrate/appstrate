@@ -28,6 +28,7 @@ import {
   organizationMembers,
   packages,
   runs,
+  packageShares,
   spaceMembers,
   spacePackages,
   spaces,
@@ -45,7 +46,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedInvitation,
   seedPackage,
   seedPackageShare,
@@ -56,6 +57,7 @@ import {
 import { createBootstrapOrg } from "@appstrate/db/bootstrap-org";
 import { resolveOrCreateOrgMembership } from "../../../src/modules/oidc/services/orgmember-mapping.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
+import { agentExecutionBlock } from "../../../src/lib/package-access.ts";
 import {
   convertPersonalSpaceToTeam,
   ensurePersonalSpaceFor,
@@ -229,7 +231,7 @@ describe("personal spaces — nobody else reaches one", () => {
       draftManifest: { name: SECRET, version: "0.1.0", type: "skill" },
       draftContent: "---\nname: secret\ndescription: d\n---\n\nbody",
     });
-    await seedInstalledPackage(personalId, SECRET);
+    await seedSpacePackage(personalId, SECRET);
   });
 
   it("does not offer a personal-space install for an unshared team package", async () => {
@@ -240,7 +242,7 @@ describe("personal spaces — nobody else reaches one", () => {
       type: "skill",
       homeSpaceId: owner.defaultSpaceId,
     });
-    await seedInstalledPackage(owner.defaultSpaceId, teamPackage);
+    await seedSpacePackage(owner.defaultSpaceId, teamPackage);
     await seedPackage({
       id: "@system/unoffered",
       orgId: null,
@@ -348,7 +350,7 @@ describe("personal spaces — nobody else reaches one", () => {
     // says does not exist for them. `home_writable` carries the answer they
     // actually need.
     await seedPackageShare(owner.defaultSpaceId, SECRET);
-    await seedInstalledPackage(owner.defaultSpaceId, SECRET);
+    await seedSpacePackage(owner.defaultSpaceId, SECRET);
     type HomeWire = { home_space_id: string | null; home_writable: boolean };
     const read = async (ctx: TestContext, spaceId: string): Promise<HomeWire> => {
       const res = await app.request(`/api/packages/skills/${SECRET}`, {
@@ -1003,11 +1005,11 @@ describe("personal spaces — offboarding", () => {
         draftContent: `---\nname: x\ndescription: d\n---\n\n${id}`,
       });
       await seedPackageShare(personalId, id);
-      await seedInstalledPackage(personalId, id);
+      await seedSpacePackage(personalId, id);
     }
     // Only one of the two is installed somewhere else.
     await seedPackageShare(otherSpace.id, SHARED);
-    await seedInstalledPackage(otherSpace.id, SHARED);
+    await seedSpacePackage(otherSpace.id, SHARED);
 
     await removeMember(owner.orgId, member.user.id);
     await ageOrphan(personalId);
@@ -1021,6 +1023,82 @@ describe("personal spaces — offboarding", () => {
     // Lived only there → deleted with the person who wrote it.
     expect(await db.select().from(packages).where(eq(packages.id, HOMED))).toHaveLength(0);
     expect(await db.select().from(spaces).where(eq(spaces.id, personalId))).toHaveLength(0);
+  });
+
+  it("re-homes a package the org still runs AND writes the offer that places it", async () => {
+    // The sweeper MOVES a placement — it takes `home_space_id` away from a
+    // space that is about to stop existing. Every space still holding a
+    // `space_packages` row needs the other placement or it is left with an
+    // orphan: the package vanishes from its index, its detail, its
+    // space-package pages and its run gate, and its schedules fail on every
+    // tick, with nobody having decided anything.
+    //
+    // The fixture is that shape exactly: the team space holds the row and no
+    // offer. It is what inherited data looks like (`scripts/migration/0016`
+    // repairs precisely this), and what any second writer of `space_packages`
+    // would produce — which is why the invariant is asserted on the sweeper's
+    // OUTPUT rather than on the path that happened to create the row.
+    const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
+    await seedPackage({
+      id: SHARED,
+      orgId: owner.orgId,
+      type: "agent",
+      homeSpaceId: personalId,
+      draftManifest: { name: SHARED, version: "0.1.0", type: "agent" },
+      draftContent: "prompt",
+    });
+    await seedSpacePackage(team.id, SHARED, { enabled: true });
+
+    await removeMember(owner.orgId, member.user.id);
+    await ageOrphan(personalId);
+    expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
+
+    // Re-homed to the organization catalogue…
+    expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBeNull();
+    // …and placed in the space that runs it, by nobody in particular: the home
+    // was the placement until this sweep, so no person offered it.
+    const offers = await db
+      .select({ spaceId: packageShares.spaceId, sharedBy: packageShares.sharedBy })
+      .from(packageShares)
+      .where(eq(packageShares.packageId, SHARED));
+    expect(offers).toEqual([{ spaceId: team.id, sharedBy: null }]);
+
+    // The row survives, and it now means something again — the same verdict
+    // the three HTTP doors and the scheduler tick read.
+    expect(
+      await db
+        .select({ enabled: spacePackages.enabled })
+        .from(spacePackages)
+        .where(and(eq(spacePackages.packageId, SHARED), eq(spacePackages.spaceId, team.id))!),
+    ).toEqual([{ enabled: true }]);
+    expect(await agentExecutionBlock({ orgId: owner.orgId, spaceId: team.id }, SHARED)).toBeNull();
+  });
+
+  it("deletes a package that only an OFFER reached — nothing runs on an offer", async () => {
+    // The other branch, stated so it is a decision rather than an oversight:
+    // "taken up elsewhere" means a `space_packages` row elsewhere. A space
+    // that was merely SHOWN the package never ran it, and keeping a departed
+    // author's draft alive on that basis would hand the organization catalogue
+    // a package nobody asked for. The offer goes with it, by cascade.
+    const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
+    await seedPackage({
+      id: HOMED,
+      orgId: owner.orgId,
+      type: "agent",
+      homeSpaceId: personalId,
+      draftManifest: { name: HOMED, version: "0.1.0", type: "agent" },
+      draftContent: "prompt",
+    });
+    await seedPackageShare(team.id, HOMED);
+
+    await removeMember(owner.orgId, member.user.id);
+    await ageOrphan(personalId);
+    expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
+
+    expect(await db.select().from(packages).where(eq(packages.id, HOMED))).toHaveLength(0);
+    expect(
+      await db.select().from(packageShares).where(eq(packageShares.packageId, HOMED)),
+    ).toHaveLength(0);
   });
 
   it("leaves a space inside the window alone", async () => {

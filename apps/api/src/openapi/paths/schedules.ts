@@ -210,8 +210,14 @@ export const schedulesPaths = {
         },
         // Shared with `PUT /api/schedules/{id}`: both writes resolve the
         // manifest the schedule will FIRE, so both refuse a never-published
-        // agent with `no_published_version`.
-        "404": { $ref: "#/components/responses/NoPublishedVersion" },
+        // agent with `no_published_version`. Arming a schedule is an execution
+        // decision, so this door also carries the activation refusal — LISTING
+        // an agent's schedules does not.
+        "404": {
+          $ref: "#/components/responses/NoPublishedVersion",
+          description:
+            "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`).",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

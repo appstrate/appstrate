@@ -467,7 +467,7 @@ export interface MeConnectionEntry {
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
   /**
-   * Number of installed agents in this connection's space that
+   * Number of agents placed in this connection's space that
    * declare this integration in their dependencies. Used by the UI to
    * surface "reused by N agents" so members understand that the connection
    * is shared across the org's agents rather than per-agent.
@@ -524,13 +524,14 @@ export interface AgentListItem extends BasePackageListItem {
   /** Always emitted by the agent-list mapper (`@scope` or null). */
   scope: string | null;
   /**
-   * Whether the agent is activated in the space this listing was read from —
-   * an installed `space_packages` row, or a system package. The list itself is
-   * the READ rule (homed here, offered here, or system), which a run does not
-   * follow: `false` means the launch routes refuse it here until somebody
-   * installs it through `POST /api/spaces/{spaceId}/packages`.
+   * Whether the agent is ACTIVE in the space this listing was read from. The
+   * placement ROW always wins — a system agent switched off here is `false`;
+   * with no row the deployment's default decides (`source: "system"`). The list
+   * itself is the READ rule (homed here, offered here, or system), which a run
+   * does not follow: `false` means the launch routes refuse it here until
+   * somebody activates it through `POST /api/spaces/{spaceId}/packages`.
    */
-  installed: boolean;
+  active: boolean;
 }
 
 export interface AgentDetail {
@@ -625,7 +626,7 @@ export interface AgentDetail {
    * (`packages.home_space_id`) — emitted ONLY when the caller reaches that
    * space. `null` means "not a space you can see": the organization catalog, or
    * a home whose id is withheld (a colleague's personal space, readable through
-   * an installation but never nameable). Read {@link home_writable}, never this
+   * a placement but never nameable). Read {@link home_writable}, never this
    * field, to decide whether a write may be offered.
    */
   home_space_id: string | null;
@@ -640,7 +641,7 @@ export interface AgentDetail {
   /**
    * Whether THIS caller holds `agents:share` in the home space — the predicate
    * the THREE `/shares` routes that change the audience enforce (offer, list,
-   * revoke), from the same server-side computation. Installing an offered
+   * revoke), from the same server-side computation. Activating an offered
    * package is not one of them: it is the recipient's own act on their own
    * space and asks for no `share`. Sharing is a third verb on the home, not a
    * synonym for writing: a custom role may hold one without the other. Always
@@ -655,6 +656,15 @@ export interface AgentDetail {
    * including for system agents, which do not expose `manifest`.
    */
   effective_timeout_seconds: number;
+  /**
+   * Whether the agent is ACTIVE in the space this detail was read from — the
+   * same rule as {@link AgentListItem.active}, answered by the detail itself so
+   * a page that has loaded the agent needs no second call to learn whether it
+   * runs. Reading an agent never requires it to be active; `false` is the state
+   * this page exists to repair, and it is why the three execution doors answer
+   * `404 agent_not_active_in_space` while this one answers 200.
+   */
+  active: boolean;
 }
 
 // --- Organization Package Types ---
@@ -688,7 +698,7 @@ export interface OrgPackageItem extends BasePackageListItem {
   /**
    * Whether THIS caller holds the type's `share` in the home space — the
    * predicate the THREE `/shares` routes that change the audience enforce
-   * (offer, list, revoke), from the same computation; installing an offered
+   * (offer, list, revoke), from the same computation; activating an offered
    * package asks for no `share`. Always emitted.
    */
   home_shareable: boolean;
@@ -1079,9 +1089,9 @@ export interface SpaceInfo {
 export interface SpaceSweepResult {
   object: "space_sweep";
   space_id: string;
-  /** Homed packages another space had installed: handed to the org catalogue. */
+  /** Homed packages another space had placed: handed to the org catalogue. */
   rehomed_packages: number;
-  /** Homed packages nothing else had installed: deleted. */
+  /** Homed packages nothing else had placed: deleted. */
   deleted_packages: number;
 }
 
@@ -1104,12 +1114,21 @@ export interface SpaceMember {
  *
  * @openapiMirror
  */
-export interface InstalledPackage {
+export interface SpacePackage {
   packageId: string;
   generationConfig: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
+  /** Whether the space RUNS it. The row and its settings survive a `false`. */
   enabled: boolean;
+  /**
+   * When the placement row was created. `installed_at` is the COLUMN's name and
+   * predates the activation vocabulary; it is kept on the wire because renaming
+   * a published field breaks every consumer reading it, which is a cost the
+   * rename buys nothing against. (The `integrations:install` permission strings
+   * are kept for a different reason — those really are rows, in `space_roles`
+   * and in every API key's scopes.)
+   */
   installed_at: string;
   updatedAt: string;
   package_type: string;
@@ -1124,7 +1143,7 @@ export interface InstalledPackage {
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / generation settings.
  * It carries no VERSION: which bytes run is the launch selector's business,
- * not the installation's.
+ * not the placement's.
  *
  * `input` carries the per-space stored input layer, because
  * `appstrate run @scope/agent --local` fetches the bundle and executes it on

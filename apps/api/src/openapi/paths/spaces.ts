@@ -337,7 +337,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Sweep an orphaned personal space now",
       description:
-        "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space has it installed) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).",
+        "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -369,11 +369,11 @@ export const spacesPaths = {
   },
   "/api/spaces/{spaceId}/packages": {
     get: {
-      operationId: "listInstalledPackages",
+      operationId: "listSpacePackages",
       tags: ["Space Packages"],
-      summary: "List installed packages",
+      summary: "List this space's package placements",
       description:
-        "List packages installed in this space, with their model/proxy/version overrides. Returns only package types the caller has permission to read, within the credential scope ceiling.",
+        "List the packages PLACED in this space — active and inactive alike — with their `enabled` flag and their model/proxy overrides. A row survives deactivation, so an inactive entry still carries the settings the space chose. Returns only package types the caller has permission to read, within the credential scope ceiling.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -387,7 +387,7 @@ export const spacesPaths = {
       ],
       responses: {
         "200": {
-          description: "Installed packages list",
+          description: "Placement list",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -415,16 +415,17 @@ export const spacesPaths = {
       },
     },
     post: {
-      operationId: "installPackage",
+      operationId: "activatePackage",
       tags: ["Space Packages"],
-      summary: "Install a package",
+      summary: "Activate a package in this space",
       description:
-        "Install a package into this space — the ONE installation door, for a personal space as for a team one. " +
+        "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. " +
+        "Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. " +
         "A package must be PLACED here first: homed in this space, or shared with it (`POST /api/packages/{scope}/{name}/shares`); system packages are placed everywhere. " +
         "If it is not, this call can create the share itself, but only for a caller holding the package type's `share` permission in the package's HOME space — `403` otherwise, `404` when the package id is not reachable at all. " +
-        "An API key never carries `share`, so it installs only what is already placed. " +
-        "In the caller's OWN personal space the type's install grant is not required: ownership is the authorization, which is how a guest takes up a package offered to them. " +
-        "The installation carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
+        "An API key never carries `share`, so it activates only what is already placed. " +
+        "In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest takes up a package offered to them. " +
+        "The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -449,8 +450,19 @@ export const spacesPaths = {
         },
       },
       responses: {
+        "200": {
+          description:
+            "Already active here — nothing changed. A package the deployment switches on without any placement row (a system package, an integration named by `SYSTEM_INTEGRATIONS`) was active before this call, so its first activation answers `200` too and writes no audit entry.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SpacePackage" },
+            },
+          },
+        },
         "201": {
-          description: "Package installed",
+          description:
+            "This call turned the package on here — it was not active before, and now it is.",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -463,14 +475,24 @@ export const spacesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "The caller lacks the package type's install grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space.",
+            "The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Package already installed in this space",
+        "422": {
+          description:
+            "The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json.",
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Invalid MCP Server Bundle",
+                status: 422,
+                detail: "MCP-server package '@myorg/tools' has no activatable published version.",
+                code: "bundle_invalid",
+                requestId: "req_abc123",
+              },
             },
           },
         },
@@ -479,10 +501,11 @@ export const spacesPaths = {
   },
   "/api/spaces/{spaceId}/packages/{scope}/{name}": {
     get: {
-      operationId: "getInstalledPackage",
+      operationId: "getSpacePackage",
       tags: ["Space Packages"],
-      summary: "Get installed package",
-      description: "Get an installed package detail with its model and proxy overrides.",
+      summary: "Get one placement",
+      description:
+        "Get one of this space's package placements with its `enabled` flag and its model and proxy overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -491,7 +514,7 @@ export const spacesPaths = {
       ],
       responses: {
         "200": {
-          description: "Installed package detail",
+          description: "Placement detail",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -505,13 +528,13 @@ export const spacesPaths = {
       },
     },
     put: {
-      operationId: "updateInstalledPackage",
+      operationId: "updateSpacePackage",
       tags: ["Space Packages"],
-      summary: "Update installed package overrides",
+      summary: "Configure how this space runs a placed package",
       description:
-        "Update the model/proxy overrides, generation settings or enabled flag of an installed package. " +
-        "Two different acts share this body, and each answers to its own permission: `enabled` is a switch of PRESENCE, gated exactly as an install (`true`) or an uninstall (`false`) — so in the caller's OWN personal space ownership is the authorization and no grant is required, the same exemption `POST /api/spaces/{spaceId}/packages` applies. `modelId`, `proxyId` and `generationConfig` choose how a present package RUNS and need the type's `configure` grant everywhere, personal space included: selecting a model spends the organization's budget. A body carrying both must clear both gates. " +
-        "There is no version field: an installation carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
+        "Update the model/proxy overrides and generation settings of a package PLACED in this space. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. " +
+        "There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. " +
+        "There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -532,7 +555,6 @@ export const spacesPaths = {
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
-                enabled: { type: "boolean" },
               },
               additionalProperties: false,
             },
@@ -541,7 +563,7 @@ export const spacesPaths = {
       },
       responses: {
         "200": {
-          description: "Updated installed package",
+          description: "Updated placement",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -553,17 +575,17 @@ export const spacesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",
-          description:
-            "The caller lacks the grant the body's fields require: the type's install/uninstall grant for `enabled`, its `configure` grant for `modelId` / `proxyId` / `generationConfig`.",
+          description: "The caller lacks the package type's `configure` grant in this space.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
-      operationId: "uninstallPackage",
+      operationId: "deactivatePackage",
       tags: ["Space Packages"],
-      summary: "Uninstall a package",
-      description: "Remove a package from this space.",
+      summary: "Deactivate a package in this space",
+      description:
+        "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only revoking the share that placed the package removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row and is not a system package: an offer nobody has taken up is not on, so there is nothing to switch off, and it stays an offer rather than becoming a refusal its recipient never made.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -571,7 +593,9 @@ export const spacesPaths = {
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
-        "204": { description: "Package uninstalled" },
+        "204": {
+          description: "Switched off here, or already off. No audit entry when nothing changed.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

@@ -28,16 +28,16 @@ interface PackageFileToolContext {
   /**
    * Package-level authorisation for the bundle about to be read. Required:
    * the preflight and the import both hand it every package they found,
-   * and a context without it would install unauthorised ones.
+   * and a context without it would import unauthorised ones.
    */
   authorizeBundle: NonNullable<Parameters<typeof preflightBundleImport>[2]>;
   /**
    * Whether the caller may OFFER a package out of its home space — asked of a
    * re-imported root that already lives in ANOTHER space, so this tool places
    * it by the same rule as `POST /api/packages/import-bundle` and
-   * `POST /api/spaces/{id}/packages`: the offer is written with the
-   * installation when the caller holds `<type>:share` in the home, and the
-   * result reports `root_installed: false` when they do not.
+   * `POST /api/spaces/{id}/packages`: the offer is written with the placement
+   * when the caller holds `<type>:share` in the home, and the result reports
+   * `root_active: false` when they do not.
    *
    * Optional, and absent means `false`: a caller with no request context
    * cannot be asked, and an import that silently offered on their behalf would
@@ -201,10 +201,11 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
   const descriptor: Tool = {
     name: "import_package_file",
     description:
-      "Import and install a package or bundle directly from an appfile:// URI. Bytes stay " +
-      "server-side and pass through the exact same preflight, conflict, version and install " +
-      "contracts as multipart bundle import. Call validate_package_file first and continue " +
-      "only when it returns valid:true and importable:true.",
+      "Import a package or bundle directly from an appfile:// URI, and activate its root in " +
+      "the current space. Bytes stay server-side and pass through the exact same preflight, " +
+      "conflict, version and placement contracts as multipart bundle import. Call " +
+      "validate_package_file first and continue only when it returns valid:true and " +
+      "importable:true.",
     annotations: {
       title: "Import package file",
       readOnlyHint: false,

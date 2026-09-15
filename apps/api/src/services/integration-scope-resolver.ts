@@ -3,7 +3,7 @@
 /**
  * Phase 2 — OAuth scope inference for integration connect flows.
  *
- * `computeRequiredScopes` walks every agent installed in the space,
+ * `computeRequiredScopes` walks every agent placed in the space,
  * reads its `integrations_configuration[id]` selection (§4.4), and
  * unions the scopes contributed by each:
  *
@@ -17,12 +17,12 @@
  *     allowed" default that mirrors Phase 3's runtime allowlist
  *     semantics).
  *
- * This is the floor every installed agent needs. It is NOT injected into
+ * This is the floor every placed agent needs. It is NOT injected into
  * the connect kickoff — connecting requests the manifest defaults (plus
  * whatever the caller explicitly forwards), so a plain "connect" never
  * inherits unrelated agents' scopes. The union is consumed at refresh time
  * (`integration-credentials-resolver`) to detect when an IdP-side scope
- * shrink drops a connection below what the installed agents require, and
+ * shrink drops a connection below what the placed agents require, and
  * the agent surface uses the per-agent slice to drive an explicit upgrade.
  *
  * `getCurrentScopesGranted` reads the `scopesGranted` of one connection row
@@ -56,9 +56,9 @@ interface ScopeResolverInput {
 }
 
 /**
- * Compute the OAuth scope set required by every agent installed in the
+ * Compute the OAuth scope set required by every agent placed in the
  * space that depends on this integration's auth. Returns an empty
- * `required` array when no installed agent uses the integration (callers
+ * `required` array when no placed agent uses the integration (callers
  * should fall back to the manifest defaults).
  *
  * Resolves the integration manifest fresh from DB on every call — cheap
@@ -79,10 +79,10 @@ export async function computeRequiredScopes(
     return { required: [] };
   }
 
-  // Walk installed agents. We need the manifest of each to read its
+  // Walk the placed agents. We need the manifest of each to read its
   // `integrations_configuration`; that lives on `draftManifest`, same
   // column the runtime resolver reads at spawn time.
-  const installed = await db
+  const placed = await db
     .select({ draftManifest: packages.draftManifest })
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
@@ -90,7 +90,7 @@ export async function computeRequiredScopes(
 
   const required = new Set<string>();
 
-  for (const agent of installed) {
+  for (const agent of placed) {
     if (!agent.draftManifest || typeof agent.draftManifest !== "object") continue;
     const integEntries = parseManifestIntegrations(agent.draftManifest as Record<string, unknown>);
     const entry = integEntries.find((e) => e.id === input.integrationId);

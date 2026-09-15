@@ -10,7 +10,7 @@ import { eq, and } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers/seed.ts";
 import { spacePackages } from "@appstrate/db/schema";
 
 const app = getTestApp();
@@ -28,6 +28,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       orgId: ctx.orgId,
       id: "@testorg/agent",
       type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
       draftManifest: {
         name: "@testorg/agent",
         version: "1.0.0",
@@ -75,6 +76,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       orgId: ctx.orgId,
       id: "@testorg/agent",
       type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
       draftManifest: { name: "@testorg/agent", version: "1.0.0", type: "agent" },
     });
     await db.insert(spacePackages).values({
@@ -97,6 +99,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       orgId: ctx.orgId,
       id: "@testorg/agent",
       type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
     });
     const res = await app.request(
       `/api/spaces/${ctx.defaultSpaceId}/packages/@testorg/agent/run-config`,
@@ -104,7 +107,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
     );
     expect(res.status).toBe(404);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body.code).toBe("package_not_installed");
+    expect(body.code).toBe("package_not_placed");
   });
 
   it("emits the empty shape for a row with nothing stored", async () => {
@@ -112,6 +115,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       orgId: ctx.orgId,
       id: "@testorg/agent",
       type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
     });
     await db.insert(spacePackages).values({
       spaceId: ctx.defaultSpaceId,
@@ -145,7 +149,12 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
   // JSONB object) so a leak is caught on both kinds of column the resolver
   // projects — the same coverage the retired per-space `config` object gave.
   it("scopes to the requested space — no cross-space leakage", async () => {
-    await seedPackage({ orgId: ctx.orgId, id: "@testorg/agent", type: "agent" });
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@testorg/agent",
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+    });
     await db.insert(spacePackages).values({
       spaceId: ctx.defaultSpaceId,
       packageId: "@testorg/agent",
@@ -160,6 +169,9 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       body: JSON.stringify({ name: "Other Space" }),
     });
     const otherSpaceId = ((await otherSpaceRes.json()) as { id: string }).id;
+    // The offer is what places the package in the OTHER space — its home is
+    // the default one, and a row without a placement behind it is nothing.
+    await seedPackageShare(otherSpaceId, "@testorg/agent");
     await db.insert(spacePackages).values({
       spaceId: otherSpaceId,
       packageId: "@testorg/agent",

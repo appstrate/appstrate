@@ -129,7 +129,7 @@ async function listAllActorIntegrationConnections(
     });
   }
 
-  // Count installed agents per (space, integration) that declare this
+  // Count the agents placed per (space, integration) that declare this
   // integration in their dependencies. One scan over the unique (space, pkg)
   // pairs the user has connections to — single round trip.
   //

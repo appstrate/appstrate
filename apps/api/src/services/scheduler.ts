@@ -26,7 +26,8 @@ import {
   resolveRunPreflight,
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
-import { getInstalledPackageSettings } from "./space-packages.ts";
+import { getSpacePackageSettings } from "./space-packages.ts";
+import { agentExecutionBlock } from "../lib/package-access.ts";
 import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -529,6 +530,46 @@ export async function triggerScheduledRun(
     }
     agentDenorm = extractRunAgentDenorm(draftAgent);
 
+    // EXECUTION gate, at FIRE time — not at create time. Whether a space runs a
+    // package is a property of the SPACE and it can change after the schedule
+    // was written, exactly like the integration activation the readiness pass
+    // below already re-checks (`integration_not_active`). The authority
+    // arguments that freeze the actor's draft rights and the connection
+    // overrides do not apply: those are properties of the principal, settled
+    // when they proved them. "Switch this agent off for a week" has to stop the
+    // cron too, or deactivating is a cosmetic filter on the pages a human looks
+    // at while the agent keeps running on the space's credentials and the
+    // organization's LLM budget. Revoking the SHARE that placed it here has to
+    // stop it for the same reason — the same predicate the three HTTP doors
+    // ask, so the one caller nobody is watching is not the permissive one.
+    //
+    // A VISIBLE failed run, and the schedule left ARMED — the same channel as a
+    // missing package below, deliberately not the invalid-actor channel, which
+    // also disables the schedule: an actor who left the org is not coming back,
+    // whereas switching the agent back on (or offering it again) must let the
+    // next tick run it. The two refusals name their own cause: "not placed" and
+    // "not active" are repaired by different acts, and a message that named the
+    // wrong one would send the operator to the wrong page.
+    const executionBlock = await agentExecutionBlock({ orgId, spaceId }, packageId);
+    if (executionBlock) {
+      logger.warn("Agent cannot execute in this space, skipping schedule", {
+        scheduleId,
+        packageId,
+        orgId,
+        spaceId,
+        block: executionBlock,
+      });
+      await failSchedule(
+        executionBlock === "not_placed"
+          ? `Agent '${packageId}' is not placed in space '${spaceId}'. ` +
+              `Share it into that space via POST /api/packages/${packageId}/shares, ` +
+              `or move this schedule to a space the agent is placed in.`
+          : `Agent '${packageId}' is not active in space '${spaceId}'. ` +
+              `Activate it via POST /api/spaces/${spaceId}/packages to resume this schedule.`,
+      );
+      return;
+    }
+
     // Same resolver as a manual run: the schedule's own `version_override`, or
     // the latest published version when it has none. No authority check — the
     // principal who created the schedule proved it then (`routes/schedules.ts`),
@@ -556,7 +597,7 @@ export async function triggerScheduledRun(
 
     // Per-space settings: editor defaults + locked fields for the input
     // resolution below, and the model/proxy this fire launches with.
-    const packageSettings = await getInstalledPackageSettings(spaceId, packageId);
+    const packageSettings = await getSpacePackageSettings({ orgId, spaceId }, packageId);
 
     // Shared preflight: validate readiness
     try {

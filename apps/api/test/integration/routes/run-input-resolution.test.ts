@@ -18,7 +18,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
@@ -78,7 +78,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       },
       draftContent: "Write a {{tone}} message about {{subject}}.",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
 
     const credentialId = await createApiKeyCredential({
       orgId: ctx.orgId,

@@ -457,7 +457,7 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
  * as `POST /api/spaces/{id}/packages` — it needs the offer. So the import takes
  * the same door: the caller who may make that offer gets the root installed
  * WITH its `package_shares` row, and the caller who may not gets
- * `root_installed: false` instead of a silently half-finished import.
+ * `root_active: false` instead of a silently half-finished import.
  *
  * The authority itself is a question about the HTTP caller, so it arrives as a
  * callback — both doors pass `holdsPackageShareAuthority` built from their own
@@ -505,7 +505,7 @@ describe("importBundle — a root homed in another space", () => {
       { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       ctx.user.id,
     );
-    expect(first.root_installed).toBe(true);
+    expect(first.root_active).toBe(true);
     const [homed] = await db
       .select({ homeSpaceId: packages.homeSpaceId })
       .from(packages)
@@ -520,7 +520,7 @@ describe("importBundle — a root homed in another space", () => {
       ctx.user.id,
       async () => true,
     );
-    expect(result.root_installed).toBe(true);
+    expect(result.root_active).toBe(true);
     // The installation and the placement that authorizes it, both present —
     // an installation with no placement is exactly the state `0016` repairs.
     expect(
@@ -537,7 +537,7 @@ describe("importBundle — a root homed in another space", () => {
     ).toHaveLength(1);
   });
 
-  it("reports `root_installed: false` and places nothing when the caller may not", async () => {
+  it("reports `root_active: false` and places nothing when the caller may not", async () => {
     // The discriminating control: same bundle, same space, same user — only
     // the authority answer changes.
     const result = await importBundle(
@@ -546,7 +546,7 @@ describe("importBundle — a root homed in another space", () => {
       ctx.user.id,
       async () => false,
     );
-    expect(result.root_installed).toBe(false);
+    expect(result.root_active).toBe(false);
     expect(
       await db
         .select()

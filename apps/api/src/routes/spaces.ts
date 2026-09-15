@@ -59,13 +59,12 @@ import {
 import { applySpacePermissions } from "../middleware/space-context.ts";
 import { validateSpaceInOrg } from "../lib/space-lookup.ts";
 import {
-  installPackage,
-  uninstallPackage,
-  listInstalledPackages,
-  getInstalledPackage,
-  updateInstalledPackage,
+  activatePackage,
+  deactivatePackage,
+  listSpacePackages,
+  getSpacePackage,
+  updateSpacePackage,
   getResolvedRunConfig,
-  getCatalogPackageType,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import {
@@ -213,22 +212,26 @@ export const updateSpaceMemberSchema = exactlyOneRole(z.object({ ...spaceRoleAss
 // /api/agents/{scope}/{name}/input-settings` is their single write path,
 // because it is the only one that validates them against
 // `manifest.input.schema` and enforces `assertLockedFieldsSatisfiable`.
-export const installPackageSchema = z
+export const activatePackageSchema = z
   .object({
     packageId: z.string().min(1),
   })
   .strict();
 
-// No `version_id`: an installation carries no version. Which bytes a space
-// runs is decided per launch — the published `latest`, or the draft for whoever
-// can write the package — not frozen on the association row. The schema is
-// `.strict()`, so a body still sending it is a 400 rather than a silent no-op.
+// No `version_id`: a placement carries no version. Which bytes a space runs is
+// decided per launch — the published `latest`, or the draft for whoever can
+// write the package — not frozen on the row.
+//
+// No `enabled` either: activation is its own act, with its own pair of doors
+// (`POST` / `DELETE` on this collection), so the placement rule and the offer
+// that may have to be created with it are stated once instead of twice. The
+// schema is `.strict()`, so a body still sending either field is a 400 rather
+// than a silent no-op.
 export const updatePackageSchema = z
   .object({
     generationConfig: modelGenerationSettingsSchema.nullable().optional(),
     modelId: z.string().nullable().optional(),
     proxyId: z.string().nullable().optional(),
-    enabled: z.boolean().optional(),
   })
   .strict();
 
@@ -255,16 +258,22 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
 // ─── Space packages: the permission is per PACKAGE TYPE ────────────────
 //
 // `spaces:write` is ORG-level — the catalog verb that creates and deletes
-// spaces. Gating install/config/uninstall on it meant a space admin could not
-// install an agent into the space they run, while anyone who could create a
-// space could install into every space in the org. The permission that fits is
-// the space-level string for the type being installed, which is also what the
-// per-type package routes already use (`routes/packages.ts` → `ROUTE_CONFIGS`).
+// spaces. Gating activate/configure/deactivate on it meant a space admin could
+// not activate an agent in the space they run, while anyone who could create a
+// space could activate one in every space in the org. The permission that fits
+// is the space-level string for the type being activated, which is also what
+// the per-type package routes already use (`routes/packages.ts` →
+// `ROUTE_CONFIGS`).
 //
-// `agents:configure` rather than `agents:write`: installing does not author the
-// agent, it configures which space runs it — the same distinction the catalog
+// `agents:configure` rather than `agents:write`: activating does not author the
+// agent, it decides which space runs it — the same distinction the catalog
 // already draws between writing an agent and configuring one.
-type SpacePackageOp = "install" | "configure" | "uninstall";
+//
+// The permission STRINGS keep the spelling their role rows carry
+// (`integrations:install` / `integrations:uninstall`): those are data in
+// `space_roles` and in every API key's scope list, and renaming a grant is a
+// migration of rows, not of code.
+type SpacePackageOp = "activate" | "configure" | "deactivate";
 
 /**
  * Gate a space-package write and resolve the package's type, in the order that
@@ -272,11 +281,17 @@ type SpacePackageOp = "install" | "configure" | "uninstall";
  *
  *   1. **Coarse gate, before any catalog read.** A caller holding none of the
  *      four strings this op can require is refused without the row ever being
- *      looked up, so it cannot tell an installed package from a package the org
+ *      looked up, so it cannot tell a placed package from a package the org
  *      does not have. This is the step that stops the route being an
  *      enumeration oracle.
- *   2. **Catalog lookup**, with the org/system predicate — a package the org
- *      cannot see reads as absent, exactly as it does for the reader.
+ *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
+ *      reachability rule the reader obeys, for ALL THREE ops. An id the caller
+ *      cannot reach answers the same 404 body here as it does on the read
+ *      routes, so `POST`, `DELETE` and `PUT` cannot be told apart by their
+ *      refusals. Two different `detail` strings — one for an org-visible id the
+ *      caller cannot reach (homed in somebody else's personal space), one for
+ *      an id that does not exist — would be an existence oracle over the whole
+ *      catalogue for any holder of one activation grant.
  *   3. **Exact gate** for the resolved type.
  *
  * A residue remains at step 3 and is accepted: a caller holding `skills:write`
@@ -284,63 +299,73 @@ type SpacePackageOp = "install" | "configure" | "uninstall";
  * one (404). That is inherent to gating per type, and it is a much narrower
  * disclosure than "any authenticated space member can enumerate the catalog".
  *
- * WHICH op a request is, for the one route that can be several at once
- * (`PUT /api/spaces/{id}/packages/{scope}/{name}`):
- *
- *   - `enabled: true` is `install`, `enabled: false` is `uninstall`. It is a
- *     switch of PRESENCE, not a setting — the same pair of acts as
- *     `POST …/integrations/{id}/activate` and `DELETE …/deactivate`, spelled on
- *     the association row instead of its own route.
- *   - `modelId` / `proxyId` / `generationConfig` are `configure`: they choose
- *     how an already-present package runs.
- *   - a body carrying both must clear BOTH gates, and a body carrying neither
- *     is gated as `configure` so an empty patch can never become a cheap
- *     installed-or-not oracle.
+ * ONE op per route, and one verb per act: `POST` on the collection activates,
+ * `DELETE` on an item deactivates, `PUT` configures. There is no body to
+ * classify — `enabled` left `PUT` when activation got its own pair of doors —
+ * so the op is a constant at each call site.
  *
  * ONE exception, and it is the whole authorization story of a PERSONAL space
  * (RBAC spec §3.6): when the target is the caller's OWN personal space, the
- * `install` / `uninstall` grants are not required — ownership is the
+ * `activate` / `deactivate` grants are not required — ownership is the
  * authorization. A `guest` holds only the `operator` preset in their own space,
  * which carries none of `agents:configure` / `integrations:install` /
  * `<type>:write`, so requiring them there would mean a recipient could never
- * take a package somebody offered them — nor put down one they took, which is
- * why `enabled` is classified above rather than left under `configure`. Both
- * coarse and exact gates are skipped together: a gate that refuses before the
- * type is known refuses just as hard. The catalog read is NOT skipped — a
- * package the caller cannot reach stays a 404 in their own space too, and the
- * offer is checked again, under a row lock, inside `installPackage`'s
- * transaction. `configure` keeps its grant even there: choosing a model is
- * spending the organization's LLM budget, not accepting what was offered.
+ * take up a package somebody offered them — nor put it back down. Both coarse
+ * and exact gates are skipped together: a gate that refuses before the type is
+ * known refuses just as hard. The catalog read is NOT skipped — a package the
+ * caller cannot reach stays a 404 in their own space too, and the offer is
+ * checked again, under a row lock, inside `activatePackage`'s transaction.
+ * `configure` keeps its grant even there: choosing a model is spending the
+ * organization's LLM budget, not accepting what was offered.
  */
-async function gateSpacePackageWrite(
+/**
+ * Step 1 of {@link gateSpacePackageWrite}, callable on its own.
+ *
+ * It needs no package id — that is the whole point — so a route whose id
+ * travels in the BODY runs it BEFORE parsing that body, and a caller with no
+ * authority over this space gets the 403 rather than a 400 about a payload they
+ * were never entitled to submit. Returns the personal-space exemption so the
+ * second half does not recompute it.
+ */
+async function coarseSpacePackageGate(
   c: Context<AppEnv>,
   orgId: string,
-  packageId: string,
   op: SpacePackageOp,
-  /**
-   * The caller's accessible spaces, when the route already walked them. A
-   * mixed `PUT` runs this gate TWICE (once per verb), and each pass would
-   * otherwise re-walk every space the caller can reach to answer the same
-   * question.
-   */
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
-): Promise<PackageType> {
+): Promise<boolean> {
   const owner = c.get("space")?.ownerUserId ?? null;
   const ownSpace =
     op !== "configure" && owner !== null && owner === callerPersonalOwnerId(c, orgId);
-
   if (!ownSpace) {
     const alternatives = (["agent", "skill", "integration", "mcp-server"] as const).map((type) =>
       spacePackagePermission(type, op),
     );
     await requireAnyPermission(alternatives)(c, async () => {});
   }
+  return ownSpace;
+}
 
-  const type =
-    op === "install"
-      ? (await assertCatalogPackageAccess(c, packageId, resolvedSpaces)).type
-      : await getCatalogPackageType(orgId, packageId);
-  if (!type) throw notFound(`Package '${packageId}' not found in organization catalog`);
+async function gateSpacePackageWrite(
+  c: Context<AppEnv>,
+  orgId: string,
+  packageId: string,
+  op: SpacePackageOp,
+  opts?: {
+    /**
+     * The caller's accessible spaces, when the route already walked them —
+     * `assertCatalogPackageAccess` would otherwise re-walk every space the
+     * caller can reach to answer a question the route has just answered.
+     */
+    resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>;
+    /**
+     * What {@link coarseSpacePackageGate} already answered, for a route that
+     * had to run step 1 early. Absent, step 1 runs here.
+     */
+    ownSpace?: boolean;
+  },
+): Promise<PackageType> {
+  const ownSpace = opts?.ownSpace ?? (await coarseSpacePackageGate(c, orgId, op));
+
+  const { type } = await assertCatalogPackageAccess(c, packageId, opts?.resolvedSpaces);
 
   // Reusing `requirePermission` rather than an inline `has` keeps the denial
   // audit hook, the 403 body and the fail-closed semantics identical to every
@@ -761,7 +786,7 @@ export function createSpacesRouter() {
     return c.json({ access_after: after ? "implicit" : "none" });
   });
 
-  // ─── Space Packages (install/uninstall/config) ─────────────────────
+  // ─── Space packages (activate / deactivate / configure) ────────────
 
   // Guard: resolve the PATH space and the caller's role in it, once for all
   // /:spaceId/packages/* routes. These are space-scoped by their path, not by
@@ -770,7 +795,7 @@ export function createSpacesRouter() {
   router.use("/:spaceId/packages/*", requireSpaceFromParam("spaceId"));
   router.use("/:spaceId/packages", requireSpaceFromParam("spaceId"));
 
-  // GET /api/spaces/:spaceId/packages — list installed packages.
+  // GET /api/spaces/:spaceId/packages — list this space's placements.
   // The `router.use` guards above only prove the space belongs to the org;
   // `spaces:read` is the read twin of the `spaces:write` the mutating routes
   // carry, and matches this route being package-type agnostic.
@@ -778,57 +803,74 @@ export function createSpacesRouter() {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
-    const rows = await listInstalledPackages({ orgId, spaceId: spaceId }, type);
+    const rows = await listSpacePackages({ orgId, spaceId: spaceId }, type);
     const readable = rows.filter((row) =>
       c.get("permissions")?.has(packagePermission(row.package_type, "read")),
     );
     return c.json(listResponse(readable.map((row) => ({ object: "space_package", ...row }))));
   });
 
-  // POST /api/spaces/:spaceId/packages — install a package. THE door: there is
-  // no second one, for a team space or a personal one (plan decisions 1, 2, 7).
+  // POST /api/spaces/:spaceId/packages — ACTIVATE a package here. THE door, for
+  // a team space and a personal one alike, and for all four package types:
+  // there is no per-type activation route beside it.
+  //
+  // Idempotent by construction: the placement row is upserted, so activating an
+  // already-active package answers with the same body instead of a 409, and
+  // activating one that was switched off brings back every setting the space
+  // had chosen. 201 when this call put the package on; 200 when it was already
+  // on — which covers a system integration, active with no row at all.
   //
   // A package is placed in a space by its HOME or by a SHARE. If neither holds
   // here, this route can CREATE the share — but only for a caller who holds
   // `<type>:share` in the package's home, which is exactly the authority an
   // offer requires (`assertPackageShareAccess`: 404 when the id is unreachable,
-  // 403 when it is reachable but not the caller's to hand out). Installing
-  // is therefore not a way around `share`: reading A's package from B grants
+  // 403 when it is reachable but not the caller's to hand out). Activating is
+  // therefore not a way around `share`: reading A's package from B grants
   // nothing about placing it there.
   //
-  // An API key never carries `share`, so it installs the already-placed and
+  // An API key never carries `share`, so it activates the already-placed and
   // nothing else — documented on the OpenAPI operation.
   router.post("/:spaceId/packages", async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("spaceId")!;
     const scope = { orgId, spaceId };
 
-    const data = await readJsonBody(c, installPackageSchema);
-    await gateSpacePackageWrite(c, orgId, data.packageId, "install");
+    // Coarse gate FIRST, before the body is even parsed: it asks nothing about
+    // the package, so a caller holding none of the four activation grants is
+    // refused with the 403 the gate exists to give rather than a 400 about the
+    // shape of a payload they were never entitled to send.
+    const ownSpace = await coarseSpacePackageGate(c, orgId, "activate");
+    const data = await readJsonBody(c, activatePackageSchema);
+    await gateSpacePackageWrite(c, orgId, data.packageId, "activate", { ownSpace });
 
     // Read first, to decide whether the caller must ALSO prove `<type>:share`.
-    // The authoritative check is `installPackage`'s, under the share row's
+    // The authoritative check is `activatePackage`'s, under the share row's
     // lock, in the transaction that writes: a revoke racing this read makes the
-    // install refuse rather than commit an unbacked installation.
+    // activation refuse rather than commit a placement nothing backs.
     const placed = await isPackageReadableInSpace(spaceId, data.packageId);
-    let installed;
+    let activation;
     if (placed) {
-      installed = await installPackage(scope, data.packageId);
+      activation = await activatePackage(scope, data.packageId);
     } else {
       await assertPackageShareAccess(c, data.packageId);
-      installed = await installPackage(scope, data.packageId, { shareBy: c.get("user").id });
+      activation = await activatePackage(scope, data.packageId, { shareBy: c.get("user").id });
     }
+    // Whether this call is what put the package ON — the activation rule read
+    // before the write. A package the deployment already switches on with no
+    // row at all (a system package, an integration named by
+    // `SYSTEM_INTEGRATIONS`) was active before the click and stays active
+    // after it: the row it gains records a decision that changes nothing.
+    const turnedOn = !activation.wasActive;
     // The AUDIENCE changed — recorded off what the transaction actually wrote,
-    // not off the read above: a concurrent install may have put the offer in
+    // not off the read above: a concurrent activation may have put the offer in
     // first, and an entry naming an act that did not happen is worse than no
-    // entry. There is no companion installation audit; the association row is
-    // the record of that half.
+    // entry.
     //
     // `targetKind: "space"` because that is what was named: this route takes a
-    // space id, never a person (plan decision 5b keeps a personal space's id
-    // off the wire, and it is not on this one either — it is the space the
-    // caller is already acting in).
-    if (installed.shared) {
+    // space id, never a person (a personal space's id stays off the wire, and
+    // it is not on this one either — it is the space the caller is already
+    // acting in).
+    if (activation.shared) {
       await recordAuditFromContext(c, {
         action: "package.shared",
         resourceType: "package",
@@ -836,11 +878,25 @@ export function createSpacesRouter() {
         after: { spaceId, targetKind: "space" },
       });
     }
-    const row = await getInstalledPackage(scope, data.packageId);
-    return c.json({ object: "space_package", ...row }, 201);
+    // Only a call that actually turned the package ON is an activation worth
+    // recording: a repeat says nothing new, and the audit trail of a toggle is
+    // unreadable when every poll writes to it.
+    if (turnedOn) {
+      await recordAuditFromContext(c, {
+        action: "package.activated",
+        resourceType: "package",
+        resourceId: data.packageId,
+        after: { spaceId },
+      });
+    }
+    // 201 says this call turned the package on; 200 says it was already on.
+    // The body is the row the TRANSACTION wrote, not a re-read: a second SELECT
+    // would describe whatever state the table is in when it lands, which under
+    // concurrency is somebody else's act.
+    return c.json({ object: "space_package", ...activation.placement }, turnedOn ? 201 : 200);
   });
 
-  // GET /api/spaces/:spaceId/packages/:packageId — get installed package detail
+  // GET /api/spaces/:spaceId/packages/:packageId — one placement, in detail
   router.get(
     `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
     requirePermission("spaces", "read"),
@@ -848,16 +904,16 @@ export function createSpacesRouter() {
       const spaceId = c.req.param("spaceId")!;
       const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      const row = await getInstalledPackage({ orgId, spaceId: spaceId }, packageId);
+      const row = await getSpacePackage({ orgId, spaceId: spaceId }, packageId);
       // A row the caller may not read reads as absent, exactly as the list
       // route omits it. Answering 403 instead would turn this route into a
       // package-type oracle for a role that cannot see the row at all.
       if (!row || !c.get("permissions")?.has(packagePermission(row.package_type, "read"))) {
         throw new ApiError({
           status: 404,
-          code: "package_not_installed",
-          title: "Package Not Installed",
-          detail: `Package '${packageId}' is not installed in this space`,
+          code: "package_not_placed",
+          title: "Package Not Placed",
+          detail: `Package '${packageId}' is not placed in this space`,
         });
       }
       return c.json({ object: "space_package", ...row });
@@ -870,41 +926,25 @@ export function createSpacesRouter() {
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+
+    // Gate FIRST — before the body is parsed, and before any read of the
+    // placement row. The id is in the PATH here, so the whole gate can run
+    // ahead of the payload: a caller with no authority gets the 403 without
+    // learning whether the package is placed here, and without a validation
+    // error standing in for it. `requirePlacement` below turns a missing row
+    // into the 404, and only a caller who passed the gate can see it.
+    //
+    // ONE gate, always `configure`: this route chooses how an already-placed
+    // package runs, and nothing else. Activation left it when it got its own
+    // pair of doors, so an empty body is gated exactly like a full one and can
+    // never be a free existence probe.
+    await gateSpacePackageWrite(c, orgId, packageId, "configure");
     const data = await readJsonBody(c, updatePackageSchema);
 
-    // Gate FIRST, before any read of the association row: the type comes from
-    // the catalog, so a caller with no authority never learns whether the
-    // package is installed. `requireInstalled` below turns a missing row into
-    // the 404, and only a caller who passed the gate can see it.
-    //
-    // WHICH gate is the body's business: `enabled` toggles presence and is
-    // judged as install/uninstall, the three settings are `configure`, and a
-    // body doing both answers to both (see `gateSpacePackageWrite`). A body
-    // that touches no setting still asks for `configure`, so an empty patch is
-    // never a free existence probe.
-    const configuresRun =
-      data.modelId !== undefined ||
-      data.proxyId !== undefined ||
-      data.generationConfig !== undefined;
-    // Walked once for both passes: a body that carries `enabled` AND a setting
-    // answers to two gates, and the catalog reachability they each prove is the
-    // same reachability.
-    const accessible = await packageAccessSpaces(c);
-    if (configuresRun || data.enabled === undefined)
-      await gateSpacePackageWrite(c, orgId, packageId, "configure", accessible);
-    if (data.enabled !== undefined)
-      await gateSpacePackageWrite(
-        c,
-        orgId,
-        packageId,
-        data.enabled ? "install" : "uninstall",
-        accessible,
-      );
-
-    const installed = await getInstalledPackage(scope, packageId);
+    const placement = await getSpacePackage(scope, packageId);
     let generationConfig = data.generationConfig;
-    if (installed && (data.modelId !== undefined || generationConfig !== undefined)) {
-      const effectiveModelId = data.modelId !== undefined ? data.modelId : installed.modelId;
+    if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
+      const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
       const explicitModel =
         data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
       const selectedModel =
@@ -919,16 +959,16 @@ export function createSpacesRouter() {
       } else if (
         generationConfig === undefined &&
         data.modelId !== undefined &&
-        installed.generationConfig
+        placement.generationConfig
       ) {
         // Reconcile only when `modelId` is part of THIS patch: re-clamping
         // stored settings is a response to the selected model possibly
         // having changed, and a patch that never mentions `modelId` cannot
-        // change it. Without the conjunct a `{ enabled: false }` patch would
+        // change it. Without the conjunct a patch naming only the proxy would
         // silently rewrite `generation_config` on a request that never named
         // it.
         generationConfig = reconcileModelGenerationSettings(
-          installed.generationConfig,
+          placement.generationConfig,
           selectedModel?.generation,
         );
       }
@@ -936,27 +976,55 @@ export function createSpacesRouter() {
 
     const { generationConfig: _generationConfig, ...rest } = data;
     void _generationConfig;
-    // `requireInstalled` — this route updates an EXISTING association; a
-    // packageId that is not installed (or not visible to the org) is a 404,
-    // never an implicit install via upsert.
-    await updateInstalledPackage(
+    // `requirePlacement` — this route updates an EXISTING placement; a
+    // packageId that is not placed here (or not visible to the org) is a 404,
+    // never an implicit activation via upsert.
+    await updateSpacePackage(
       scope,
       packageId,
       { ...rest, ...(generationConfig !== undefined ? { generationConfig } : {}) },
-      { requireInstalled: true },
+      { requirePlacement: true },
     );
-    const updated = await getInstalledPackage(scope, packageId);
+    const updated = await getSpacePackage(scope, packageId);
     return c.json({ object: "space_package", ...updated });
   });
 
-  // DELETE /api/spaces/:spaceId/packages/:packageId — uninstall
+  // DELETE /api/spaces/:spaceId/packages/:packageId — DEACTIVATE it here.
+  //
+  // The placement row and every setting on it stay: the space keeps the model,
+  // the proxy and the stored input values it chose, so switching a package off
+  // for a week costs nothing to undo. Only revoking the share that placed the
+  // package removes the row (`DELETE …/shares/{target}`), and only for the
+  // space that lost the offer.
+  //
+  // 204 when the space has a row, and when it has none but the package is ON by
+  // the DEPLOYMENT's default — there the row is MATERIALIZED saying `false`,
+  // which is the sticky opt-out: the default switched the package on, and only
+  // an explicit row outvotes it. The default is the activation rule's, not a
+  // reading of `source`: a `system`-provenance integration this deployment does
+  // NOT offer is off already and falls into the case below.
+  // 404 for anything else with no row: an offer nobody has taken up is not on,
+  // so there is nothing to switch off, and writing the row would turn a pending
+  // offer into "switched off" — a decision its recipient never made.
   router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    await gateSpacePackageWrite(c, orgId, packageId, "uninstall");
-    await uninstallPackage(scope, packageId);
+    await gateSpacePackageWrite(c, orgId, packageId, "deactivate");
+    const { changed } = await deactivatePackage(scope, packageId);
+    // Symmetric with `package.activated`: only a call that actually switched
+    // the package off is worth recording. A repeat says nothing new, and the
+    // same argument that keeps the other door quiet applies here — a log full
+    // of no-op deactivations is a log nobody can read a real one out of.
+    if (changed) {
+      await recordAuditFromContext(c, {
+        action: "package.deactivated",
+        resourceType: "package",
+        resourceId: packageId,
+        after: { spaceId },
+      });
+    }
     return c.body(null, 204);
   });
 
@@ -977,9 +1045,9 @@ export function createSpacesRouter() {
       if (!resolved) {
         throw new ApiError({
           status: 404,
-          code: "package_not_installed",
-          title: "Package Not Installed",
-          detail: `Package '${packageId}' is not installed in this space`,
+          code: "package_not_placed",
+          title: "Package Not Placed",
+          detail: `Package '${packageId}' is not placed in this space`,
         });
       }
       return c.json(resolved);

@@ -97,6 +97,12 @@ export interface SkillFixture {
   extraFiles?: Record<string, string>;
   /** `source` on the list DTO — set to `"system"` to assert it is skipped. */
   source?: "local" | "system";
+  /**
+   * The skill is PLACED in the space but switched off there. The real list
+   * route drops it from `?active=true`, which is the only listing the sync
+   * reads — so a fixture marked this way must never reach the plan.
+   */
+  inactive?: boolean;
   /** When true, `versions/latest` answers 404 (never published). */
   unpublished?: boolean;
   /**
@@ -234,16 +240,22 @@ export function createSkillServer(
     }
 
     if (path === "/api/packages/skills") {
+      // `?active=true` is the ACTIVE set, not the placed one — the narrowing
+      // the server applies, reproduced here so a sync that dropped the query
+      // parameter fails instead of quietly syncing switched-off skills.
+      const activeOnly = url.searchParams.get("active") === "true";
       return json({
         object: "list",
-        data: prepared.map((p) => ({
-          id: p.fixture.id,
-          name: p.name,
-          description: MANIFEST_DESCRIPTION,
-          source: p.fixture.source ?? "local",
-          version: p.version,
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        })),
+        data: prepared
+          .filter((p) => !(activeOnly && p.fixture.inactive))
+          .map((p) => ({
+            id: p.fixture.id,
+            name: p.name,
+            description: MANIFEST_DESCRIPTION,
+            source: p.fixture.source ?? "local",
+            version: p.version,
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          })),
       });
     }
 

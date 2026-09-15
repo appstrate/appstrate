@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackageShare, seedRun, seedSpace } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   getRecentRuns,
   getRunningRunCounts,
@@ -35,9 +35,9 @@ describe("Cross-space run isolation (service layer)", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     await seedPackageShare(spaceBId, agentId);
-    await installPackage({ orgId: ctx.orgId, spaceId: spaceBId }, agentId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: spaceBId }, agentId);
   });
 
   describe("getRecentRuns", () => {

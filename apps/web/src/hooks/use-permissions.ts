@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { useOrg } from "./use-org.ts";
 import { useSpaces } from "./use-spaces.ts";
+import type { SpaceGrant } from "../lib/package-permissions.ts";
 import { useCurrentSpaceId } from "./use-current-space.ts";
 import type { OrgRole } from "@appstrate/shared-types";
 import { ORG_ROLES_WITH_FULL_ACCESS, type CorePermission } from "@appstrate/core/permissions";
@@ -101,4 +102,26 @@ export function usePermissions() {
   const ready = !!currentOrg && !spacesLoading && (!!space || !enterableSpaceExists);
 
   return { can, ready, orgRole: currentOrg?.role ?? null };
+}
+
+/**
+ * The caller's standing in the space they are currently IN, in the shape the
+ * activation verdict reads (`maySetPackageActive`). Activating a package is
+ * judged in the TARGET space and nowhere else, and owning that space is its own
+ * authorization — neither fact survives the org∪space union `can` computes, so
+ * the row itself travels.
+ *
+ * `undefined` while `GET /api/spaces` is in flight, or for a space this caller
+ * does not reach: both read as "not yet", never as a refusal.
+ */
+export function useCurrentSpaceGrant(): SpaceGrant | undefined {
+  const spaceId = useCurrentSpaceId();
+  const { data: spaces } = useSpaces();
+  const space = spaces?.find((s) => s.id === spaceId);
+  if (!space) return undefined;
+  return {
+    permissions: space.permissions,
+    personal: space.personal,
+    access: space.access,
+  };
 }

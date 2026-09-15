@@ -171,7 +171,9 @@ function agentConnectionReadinessQueryOptions(
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
-  // Keep explicit draft distinct from the inherited installation snapshot.
+  // The `version` selector rides in the key: an explicit `draft` and the
+  // published version resolve different manifests, so their verdicts must not
+  // share one cache entry.
   return $api.queryOptions(
     "get",
     "/api/agents/{scope}/{name}/connection-readiness",
@@ -240,46 +242,6 @@ export function useIntegrationRunBlocking(
     enabled: Boolean(orgId && spaceId && integrationId && agentPackageId),
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,
-  });
-}
-
-export function useActivateIntegration() {
-  const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  return useMutation({
-    // 201 + the bare integration detail resource (#657) — activation
-    // state is the resource's `active` field.
-    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
-      const { data } = await client.POST("/api/integrations/{packageId}/activate", {
-        ...vars,
-        body: {},
-      });
-      return data;
-    },
-    onSuccess: () => {
-      toast.success(t("integrations.activate.success"));
-      void invalidateIntegrationQueries(qc);
-    },
-    onError: () => toast.error(t("integrations.activate.error")),
-  });
-}
-
-export function useDeactivateIntegration() {
-  const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  return useMutation({
-    // DELETE → 204 empty (#657): deactivation removes the
-    // space_packages row; the detail stays GET-able.
-    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
-      await client.DELETE("/api/integrations/{packageId}/deactivate", {
-        ...vars,
-      });
-    },
-    onSuccess: () => {
-      toast.success(t("integrations.deactivate.success"));
-      void invalidateIntegrationQueries(qc);
-    },
-    onError: () => toast.error(t("integrations.deactivate.error")),
   });
 }
 
@@ -415,7 +377,7 @@ export function useIntegrationPins(packageId: string | undefined) {
 }
 
 /**
- * R2 — installed agents that declare this integration as a dependency. Used
+ * R2 — the space's agents that declare this integration as a dependency. Used
  * by the centralised pin management table to populate the "pin a new agent"
  * picker.
  */

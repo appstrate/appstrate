@@ -38,7 +38,7 @@ import {
   seedPackage,
   seedPackageShare,
   seedPublishedVersion,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedApiKey,
   seedPackageVersion,
 } from "../../helpers/seed.ts";
@@ -126,7 +126,7 @@ describe("packages GET routes — read permission", () => {
       },
       draftContent: SKILL_BODY,
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
     await seedPackageVersion({
       packageId: SKILL_ID,
       version: "0.1.0",
@@ -214,7 +214,7 @@ describe("packages GET routes — read permission", () => {
     // agent answers `404 no_published_version` and this test would assert the
     // wrong refusal.
     await seedPublishedVersion(agentId, "0.1.0");
-    await seedInstalledPackage(ctx.defaultSpaceId, agentId);
+    await seedSpacePackage(ctx.defaultSpaceId, agentId);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -246,7 +246,7 @@ describe("packages version download — access + read permission", () => {
   it("403s a download for a key without the package type's read scope", async () => {
     await publishSkill(ctx);
     await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -264,7 +264,7 @@ describe("packages version download — access + read permission", () => {
   it("serves the artifact to a key holding skills:read", async () => {
     await publishSkill(ctx);
     await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
@@ -330,7 +330,7 @@ describe("packages file explorer — read permission", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
     await publishSkill(ctx);
     await seedPackageShare(ctx.defaultSpaceId, SKILL_ID);
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
   });
 
   it("403s the index and the file bytes for a key without skills:read", async () => {

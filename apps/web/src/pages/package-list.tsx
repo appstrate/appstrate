@@ -9,7 +9,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
-import { SpacePackageOffers } from "../components/package-offers";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
@@ -28,14 +27,14 @@ export interface CardItem {
   actions?: ReactNode;
   autoInstalled?: boolean;
   /**
-   * Agent cards only: whether the agent is activated in the current space
-   * (`AgentListItem.installed`). The index lists what this space READS — homed
-   * here, offered here, or system — and a run needs an installation on top, so
-   * `false` greys the card's launch control out with the reason rather than
+   * Agent cards only: whether the agent is ACTIVE in the current space
+   * (`AgentListItem.active`). The index lists what this space READS — homed
+   * here, offered here, or system — while a run needs a placement switched on,
+   * so `false` greys the card's launch control out with the reason rather than
    * letting the click come back a 404. `undefined` where the list does not
    * carry the fact (non-agent cards), which reads as "runnable".
    */
-  installed?: boolean;
+  active?: boolean;
 }
 
 interface PackageTabProps {
@@ -51,7 +50,6 @@ interface PackageTabProps {
   extraActions?: ReactNode;
   emptyExtraActions?: ReactNode;
   headerContent?: ReactNode;
-  beforeItems?: ReactNode;
 }
 
 export function PackageTab({
@@ -67,7 +65,6 @@ export function PackageTab({
   extraActions,
   emptyExtraActions,
   headerContent,
-  beforeItems,
 }: PackageTabProps) {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
@@ -84,7 +81,6 @@ export function PackageTab({
     return (
       <>
         {header}
-        {beforeItems}
         <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon}>
           {emptyActions}
         </EmptyState>
@@ -95,7 +91,6 @@ export function PackageTab({
   return (
     <>
       {header}
-      {beforeItems}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {items.map((item) => (
           <PackageCard key={item.id} {...item} />
@@ -121,13 +116,12 @@ export function PackageList() {
     runningRuns: f.running_runs,
     keywords: f.keywords,
     unreadCount: unreadCounts?.[f.id],
-    installed: f.installed,
+    active: f.active,
   }));
 
   return (
     <div className="p-6">
       <PackageTab
-        beforeItems={<SpacePackageOffers type="agent" />}
         title={t("list.tabAgents")}
         emoji="⚡"
         breadcrumbs={[

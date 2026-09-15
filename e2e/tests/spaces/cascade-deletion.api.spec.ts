@@ -4,7 +4,7 @@
  * Space cascade deletion E2E tests.
  *
  * Verifies that deleting a custom space cascades to its
- * associated resources (webhooks, schedules, installed packages, end-users).
+ * associated resources (webhooks, schedules, package placements, end-users).
  */
 
 import { test, expect } from "../../fixtures/api.fixture.ts";
@@ -13,7 +13,7 @@ import {
   createSpace,
   createWebhook,
   createSchedule,
-  installPackageInSpace,
+  activatePackageInSpace,
 } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
 
@@ -49,7 +49,7 @@ test.describe("Space cascade deletion", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("Deleting a custom space removes its installed packages", async ({
+  test("Deleting a custom space removes the packages placed in it", async ({
     apiClient,
     orgContext,
     orgOnlyClient,
@@ -59,9 +59,9 @@ test.describe("Space cascade deletion", () => {
     await createAgent(apiClient, scope, agentName);
 
     const customSpace = await createSpace(orgOnlyClient, `CascPkg-${Date.now()}`);
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
 
-    // Verify installed
+    // Verify the placement exists
     let res = await orgOnlyClient.get(`/spaces/${customSpace.id}/packages`);
     expect(res.status()).toBe(200);
     const body = await res.json();
@@ -87,8 +87,8 @@ test.describe("Space cascade deletion", () => {
     await createAgent(apiClient, scope, agentName);
 
     const customSpace = await createSpace(orgOnlyClient, `CascSched-${Date.now()}`);
-    // Install agent in custom space so we can create schedule there
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
+    // Activate the agent in the custom space so a schedule can be created there
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
 
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,

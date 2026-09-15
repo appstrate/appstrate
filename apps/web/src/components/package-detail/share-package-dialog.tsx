@@ -40,8 +40,9 @@ type ShareTarget = { kind: "user"; user_id: string } | { kind: "space"; space_id
  * Two tabs because there are two kinds of subject and a person is not a space:
  * picking someone shares with THEIR personal space, resolved server-side, so
  * this dialog never handles that id. The list below is the current audience,
- * and revoking from it also uninstalls the package for that recipient — which
- * is why the button says so.
+ * and revoking from it takes the placement away with the share — the package
+ * stops being readable AND stops running there, which is why the button says
+ * so.
  *
  * Offering needs a published version, whatever the target (`409
  * package_has_no_version`): away from its home a package runs the latest
@@ -96,7 +97,7 @@ export function SharePackageDialog({
   const members = (org?.members ?? []).filter((member) => !offered.has(member.userId));
   // A share destination is a space the caller reaches that is neither the
   // package's home nor their OWN personal space: the first already has it, and
-  // the second is reached by installing, not by offering it to yourself.
+  // the second is reached by activating it, not by offering it to yourself.
   const destinations = (spaces ?? []).filter(
     (candidate) =>
       !candidate.personal &&

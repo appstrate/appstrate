@@ -25,7 +25,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedSpaceMember } from "../../helpers/seed.ts";
-import { installPackage, updateInstalledPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, updateSpacePackage } from "../../../src/services/space-packages.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { runs, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { validateManifest } from "@appstrate/core/validation";
@@ -79,7 +79,7 @@ async function seedRegistryAgent(
     .insert(packageDistTags)
     .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
   await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
+  await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 }
 
 async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
@@ -225,7 +225,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
@@ -276,7 +276,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
@@ -321,7 +321,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
@@ -351,7 +351,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/draft-only");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/draft-only");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/draft-only", stage: "draft" },
@@ -388,7 +388,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/draft-only");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/draft-only");
     // Publish one too, so the control below runs the SAME agent from the SAME
     // caller and the only thing that changes is the stage.
     const versionRow = await seedPackageVersion({
@@ -494,7 +494,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/broken-draft");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/broken-draft");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/broken-draft", stage: "draft" },
@@ -542,7 +542,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     });
     expect(res.status).toBe(404);
     const body = (await res.json()) as { code?: string };
-    expect(body.code).toBe("package_not_installed_in_space");
+    expect(body.code).toBe("package_not_active_in_space");
   });
 
   it("rejects an unresolvable spec with 404", async () => {
@@ -652,7 +652,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "helper",
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/helper");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/helper");
 
     // Agent declaring a skill dependency — its id is a valid override KEY.
     const manifest = {
@@ -685,7 +685,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", "2.0.0", buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "2.0.0" },
@@ -886,7 +886,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         } as unknown as Record<string, unknown>,
         LOCKED_VERSION,
       );
-      await updateInstalledPackage(
+      await updateSpacePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@acme/briefing",
         { inputSettings: { values: { tone: "formal" }, locked: ["tone"] } },

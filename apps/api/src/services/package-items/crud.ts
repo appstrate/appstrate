@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, or, ne, desc, sql, isNotNull } from "drizzle-orm";
+import { eq, and, or, ne, desc, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageShares } from "@appstrate/db/schema";
@@ -18,6 +18,8 @@ import {
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
+import { activeHereSql } from "../package-activation.ts";
+import { placementReadFilter } from "../package-placement.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -243,39 +245,6 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
-/**
- * Placement, in SQL — the same rule `placementGrantsRead` states in memory
- * (`lib/package-access.ts`, RBAC spec §6.9, §6.10): a package is readable from
- * a space when it is a SYSTEM package (readable everywhere), when it is SHARED
- * there, or when that space is its HOME. Exactly two placements, plus the
- * system escape.
- *
- * Without the home half a package this space governs but has uninstalled
- * disappears from its own type's index page while staying editable — write
- * without read; without the share half a package offered to this space is
- * invisible on the page the recipient would go looking for it. An INSTALLATION
- * is not a third placement: it only ever exists where one of these two already
- * holds, so reading it here would state nothing the rule does not.
- *
- * Expects `packageShares` LEFT JOINed on (package, `spaceId`) — the share half
- * is `packageShares.packageId IS NOT NULL`, so a query that omits the join
- * silently loses it. The org boundary (`orgOrSystemFilter`) and the shadow
- * filter (`notEphemeralFilter`) are the caller's, as everywhere else.
- *
- * It lives here rather than beside `placementGrantsRead` because
- * `lib/package-access.ts` already reaches `services/space-packages.ts`
- * transitively (through `services/organizations.ts`); importing it back would
- * close that cycle. Its two callers are `listOrgItems` below and
- * `listReadablePackages` in `services/space-packages.ts`.
- */
-export function placementReadFilter(spaceId: string) {
-  return or(
-    eq(packages.source, "system"),
-    isNotNull(packageShares.packageId),
-    eq(packages.homeSpaceId, spaceId),
-  );
-}
-
 /** List items of a type readable from a space — the placement rule, per type. */
 export async function listOrgItems(
   orgId: string,
@@ -284,15 +253,16 @@ export async function listOrgItems(
   opts?: { activeOnly?: boolean },
 ) {
   // Default: the catalogue view — {@link placementReadFilter}, the placement
-  // rule this page is a reader of. `activeOnly` narrows to packages actually
-  // active in THIS space: an enabled `space_packages` row, dropping the "system
-  // always shows" branch. Used by the agent editor's integration picker so it
-  // only offers usable integrations (server-side filter — the full catalogue
-  // can be large). `activeOnly` stays install-only: neither a home nor an offer
-  // is a usable instance.
-  const placementFilter = opts?.activeOnly
-    ? and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true))
-    : placementReadFilter(spaceId);
+  // rule this page is a reader of. `activeOnly` NARROWS it, and narrows is the
+  // exact word: {@link activeHereSql} conjoins the same placement filter and
+  // then asks the space's switch on top, so every row it returns is one this
+  // view would have returned anyway. That is the one definition the run gate,
+  // the hints and the library all read, so the agent editor's integration
+  // picker offers exactly the set readiness will accept. NOT a formulation of
+  // its own: a bare row-and-enabled predicate hides every system package the
+  // space runs without a row, and then the integrations listing needs a
+  // correction pass to put them back.
+  const placementFilter = opts?.activeOnly ? activeHereSql(spaceId) : placementReadFilter(spaceId);
   // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
   // projected: the list mapper never reads it, and it is by far the largest
   // column on the row.

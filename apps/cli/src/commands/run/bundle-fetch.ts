@@ -26,7 +26,7 @@ export class BundleFetchError extends Error {
   constructor(
     public readonly code:
       | "package_not_found"
-      | "package_not_installed_in_space"
+      | "package_not_active_in_space"
       | "version_not_found"
       | "integrity_mismatch"
       | "bundle_fetch_failed",
@@ -99,15 +99,15 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     const text = await safeText(res);
     // Server-issued problem+json carries a `code` field that distinguishes
     // the three 404 sub-cases. Parsing it here lets us surface a clearer
-    // hint than the historical "not found — verify the agent is installed"
+    // hint than the historical "not found — verify the agent is available"
     // catch-all (which left users staring at the message wondering whether
     // their agent existed at all).
     const errorCode = parseProblemCode(text);
-    if (errorCode === "agent_not_installed_in_space") {
+    if (errorCode === "agent_not_active_in_space") {
       throw new BundleFetchError(
-        "package_not_installed_in_space",
-        `Package ${input.packageId} exists in your organization catalog but is not installed in the pinned space`,
-        `Install it from the dashboard, or run:\n  appstrate api -X POST /api/spaces/${input.spaceId}/packages -d '{"packageId":"${input.packageId}"}'`,
+        "package_not_active_in_space",
+        `Package ${input.packageId} exists in your organization catalog but is not active in the pinned space`,
+        `Activate it from the dashboard, or run:\n  appstrate api -X POST /api/spaces/${input.spaceId}/packages -d '{"packageId":"${input.packageId}"}'`,
       );
     }
     if (/version/i.test(text) && input.spec) {

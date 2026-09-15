@@ -20,7 +20,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   _setRunLimitsForTesting,
   getInlineRunLimits,
@@ -197,7 +197,7 @@ async function seedAndExportBundle(opts: {
 
   await seedPackageShare(ctx.defaultSpaceId, rootId);
 
-  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootId);
+  await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootId);
 
   const res = await app.request(`/api/agents/${rootId}/bundle`, { headers: authHeaders(ctx) });
   if (res.status !== 200) {
@@ -247,7 +247,7 @@ describe("POST /api/packages/import-bundle — import", () => {
     }
     const body = (await res.json()) as {
       imported: Array<{ identity: string; status: string; version_id: number | null }>;
-      root_installed: boolean;
+      root_active: boolean;
       root_package_id: string;
       root_version: string;
     };
@@ -255,7 +255,7 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(body.imported.every((i) => i.status === "inserted" || i.status === "reused")).toBe(true);
     expect(body.root_package_id).toBe("@srcorg/agent-root");
     expect(body.root_version).toBe("1.0.0");
-    expect(body.root_installed).toBe(true);
+    expect(body.root_active).toBe(true);
 
     // Verify DB state — 3 packages registered + root installed in
     // the importing space.

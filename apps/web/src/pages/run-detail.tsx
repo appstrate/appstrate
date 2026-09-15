@@ -68,6 +68,12 @@ export function RunDetailPage() {
   const spaceId = useCurrentSpaceId();
   const { can, ready: permissionsReady } = usePermissions();
   const canReadAgent = can("agents:read");
+  // A run PROVES the agent was active here once; it does not prove it still is.
+  // Deactivating is an ordinary, reversible gesture now, so "Relancer" answers
+  // to the same gate as the detail page's Run button and the card's launcher —
+  // said before the click rather than collected as a 404 after it. The verdict
+  // rides this very response (`AgentDetail.active`), resolved for the space the
+  // page is read from; the Re-run control renders only once it has landed.
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -363,19 +369,24 @@ export function RunDetailPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    // Nothing published and the working copy is not this
-                    // reader's: a re-run resolves the latest published version
-                    // and there is none. Same refusal as the detail page's
-                    // Run button, said before the click rather than after.
+                    // Two refusals the launcher would otherwise discover by
+                    // round trip, in the order the detail page names them:
+                    // switched off HERE (the cure is one page away), then
+                    // nothing published and the working copy is not this
+                    // reader's — a re-run resolves the latest published
+                    // version and there is none.
                     disabled={
                       !permissionsReady ||
                       runAgent.isPending ||
+                      !agent.active ||
                       (agent.definition === "draft" && !agent.home_writable)
                     }
                     title={
-                      agent.definition === "draft" && !agent.home_writable
-                        ? t("detail.titleNeverPublished")
-                        : undefined
+                      !agent.active
+                        ? t("detail.titleNotActive")
+                        : agent.definition === "draft" && !agent.home_writable
+                          ? t("detail.titleNeverPublished")
+                          : undefined
                     }
                     onClick={() => {
                       if (canReadAgent) {

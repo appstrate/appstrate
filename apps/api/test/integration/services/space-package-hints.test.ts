@@ -1,31 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `listInstalledPackageHints` (through `listRunnableAgents` /
- * `listInstalledSkills`) is bounded IN SQL: the per-space enabled filter and
- * the cap sit in the query, and `total` is a window count over the filtered
- * set. It runs twice on every chat turn's TTFT path, so it must not load the
- * whole catalog to keep `limit` rows of it.
+ * `listActivePackageHints` (through `listRunnableAgents` /
+ * `listActiveSkills`) is bounded IN SQL: the activation filter and the cap
+ * sit in the query, and `total` is a window count over the filtered set. It
+ * runs twice on every chat turn's TTFT path, so it must not load the whole
+ * catalog to keep `limit` rows of it.
  *
  * What the SQL rewrite could get wrong, and what is pinned against it:
  *   - `total` counted AFTER the cap (a plain `LIMIT` with `rows.length`) would
  *     report the page size, not the catalog size → `total` is asserted above
  *     `items.length` with `truncated` true;
- *   - the enabled filter applied to the page but not the count → a disabled
- *     install is asserted absent from `total` as well as from `items`;
+ *   - the activation filter applied to the page but not the count → a
+ *     deactivated placement is asserted absent from `total` as well as from
+ *     `items`;
  *   - a different total order than `listReadablePackages` (system first,
  *     then id — load-bearing for the prompt cache) → the page's ids are
  *     asserted in that order, with a system package seeded to lead it.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { listRunnableAgents, listInstalledSkills } from "../../../src/services/space-packages.ts";
+import { listRunnableAgents, listActiveSkills } from "../../../src/services/space-packages.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 
-describe("listInstalledPackageHints — bounded in SQL", () => {
+describe("listActivePackageHints — bounded in SQL", () => {
   let ctx: TestContext;
   let scope: SpaceScope;
 
@@ -35,10 +36,11 @@ describe("listInstalledPackageHints — bounded in SQL", () => {
     scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
   });
 
-  async function seedInstalledAgent(id: string, overrides?: { enabled?: boolean }): Promise<void> {
+  async function seedActiveAgent(id: string, overrides?: { enabled?: boolean }): Promise<void> {
     await seedPackage({
       id,
       orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
       draftManifest: {
         name: id,
         version: "0.1.0",
@@ -47,22 +49,31 @@ describe("listInstalledPackageHints — bounded in SQL", () => {
         description: "An agent.",
       },
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, id, overrides);
+    await seedSpacePackage(ctx.defaultSpaceId, id, overrides);
   }
 
   it("caps the page, counts the whole enabled catalog, and keeps the system-first order", async () => {
-    // Five enabled local installs, ids chosen so the id tie-break is known.
-    for (const n of ["a1", "a2", "a3", "a4", "a5"]) await seedInstalledAgent(`@hintorg/${n}`);
-    // A system agent: no `space_packages` row (enabled by absence), and it
+    // Five active local placements, ids chosen so the id tie-break is known.
+    for (const n of ["a1", "a2", "a3", "a4", "a5"]) await seedActiveAgent(`@hintorg/${n}`);
+    // A system agent: no `space_packages` row (active by construction), and it
     // sorts FIRST whatever its id.
     await seedPackage({ id: "@zsys/system-agent", orgId: null, source: "system" });
-    // Installed but disabled in the space → in neither the page nor the count.
-    await seedInstalledAgent("@hintorg/a0-disabled", { enabled: false });
+    // Placed but switched off in the space → in neither the page nor the count.
+    await seedActiveAgent("@hintorg/a0-disabled", { enabled: false });
     // Owned by the org but not installed here → invisible.
-    await seedPackage({ id: "@hintorg/a0-uninstalled", orgId: ctx.orgId });
+    await seedPackage({
+      id: "@hintorg/a0-uninstalled",
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+    });
     // Another type → not an agent.
-    await seedPackage({ id: "@hintorg/a0-skill", orgId: ctx.orgId, type: "skill" });
-    await seedInstalledPackage(ctx.defaultSpaceId, "@hintorg/a0-skill");
+    await seedPackage({
+      id: "@hintorg/a0-skill",
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: ctx.defaultSpaceId,
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/a0-skill");
 
     const page = await listRunnableAgents(scope, { limit: 3 });
     expect(page.agents.map((a) => a.package_id)).toEqual([
@@ -71,7 +82,7 @@ describe("listInstalledPackageHints — bounded in SQL", () => {
       "@hintorg/a2",
     ]);
     expect(page.truncated).toBe(true);
-    // 1 system + 5 enabled installs. Not 7: the disabled install is filtered
+    // 1 system + 5 active placements. Not 7: the deactivated one is filtered
     // before the count, not after it.
     expect(page.total).toBe(6);
 
@@ -92,13 +103,14 @@ describe("listInstalledPackageHints — bounded in SQL", () => {
         id: `@hintorg/${n}`,
         orgId: ctx.orgId,
         type: "skill",
+        homeSpaceId: ctx.defaultSpaceId,
         draftManifest: { name: `@hintorg/${n}`, version: "1.0.0", type: "skill" },
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, `@hintorg/${n}`);
+      await seedSpacePackage(ctx.defaultSpaceId, `@hintorg/${n}`);
     }
-    await seedInstalledPackage(ctx.defaultSpaceId, "@hintorg/s3", { enabled: false });
+    await seedSpacePackage(ctx.defaultSpaceId, "@hintorg/s3", { enabled: false });
 
-    const page = await listInstalledSkills(scope, { limit: 1 });
+    const page = await listActiveSkills(scope, { limit: 1 });
     expect(page.skills.map((s) => s.package_id)).toEqual(["@hintorg/s1"]);
     expect(page.skills[0]!.version).toBe("1.0.0");
     expect(page.truncated).toBe(true);

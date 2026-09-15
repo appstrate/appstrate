@@ -20,7 +20,7 @@ import {
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
-import { getInstalledPackageSettings } from "../services/space-packages.ts";
+import { getSpacePackageSettings, hasPackageAccess } from "../services/space-packages.ts";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -128,10 +128,10 @@ async function buildDependencyGroups(
  * fork / restore) can echo the full resource instead of an id-only stub
  * (issue #646), reusing the single GET serializer.
  *
- * `requireAccess` defaults to `true` (the GET semantics: agent must be installed
- * in the current space). Mutation responses pass `false` — the caller just wrote
- * the agent within their org, so org-scope is the right gate and the space-install
- * gate must not 404 a successful write that was not auto-installed.
+ * `requireAccess` defaults to `true` (the GET semantics: the agent must be
+ * ACTIVE in the current space). Mutation responses pass `false` — the caller
+ * just wrote the agent within their org, so org-scope is the right gate and the
+ * activation gate must not 404 a successful write that nothing switched on.
  *
  * Returns `null` when the agent is not found (or not accessible under
  * `requireAccess`), so the GET wrapper can map it to a 404 and mutation
@@ -202,8 +202,8 @@ export async function buildAgentDetailDto(
     accessible,
   });
 
-  const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
-    spaceId,
+  const { values: storedValues, locked: lockedFields } = await getSpacePackageSettings(
+    { orgId, spaceId },
     agent.id,
   );
 
@@ -211,9 +211,14 @@ export async function buildAgentDetailDto(
   // `runs:read-all` the last run and the in-flight count are the caller's own
   // runs, not a colleague's.
   const visibility = runVisibilityFilter(c);
-  const [lastRun, runningCount] = await Promise.all([
+  const [lastRun, runningCount, active] = await Promise.all([
     getLastRun(scope, agent.id, visibility),
     getRunningRunsForPackage(scope, agent.id, visibility),
+    // The space's switch, answered by the page that carries it. Reading an
+    // agent never requires it to be active — this detail is exactly what a
+    // caller opens to put a switched-off agent back on — so the verdict travels
+    // in the payload instead of turning the read into a 404.
+    hasPackageAccess(scope, agent.id),
   ]);
 
   const parsed = parseScopedName(m.name);
@@ -277,6 +282,11 @@ export async function buildAgentDetailDto(
     // system agents, so making this field conditional too would leave a system
     // agent's cap undiscoverable from the API.
     effective_timeout_seconds: resolveRunTimeout(m.timeout).effectiveSeconds,
+    // Whether this SPACE runs the agent — the same rule `GET /api/agents`
+    // answers per row, emitted here so a loaded detail page never has to read a
+    // second endpoint to learn it. Unconditional, including on a summary read:
+    // a launcher needs it most.
+    active,
     // Which space's `agents:write` governs this agent, and whether THIS caller
     // holds it (`homeWireForCaller`, RBAC spec §6.9). Both emitted
     // UNCONDITIONALLY, for the same reason as the timeout above: a summary read

@@ -170,7 +170,7 @@ interface RunPipelineSuccess {
  *
  * Returns nothing: readiness is a gate, and the per-space run settings
  * (model, generation config, proxy) are read by each origin from the
- * `InstalledPackageSettings` row it already loaded to resolve the input
+ * `SpacePackageSettings` row it already loaded to resolve the input
  * layers — projecting them back through here only duplicated that read.
  *
  * Connection overrides are forwarded to readiness so a caller that
@@ -212,7 +212,7 @@ export async function resolveRunPreflight(params: {
   // --- Seed the manifest memo with the PINNED integration manifests ---
   //
   // Readiness reads every declared integration's manifest three times over
-  // (manifest-health gate, install/enable gate, connection cascade), all
+  // (manifest-health gate, activation gate, connection cascade), all
   // through this memo. Unseeded, `fetchIntegrationManifest` falls through to
   // `packages.draft_manifest` — so readiness judged manifest health, required
   // scopes and auth keys against the integration AUTHOR'S LIVE DRAFT, while
@@ -235,7 +235,7 @@ export async function resolveRunPreflight(params: {
   // though that is the pin's single enforcement point for a run. That function
   // is a GATE: calling it here would move its 422 (unsatisfiable /
   // never-published pin) and 400 (undeclared override key) ahead of EVERY
-  // readiness check, so an agent whose integration is merely uninstalled,
+  // readiness check, so an agent whose integration is merely inactive,
   // disabled, or carrying an invalid draft manifest would stop reporting
   // `integration_not_active` / `integration_invalid_manifest` / `not_connected`
   // and report an unresolved dependency instead — measured at 9 of the 15 cases
@@ -702,7 +702,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   });
 
   // Degradation marker — one `warn` run log per integration the agent
-  // declared but that could not be resolved (not installed / not connected /
+  // declared but that could not be resolved (not active / not connected /
   // unresolvable reference). Without it a run that started with a subset of
   // its tools is indistinguishable from an agent that chose not to call them.
   // Awaited (not fire-and-forget like the breadcrumbs above) so the marker is

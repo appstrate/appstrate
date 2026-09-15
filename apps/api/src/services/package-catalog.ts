@@ -9,7 +9,6 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
-import { hasPackageAccess } from "./space-packages.ts";
 import { isPackageReadableInSpace } from "../lib/package-access.ts";
 
 interface DbPackageRow {
@@ -144,32 +143,17 @@ export async function getPackage(
 }
 
 /**
- * Load an agent and verify space-level access in one operation.
- * System packages are reachable from every space; everything else needs an
- * installed `space_packages` row (`hasPackageAccess`).
- * Returns null if agent not found OR access denied (404 semantics — no info leak).
+ * Load an agent for a READ, not for a run: the agent's HOME grants it too, so
+ * an author keeps sight of an agent placed only in spaces they cannot reach
+ * (RBAC spec §6.9). Returns null when the agent is not found or not readable
+ * here — 404 semantics, no info leak.
  *
- * This is the RUN-side gate: an agent runs in the space that installed it. A
- * plain READ of the agent goes through {@link getPackageForRead}, which the
- * home also opens.
- */
-export async function getPackageWithAccess(
-  id: string,
-  orgId: string,
-  spaceId: string,
-): Promise<LoadedPackage | null> {
-  const agent = await getPackage(id, orgId);
-  if (!agent) return null;
-
-  if (!(await hasPackageAccess({ orgId, spaceId }, id))) return null;
-
-  return agent;
-}
-
-/**
- * {@link getPackageWithAccess} for a READ rather than a run: the agent's HOME
- * grants it too, so an author keeps sight of an agent installed only in spaces
- * they cannot reach (RBAC spec §6.9). Same 404 semantics.
+ * The RUN-side gate is `requireAgent()` (`middleware/guards.ts`), which asks
+ * `hasPackageAccess` and then tells "placed but switched off" from "not placed
+ * here" so the two refusals can be acted on differently. It does not live here
+ * because that distinction needs the reachability read as well, and folding
+ * both into one loader is what made every launch door answer the same opaque
+ * code.
  */
 export async function getPackageForRead(
   id: string,

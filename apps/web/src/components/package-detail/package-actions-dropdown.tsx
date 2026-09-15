@@ -12,7 +12,6 @@ import {
   Pencil,
   CalendarPlus,
   Trash2,
-  PackageMinus,
   PackagePlus,
   PowerOff,
   SlidersHorizontal,
@@ -29,8 +28,8 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageEditPath } from "../../lib/package-paths";
-import { PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
-import { usePermissions } from "../../hooks/use-permissions";
+import { maySetPackageActive, PACKAGE_PERMISSIONS } from "../../lib/package-permissions";
+import { usePermissions, useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
 import { SharePackageDialog } from "./share-package-dialog";
 
@@ -70,11 +69,12 @@ interface PackageActionsDropdownProps {
    *  menu item and surface a tooltip pointing to "Créer une version". */
   hasPublishedVersion?: boolean;
   /**
-   * Whether the package is installed in the CURRENT space. The bundle export
-   * route runs the execution gate (`hasPackageAccess`), not the read gate, so a
-   * package merely homed here would answer 404 on click.
+   * Whether the package is ACTIVE in the current space. The bundle export route
+   * runs the execution gate (`hasPackageAccess`), not the read gate, so a
+   * package merely placed here — or placed and switched off — answers 404 on
+   * click.
    */
-  isInstalledHere?: boolean;
+  isActiveHere?: boolean;
   onCreateVersion?: () => void;
   onFork?: () => void;
   // Agent-specific
@@ -98,21 +98,18 @@ interface PackageActionsDropdownProps {
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
-  // Install into / uninstall from the current space — the same door in both
-  // directions (`POST` / `DELETE /api/spaces/{spaceId}/packages…`). Install is
-  // offered because the index page lists what the space READS: a package homed
-  // here or offered here and activated nowhere is reachable, and this is where
-  // its reader turns that into a run.
-  canInstall?: boolean;
-  onInstall?: () => void;
-  installPending?: boolean;
-  canUninstall?: boolean;
-  onUninstall?: () => void;
-  // Integration-specific: deactivate in the current space (non-destructive —
-  // removes the space_packages row, keeps connections).
+  // Activate in / deactivate from the current space — ONE verb, one pair of
+  // doors (`POST` / `DELETE /api/spaces/{spaceId}/packages…`), for all four
+  // package families. Activating is offered because the index page lists what
+  // the space READS: a package placed here and switched off is reachable, and
+  // this is where its reader turns that into a run. Deactivating is not
+  // destructive — the placement and its settings stay, and so do connections.
+  canActivate?: boolean;
+  onActivate?: () => void;
   canDeactivate?: boolean;
   onDeactivate?: () => void;
-  deactivatePending?: boolean;
+  /** One mutation drives both directions, so one pending flag covers both. */
+  activationPending?: boolean;
 }
 
 export function PackageActionsDropdown({
@@ -128,7 +125,7 @@ export function PackageActionsDropdown({
   onDownload,
   onDownloadBundle,
   hasPublishedVersion,
-  isInstalledHere,
+  isActiveHere,
   onCreateVersion,
   onFork,
   runningRuns = 0,
@@ -143,18 +140,16 @@ export function PackageActionsDropdown({
   runBlockedReason,
   canDeletePackage,
   onDeletePackage,
-  canInstall,
-  onInstall,
-  installPending,
-  canUninstall,
-  onUninstall,
+  canActivate,
+  onActivate,
   canDeactivate,
   onDeactivate,
-  deactivatePending,
+  activationPending,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const spaceGrant = useCurrentSpaceGrant();
   const [moveHomeOpen, setMoveHomeOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -176,15 +171,15 @@ export function PackageActionsDropdown({
   // space, and a system package answers `false` (it is already readable
   // everywhere, and the route refuses it).
   const canShare = homeShareable === true && !isBuiltIn && !isHistoricalVersion && isOwned;
-  // Deactivating / uninstalling an integration is the same route pair as
-  // `integrations:uninstall`; the props say whether the action EXISTS here.
-  const showDeactivate = !!canDeactivate && can("integrations:uninstall") && !!onDeactivate;
-  const showUninstall = !!canUninstall && can("integrations:uninstall") && !!onUninstall;
-  // Its own resource, unlike the two lines above: installing an agent is
-  // `agents:configure`, a skill `skills:write` — the table the install route
-  // enforces (`PACKAGE_PERMISSIONS`).
-  const showInstall =
-    !!canInstall && can(PACKAGE_PERMISSIONS[type].install) && !!onInstall && !showUninstall;
+  // The activation verdict is the target space's, not the org∪space union `can`
+  // computes: owning a personal space authorizes activating there even though
+  // the `operator` preset held in it carries no `agents:configure` (§3.6). The
+  // props say whether the action EXISTS here; `maySetPackageActive` says
+  // whether this caller may perform it.
+  const showDeactivate =
+    !!canDeactivate && !!onDeactivate && maySetPackageActive(spaceGrant, type, false);
+  const showActivate =
+    !!canActivate && !!onActivate && !showDeactivate && maySetPackageActive(spaceGrant, type, true);
   const showDelete = !isBuiltIn && isOwned && canDelete;
 
   // The manifest is no longer reachable from here, and does not need to be:
@@ -250,9 +245,9 @@ export function PackageActionsDropdown({
               Disabled when no version has been published: the export
               endpoint resolves `(packageId, version)` from the registry,
               so a draft-only package would 404. Hidden entirely when the
-              agent is not installed HERE: that route is install-gated
+              agent is not ACTIVE here: that route runs the execution gate
               (`hasPackageAccess`), so the home alone does not open it. */}
-          {canRead && isAgent && isInstalledHere && onDownloadBundle && (
+          {canRead && isAgent && isActiveHere && onDownloadBundle && (
             <DropdownMenuItem
               onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
               disabled={!hasPublishedVersion}
@@ -290,7 +285,7 @@ export function PackageActionsDropdown({
           )}
 
           {/* ── Share — the package's audience (RBAC spec §6.10). Offering it to
-              a space is not installing it there: the recipient activates it,
+              a space places it there and no more: the recipient switches it on,
               because it runs with THEIR credentials. */}
           {canShare && (
             <DropdownMenuItem onSelect={() => setShareOpen(true)}>
@@ -339,29 +334,20 @@ export function PackageActionsDropdown({
             </>
           )}
 
-          {/* ── Install / Deactivate / Uninstall / Delete ── */}
-          {(showInstall || showDeactivate || showUninstall || showDelete) && (
+          {/* ── Activate / Deactivate / Delete ── */}
+          {(showActivate || showDeactivate || showDelete) && (
             <>
               <DropdownMenuSeparator />
-              {showInstall && (
-                <DropdownMenuItem onSelect={onInstall} disabled={installPending}>
+              {showActivate && (
+                <DropdownMenuItem onSelect={onActivate} disabled={activationPending}>
                   <PackagePlus size={14} />
-                  {t("packages.install", { ns: "settings" })}
+                  {t("packages.activate", { ns: "settings" })}
                 </DropdownMenuItem>
               )}
               {showDeactivate && (
-                <DropdownMenuItem onSelect={onDeactivate} disabled={deactivatePending}>
+                <DropdownMenuItem onSelect={onDeactivate} disabled={activationPending}>
                   <PowerOff size={14} />
-                  {t("integrations.btn.deactivate", { ns: "settings" })}
-                </DropdownMenuItem>
-              )}
-              {showUninstall && (
-                <DropdownMenuItem
-                  onSelect={onUninstall}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <PackageMinus size={14} />
-                  {t("packages.uninstall", { ns: "settings" })}
+                  {t("packages.deactivate", { ns: "settings" })}
                 </DropdownMenuItem>
               )}
               {showDelete && isAgent && onDeleteAgent && (

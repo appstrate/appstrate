@@ -6,7 +6,7 @@
  * A POST /api/runs/inline request creates a transient `packages` row with
  * `ephemeral = true`, then feeds it through the existing run pipeline. The
  * shadow row is hidden from every user-facing catalog query
- * (notEphemeralFilter), never installed in spaces, and eventually
+ * (notEphemeralFilter), never placed in a space, and eventually
  * compacted (manifest/prompt NULLed) by the retention worker.
  *
  * Shadow IDs use the reserved `@inline/r-<hex>` format so they remain

@@ -3,15 +3,18 @@
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
- * Library — the package list, in its two shapes.
+ * Library — the map of PLACEMENTS, in its two shapes.
  *
- * `GET /api/library` is the organization CATALOGUE: every package visible to
- * the org (org-owned + system) grouped by type, each carrying `installed_in`.
- * `GET /api/spaces/{spaceId}/library` is one space's view of the same, narrowed
- * to what the caller could actually put there — and it is the ONLY one with a
- * `shared` section, because an offer is addressed to a space and taken up from
- * that space's page. The catalogue is an administrative map of what exists and
- * where it sits, not a recipient's inbox.
+ * `GET /api/library` is the organization map: every package visible to the org
+ * (org-owned + system) grouped by type, each carrying one `placements` entry
+ * per space it is placed in and the caller reads.
+ * `GET /api/spaces/{spaceId}/library` is one space's view of the same, its
+ * placements narrowed to that space and its rows widened to what the caller
+ * could still put there in one click.
+ *
+ * There is no `shared` section in either: an offer nobody has taken up is a
+ * placement with `state: "none"`, on the package's own row and behind the same
+ * switch as every other space — one act, one control.
  */
 
 /** The spaces the two listings project — identical in both shapes. */
@@ -56,7 +59,20 @@ const PACKAGES_EXAMPLE = {
       home_space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
       home_writable: true,
       home_shareable: true,
-      installed_in: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
+      placements: [
+        {
+          space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+          via: "home",
+          state: "active",
+          shared_by: null,
+        },
+        {
+          space_id: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+          via: "shared",
+          state: "none",
+          shared_by: { user_id: "usr_1", name: "Alex" },
+        },
+      ],
     },
   ],
   skill: [],
@@ -71,9 +87,19 @@ const PACKAGES_EXAMPLE = {
       home_space_id: null,
       home_writable: false,
       home_shareable: false,
-      installed_in: [
-        "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
-        "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+      placements: [
+        {
+          space_id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+          via: "system",
+          state: "active",
+          shared_by: null,
+        },
+        {
+          space_id: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+          via: "system",
+          state: "inactive",
+          shared_by: null,
+        },
       ],
     },
   ],
@@ -89,22 +115,25 @@ const organizationLibraryPaths = {
     get: {
       operationId: "getLibrary",
       tags: ["Library"],
-      summary: "Organization library (owners and admins)",
+      summary: "Organization library — the placement map (owners and admins)",
       description:
-        "Returns packages readable in an accessible space, plus readable system packages, grouped by type. " +
-        "Organization owners and admins also see uninstalled organization packages with their read permissions. " +
-        "Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. " +
-        "The spaces list and installed_in mappings include only spaces the caller can enter, and package mappings " +
-        "also require the package type's read permission in that space. " +
-        "This is the catalogue, not an inbox: it carries NO `shared` section — an offer is addressed to a space, " +
-        "and `GET /api/spaces/{spaceId}/library` is where it is presented and taken up.",
+        "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its " +
+        "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there " +
+        "(`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). " +
+        "Organization owners and admins also see organization-catalogue packages (`home_space_id: null`) placed " +
+        "nowhere, with their read permissions. Members, guests and API keys cannot access this administrative " +
+        "endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the " +
+        "caller can enter, and each package type also requires that type's read permission in the space. " +
+        "Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` " +
+        "activates a package in a space — creating the offer that places it when the caller holds `<type>:share` " +
+        "in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.",
       parameters: [
         // `/api/library` is org-scoped, not space-scoped — no X-Space-Id.
         { $ref: "#/components/parameters/XOrgId" },
       ],
       responses: {
         "200": {
-          description: "Organization catalogue snapshot. Carries no `shared` section.",
+          description: "Organization placement map.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -138,91 +167,32 @@ export const libraryPaths = {
     get: {
       operationId: "getSpaceLibrary",
       tags: ["Library"],
-      summary: "Discover packages and pending shares for a space",
+      summary: "One space's placements, and what the caller could still place there",
       description:
-        "Accessible to readers of the target space. The candidates are exactly what the caller could put there, so the listing never offers a package the install would refuse. For a TEAM destination: packages already PLACED in it (homed there or shared with it), plus packages the caller may place there — those whose home space grants them the type's `share` permission (`home_shareable`), since installing then creates the offer — plus the organization catalogue for an owner or admin, plus system packages. For a PERSONAL destination: placed packages only, plus system packages other than integrations — an offer into somebody's own space is somebody else's act, and arrives in `shared`. Each package type requires read permission in the target space. Installation remains subject to the target space permissions. Personal spaces remain private and API keys remain pinned to their space.",
+        "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, offered here, or shipped with the platform, with `state` saying whether the space runs it — `none` is exactly a pending offer, taken up with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then creates the offer) and the organization catalogue for an owner or admin; for a PERSONAL destination, nothing beyond what is already placed — an offer into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
-          description: "Space library snapshot: the matrix, plus the offers awaiting a decision.",
+          description: "This space's placement map, plus what the caller could still place here.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["object", "spaces", "packages", "shared"],
+                required: ["object", "spaces", "packages"],
                 properties: {
                   object: { type: "string", enum: ["library"] },
                   spaces: SPACES_SCHEMA,
                   packages: PACKAGES_SCHEMA,
-                  shared: {
-                    type: "array",
-                    description:
-                      'Packages OFFERED to this space and not installed in it — "shared with me", i.e. the offers still waiting on a decision, and their ONLY place in this response: a package whose sole placement here is an untaken offer is deliberately absent from `packages`, so one act is never behind two buttons. Installing it (`POST /api/spaces/{spaceId}/packages`) moves it out of this list and into `packages` with an `installed_in` entry. Empty when nobody has offered anything.',
-                    items: {
-                      type: "object",
-                      required: [
-                        "id",
-                        "type",
-                        "source",
-                        "name",
-                        "description",
-                        "space_id",
-                        "personal",
-                        "shared_by",
-                      ],
-                      properties: {
-                        id: { type: "string", description: "Package id (`@scope/name`)." },
-                        type: {
-                          type: "string",
-                          enum: ["agent", "skill", "mcp-server", "integration"],
-                        },
-                        source: { type: "string" },
-                        name: { type: "string" },
-                        description: { type: "string" },
-                        space_id: {
-                          type: "string",
-                          description:
-                            "The space the package is offered to (`spc_…`) — always one the caller reads, so no private id is disclosed.",
-                        },
-                        personal: {
-                          type: "boolean",
-                          description:
-                            "The offered space is the caller's OWN personal space. Either way the offer is taken up with `POST /api/spaces/{spaceId}/packages` on `space_id` — there is no separate accept route; in a personal space the owner needs no install grant, in a team space the caller does.",
-                        },
-                        shared_by: {
-                          type: ["object", "null"],
-                          description: "Who shared it. `null` once that account is gone.",
-                          required: ["user_id", "name"],
-                          properties: {
-                            user_id: { type: "string" },
-                            name: { type: "string" },
-                          },
-                        },
-                      },
-                    },
-                  },
                 },
               },
               example: {
                 object: "library",
                 spaces: SPACES_EXAMPLE,
                 packages: PACKAGES_EXAMPLE,
-                shared: [
-                  {
-                    id: "@acme/weekly-digest",
-                    type: "agent",
-                    source: "local",
-                    name: "Weekly Digest",
-                    description: "Summarises the week's threads.",
-                    space_id: "spc_9a1b3c5d-7e9f-4a1b-8c3d-5e7f9a1b3c5d",
-                    personal: true,
-                    shared_by: { user_id: "usr_1", name: "Alex" },
-                  },
-                ],
               },
             },
           },

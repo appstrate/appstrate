@@ -77,7 +77,7 @@ export async function buildBundleFromUploadedAfps(
  *      unresolvable.
  *   2. The `"latest"` dist-tag of the package.
  *
- * There is no per-space step between them. An installation carries no version,
+ * There is no per-space step between them. A placement carries no version,
  * so "the version this space runs" and "the latest published version" are the
  * same sentence; an export that answered anything else would hand the CLI
  * different bytes from the ones a server-side run of the same agent executes.

@@ -58,7 +58,7 @@ import {
   deleteIntegrationConnection,
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
-import { listRunnableAgents, listInstalledSkills } from "../services/space-packages.ts";
+import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { getEndUser } from "../services/end-users.ts";
@@ -413,13 +413,13 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const accessible = await packageAccessSpaces(c);
   const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[1]) =>
     homeWireForCaller(c, pkg, accessible).home_writable;
-  const [connections, runnable, installedSkills, recentRuns] = await Promise.all([
+  const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
     listUsableIntegrationsForActor(scope, actor),
     canRun
       ? listRunnableAgents(scope, { homeWritable })
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
     canReadSkills
-      ? listInstalledSkills(scope, { homeWritable })
+      ? listActiveSkills(scope, { homeWritable })
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
     // The caller's own recent runs (actor-scoped) — no extra permission needed.
     listRecentForActor(scope, actor),
@@ -438,9 +438,9 @@ router.get("/context", requireSpaceContext(), async (c) => {
     agents: runnable.agents,
     agents_truncated: runnable.truncated,
     agents_total: runnable.total,
-    skills: installedSkills.skills,
-    skills_truncated: installedSkills.truncated,
-    skills_total: installedSkills.total,
+    skills: activeSkills.skills,
+    skills_truncated: activeSkills.truncated,
+    skills_total: activeSkills.total,
   });
 });
 

@@ -13,7 +13,7 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedInstalledPackage, seedRun } from "../../helpers/seed.ts";
+import { seedAgent, seedSpacePackage, seedRun } from "../../helpers/seed.ts";
 import { computeRequestHash, storeIdempotencyResult } from "../../../src/lib/idempotency.ts";
 
 const app = getTestApp();
@@ -27,8 +27,15 @@ describe("run replay respects current permissions on the real test application",
     const viewer = await memberContext(owner, "member", "viewer");
     const packageId = "@idem-review/agent";
     const path = `/api/agents/${packageId}/run`;
-    await seedAgent({ id: packageId, orgId: owner.orgId, createdBy: owner.user.id });
-    await seedInstalledPackage(owner.defaultSpaceId, packageId);
+    // Homed here: `requireAgent()` resolves the agent by the placement rule, so
+    // a placement row with no home and no offer reaches nothing.
+    await seedAgent({
+      id: packageId,
+      orgId: owner.orgId,
+      homeSpaceId: owner.defaultSpaceId,
+      createdBy: owner.user.id,
+    });
+    await seedSpacePackage(owner.defaultSpaceId, packageId);
     const run = await seedRun({
       orgId: owner.orgId,
       spaceId: owner.defaultSpaceId,

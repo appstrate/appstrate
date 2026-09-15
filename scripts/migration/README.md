@@ -155,12 +155,20 @@ scripts, and they do not all sit on the same side of the window: `0014` and then
 new environment variable.
 
 `0016` is second because it reads what `0014` writes. It gives every
-installation that sits outside its package's home the `package_shares` row that
-now places it there: from this release on, a package is readable from a space
-through its HOME or through a share and through nothing else, so an installation
-left without one vanishes from the space that runs it — still installed, still
-firing for a schedule, invisible on every page — until somebody holding `share`
-authority offers it again.
+`space_packages` row that sits outside its package's home the `package_shares`
+row that now places it there: from this release on, a package is readable from a
+space through its HOME or through a share and through nothing else, so a row
+left without one vanishes from the space that runs it — invisible on every page,
+refused by the run doors and by the scheduler tick — until somebody holding
+`share` authority offers it again.
+
+`0016` repairs what INHERITED data left, and that is the whole of its job: **the
+new code manufactures no such rows.** The two paths that rewrite a package's home
+— `PATCH /api/packages/{scope}/{name}` and the personal-space offboarding sweeper
+— both write the offers that keep every other space placed, from one shared
+function and inside their own transaction. So this script runs once, in this
+window, and nothing accumulates behind it: a second run inserts nothing, and a
+`without_share_after` that drifts off 0 after the deploy is a bug, not a backlog.
 
 Read the header of each file too — it is the authority on what that file touches.
 
@@ -296,10 +304,31 @@ inserts nothing.
 
 - A builder who holds `<type>:write` in a package's home edits it while browsing
   a space where they only read.
-- A builder of space B who holds no `<type>:share` in space A cannot install A's
-  package into B: **403** when they can otherwise read it, **404** when they
-  cannot. An organization admin installs that same package into B and the
+- A builder of space B who holds no `<type>:share` in space A cannot activate
+  A's package in B: **403** when they can otherwise read it, **404** when they
+  cannot. An organization admin activates that same package in B and the
   `package_shares` row appears with it, written in the same transaction.
+- Activating a package that is already active answers **200**, not a conflict,
+  and `DELETE /api/spaces/{id}/packages/{scope}/{name}` answers **204** and
+  leaves the row: read `model_id` back after a deactivate/reactivate round trip
+  and it is the one the space chose. The status reports what the CALL did, so
+  switching a package back ON after a deactivation answers **201**.
+- `DELETE` on an offer nobody has activated answers **404** and leaves it a
+  pending offer: the library still shows the row as **Proposé**, not as
+  switched off.
+- A package id the caller cannot reach — one homed in another member's personal
+  space — answers the SAME 404 body as an id that does not exist, on all three
+  doors (`POST`, `PUT`, `DELETE`). Compare the two responses field by field;
+  they must be identical. `POST /api/runs/remote` answers the same way for a
+  package no placement holds in the calling space, and answers
+  `package_not_active_in_space` only for one the space holds and has switched
+  off — compare those two bodies field by field as well.
+- A SYSTEM package can be switched off in a space and stays off: `DELETE`
+  answers 204 and writes the row, `GET /api/agents` reads `active: false`, and
+  the next `POST` switches it back on.
+- An integration is activated through the same pair of doors as every other
+  type, and `PUT /api/spaces/{id}/packages/{scope}/{name}` accepts `modelId`,
+  `proxyId` and `generationConfig` and nothing else — any other field is a 400.
 - Every package a team space was running before the deploy is still listed
   there — that is `0016`'s whole job, and `without_share_after = 0` is its
   machine-checkable half.
@@ -320,10 +349,43 @@ inserts nothing.
   `409 personal_space_takes_no_end_users`.
 - Removing a member stamps `spaces.orphaned_at` and the organization's Spaces
   page lists the orphan with **Convert** / **Sweep now**.
-- A package shared with a member shows up in the `shared` section of THEIR
-  space's library, and `POST /api/spaces/{personal}/packages` installs it with no
-  install grant at all — ownership is the authorization. `GET /api/library` has
-  no `shared` section.
+- **Sweep now** on an orphaned space that homes a package a TEAM space is
+  running re-homes it to the organization catalogue (`home_space_id IS NULL`)
+  **and writes the offer that keeps that team space placed**: `GET …/shares`
+  lists the team space with no author, the team's index, detail, run and
+  schedules keep working, and re-running `0016`'s own `without_share_after`
+  query (the `-- VERIFY (after)` block at the foot of the file) still prints
+  **0**. A package the orphaned space homed that NO other space was running is
+  deleted, an outstanding offer included.
+- A package shared with a member shows up on THEIR space's library page as a
+  placement with `via: "shared"` and `state: "none"` — a **Proposé** row with its
+  own switch — and `POST /api/spaces/{personal}/packages` activates it with no
+  activation grant at all: ownership is the authorization. Both library shapes
+  answer with `placements` and nothing beside it.
+- A `viewer` in a space where an agent is placed but switched OFF cannot run it:
+  `GET /api/agents` shows the row with `active: false`, and the THREE execution
+  doors — `POST /api/agents/{scope}/{name}/run` (a rerun is the same route),
+  `POST …/schedules` and `GET …/bundle` — answer
+  **404 `agent_not_active_in_space`**, naming the space and
+  `POST /api/spaces/{id}/packages`.
+- That same agent READS normally, which is what makes it repairable. Its detail
+  answers **200** with `active: false`, and so do `GET …/model`, `/proxy`,
+  `/persistence`, `/runs`, `/schedules` and the writes beside them. Open the
+  page in the SPA: it opens without an error, carries the **Agent inactif dans
+  cet espace** banner, greys the launcher with that reason, and offers
+  **Activer dans cet espace** — one click, and the three doors open. The library
+  shows the same row as **Désactivé**, and an offer nobody has taken up as
+  **Proposé**. `GET …/connection-readiness` answers **200**
+  too, with `blocks_run: true` and an `errors[0]` whose `field` is `agent` and
+  whose `code` is `agent_not_active` — a 404 there would blank the panel that
+  explains the refusal.
+- `appstrate skills sync` writes only the skills a space has ACTIVE. Switch a
+  skill off in a space, sync again, and its directory disappears from the target;
+  switch it back on and the next sync restores it.
+- A SCHEDULE on a switched-off agent creates a **visible failed run** naming the
+  switch, and the schedule stays **armed** (`enabled = true`, `next_run_at` set)
+  — switching the agent back on lets the next tick run it, with nothing to
+  re-enable by hand.
 - A `viewer` or an `operator` launching with `version=draft` gets
   **403 `draft_not_writable`**; the same person with the selector omitted runs
   the latest published version, and gets **404 `no_published_version`** when the
@@ -342,13 +404,13 @@ shares a package to them. Idempotent; a second run inserts zero rows and
 
 Per file, and they do not agree:
 
-| File   | Before its script                            | After its script                                                                                                                                                                                                                                                        |
-| ------ | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0063` | Safe. An older build never reads the column. | Serviceable — the old build still ignores the column — but `DELETE FROM spaces` now raises `23503` on a space that homes a package, and the old build has no route that clears a home. Run `UPDATE packages SET home_space_id = NULL` FIRST, before any space deletion. |
-| `0064` | **Already one-way.**                         | Same. `0015` changes only HOW MANY personal spaces exist, never whether any do.                                                                                                                                                                                         |
-| `0065` | Safe.                                        | Safe — no script. An older build never reads `package_shares`; the rows left behind are inert.                                                                                                                                                                          |
-| `0066` | **One-way.**                                 | Same. It DROPs `space_packages.version_id`, which a previous build reads at launch, on the detail page and in the export, and writes through `updateInstalledPackage`. Whatever the column held is discarded with it. Restore the coordinated backup, or roll forward.  |
-| `0016` | n/a — it is a script, not a migration.       | Additive and inert for an older build: the extra `package_shares` rows are invisible to a build from before `0065` and read as ordinary offers by any build after it. Leaving them in place costs nothing, so there is nothing to undo.                                 |
+| File   | Before its script                            | After its script                                                                                                                                                                                                                                                                    |
+| ------ | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0063` | Safe. An older build never reads the column. | Serviceable — the old build still ignores the column — but `DELETE FROM spaces` now raises `23503` on a space that homes a package, and the old build has no route that clears a home. Run `UPDATE packages SET home_space_id = NULL` FIRST, before any space deletion.             |
+| `0064` | **Already one-way.**                         | Same. `0015` changes only HOW MANY personal spaces exist, never whether any do.                                                                                                                                                                                                     |
+| `0065` | Safe.                                        | Safe — no script. An older build never reads `package_shares`; the rows left behind are inert.                                                                                                                                                                                      |
+| `0066` | **One-way.**                                 | Same. It DROPs `space_packages.version_id`, which a previous build reads at launch, on the detail page and in the export, and writes through the space-package configuration route. Whatever the column held is discarded with it. Restore the coordinated backup, or roll forward. |
+| `0016` | n/a — it is a script, not a migration.       | Additive and inert for an older build: the extra `package_shares` rows are invisible to a build from before `0065` and read as ordinary offers by any build after it. Leaving them in place costs nothing, so there is nothing to undo.                                             |
 
 `0064` is one-way from the **first boot of the new build**, not from `0015`:
 `provisionMember` creates a personal space at every membership door and
@@ -422,4 +484,4 @@ instead where one exists, and prefer rolling forward.
 | 0013 | not applied | `org_models`: keep the oldest un-aliased row per (org, credential, model), repoint `organizations.default_model_id` / `space_packages.model_id` / `package_schedules.model_id_override` / `llm_usage.model` at it and delete the younger copies, so drizzle `0062` can create `uq_org_models_unaliased_binding` — **run before the drizzle batch when the pre-flight above counts any**; a duplicate needs two `POST /api/models` for the same pair                                                                                                                                                                  | unmeasured — prints the duplicate-binding count before/after (after must be 0) and the four dangling-reference counts (all must be 0)                                                                                                                                                                                                                                                                                                                                                                                   |
 | 0014 | not applied | every organization package given a `home_space_id` — its ONE write-authority space (drizzle `0063` adds the column NULL everywhere, i.e. admin-only): exactly one installation → that space, several → the oldest `installed_at` **printed for review before `COMMIT`**, none → left NULL; **run between the drizzle batch and bringing the new version up**, the `0008` shape; serving traffic in between costs every non-owner author and every API key write access to their own packages                                                                                                                         | unmeasured — prints the NULL-home count before and after (after = the packages installed nowhere) and the ambiguous list in between                                                                                                                                                                                                                                                                                                                                                                                     |
 | 0015 | not applied | one personal space per existing `org_members` row (`spaces.owner_user_id`, drizzle `0064`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the space count first** — it inserts one row per membership, and nothing counts spaces for a quota today                                                                                                          | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0                                                                                                                                                                                                                                                                                                                                                                                                         |
-| 0016 | not applied | one `package_shares` row (`shared_by` NULL) per installation sitting outside its package's home, so the placement rule drizzle `0066` completes — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                                 | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0                                                                                                                                                                                                                                                                                                                                                                         |
+| 0016 | not applied | one `package_shares` row (`shared_by` NULL) per `space_packages` row sitting outside its package's home, so the placement rule drizzle `0066` completes — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                         | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0                                                                                                                                                                                                                                                                                                                                                                         |

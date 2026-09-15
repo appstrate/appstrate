@@ -14,7 +14,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackage,
   seedPackageShare,
   seedSpace,
@@ -55,7 +55,7 @@ beforeEach(async () => {
     draftManifest: { name: skillId, version: "0.1.0", type: "skill" },
     draftContent: "Private skill instructions",
   });
-  await seedInstalledPackage(hidden.id, skillId);
+  await seedSpacePackage(hidden.id, skillId);
   headers = { ...authHeaders(ctx), Cookie: guest.cookie };
 });
 
@@ -92,7 +92,7 @@ describe("inline dependency authorization", () => {
 
   it("accepts an operator's readable dependency installed in their own space", async () => {
     await seedPackageShare(ctx.defaultSpaceId, skillId);
-    await seedInstalledPackage(ctx.defaultSpaceId, skillId);
+    await seedSpacePackage(ctx.defaultSpaceId, skillId);
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
@@ -109,7 +109,7 @@ describe("inline dependency authorization", () => {
       scopes: ["agents:run"],
     });
     await seedPackageShare(ctx.defaultSpaceId, skillId);
-    await seedInstalledPackage(ctx.defaultSpaceId, skillId);
+    await seedSpacePackage(ctx.defaultSpaceId, skillId);
     const response = await app.request("/api/runs/inline/validate", {
       method: "POST",
       headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },

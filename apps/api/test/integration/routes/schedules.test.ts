@@ -19,7 +19,7 @@ import {
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { schedulesPaths } from "../../../src/openapi/paths/schedules.ts";
 import { responses } from "../../../src/openapi/responses.ts";
 
@@ -1041,7 +1041,7 @@ describe("Schedules API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
 
       const res = await post(fid, {});
 
@@ -1082,14 +1082,27 @@ describe("Schedules API", () => {
       for (const [label, op] of writes) {
         expect(Object.keys(op.responses), label).toContain("404");
         // The SAME component on both, which is what stops them drifting apart
-        // again: an inline description on one is a second source of truth.
-        expect(op.responses["404"], label).toEqual({
-          $ref: "#/components/responses/NoPublishedVersion",
-        });
+        // again: the publish cause is stated once, in the component.
+        expect(op.responses["404"].$ref, label).toBe("#/components/responses/NoPublishedVersion");
         // …and the cause the invalid-timezone refusal answers with, which POST
         // never declared either.
         expect(op.responses["400"].description, label).toContain("timezone");
       }
+
+      // Where the two writes legitimately DIFFER. Creating a schedule is an
+      // execution decision and mounts `requireActiveAgent()`, so its 404 has
+      // two more causes; `PUT /api/schedules/{id}` takes a schedule id, mounts
+      // no agent lookup at all, and must not claim refusals it cannot raise —
+      // that is the CONTROL half of this assertion.
+      //
+      // A sibling `description` REPLACES the component's in every renderer, so
+      // POST's has to be complete: it must still name the publish cause it is
+      // overriding, or the contract loses it on this operation.
+      const createDescription = writes[0]![1].responses["404"].description as string;
+      expect(createDescription).toContain("no_published_version");
+      expect(createDescription).toContain("agent_not_found");
+      expect(createDescription).toContain("agent_not_active_in_space");
+      expect(writes[1]![1].responses["404"].description).toBeUndefined();
 
       // The component the two `$ref`s resolve to actually names the code…
       expect(responses.NoPublishedVersion.description).toContain("no_published_version");
@@ -1135,7 +1148,7 @@ describe("Schedules API", () => {
           orgId: ctx.orgId,
           createdBy: ctx.user.id,
         });
-        await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
+        await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
         const schedule = await seedSchedule({
           packageId: agent.id,
           orgId: ctx.orgId,

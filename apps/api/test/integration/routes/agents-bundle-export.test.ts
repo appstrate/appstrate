@@ -21,7 +21,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { packageDistTags } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -178,7 +178,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
 
     // Install the root in the default space. The export resolves the `latest`
     // dist-tag set just above — an installation carries no version of its own.
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     const res = await app.request(`/api/agents/@exportorg/agent-root/bundle`, {
       headers: authHeaders(ctx),
@@ -237,7 +237,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       },
       setLatest: true,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     const [r1, r2] = await Promise.all([
       app.request(`/api/agents/@exportorg/stable-agent/bundle`, {
@@ -280,7 +280,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       content: "Plain prompt.",
       setLatest: true,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     // A secret stored in connection profiles etc. must NEVER end up in
     // the bundle — our helper just asserts the secret string is absent
@@ -322,7 +322,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       },
       setLatest: true,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     const res = await app.request(`/api/agents/@exportorg/version-gated/bundle?version=99.99.99`, {
       headers: authHeaders(ctx),
@@ -342,7 +342,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       type: "agent",
       orgId: ctx.orgId,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     const res = await app.request(`/api/agents/@exportorg/draft-only/bundle`, {
       headers: authHeaders(ctx),
@@ -378,7 +378,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       },
       setLatest: true,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
   }
 
   async function exportDepRoot(ctx: TestContext) {

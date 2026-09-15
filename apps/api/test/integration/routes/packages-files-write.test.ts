@@ -9,12 +9,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { apiIntegrationManifest, mcpServerManifest } from "../../helpers/integration-manifests.ts";
-import {
-  seedApiKey,
-  seedInstalledPackage,
-  seedPackage,
-  seedPackageShare,
-} from "../../helpers/seed.ts";
+import { seedApiKey, seedSpacePackage, seedPackage, seedPackageShare } from "../../helpers/seed.ts";
 import {
   uploadPackageFiles,
   downloadPackageFiles,
@@ -154,7 +149,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
       draftManifest: skillManifest(),
       draftContent: SKILL_MD,
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
+    await seedSpacePackage(ctx.defaultSpaceId, SKILL_ID);
     await uploadPackageFiles("skills", ctx.orgId, SKILL_ID, {
       "SKILL.md": encoder.encode(SKILL_MD),
       "scripts/run.py": encoder.encode("print(1)"),
@@ -183,7 +178,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
             draftContent: type === "agent" ? "Follow the instructions." : "",
           });
           await seedPackageShare(ctx.defaultSpaceId, id);
-          await seedInstalledPackage(ctx.defaultSpaceId, id);
+          await seedSpacePackage(ctx.defaultSpaceId, id);
           await uploadPackageFiles(
             folder,
             ctx.orgId,
@@ -224,7 +219,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         draftManifest: manifest,
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
       await uploadPackageFiles("mcp-servers", ctx.orgId, id, {
         "main.js": encoder.encode("export {};"),
         "manifest.json": encoder.encode(JSON.stringify(manifest)),
@@ -258,7 +253,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         draftManifest: manifest,
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
       expect(
         (await saveFiles([{ op: "write", path: "INTEGRATION.md", text: "Companion" }], { id }))
           .status,
@@ -787,7 +782,7 @@ describe("PUT /api/packages/{type}/{scope}/{name}", () => {
         draftManifest: { ...skillManifest(), name: foreignId },
         draftContent: SKILL_MD,
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, foreignId);
+      await seedSpacePackage(ctx.defaultSpaceId, foreignId);
 
       const res = await saveFiles([{ op: "write", path: "docs/a.md", text: "x" }], {
         id: foreignId,

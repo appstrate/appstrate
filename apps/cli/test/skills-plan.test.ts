@@ -62,6 +62,20 @@ describe("listSyncableSkills", () => {
 
     expect(await listSyncableSkills("default")).toEqual(["@acme/alpha", "@acme/zebra"]);
   });
+
+  // The sync reads what the space OFFERS, which is the ACTIVE set: a skill
+  // somebody switched off in the space is not written into the local Claude
+  // Code checkout, or the switch would mean nothing outside the dashboard.
+  // The stub only narrows when the request carries `?active=true`, so dropping
+  // the parameter turns this red.
+  it("reads the ACTIVE set — a skill switched off in the space is not syncable", async () => {
+    createSkillServer([
+      { id: "@acme/on", skillMd: skillMd("on") },
+      { id: "@acme/off", skillMd: skillMd("off"), inactive: true },
+    ]).install();
+
+    expect(await listSyncableSkills("default")).toEqual(["@acme/on"]);
+  });
 });
 
 describe("resolveSkill", () => {

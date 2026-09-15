@@ -25,7 +25,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedEndUser, seedApiKey } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -106,7 +106,7 @@ describe("/api/me/integration-pins", () => {
       source: "local",
       draftManifest: buildAgentManifest(),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     await seedPackage({
       id: INTEGRATION,
@@ -116,7 +116,7 @@ describe("/api/me/integration-pins", () => {
       source: "local",
       draftManifest: buildIntegrationManifest(),
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
   });
 
   // ─── PUT — wire-shape snake_case body validation ───────

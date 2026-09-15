@@ -21,6 +21,24 @@ import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
+/**
+ * Package ACTIVATION, per space — one row per (space, package) saying this
+ * space runs it, plus everything the space chose about how: the model, the
+ * proxy, the generation settings, the agent's stored input values.
+ *
+ * A row is not a placement. WHERE a package is, is decided by `packages.
+ * home_space_id` and by {@link packageShares}; a row here is what a space does
+ * with a package already placed in it, and the platform reads the two together
+ * (`services/package-activation.ts`). A row that outlives its placement — the
+ * home moved away, the offer was revoked — decides nothing anywhere: not on the
+ * run gate, not in the listings, not in the caller context handed to the model.
+ *
+ * `enabled` is sticky in both directions and the ROW always wins over the
+ * deployment's default, which is what makes a system package switchable off
+ * per space. Deactivating never deletes the row: it holds the configuration,
+ * so switching a package off for a week costs nothing to undo. Only the revoke
+ * of the share that placed the package removes it, along with the placement.
+ */
 export const spacePackages = pgTable(
   "space_packages",
   {
@@ -30,10 +48,10 @@ export const spacePackages = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    // This table carries no version: an installation outside the package's
-    // home runs the `latest` published version, always (RBAC spec §6.10). The
-    // draft belongs to whoever can write it, and dependency versions come from
-    // the agent's own manifest ranges — nothing here selects a definition.
+    // This table carries no version: outside the package's home a space runs
+    // the `latest` published version, always (RBAC spec §6.10). The draft
+    // belongs to whoever can write it, and dependency versions come from the
+    // agent's own manifest ranges — nothing here selects a definition.
     //
     // The agent's stored input settings for this space, in one
     // document:
@@ -76,19 +94,21 @@ export const spacePackages = pgTable(
 );
 
 /**
- * Package sharing — AUDIENCE, not installation (RBAC spec §6.10).
+ * Package sharing — AUDIENCE, one of the two PLACEMENTS (RBAC spec §6.10).
  *
  * A row here says "this package is OFFERED to that space". It grants READ (the
  * metadata a recipient needs to decide, and the "add to my space" affordance)
- * and NOTHING else: running a package, resolving its pins, resolving its
- * credentials all read `space_packages`, which the recipient writes for
- * themselves by accepting. That separation is the whole point of a second
- * table — an agent runs with the recipient's credentials, so activating it has
- * to be the recipient's own act, and a state carried on `space_packages` would
- * have had to be filtered at each of its readers, where one miss executes a
- * package nobody consented to.
+ * and NOTHING else: running a package, resolving its pins and resolving its
+ * credentials all ask {@link spacePackages} as well, and the recipient writes
+ * that row themselves by ACTIVATING the package
+ * (`POST /api/spaces/{spaceId}/packages`). That separation is the whole point
+ * of a second table — an agent runs with the recipient's credentials, so
+ * switching it on has to be the recipient's own act, and a state carried on
+ * `space_packages` would have had to be filtered at each of its readers, where
+ * one miss executes a package nobody consented to.
  *
- * Revoking a share deletes the installation it backs, in the same transaction.
+ * Revoking a share deletes the activation row it backs, in the same
+ * transaction: the offer was the placement, so nothing survives it.
  *
  * `shared_by` is `SET NULL` rather than `RESTRICT`: the sharer leaving the
  * organization must not keep the audience alive as a foreign-key obstacle, and
@@ -125,10 +145,14 @@ export const packages = pgTable(
     // `assertPackageMutationAccess` (`apps/api/src/lib/package-access.ts`).
     // Holding `<type>:write` in THIS space is what authorizes editing,
     // publishing, renaming and deleting the package; every other space it is
-    // installed in consumes it and never gains a say. NULL means the
+    // placed in consumes it and never gains a say. NULL means the
     // organization catalogue: owners and admins in session, nobody else
-    // (`managesOrgCatalog`). It is also a READ grant — a draft never installed
-    // anywhere is still readable at home.
+    // (`managesOrgCatalog`). It is also the other PLACEMENT, and a READ grant
+    // with it — a draft nobody has been offered is still readable at home.
+    //
+    // Moving it moves a placement: every space still holding a
+    // `space_packages` row needs the offer that now places it, written in the
+    // same transaction (`reconcilePlacementsAfterRehome`).
     //
     // `ON DELETE RESTRICT`: dropping a space that homes packages would
     // silently promote them to the org catalogue, widening who may write them.

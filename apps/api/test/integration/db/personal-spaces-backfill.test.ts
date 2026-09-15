@@ -12,7 +12,7 @@ import {
 import { getPGliteClient, reservePgConnection } from "@appstrate/db/client";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
-import { seedInstalledPackage, seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedSpacePackage, seedPackage, seedSpace } from "../../helpers/seed.ts";
 
 async function backfill(file: string) {
   const script = await Bun.file(
@@ -44,11 +44,11 @@ describe("personal-space rollout scripts on migrated data", () => {
     for (const name of ["single", "multiple", "uninstalled"]) {
       await seedPackage({ id: `@backfill/${name}`, orgId: ctx.orgId, type: "agent" });
     }
-    await seedInstalledPackage(ctx.defaultSpaceId, "@backfill/single");
-    await seedInstalledPackage(ctx.defaultSpaceId, "@backfill/multiple", {
+    await seedSpacePackage(ctx.defaultSpaceId, "@backfill/single");
+    await seedSpacePackage(ctx.defaultSpaceId, "@backfill/multiple", {
       installedAt: new Date("2020-01-01"),
     });
-    await seedInstalledPackage(newer.id, "@backfill/multiple", {
+    await seedSpacePackage(newer.id, "@backfill/multiple", {
       installedAt: new Date("2021-01-01"),
     });
     await backfill("0014-packages-home-space-backfill.sql");
@@ -92,12 +92,12 @@ describe("personal-space rollout scripts on migrated data", () => {
     await seedPackage({ id: "@sys/tool", orgId: null, source: "system" });
 
     // Two installations OUTSIDE the home, one INSIDE it, one system package.
-    await seedInstalledPackage(teamA.id, "@backfill/homed");
-    await seedInstalledPackage(teamB.id, "@backfill/catalogue");
-    await seedInstalledPackage(home.id, "@backfill/homed");
-    await seedInstalledPackage(teamA.id, "@sys/tool");
+    await seedSpacePackage(teamA.id, "@backfill/homed");
+    await seedSpacePackage(teamB.id, "@backfill/catalogue");
+    await seedSpacePackage(home.id, "@backfill/homed");
+    await seedSpacePackage(teamA.id, "@sys/tool");
     // A cross-tenant stray: the row exists, the space belongs to another org.
-    await seedInstalledPackage(foreign.defaultSpaceId, "@backfill/homed");
+    await seedSpacePackage(foreign.defaultSpaceId, "@backfill/homed");
 
     const shares = async () =>
       (await db.select().from(packageShares))

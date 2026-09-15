@@ -50,7 +50,7 @@ import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateInput } from "../services/schema.ts";
-import { getInstalledPackageSettings } from "../services/space-packages.ts";
+import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
 import { assertSpaceInScope } from "../services/spaces.ts";
@@ -243,15 +243,17 @@ export function createRunsRemoteRouter() {
       // placements stay ahead of every write this handler makes (the inline
       // branch's shadow package row is inserted after its own).
       if (src.kind === "registry") {
-        // `stage: "draft"` is `?version=draft` spelled for this surface, so it
-        // answers to the one predicate that says who owns a working copy —
-        // otherwise the 403 the platform run route returns is a formality any
-        // caller holding `agents:run` steps around by posting here instead.
-        await assertDraftSelectorAllowed(c, src.packageId, src.stage);
-
         // Server-resolved attribution. The runner names the package; we
         // load manifest+prompt from our own catalog. No fingerprint
         // reconciliation, no shadow row, no "Inline" badge.
+        //
+        // FIRST, and before the draft-authority gate below: this is where the
+        // execution question is asked, and its `not_placed` answer is the same
+        // 404 a nonexistent id gets. The platform run route gets that ordering
+        // from its middleware (`requireAgent()` loads the agent before the
+        // handler runs at all); here the handler owns it, and asking authority
+        // first would answer `403 draft_not_writable` for a package the caller
+        // is not entitled to know exists.
         const resolved = await resolveRegistryAgent({
           orgId,
           spaceId,
@@ -260,6 +262,11 @@ export function createRunsRemoteRouter() {
           spec: src.spec,
           ...(src.integrity ? { integrityHint: src.integrity } : {}),
         });
+        // `stage: "draft"` is `?version=draft` spelled for this surface, so it
+        // answers to the one predicate that says who owns a working copy —
+        // otherwise the 403 the platform run route returns is a formality any
+        // caller holding `agents:run` steps around by posting here instead.
+        await assertDraftSelectorAllowed(c, src.packageId, src.stage);
         agentForRun = resolved.agent;
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
@@ -273,8 +280,8 @@ export function createRunsRemoteRouter() {
         // resolves through the same four layers as a platform run: author
         // defaults < editor defaults < caller input, with locked fields
         // refused (400 `locked_input_field`). There is no schedule layer here.
-        const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
-          spaceId,
+        const { values: storedValues, locked: lockedFields } = await getSpacePackageSettings(
+          { orgId, spaceId },
           agentForRun.id,
         );
         const inputSchema = agentForRun.manifest.input?.schema;

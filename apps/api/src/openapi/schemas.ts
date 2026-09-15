@@ -46,7 +46,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_space_id: {
     type: ["string", "null"],
     description:
-      "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through an installation but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is installed in consume it and never gain write authority.",
+      "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority.",
   },
   home_writable: {
     type: "boolean",
@@ -56,7 +56,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_shareable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate the THREE `/shares` routes that change the audience enforce (offer, list, revoke); `accept` is the recipient's own act on their own space and asks for no `share` at all. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
   },
 } as const;
 
@@ -302,20 +302,22 @@ export const schemas = {
   SpacePackage: {
     type: "object",
     description:
-      "A package installed in a space with its model/proxy overrides. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
-    // The installedPackageSelect projection emits every field unconditionally
+      "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the share that placed the package is revoked. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
+    // The spacePackageSelect projection emits every field unconditionally
     // (package_type/package_source come from the join). `object` is spec-only
-    // (not on the InstalledPackage type). Stored input values and their locks
+    // (not on the SpacePackage shared type). Stored input values and their locks
     // are not here — they are read via `GET /api/agents/{scope}/{name}`
     // (`AgentDetail.input`), where the schema and the locks travel with them.
     //
     // CASING: this object deliberately mixes cases and the spec matches the
-    // runtime serializer (`services/space-packages.ts:installedPackageSelect`)
+    // runtime serializer (`services/space-packages.ts:spacePackageSelect`)
     // field-for-field — spec==runtime is the hard invariant, so do NOT "normalize".
     //   - `packageId`/`modelId`/`proxyId`/`updatedAt` are camelCase per the
     //     universal *Id / timestamp carve-out (docs/CASING_CONVENTIONS.md).
-    //   - `installed_at` is snake_case: the projection aliases it that way, so it
-    //     DIVERGES from the timestamp carve-out. Documented module carve-out.
+    //   - `installed_at` is snake_case: the projection aliases the COLUMN of
+    //     that name, so it DIVERGES from the timestamp carve-out. Documented
+    //     module carve-out, and the one place the activation vocabulary does
+    //     not reach — the column is data, renamed by a migration or not at all.
     required: [
       "packageId",
       "generationConfig",
@@ -343,7 +345,7 @@ export const schemas = {
       package_source: { type: "string", enum: ["system", "local"] },
       draft_manifest: {
         type: ["object", "null"],
-        description: "Raw draft manifest JSONB for the installed package.",
+        description: "Raw draft manifest JSONB for the placed package.",
       },
     },
   },
@@ -506,7 +508,7 @@ export const schemas = {
   },
   AgentListItem: {
     type: "object",
-    // `running_runs`/`dependencies`/`scope`/`keywords`/`version`/`installed` are
+    // `running_runs`/`dependencies`/`scope`/`keywords`/`version`/`active` are
     // always emitted by the GET /api/agents mapper. `display_name`/`description`/
     // `schema_version`/`author` stay optional (manifest-derived, may be absent);
     // `forked_from` is not emitted by the list endpoint (shared-type optional).
@@ -519,7 +521,7 @@ export const schemas = {
       "scope",
       "keywords",
       "version",
-      "installed",
+      "active",
     ],
     properties: {
       id: { type: "string" },
@@ -541,10 +543,10 @@ export const schemas = {
         enum: ["agent", "skill", "mcp-server", "integration"],
       },
       running_runs: { type: "integer" },
-      installed: {
+      active: {
         type: "boolean",
         description:
-          "Whether the agent is activated in the space this listing was read from (an installed `space_packages` row, or a system package). The listing itself follows the READ rule — homed in this space, offered to it, or system — which a RUN does not: when this is `false` the launch routes answer `404 agent_not_found` here until somebody installs it through `POST /api/spaces/{spaceId}/packages`. Always emitted.",
+          "Whether the agent is ACTIVE in the space this listing was read from — the placement row's `enabled` when the space has one, the deployment's default (a system package) when it has none. The listing itself follows the READ rule — homed in this space, offered to it, or system — which a RUN does not: when this is `false` the launch routes answer `404 agent_not_active_in_space` here until somebody activates it through `POST /api/spaces/{spaceId}/packages`. Always emitted.",
       },
       dependencies: {
         type: "object",
@@ -602,6 +604,7 @@ export const schemas = {
       "running_runs",
       "last_run",
       "effective_timeout_seconds",
+      "active",
       "home_space_id",
       "home_writable",
       "home_shareable",
@@ -762,6 +765,11 @@ export const schemas = {
         type: "integer",
         description:
           "Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`.",
+      },
+      active: {
+        type: "boolean",
+        description:
+          "Whether the agent is ACTIVE in the space this detail was read from — the same rule as `AgentListItem.active`: the placement row's `enabled` when the space has one, the deployment's default when it has none. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. Always emitted.",
       },
     },
   },
@@ -1704,7 +1712,7 @@ export const schemas = {
   IntegrationCredentialsResponse: {
     type: "object",
     description:
-      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an installed integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
+      "Live credentials + per-auth HTTP delivery plans + per-auth expiries for an active integration. Returned by both `GET /internal/integration-credentials/{scope}/{name}` and `POST .../refresh` (identical shape). Feeds the sidecar's MITM `MitmCredentialSource.current()` + `.deliveryPlans()`. All wire keys are snake_case per AFPS (see `docs/CASING_CONVENTIONS.md` — internal sidecar↔platform endpoints share the Zone 1 default).",
     required: ["auths", "delivery_plans", "expires_at_epoch_ms"],
     properties: {
       auths: {
@@ -1822,17 +1830,18 @@ export const schemas = {
   AgentConnectionReadiness: {
     type: "object",
     description:
-      "Bulk integration connection readiness for an agent. `blocks_run`/`errors` mirror the run-kickoff 412 (run semantics); `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
+      "What stands between this agent and a run, in one call: the connection verdict (mirroring the run-kickoff 412, run semantics) plus the space's own activation switch. `integrations[]` carries every declared integration's management verdict for the Connexions tab.",
     required: ["blocks_run", "errors", "integrations"],
     properties: {
       blocks_run: {
         type: "boolean",
-        description: "True iff POST /api/agents/{scope}/{name}/run would reject with 412.",
+        description:
+          "True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (412), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty.",
       },
       errors: {
         type: "array",
         description:
-          "Integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors). Shares the single ResolutionFieldError component so the shape can't drift from the 412 error items.",
+          'What blocks the run. The integration portion of the 412 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can\'t drift from the 412 error items.',
         items: { $ref: "#/components/schemas/ResolutionFieldError" },
       },
       integrations: {
@@ -1905,11 +1914,11 @@ export const schemas = {
       rehomed_packages: {
         type: "integer",
         description:
-          "Packages this space homed that another space has installed: handed to the organization catalogue (`home_space_id = null`) rather than deleted",
+          "Packages this space homed that another space has placed: handed to the organization catalogue (`home_space_id = null`) rather than deleted",
       },
       deleted_packages: {
         type: "integer",
-        description: "Packages this space homed that no other space had installed: deleted",
+        description: "Packages this space homed that no other space had placed: deleted",
       },
     },
   },
@@ -2219,9 +2228,9 @@ export const schemas = {
   LibraryPackageList: {
     type: "array",
     description:
-      "Packages of a single type visible to the org. Each entry carries an " +
-      "`installed_in` array listing the caller-org spaces where the package " +
-      "is currently installed (empty array = not installed in any of the caller's spaces).",
+      "Packages of a single type visible to the org. Each entry carries its " +
+      "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it " +
+      "is there (`via`) and whether that space runs it (`state`).",
     items: {
       type: "object",
       required: [
@@ -2233,7 +2242,7 @@ export const schemas = {
         "home_space_id",
         "home_writable",
         "home_shareable",
-        "installed_in",
+        "placements",
       ],
       properties: {
         id: { type: "string", description: "Package id (`pkg_…`)." },
@@ -2254,11 +2263,48 @@ export const schemas = {
             "Description from the package draft manifest; empty string when not provided.",
         },
         ...PACKAGE_HOME_PROPERTIES,
-        installed_in: {
+        placements: {
           type: "array",
           description:
-            "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
-          items: { type: "string" },
+            "Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the " +
+            "package is placed nowhere the caller can see — which the space form still lists when the caller " +
+            "could place it there in one click (the organization catalogue they administer, or a package whose " +
+            "home grants them `<type>:share`).",
+          items: { $ref: "#/components/schemas/PackagePlacement" },
+        },
+      },
+    },
+  },
+  PackagePlacement: {
+    type: "object",
+    description:
+      "One (package, space) cell of the library map: why the package reaches that space, and whether the space runs it.",
+    required: ["space_id", "via", "state", "shared_by"],
+    properties: {
+      space_id: {
+        type: "string",
+        description: "Space id (`spc_…`) — always one the caller reads.",
+      },
+      via: {
+        type: "string",
+        enum: ["home", "shared", "system"],
+        description:
+          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (it was offered to this space), `system` (a built-in package, readable in every space).",
+      },
+      state: {
+        type: "string",
+        enum: ["active", "inactive", "none"],
+        description:
+          "Whether the space RUNS it. `active`: yes. `inactive`: it was switched off here, and its per-space model, proxy and input settings are kept. `none`: nothing has switched it on yet — a pending offer is exactly this. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+      },
+      shared_by: {
+        type: ["object", "null"],
+        description:
+          'Who offered it — on `via: "shared"` placements only. `null` there when the offer came from a home move rather than from a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
+        required: ["user_id", "name"],
+        properties: {
+          user_id: { type: "string" },
+          name: { type: "string" },
         },
       },
     },
@@ -2307,14 +2353,15 @@ export const schemas = {
   PackageShare: {
     type: "object",
     description:
-      "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to install; it is never an installation, and no execution path consults it.",
+      "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
     required: ["object", "target", "shared_by", "created_at"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
       target: { $ref: "#/components/schemas/ShareTargetView" },
       shared_by: {
         type: ["object", "null"],
-        description: "Who shared it. `null` once that account is gone.",
+        description:
+          "Who shared it. `null` once that account is gone, and `null` once they have left this organization.",
         required: ["user_id", "name"],
         properties: {
           user_id: { type: "string" },

@@ -28,7 +28,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackage,
   seedPackageShare,
   seedPackageVersion,
@@ -112,7 +112,7 @@ describe("package file explorer", () => {
         draftContent: "draft prompt from DB",
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
     });
 
     it("lists ZIP entries alongside the DB-authoritative files", async () => {
@@ -184,7 +184,7 @@ describe("package file explorer", () => {
         draftManifest: { ...manifestFor(skillId), type: "skill" },
         draftContent: "---\nname: a-skill\ndescription: A skill.\n---\nbody",
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, skillId);
+      await seedSpacePackage(ctx.defaultSpaceId, skillId);
 
       const { entries } = await listFiles(ctx, skillId);
       expect(entries.map((e) => e.path)).toEqual(["SKILL.md", "manifest.json"]);
@@ -212,7 +212,7 @@ describe("package file explorer", () => {
         draftManifest: { ...manifestFor(intId), type: "integration" },
         draftContent: "# Updated integration docs",
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, intId);
+      await seedSpacePackage(ctx.defaultSpaceId, intId);
       await uploadPackageFiles("integrations", ctx.orgId, intId, {
         "manifest.json": encoder.encode("{}"),
         "INTEGRATION.md": encoder.encode("# STALE docs from the ZIP"),
@@ -243,7 +243,7 @@ describe("package file explorer", () => {
         draftManifest: manifest,
         draftContent: JSON.stringify(manifest),
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, intId);
+      await seedSpacePackage(ctx.defaultSpaceId, intId);
       await uploadPackageFiles("integrations", ctx.orgId, intId, {
         "manifest.json": encoder.encode(JSON.stringify(manifest)),
         "server/index.js": encoder.encode("export default 1;"),
@@ -264,7 +264,7 @@ describe("package file explorer", () => {
         draftManifest: manifest,
         draftContent: JSON.stringify(manifest),
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, mcpId);
+      await seedSpacePackage(ctx.defaultSpaceId, mcpId);
       await uploadPackageFiles("mcp-servers", ctx.orgId, mcpId, {
         "manifest.json": encoder.encode("{}"),
         "server/index.js": encoder.encode("export default 1;"),
@@ -288,7 +288,7 @@ describe("package file explorer", () => {
         draftManifest: manifest,
         draftContent: "",
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, mcpId);
+      await seedSpacePackage(ctx.defaultSpaceId, mcpId);
 
       const { entries } = await listFiles(ctx, mcpId);
       expect(entries.map((e) => e.path)).toEqual(["manifest.json"]);
@@ -310,7 +310,7 @@ describe("package file explorer", () => {
         draftContent: "draft prompt",
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
 
       const zip = buildMinimalZip(manifestFor(id), "published prompt v1", "prompt.md");
       await uploadPackageZip(id, "1.0.0", zip);
@@ -483,7 +483,7 @@ describe("package file explorer", () => {
         draftContent: "draft prompt",
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
     });
 
     it(
@@ -579,7 +579,7 @@ describe("package file explorer", () => {
       );
     });
 
-    it("404s a package that is not installed in this space", async () => {
+    it("404s a package that is not placed in this space", async () => {
       const id = "@fexp/uninstalled";
       await seedPackage({ id, orgId: ctx.orgId, type: "agent", draftContent: "hi" });
 
@@ -593,14 +593,22 @@ describe("package file explorer", () => {
       const id = "@fexpother/private-agent";
       await seedPackage({ id, orgId: other.orgId, type: "agent", draftContent: "secret" });
 
-      // Install it in OUR space on purpose. `hasPackageAccess` does not
-      // filter `orgId`, so it now PASSES — which leaves `orgOrSystemFilter` as
-      // the only thing standing between us and another org's bytes. Seeding
-      // the install in the foreign space instead would make this test green with
-      // the org filter deleted.
+      // Place and activate it in OUR space on purpose: the fixture builds the
+      // strongest state an attacker could reach, so the refusal cannot be
+      // coming from a missing row. Seeding it in the FOREIGN space instead
+      // would make this test green with every org filter deleted.
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
+      // TWO independent boundaries now stand between us and another org's
+      // bytes, and this pins both: `hasPackageAccess` carries the org filter in
+      // its own query, and the explorer's read carries `orgOrSystemFilter`.
       expect(await hasPackageAccess({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
+        false,
+      );
+      // The same predicate answers `true` for the org that DOES own it — so
+      // the `false` above is the boundary talking, not the fixture failing to
+      // activate anything.
+      expect(await hasPackageAccess({ orgId: other.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
         true,
       );
 
@@ -619,7 +627,7 @@ describe("package file explorer", () => {
       const [shadow] = await db.select().from(packages).where(eq(packages.ephemeral, true));
       expect(shadow).toBeDefined();
       await seedPackageShare(ctx.defaultSpaceId, shadow!.id);
-      await seedInstalledPackage(ctx.defaultSpaceId, shadow!.id);
+      await seedSpacePackage(ctx.defaultSpaceId, shadow!.id);
 
       const { res } = await listFiles(ctx, shadow!.id);
       expect(res.status).toBe(404);
@@ -684,7 +692,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: DRAFT_BODY,
       });
-      await seedInstalledPackage(homeId, id);
+      await seedSpacePackage(homeId, id);
     });
 
     /** Publish `1.0.0` with a body that differs from the draft — the control. */
@@ -779,7 +787,7 @@ describe("package file explorer", () => {
         draftContent: "prompt body",
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
     });
 
     it("serves raw bytes as a non-executable attachment", async () => {
@@ -877,7 +885,7 @@ describe("package file explorer", () => {
         draftContent: "etag body",
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
     });
 
     it("round-trips to 304 with no body on the index", async () => {
@@ -1015,7 +1023,7 @@ describe("package file explorer", () => {
         draftContent: "draft prompt",
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      await seedSpacePackage(ctx.defaultSpaceId, id);
       // A version row WITHOUT its artifact in storage. Any code path that
       // downloads the ZIP to answer the request must fail loudly.
       await seedPackageVersion({
@@ -1181,7 +1189,7 @@ describe("draft tree writes", () => {
       draftContent: SKILL_MD,
     });
     await seedPackageShare(ctx.defaultSpaceId, id);
-    await seedInstalledPackage(ctx.defaultSpaceId, id);
+    await seedSpacePackage(ctx.defaultSpaceId, id);
     await uploadPackageFiles("skills", ctx.orgId, id, {
       "SKILL.md": encoder.encode(SKILL_MD),
       "scripts/run.py": encoder.encode("print(1)"),

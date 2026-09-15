@@ -18,7 +18,7 @@ import {
   deleteSchedule,
 } from "../services/scheduler.ts";
 import { computeNextRun, isValidCron } from "../lib/cron.ts";
-import { requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -33,10 +33,7 @@ import {
   resolveModel,
   validateGenerationOverride,
 } from "../services/org-models.ts";
-import {
-  getInstalledPackageSettings,
-  type InstalledPackageSettings,
-} from "../services/space-packages.ts";
+import { getSpacePackageSettings, type SpacePackageSettings } from "../services/space-packages.ts";
 import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
 import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
@@ -192,7 +189,7 @@ async function assertScheduleTargetValid(args: {
   agent: LoadedPackage;
   /** `version_override` as this request leaves it — the selector every fire replays. */
   versionOverride: string | undefined;
-  packageSettings: InstalledPackageSettings;
+  packageSettings: SpacePackageSettings;
   input: Record<string, unknown> | undefined;
 }): Promise<LoadedPackage> {
   const { agent: effectiveAgent } = await resolveAgentRunVersion(args.agent, args.versionOverride);
@@ -370,6 +367,10 @@ export function createSchedulesRouter() {
     rateLimit(10),
     requirePermission("schedules", "write"),
     requireAgent(),
+    // Arming a schedule is an execution decision, so it asks the execution
+    // question now rather than leaving the first tick to discover it. LISTING
+    // the schedules of a switched-off agent is a read and does not.
+    requireActiveAgent(),
     async (c) => {
       const agent = c.get("package");
 
@@ -380,7 +381,7 @@ export function createSchedulesRouter() {
 
       const scope = getSpaceScope(c);
 
-      const packageSettings = await getInstalledPackageSettings(scope.spaceId, agent.id);
+      const packageSettings = await getSpacePackageSettings(scope, agent.id);
       // A creation names every selector it carries, so every one of them is an
       // act: `version_override: "draft"` here IS the request to freeze the
       // author's working copy onto a row that replays it forever.
@@ -485,7 +486,7 @@ export function createSchedulesRouter() {
     // The agent's per-space settings — read once and shared by the
     // locked-field refusal and the generation-config reconciliation below,
     // which can both run on the same request.
-    const packageSettings = await getInstalledPackageSettings(scope.spaceId, existing.packageId);
+    const packageSettings = await getSpacePackageSettings(scope, existing.packageId);
 
     // The selector this row will replay after the patch: `null` clears the
     // override, i.e. back to the unified default; omitted leaves whatever the

@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
-import { useInvalidatePackageInstallation } from "./use-library";
+import { useInvalidatePackageActivation } from "./use-library";
 
 export type PackageShare = components["schemas"]["PackageShare"];
 
@@ -32,16 +32,16 @@ export function usePackageShares(packageId: string, enabled: boolean) {
 
 /**
  * Every write here changes what the RECIPIENT sees, not just the audience list:
- * a share makes the package readable in the target space, and revoking also
- * uninstalls it there. So the library — the listing that renders both halves —
- * is invalidated alongside the share list.
+ * a share places the package in the target space, and revoking takes both the
+ * placement and its local instance away again. So the library — the listing
+ * that renders both halves — is invalidated alongside the share list.
  */
 function useInvalidateShares() {
   const qc = useQueryClient();
-  const invalidateInstallation = useInvalidatePackageInstallation();
+  const invalidateActivation = useInvalidatePackageActivation();
   return () => {
     void qc.invalidateQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/shares"] });
-    invalidateInstallation();
+    invalidateActivation();
   };
 }
 

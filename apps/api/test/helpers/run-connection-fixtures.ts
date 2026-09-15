@@ -23,7 +23,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { seedPackage, seedPackageVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";
 import type { TestContext } from "./auth.ts";
-import { installPackage } from "../../src/services/space-packages.ts";
+import { activatePackage } from "../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../src/services/org-models.ts";
 import { waitForInFlight } from "../../src/services/run-tracker.ts";
@@ -159,7 +159,7 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
     version: "1.0.0",
     manifest: connectionTestIntegrationManifest(id) as unknown as Record<string, unknown>,
   });
-  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+  await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
 }
 
 /** Add one connection on the integration's `primary` auth, owned by the ctx user. */

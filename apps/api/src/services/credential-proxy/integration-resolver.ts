@@ -74,7 +74,7 @@ interface ResolvedIntegrationProxyCredentials {
 /**
  * Resolve live credentials for the credential-proxy from an
  * integration connection. Throws {@link IntegrationCredentialNotFoundError}
- * when the integration is not installed / has no accessible connection — the
+ * when the integration is not active / has no accessible connection — the
  * only way this path fails.
  */
 export async function resolveIntegrationProxyCredentials(

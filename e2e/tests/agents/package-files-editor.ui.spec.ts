@@ -476,7 +476,7 @@ test("discarding a new package's files creates nothing on the server", async ({
   expect(writes).toEqual([]);
 });
 
-test("a MCP home author edits files while browsing a read-only installation", async ({
+test("a MCP home author edits files while browsing a read-only placement", async ({
   request,
   browser,
   browserCtx,

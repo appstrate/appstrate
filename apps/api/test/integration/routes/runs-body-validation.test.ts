@@ -28,7 +28,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -46,7 +46,7 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 
   /** POST a raw body string — lets a malformed payload be sent verbatim. */

@@ -4,7 +4,7 @@
  * Integration package read-side service.
  *
  * Scope (deliberately narrow): read-side queries for the integration package
- * list/detail UI + a thin install helper. Mutations (connect, OAuth flows)
+ * list/detail UI + a thin activation helper. Mutations (connect, OAuth flows)
  * and the runtime credential/spawn path live in their own services.
  */
 
@@ -609,7 +609,7 @@ export async function getIntegration(
  * Per-integration prompt companion returned by
  * {@link fetchIntegrationPromptDocs}. `description` comes from the
  * integration manifest; `doc` is the raw `INTEGRATION.md` content
- * (AFPS §3.5) parsed at install time and persisted on
+ * (AFPS §3.5) parsed at import time and persisted on
  * `packages.draftContent`. Either may be absent.
  */
 interface IntegrationPromptDoc {
@@ -662,7 +662,7 @@ function truncateIntegrationDoc(raw: string): string {
  * Batch-load `(description, INTEGRATION.md)` for a set of integration
  * package ids. Reads from `packages.draftManifest` (description) +
  * `packages.draftContent` (the `INTEGRATION.md` content captured at
- * install time by `zip.ts`) — never re-fetches the bundle from object
+ * import time by `zip.ts`) — never re-fetches the bundle from object
  * storage. Returned entries are sized to the inline-budget; oversized
  * docs are truncated on a UTF-8 code-point boundary with a plain
  * truncation marker.

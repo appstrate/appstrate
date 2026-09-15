@@ -228,7 +228,11 @@ const canonicalRunsPaths = {
           description:
             "Insufficient permissions — including `draft_not_writable` when `version=draft`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE (the message names it).",
         },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`.",
+        },
         "409": {
           description:
             "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), or the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference)",
@@ -339,10 +343,12 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        // requireAgent() 404s when the agent is not visible in the caller's
-        // org+space scope; the org/space-context middleware 403s on an
-        // org/space mismatch (org-context.ts / space-context.ts). Both are
-        // reachable on this space-scoped read.
+        // A READ: `requireAgent()` asks placement only, so the 404 is the opaque
+        // `agent_not_found` and nothing else — an agent switched off here still
+        // has a history, and hiding it would blank the page that switches it
+        // back on. The org/space-context middleware 403s on an org/space
+        // mismatch (org-context.ts / space-context.ts). Both are reachable on
+        // this space-scoped read.
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -380,8 +386,9 @@ const canonicalRunsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        // requireAgent() 404s when the agent is not visible in the caller's
-        // org+space scope (guards.ts:requireAgent → agent_not_found).
+        // `agent_not_found` when the space holds no placement for the agent.
+        // Deleting a switched-off agent's runs is housekeeping, not execution,
+        // so the activation gate is not mounted here.
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Running runs exist",
@@ -1194,7 +1201,7 @@ const canonicalRunsPaths = {
                         spec: {
                           type: "string",
                           description:
-                            "Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the space, then to the `latest` dist-tag.",
+                            "Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the `latest` dist-tag.",
                         },
                         integrity: {
                           type: "string",

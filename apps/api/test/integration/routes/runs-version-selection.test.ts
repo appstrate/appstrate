@@ -31,7 +31,7 @@ import {
 } from "../../helpers/auth.ts";
 import {
   seedAgent,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedPackage,
   seedPackageShare,
   seedPackageVersion,
@@ -48,7 +48,7 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
 
 const app = getTestApp();
@@ -67,7 +67,7 @@ describe("POST /api/agents/:scope/:name/run — version selector", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 
   async function run(version?: string) {
@@ -189,9 +189,9 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
     // Placed and installed in BOTH spaces, so every refusal below is about the
     // selector and never about reach: a caller who could not see the agent
     // would 404 and prove nothing.
-    await seedInstalledPackage(homeId, DRAFT_AGENT);
+    await seedSpacePackage(homeId, DRAFT_AGENT);
     await seedPackageShare(teamId, DRAFT_AGENT);
-    await seedInstalledPackage(teamId, DRAFT_AGENT);
+    await seedSpacePackage(teamId, DRAFT_AGENT);
   });
 
   // `viewer` is deliberately absent: the preset holds no `agents:run`, so the
@@ -288,7 +288,7 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
       draftContent: DRAFT_BODY,
     });
     await seedPackageShare(homeId, SKILL);
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     await seedPublishedVersion(SKILL, "1.0.0", {
       manifest: skillManifest,
       content: PUBLISHED_BODY,
@@ -348,7 +348,7 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
       draftManifest: skillManifest,
       draftContent: "Never published.",
     });
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     await uploadPackageFiles("skills", ctx.orgId, SKILL, {
       "manifest.json": enc(JSON.stringify(skillManifest, null, 2)),
       "SKILL.md": enc("Never published."),
@@ -390,7 +390,7 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
       draftManifest: { name: SKILL, version: "1.0.0", type: "skill" },
       draftContent: SKILL_MD,
     });
-    await seedInstalledPackage(homeId, SKILL);
+    await seedSpacePackage(homeId, SKILL);
     // The draft catalog assembles a skill from its STORED files, not from the
     // draft column, so the accepted case below has to reach a real closure.
     const enc = (text: string) => new TextEncoder().encode(text);
@@ -602,7 +602,7 @@ describe("POST /api/agents/:scope/:name/run — published deps diverged from the
         draftManifest: { name: id, version: "1.0.0", type: "skill" },
       });
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
 
     // Draft declares dep-y only; the published snapshot still declares dep-x.
@@ -618,7 +618,7 @@ describe("POST /api/agents/:scope/:name/run — published deps diverged from the
         dependencies: { skills: { [DEP_Y]: "^1.0.0" } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, DRIFTED);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, DRIFTED);
 
     const version = await seedPackageVersion({
       packageId: DRIFTED,
@@ -692,7 +692,7 @@ describe("GET /api/runs/:id — version_ref persistence", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 
   async function getRunWire(runId: string) {

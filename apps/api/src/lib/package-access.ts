@@ -12,6 +12,7 @@ import {
   VERSION_SELECTOR_PUBLISHED,
 } from "../services/agent-version-resolver.ts";
 import { getLatestVersionId } from "../services/package-versions.ts";
+import { hasPackageAccess } from "../services/space-packages.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
@@ -19,6 +20,7 @@ import type { OrgRole } from "@appstrate/core/permissions";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
+import type { SpaceScope } from "./scope.ts";
 import { callerPermissions, type Permission } from "./permissions.ts";
 import {
   callerOrgRole,
@@ -85,30 +87,40 @@ export function agentReadIsSummary(c: Context<AppEnv>): boolean {
   return !callerPermissions(c).has("agents:read");
 }
 
+/**
+ * The permission one ACT on a space placement asks for, per package type.
+ *
+ * The act is spelled activate / configure / deactivate everywhere the platform
+ * talks about it; the permission STRINGS keep the spelling they have in
+ * `space_roles` rows and in every API key's scope list
+ * (`integrations:install` / `integrations:uninstall`). Those are data, and
+ * renaming a grant is a migration of rows, not of code — so the mapping is the
+ * one place where the two vocabularies meet.
+ */
 export function spacePackagePermission(
   type: PackageType,
-  op: "install" | "configure" | "uninstall",
+  op: "activate" | "configure" | "deactivate",
 ): Permission {
   if (type === "agent") return "agents:configure";
   if (type === "integration")
-    return op === "uninstall" ? "integrations:uninstall" : "integrations:install";
+    return op === "deactivate" ? "integrations:uninstall" : "integrations:install";
   return packagePermission(type, "write");
 }
 
-/** Existing catalog imports must hold the target's install grant before adding an association. */
-export async function assertExistingPackageInstallAccess(
+/** Existing catalog imports must hold the target's activation grant before placing it. */
+export async function assertExistingPackageActivationAccess(
   c: Context<AppEnv>,
   packageId: string,
   type: PackageType,
 ) {
   const target = c.get("space")?.id ?? c.get("spaceId");
-  const [installed] = await db
+  const [placement] = await db
     .select({ packageId: spacePackages.packageId })
     .from(spacePackages)
     .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, target)))
     .limit(1);
-  if (!installed)
-    await makePermissionGuard(spacePackagePermission(type, "install"))(c, async () => {});
+  if (!placement)
+    await makePermissionGuard(spacePackagePermission(type, "activate"))(c, async () => {});
 }
 
 /**
@@ -187,19 +199,20 @@ export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerO
  * One rule, one place (RBAC spec §6.9, §6.10): a package is readable where it
  * is HOMED and where it is SHARED. Exactly TWO placements. The home is a grant
  * of its own: a draft nobody has offered yet is readable where it lives, and an
- * author does not lose sight of their own package because a space uninstalled
+ * author does not lose sight of their own package because a space switched off
  * it. Without it, write authority would exceed read access — a builder able to
- * `PUT` a package they cannot `GET`. The SHARE half is both the audience rule
- * and what makes "Shared with me" a listing at all: an offered package has to
- * be readable (its name, its description, the button that installs it) before
- * the recipient has decided to install it.
+ * `PUT` a package they cannot `GET`. The SHARE half is the audience rule, and
+ * it has to grant read BEFORE anything is switched on: an offer the recipient
+ * has not taken up still shows them its name, its description and the switch
+ * that would activate it, which is only possible because the offer alone makes
+ * the package readable.
  *
- * An INSTALLATION is deliberately not a third one. It is the only candidate
+ * A PLACEMENT ROW is deliberately not a third one. It is the only candidate
  * that would answer "why does this space see this package" without consulting
- * `<type>:share`: a builder of B who reads A's package anywhere would install
- * it into B and hand B a placement A granted to nobody. Installing is the act
- * of TAKING an offer — `installPackage` requires `home ∨ shared` before it
- * writes anything — so an installation is a placement's consequence and never
+ * `<type>:share`: a builder of B who reads A's package anywhere would activate
+ * it in B and hand B a placement A granted to nobody. Activating is the act
+ * of TAKING an offer — `activatePackage` requires `home ∨ shared` before it
+ * writes anything — so a placement row is a placement's consequence and never
  * its source.
  *
  * The readers of this rule differ only in the set they compare against: the
@@ -209,10 +222,12 @@ export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerO
  * `<type>:read` in one of those spaces is the other half of the rule and stays
  * with each reader.
  *
- * READ only. RUNNING a package still requires an INSTALLATION in the space it
- * runs in — `hasPackageAccess`, deliberately untouched, and the reason a share
- * is not an activation: an agent runs with the recipient's credentials, so the
- * recipient installs it themselves.
+ * READ only. RUNNING a package asks this AND one more: {@link
+ * agentExecutionBlock} wants it placed here *and* ACTIVE here — the placement
+ * row's `enabled`, or the deployment's default where there is no row
+ * (`services/package-activation.ts`). That is why a share is not an
+ * activation: an agent runs with the recipient's credentials, so the recipient
+ * switches it on themselves.
  */
 export function placementGrantsRead(
   pkg: { homeSpaceId: string | null },
@@ -252,6 +267,65 @@ export async function isPackageReadableInSpace(
   if (row.source === "system") return true;
   const here = new Set([spaceId]);
   return placementGrantsRead(row, row.sharedHere ? here : [], here);
+}
+
+/**
+ * Why a package may NOT execute in a space — `null` when it may.
+ *
+ * `"not_placed"` beats `"not_active"`: a space that holds no placement is told
+ * nothing about a switch it was never entitled to throw.
+ */
+export type AgentExecutionBlock = "not_placed" | "not_active";
+
+/**
+ * THE execution predicate: may this package RUN in this space?
+ *
+ * Two halves, and both must answer yes — they are different questions and
+ * neither implies the other:
+ *
+ *   - PLACED here: homed here, offered here, or shipped with the deployment
+ *     ({@link isPackageReadableInSpace} — the same rule the reads use);
+ *   - ACTIVE here: the placement row's `enabled`, or the deployment's default
+ *     where there is no row (`hasPackageAccess` / `activeHereSql`).
+ *
+ * Stated ONCE because three callers ask it and drift between them is invisible:
+ * the HTTP door (`requireActiveAgent`, `middleware/guards.ts`, mounted by
+ * `POST …/run`, `POST …/schedules` and `GET …/bundle`), the remote-run resolver
+ * (`services/registry-run-resolver.ts`, behind `POST /api/runs/remote`, which
+ * takes a package id straight from the caller) and the scheduler tick, which
+ * fires on its own with no request to refuse.
+ *
+ * The activation half ALONE would let an ORPHAN placement — a `space_packages`
+ * row with neither a home nor a share behind it, the residue
+ * `scripts/migration/0016` repairs — execute from a cron in a space every HTTP
+ * door refuses to serve it to. A cron is the one caller nobody is watching,
+ * which is exactly why it must not be the permissive one.
+ *
+ * A VERDICT rather than a throw: the three callers render the refusal on their
+ * own channels — an RFC-9457 404 with a code at the HTTP door, the resolver's
+ * own 404 pair, a visible failed run with the schedule left ARMED at the tick
+ * — and folding their wording into one shared `ApiError` would tell a schedule
+ * to "pick a different space". The RULE is shared; the sentence each caller
+ * shows is its own.
+ *
+ * Both halves are read in parallel: they are independent rows, and the tick
+ * pays for this on every fire.
+ *
+ * Adds no `orgId` predicate of its own: `hasPackageAccess` carries the org
+ * boundary in its own query, and every caller has already loaded the package
+ * under it (`getPackage(packageId, orgId)`).
+ */
+export async function agentExecutionBlock(
+  scope: SpaceScope,
+  packageId: string,
+): Promise<AgentExecutionBlock | null> {
+  const [placed, active] = await Promise.all([
+    isPackageReadableInSpace(scope.spaceId, packageId),
+    hasPackageAccess(scope, packageId),
+  ]);
+  if (!placed) return "not_placed";
+  if (!active) return "not_active";
+  return null;
 }
 
 /** Catalog reachability permits copying between accessible spaces, never guessing a private id. */
@@ -342,13 +416,13 @@ function assertPackageIsReachable(
       !placementGrantsRead(pkg, sharedIn, readable) &&
       // The org-catalogue exception is for a package with NO home. One homed in
       // a space is reachable through that space or not at all — otherwise an
-      // admin would read a draft that lives, uninstalled, in a member's
+      // admin would read a draft that lives, switched off, in a member's
       // personal space (§3.6).
       //
       // The NULL home is the WHOLE condition: a package the organization owns
       // stays the organization's however it is placed. Narrowing the exception
       // to "placed nowhere" would turn a single offer into a 404 on the owner's
-      // own versions, fork and installation — a package the organization
+      // own versions, fork and placement — a package the organization
       // administers does not stop being theirs because somebody was given it.
       !(pkg.homeSpaceId === null && managesOrgCatalog(c, orgRole)))
   ) {
@@ -359,7 +433,7 @@ function assertPackageIsReachable(
 /**
  * Write authority is the package's HOME (`packages.home_space_id`) and nothing
  * else — not the space the caller happens to be in, not the set of spaces it is
- * installed in: those consume the package and have no say over its draft,
+ * placed in: those consume the package and have no say over its draft,
  * versions or identity. A NULL home is the organization catalogue — owners and
  * admins in session, which is what {@link managesOrgCatalog} means.
  *
@@ -423,8 +497,8 @@ async function holdsPackageWriteAuthority(
 /**
  * The SAME rule as {@link assertPackageShareAccess}, asked as a question — for
  * the one caller that has to CHOOSE rather than refuse: a bundle import whose
- * root already lives in another space installs it with the offer when the
- * caller may make one, and reports `root_installed: false` when they may not.
+ * root already lives in another space activates it with the offer when the
+ * caller may make one, and reports `root_active: false` when they may not.
  *
  * `false`, never a throw, for every refusal the assert would spell out.
  */
@@ -634,7 +708,7 @@ async function assertHomeAuthority(
  * `home_space_id` is the home's id **only when the caller reaches that space**,
  * and `null` otherwise. The raw column cannot go on the wire: a package homed in
  * a member's PERSONAL space is legitimately readable by everyone it is
- * installed for, and emitting its home would hand each of them the id of a
+ * placed for, and emitting its home would hand each of them the id of a
  * space §3.6 says does not exist for them. `null` therefore means "not a space
  * you can see" — the organization catalogue and a withheld home both — and
  * nothing downstream needs to tell those apart: what a reader actually wants to
@@ -676,7 +750,7 @@ export function homeWireForCaller(
 
 /**
  * {@link homeWireForCaller}'s `home_writable`, asked for MANY packages in one
- * catalogue read — the dependency list of an agent, the installed-package hints
+ * catalogue read — the dependency list of an agent, the active-package hints
  * served to a model.
  *
  * Both surfaces offer the draft of a package OTHER than the one being read, and
@@ -750,7 +824,7 @@ function holdsHomeAuthority(
  *
  * SKILLS are exempt in both settings: the CLI's skills sync downloads them into
  * a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`), and a
- * skill's audience is already the space it is installed in. RUNS are unaffected
+ * skill's audience is already the space it is placed in. RUNS are unaffected
  * — a run's bundle is assembled server-side and never travels as a copy.
  *
  * SYSTEM packages are exempt too, and they are the reason the exemption is
@@ -758,7 +832,7 @@ function holdsHomeAuthority(
  * readable in every space of every organization, so there is no "space that
  * owns them" for a setting about copying OUT of one to protect. Their home is
  * `NULL`, which the home rule reads as the organization catalogue — that turned
- * the key into "only owners and admins may install the shipped catalogue", a
+ * the key into "only owners and admins may activate the shipped catalogue", a
  * refusal about somebody else's content that this setting never meant to make.
  *
  * The setting is read UNCACHED for the same reason the SSO gate is: a security
@@ -839,7 +913,7 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
     if (isSystemPackage(packageId)) {
       const source = await assertCatalogPackageAccess(c, packageId, accessible);
       if (identity === bundle.root)
-        await assertExistingPackageInstallAccess(c, packageId, source.type);
+        await assertExistingPackageActivationAccess(c, packageId, source.type);
       continue;
     }
     const type = pkg.manifest.type;
@@ -855,7 +929,7 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
     if (existing?.orgId === c.get("orgId")) {
       await assertPackageMutationAccess(c, packageId, "write", accessible);
       if (identity === bundle.root)
-        await assertExistingPackageInstallAccess(c, packageId, existing.type);
+        await assertExistingPackageActivationAccess(c, packageId, existing.type);
     }
   }
 }

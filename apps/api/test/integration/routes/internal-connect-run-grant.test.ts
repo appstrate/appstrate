@@ -51,7 +51,7 @@ import {
 } from "../../helpers/integration-manifests.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { db } from "../../helpers/db.ts";
 import { integrationConnections } from "@appstrate/db/schema";
@@ -127,7 +127,7 @@ describe("/internal/* — connect-run grant authorization", () => {
     });
     if (installed) {
       await seedPackageShare(ctx.defaultSpaceId, id);
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
   }
 
@@ -191,7 +191,7 @@ describe("/internal/* — connect-run grant authorization", () => {
         integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegrationPackage(INTEGRATION, MCP_SERVER, true);
     await seedIntegrationPackage(OTHER_INTEGRATION, OTHER_SERVER, true);
     await seedServer(MCP_SERVER, SERVER_VERSION, SERVER_BYTES);

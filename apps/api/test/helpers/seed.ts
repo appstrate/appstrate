@@ -77,7 +77,7 @@ export const seedAgent = seedPackage;
  * `space_packages` row the runtime gate requires for a package to be
  * usable in that space. Idempotent.
  */
-export async function seedInstalledPackage(
+export async function seedSpacePackage(
   spaceId: string,
   packageId: string,
   overrides?: Partial<InferInsertModel<typeof spacePackages>>,
@@ -87,10 +87,32 @@ export async function seedInstalledPackage(
     .values({ spaceId, packageId, ...overrides })
     .onConflictDoUpdate({
       target: [spacePackages.spaceId, spacePackages.packageId],
-      // Apply overrides on conflict so callers can flip e.g. `enabled` on an
-      // already-installed package; no-op write when there are none.
+      // Apply overrides on conflict so callers can flip e.g. `enabled` on a
+      // package the space already holds a row for; no-op write when there are
+      // none.
       set: overrides && Object.keys(overrides).length > 0 ? overrides : { spaceId },
     });
+}
+
+/**
+ * The state the activation door leaves behind for a package the space does NOT
+ * home: the OFFER that places it, plus the `space_packages` row that switches
+ * it on. Two writes, because they are two facts — and a row without the offer
+ * behind it is an ORPHAN, which the platform reads as nothing at all
+ * (`services/package-activation.ts`).
+ *
+ * Reach for this whenever a fixture means "this space runs that package" and
+ * the package lives somewhere else. {@link seedSpacePackage} stays the raw row,
+ * for the cases that assert what an orphan gets — and for a package the space
+ * already homes, where the home IS the placement.
+ */
+export async function seedPlacedPackage(
+  spaceId: string,
+  packageId: string,
+  overrides?: Partial<InferInsertModel<typeof spacePackages>>,
+): Promise<void> {
+  await seedPackageShare(spaceId, packageId);
+  await seedSpacePackage(spaceId, packageId, overrides);
 }
 
 /**
@@ -100,7 +122,7 @@ export async function seedInstalledPackage(
  * A fixture for the sharer's act, not for the recipient's: it writes the offer
  * and nothing else, so a test can set up "this space was offered the package"
  * without going through `POST …/shares` and its authority checks. Pair it with
- * {@link seedInstalledPackage} when the space should also have taken it up.
+ * {@link seedSpacePackage} when the space should also have taken it up.
  * `sharedBy` is nullable for the same reason `scripts/migration/0016` leaves it
  * null: nobody in particular made this offer.
  */
@@ -193,6 +215,8 @@ type McpServerInsert = {
   version?: string;
   serverType?: "node" | "python" | "binary" | "uv";
   entryPoint?: string;
+  /** The space that HOMES it — one of the two placements. */
+  homeSpaceId?: string;
 };
 
 /**
@@ -215,6 +239,7 @@ export async function seedMcpServer(overrides: McpServerInsert): Promise<void> {
     type: "mcp-server",
     source: "local",
     draftManifest: manifest,
+    ...(overrides.homeSpaceId ? { homeSpaceId: overrides.homeSpaceId } : {}),
   });
   await seedPackageVersion({ packageId: overrides.id, version, manifest });
 }

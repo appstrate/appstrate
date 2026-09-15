@@ -10,7 +10,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -29,7 +29,7 @@ describe("requireAgent (via agent config route)", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/my-agent");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/my-agent");
 
     const res = await app.request("/api/agents/@testorg/my-agent/input-settings", {
       method: "PUT",
@@ -64,7 +64,7 @@ describe("requireMutableAgent (via agent skills route)", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/my-agent");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/my-agent");
 
     const res = await app.request("/api/agents/@testorg/my-agent/skills", {
       method: "PUT",
@@ -81,7 +81,7 @@ describe("requireMutableAgent (via agent skills route)", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/busy-agent");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/busy-agent");
 
     await seedRun({
       packageId: "@testorg/busy-agent",

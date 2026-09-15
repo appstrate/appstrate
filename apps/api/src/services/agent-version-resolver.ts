@@ -15,7 +15,7 @@
  *                     range) via {@link getVersionDetail}. 404 when nothing
  *                     matches.
  *   - omitted       → `"published"` (#636). There is no third answer: an
- *                     installation carries no version, so a space runs what its
+ *                     placement carries no version, so a space runs what its
  *                     author last published unless the caller asks for
  *                     something else.
  *

@@ -7,19 +7,24 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
 import { buildDownloadHeaders } from "@appstrate/core/integrity";
-import { eq, and, inArray, ne } from "drizzle-orm";
-import { packages, packageShares, profiles, spacePackages, spaces } from "@appstrate/db/schema";
+import { eq, and, inArray } from "drizzle-orm";
+import { packages, profiles } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
-import { installPackage } from "../services/space-packages.ts";
+import {
+  activatePackage,
+  activatePackageWithin,
+  assertMcpServerActivatable,
+  type PackageActivation,
+} from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
+import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
 import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
 import { createPackageShareNotification } from "../services/state/notifications.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { callerOrgRole } from "../lib/view-as.ts";
-import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { unzipPackageArchive } from "../services/package-archive.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -73,7 +78,7 @@ import {
   assertPackageDependenciesAccessible,
   assertForkSourceAccess,
   authorizeBundlePackages,
-  assertExistingPackageInstallAccess,
+  assertExistingPackageActivationAccess,
   defaultDefinitionSelector,
   PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
@@ -119,8 +124,8 @@ import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/pa
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
-} from "../services/integration-install-warnings.ts";
-import { collectAgentInstallWarnings } from "../services/agent-install-warnings.ts";
+} from "../services/integration-import-warnings.ts";
+import { collectAgentImportWarnings } from "../services/agent-import-warnings.ts";
 import {
   ApiError,
   invalidRequest,
@@ -568,7 +573,7 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     getHandler: agentDetailHandler,
     // Mutating endpoints echo the full Agent detail (same serializer as the
     // GET). `requireAccess: false` — the caller just wrote this agent in their
-    // org, so the space-install gate must not 404 a successful write.
+    // org, so the space activation gate must not 404 a successful write.
     detailDto: (c, itemId) =>
       buildAgentDetailDto(c, { itemId, requireAccess: false, version: "draft" }),
   },
@@ -601,27 +606,15 @@ function makeListHandler(rcfg: PackageRouteConfig) {
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
     // `?active=true` narrows to packages active in this space (agent-editor
-    // integration picker). For most types "active" means an installed +
-    // enabled `space_packages` row (generic SQL narrowing in
-    // `listOrgItems`). INTEGRATIONS additionally auto-activate env-backed
-    // SYSTEM integrations that have no row — so they resolve through the
-    // canonical activation rule (`resolveIntegrationActivations`), the single
-    // source of truth shared with the settings list + detail endpoints, rather
-    // than the generic SQL filter (which would hide them).
+    // integration picker), through the ONE activation rule
+    // (`services/package-activation.ts`, applied in SQL by `listOrgItems`):
+    // the placement row when there is one, the deployment's default when there
+    // is not. That is the same rule the integration resolver states, the
+    // env-backed system integrations active without a row included, so no type
+    // needs a correction pass behind this listing.
     const wantActive = c.req.query("active") === "true";
-    const isIntegration = rcfg.cfg.type === "integration";
-    const items = await listOrgItems(orgId, rcfg.cfg, spaceId, {
-      activeOnly: wantActive && !isIntegration,
-    });
-    let visible = items;
-    if (wantActive && isIntegration) {
-      const activations = await resolveIntegrationActivations(
-        items.map((i) => i.id),
-        spaceId,
-      );
-      visible = items.filter((i) => activations.get(i.id)?.active);
-    }
-    const enriched = await enrichWithCreatorNames(visible);
+    const items = await listOrgItems(orgId, rcfg.cfg, spaceId, { activeOnly: wantActive });
+    const enriched = await enrichWithCreatorNames(items);
     // `home_space_id` / `home_writable` are computed HERE, not in
     // `listOrgItems`: both depend on the caller's reach (RBAC spec §6.9), which
     // a service has no access to. One `packageAccessSpaces` read for the page.
@@ -791,13 +784,13 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       lockVersion: createdItem.lockVersion,
     });
     // The package was just created HERE (`homeSpaceId: spaceId` above), so the
-    // placement rule is satisfied and this can only fail on an already-present
-    // row. WARN nonetheless: a create whose package never reached the space is
-    // a half-finished act, and it has to be visible to an operator.
+    // placement rule is satisfied and this is an upsert that cannot conflict.
+    // WARN nonetheless: a create whose package never became active in the space
+    // is a half-finished act, and it has to be visible to an operator.
     const spaceId = c.get("spaceId");
     if (spaceId && versionCreated) {
-      await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.warn("auto-install skipped", { packageId, spaceId, err: getErrorMessage(e) }),
+      await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+        logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
       );
     }
     await recordAuditFromContext(c, {
@@ -894,7 +887,7 @@ async function loadPublishedDefinition(
 /**
  * Build the canonical package detail DTO for skills / integrations / mcp-servers
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
- * Org-scoped (no space-install gate): the GET handler applies that gate before
+ * Org-scoped (no space activation gate): the GET handler applies that gate before
  * calling this, while mutating endpoints (create / update / fork) reuse this
  * directly to echo what the caller just wrote (issue #646). Returns `null` when
  * the package is not found in the org.
@@ -997,7 +990,7 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     const spaceId = c.get("spaceId");
     const itemId = getItemId(c);
 
-    // Space-level visibility: installed here, homed here, or a system package.
+    // Space-level visibility: offered here, homed here, or a system package.
     if (!(await isPackageReadableInSpace(spaceId, itemId))) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
@@ -1533,7 +1526,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * Two gates that answer different questions, both required:
  *
  * - `isPackageReadableInSpace` is VISIBILITY: "is this a system package,
- *   installed in THIS space, or homed here?" (it also excludes ephemeral
+ *   offered to THIS space, or homed here?" (it also excludes ephemeral
  *   shadows). It says nothing about what the caller is ALLOWED to do — a
  *   credential with `scopes: []` passes it. Believing otherwise is exactly the
  *   mistake #1124 had to undo across the rest of the package surface.
@@ -1652,8 +1645,9 @@ async function resolveFileExplorerVersion(
  * reason — it still allows the 304 round-trip, it only forbids serving without
  * one, and that round-trip is what keeps authorization live. Any fresh window,
  * however short, is served by the browser with ZERO server contact: revoke
- * `<type>:read`, remove the member from the org, or uninstall the package from
- * the space, and the cached 200 keeps being handed out until it expires.
+ * `<type>:read`, remove the member from the org, or revoke the offer that
+ * places the package in the space, and the cached 200 keeps being handed out
+ * until it expires.
  * `Vary` cannot rescue that — revocation changes no request header. Forcing the
  * round-trip re-enters `loadFileExplorerPackage`, so `isPackageReadableInSpace`
  * and `requirePackageReadPermission` run on every hit.
@@ -1666,7 +1660,7 @@ async function resolveFileExplorerVersion(
  * `X-Space-Id` (via `isPackageReadableInSpace`) while the URL does not mention
  * either. Without it, switching spaces in the SPA re-issues an identical
  * URL and the browser answers from cache — showing space B an artifact
- * that is only installed in space A.
+ * that is only placed in space A.
  */
 function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string> {
   const headers: Record<string, string> = {
@@ -1963,44 +1957,43 @@ export function createPackagesRouter() {
       // (`computeHasUnpublishedChanges`). Moving the home changes no bytes, so
       // touching it would report a fully-published package as dirty.
       //
-      // The move and the PLACEMENTS it invalidates travel in ONE transaction.
-      // A package is placed in a space by its home or by a share (RBAC spec
-      // §6.9), so moving the home OUT of a space where it stays installed would
-      // leave an installation nothing places — still running for a schedule,
-      // invisible on every page of the space that runs it. That is the exact
-      // state `scripts/migration/0016` exists to repair, and a route must not
-      // create it: every installation outside the NEW home gets the share that
-      // now places it, `shared_by` NULL because nobody offered it — the home
-      // did, until this call. The destination's own share is dropped for the
-      // mirror-image reason `POST …/shares` answers `share_target_is_home`: a
-      // package is not offered to the space it lives in.
-      await db.transaction(async (tx) => {
+      // The move and the PLACEMENTS it invalidates travel in ONE transaction,
+      // through `reconcilePlacementsAfterRehome` — the same function the
+      // personal-space sweeper calls when it re-homes a package whose author
+      // left. Its docstring carries the reasoning; it is a function because
+      // there are two ways to move a home and the invariant belongs to the
+      // act, not to either caller.
+      // An mcp-server whose `latest` archive does not parse is refused
+      // activation by the door; the move must not be the way in. Run outside
+      // the transaction, exactly as `activatePackage` runs it, because it reads
+      // object storage — a 422 here fails the whole move, which is the point.
+      if (target !== null) await assertMcpServerActivatable({ orgId, spaceId: target }, packageId);
+      const activation = await db.transaction(async (tx) => {
+        let activated: PackageActivation | null = null;
         await tx
           .update(packages)
           .set({ homeSpaceId: target })
           .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
-        const orphaned = await tx
-          .select({ spaceId: spacePackages.spaceId })
-          .from(spacePackages)
-          .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
-          .where(
-            and(
-              eq(spacePackages.packageId, packageId),
-              eq(spaces.orgId, orgId),
-              target === null ? undefined : ne(spacePackages.spaceId, target),
-            ),
-          );
-        if (orphaned.length > 0) {
-          await tx
-            .insert(packageShares)
-            .values(orphaned.map((row) => ({ packageId, spaceId: row.spaceId, sharedBy: null })))
-            .onConflictDoNothing();
-        }
+        await reconcilePlacementsAfterRehome(tx, {
+          packageId,
+          orgId,
+          newHomeSpaceId: target,
+        });
         if (target !== null) {
-          await tx
-            .delete(packageShares)
-            .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, target)));
+          // The new home ACTIVATES it, exactly as creation does: a package
+          // lives where it is written, and arriving in a space that cannot run
+          // it would make the move a two-step act with no second button on the
+          // page that performed it. Through the activation door itself, in THIS
+          // transaction, so `space_packages` keeps a single writer and the act
+          // is audited like any other activation. `keepExistingDecision`: a
+          // space that deliberately switched the package off keeps that
+          // decision, because the move is about authority, not about what this
+          // space runs.
+          activated = await activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
+            keepExistingDecision: true,
+          });
         }
+        return activated;
       });
       await recordAuditFromContext(c, {
         action: "package.home_space_changed",
@@ -2009,6 +2002,19 @@ export function createPackagesRouter() {
         before: { home_space_id: pkg.homeSpaceId },
         after: { home_space_id: target },
       });
+      // Symmetric with the HTTP door: recorded only when the destination
+      // actually started running the package, and naming the act that did it —
+      // the move, not a click on a switch that nobody pressed. A destination
+      // that kept an `enabled = false` row changed nothing and is audited as
+      // nothing.
+      if (activation && activation.placement.enabled && !activation.wasActive) {
+        await recordAuditFromContext(c, {
+          action: "package.activated",
+          resourceType: "package",
+          resourceId: packageId,
+          after: { spaceId: target, via: "move" },
+        });
+      }
     }
 
     const rcfg = ROUTE_CONFIGS[pkg.type];
@@ -2067,12 +2073,12 @@ export function createPackagesRouter() {
     }
 
     // The fork is homed in the current space, so its placement is this space's
-    // by construction and the install can only fail on an already-present row.
+    // by construction and the activation is an upsert that cannot conflict.
     // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
     const spaceId = c.get("spaceId");
     if (spaceId) {
-      await installPackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
-        logger.warn("auto-install skipped", {
+      await activatePackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
+        logger.warn("auto-activation skipped", {
           packageId: result.packageId,
           spaceId,
           err: getErrorMessage(e),
@@ -2113,9 +2119,9 @@ export function createPackagesRouter() {
   // API key's allowlist, so all three are session-borne in effect without a
   // transport check of their own.
   //
-  // There is no ACCEPT route: taking up an offer is installing, and installing
+  // There is no ACCEPT route: taking up an offer is ACTIVATING, and activating
   // has one door, `POST /api/spaces/{spaceId}/packages` — for a personal space
-  // exactly as for a team one, with ownership standing in for the install grant
+  // exactly as for a team one, with ownership standing in for the activation grant
   // there (§3.6).
   //
   // Registered BEFORE `/{scope}/{name}/:version/download`: `:version` would
@@ -2132,7 +2138,7 @@ export function createPackagesRouter() {
 
     // Outside its home a package runs the LATEST PUBLISHED version, always
     // (plan decisions 3 and 6) — so an offer of a package with nothing
-    // published is an offer of nothing: the recipient installs it and every
+    // published is an offer of nothing: the recipient activates it and every
     // launch answers `404 no_published_version`. Refusing HERE puts the refusal
     // on the only principal who can clear it — the author, in the act they are
     // performing, where the dialogue offers "Publish and share" — instead of on
@@ -2267,7 +2273,7 @@ export function createPackagesRouter() {
       recipientUserId = target;
     }
 
-    // Withdrawing the offer withdraws the installation it backs, in one
+    // Withdrawing the offer withdraws the placement it backs, in one
     // transaction (plan decision 3) — otherwise the package keeps running in a
     // space that is no longer allowed to see it.
     const revoked = await revokePackageShare({ packageId, spaceId, orgId });
@@ -2278,10 +2284,11 @@ export function createPackagesRouter() {
       resourceId: packageId,
       // The subject as the caller named it — a person for a `user` target, and
       // never the personal space it resolved to, for the reason `package.shared`
-      // states. `uninstalled` is the other half of what this act did.
+      // states. `placement_removed` is the other half of what this act did: the
+      // offer went, and the placement row it backed went with it.
       after: recipientUserId
-        ? { recipientUserId, targetKind: "user", uninstalled: revoked.uninstalled }
-        : { spaceId, targetKind: "space", uninstalled: revoked.uninstalled },
+        ? { recipientUserId, targetKind: "user", placement_removed: revoked.placementRemoved }
+        : { spaceId, targetKind: "space", placement_removed: revoked.placementRemoved },
     });
     return c.body(null, 204);
   });
@@ -2420,7 +2427,7 @@ export function createPackagesRouter() {
 
     if (existing?.orgId === orgId) {
       await assertPackageMutationAccess(c, packageId, "write");
-      await assertExistingPackageInstallAccess(c, packageId, existing.type);
+      await assertExistingPackageActivationAccess(c, packageId, existing.type);
     }
     await assertPackageDependenciesAccessible(
       c,
@@ -2510,12 +2517,13 @@ export function createPackagesRouter() {
       });
     }
 
-    // Same as the create route: the import homes the package here, so only an
-    // already-present row can refuse. WARN so a silent non-placement is visible.
+    // Same as the create route: the import homes the package here, so the
+    // placement rule is satisfied and the upsert cannot conflict. WARN so a
+    // silent non-activation is still visible.
     const spaceId = c.get("spaceId");
     if (spaceId) {
-      await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.warn("auto-install skipped", { packageId, spaceId, err: getErrorMessage(e) }),
+      await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+        logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
       );
     }
 
@@ -2552,7 +2560,7 @@ export function createPackagesRouter() {
     });
     // Surface engine-subset limitations for integration manifests as
     // non-blocking warnings (AFPS §7.7). Publishers learn
-    // about unsupported `connect.login` selectors / criteria at install
+    // about unsupported `connect.login` selectors / criteria at import
     // time rather than chasing the runtime LoginError later. Also lift the
     // validator's `_meta` Appendix B regex soft-fail warnings to the same
     // channel so publishers see them on import. Same channel again for an
@@ -2561,17 +2569,17 @@ export function createPackagesRouter() {
     // No retired-dependency-key warning here, unlike the bundle path: this
     // route parses through `parseZipWithSkillFallback`, which rejects them
     // outright, so such a manifest is a 400 long before this line.
-    const installWarnings = [
+    const importWarnings = [
       ...collectConnectLoginWarnings(manifest),
       ...collectMetaWarnings(manifest),
-      ...collectAgentInstallWarnings(manifest),
+      ...collectAgentImportWarnings(manifest),
     ];
     return c.json(
       {
         packageId,
         type: packageType,
         version: importedVersion,
-        ...(installWarnings.length > 0 ? { warnings: installWarnings } : {}),
+        ...(importWarnings.length > 0 ? { warnings: importWarnings } : {}),
       },
       201,
     );
@@ -2608,7 +2616,7 @@ export function createPackagesRouter() {
         userId,
         (bundle) => authorizeBundlePackages(c, bundle),
         // A root that already lives in another space is placed here by the same
-        // rule as any install: the offer, when this caller may make one.
+        // rule as any activation: the offer, when this caller may make one.
         (packageId) => holdsPackageShareAuthority(c, packageId),
       );
     } catch (err) {
@@ -2800,7 +2808,7 @@ export function createPackagesRouter() {
     const spaceId = c.get("spaceId");
     const versionSpec = c.req.param("version")!;
 
-    // Visibility first — "system package, installed in THIS space, or homed
+    // Visibility first — "system package, offered to THIS space, or homed
     // here", the same gate the rest of the package read surface applies.
     // Without it this route served the artifact bytes of packages that are
     // merely owned by the org and placed nowhere the caller can reach.

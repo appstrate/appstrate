@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import {
   computeRequiredScopes,
@@ -131,7 +131,7 @@ describe("integration-scope-resolver", () => {
           tools: ["list_messages", "get_message"],
         }),
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@scope/agent-reader",
       );
@@ -158,7 +158,7 @@ describe("integration-scope-resolver", () => {
           draftManifest: agentManifest(id, { version: "^1.0.0", tools: [...tools] }),
         });
         await seedPackageShare(ctx.defaultSpaceId, id);
-        await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+        await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
       }
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
@@ -176,7 +176,7 @@ describe("integration-scope-resolver", () => {
         type: "agent",
         draftManifest: agentManifest("@scope/agent-noselection", { version: "^1.0.0" }),
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@scope/agent-noselection",
       );
@@ -201,7 +201,7 @@ describe("integration-scope-resolver", () => {
           scopes: ["delete"],
         }),
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@scope/agent-manual",
       );
@@ -226,7 +226,10 @@ describe("integration-scope-resolver", () => {
           scopes: ["read"],
         }),
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@scope/agent-empty");
+      await activatePackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@scope/agent-empty",
+      );
 
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
@@ -282,7 +285,7 @@ describe("integration-scope-resolver", () => {
           allow_undeclared_tools: true,
         }) as unknown as Record<string, unknown>,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
 
       await seedPackage({
         id: "@scope/agent-wildcard",
@@ -294,7 +297,7 @@ describe("integration-scope-resolver", () => {
           tools: "*",
         }),
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@scope/agent-wildcard",
       );
@@ -324,7 +327,10 @@ describe("integration-scope-resolver", () => {
           dependencies: { integrations: { "@some/other": "^1.0.0" } },
         },
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@scope/agent-other");
+      await activatePackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@scope/agent-other",
+      );
 
       const out = await computeRequiredScopes({
         scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },

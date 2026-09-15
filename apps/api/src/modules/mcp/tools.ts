@@ -130,7 +130,7 @@ export interface McpToolContext {
    * predicate `import_package_file` needs to place a re-imported root the
    * same way the REST import route places it. Optional so a non-HTTP caller
    * (a unit test, an in-process consumer with no request) can omit it and
-   * get the fail-closed answer: the root is not installed and the result
+   * get the fail-closed answer: the root is not activated and the result
    * says so.
    */
   mayShareRoot?: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];

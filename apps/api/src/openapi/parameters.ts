@@ -179,10 +179,11 @@ export const parameters = {
     in: "query" as const,
     required: false,
     description:
-      "When `true`, narrows the list to packages installed and enabled in the current " +
-      "space — system packages with no install row drop out. Integrations are the one " +
-      "exception: they are filtered on effective activation, so an environment-provided " +
-      "system integration stays listed even though it has no install row.",
+      "When `true`, narrows the list to packages ACTIVE in the current space, by the " +
+      "same rule the run gate applies: the placement row's `enabled` when the space has " +
+      "one, the deployment's default when it has none — a system package, or an " +
+      "integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row " +
+      "at all. No per-type exception: one rule, every package type.",
     schema: { type: "string", enum: ["true"] as const },
   },
 } as const;

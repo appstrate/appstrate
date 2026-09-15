@@ -305,20 +305,26 @@ export async function createSchedule(
   return res.json();
 }
 
-// ─── Space Packages (install/uninstall) ─────────
+// ─── Space packages (activate / deactivate) ─────────
 
-export async function installPackageInSpace(
+/**
+ * Switch a package ON in a space — the one door, for every package family.
+ * `201` when the placement was created, `200` when a placement that already
+ * existed was simply switched back on; the act is idempotent either way.
+ */
+export async function activatePackageInSpace(
   client: ApiClient | ReturnType<typeof createOrgOnlyClient>,
   spaceId: string,
   packageId: string,
 ): Promise<void> {
   const res = await client.post(`/spaces/${spaceId}/packages`, { packageId });
   if (res.status() !== 201 && res.status() !== 200) {
-    throw new Error(`Install package failed (${res.status()}): ${await res.text()}`);
+    throw new Error(`Activate package failed (${res.status()}): ${await res.text()}`);
   }
 }
 
-export async function uninstallPackageFromSpace(
+/** Switch it OFF: the placement and its settings stay, the runs stop. */
+export async function deactivatePackageInSpace(
   client: ApiClient | ReturnType<typeof createOrgOnlyClient>,
   spaceId: string,
   scope: string,
@@ -326,6 +332,6 @@ export async function uninstallPackageFromSpace(
 ): Promise<void> {
   const res = await client.delete(`/spaces/${spaceId}/packages/${scope}/${name}`);
   if (res.status() !== 204 && res.status() !== 200) {
-    throw new Error(`Uninstall package failed (${res.status()}): ${await res.text()}`);
+    throw new Error(`Deactivate package failed (${res.status()}): ${await res.text()}`);
   }
 }

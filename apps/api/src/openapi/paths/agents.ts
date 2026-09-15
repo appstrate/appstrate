@@ -14,7 +14,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List all agents",
       description:
-        "Returns the agents READABLE from the space named by `X-Space-Id`, with running run counts — the placement rule: homed in that space, offered to it, or a system agent. Reading is not running: an agent placed here but not activated here carries `installed: false` and the launch routes refuse it until `POST /api/spaces/{spaceId}/packages` installs it. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
+        "Returns the agents READABLE from the space named by `X-Space-Id`, with running run counts — the placement rule: homed in that space, offered to it, or a system agent. Reading is not running: an agent placed here but switched off here carries `active: false` and the launch routes refuse it until `POST /api/spaces/{spaceId}/packages` activates it. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -53,7 +53,7 @@ export const agentsPaths = {
                     version: "1.2.0",
                     type: "agent",
                     running_runs: 1,
-                    installed: true,
+                    active: true,
                     dependencies: {
                       skills: {},
                       mcp_servers: {},
@@ -72,7 +72,7 @@ export const agentsPaths = {
                     version: "2.0.0",
                     type: "agent",
                     running_runs: 0,
-                    installed: true,
+                    active: true,
                     dependencies: {
                       skills: { "@appstrate/summarize": "^1.0.0" },
                       mcp_servers: { "@appstrate/filesystem-mcp": "^1.0.0" },
@@ -237,7 +237,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk integration connection readiness for an agent",
       description:
-        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict (identical to the run-kickoff 412 — run semantics, includeInert false + required-auth carve-out). `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
+        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 412 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true) so the Connexions tab and the launch badge share one source of truth.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -716,7 +716,11 @@ export const agentsPaths = {
           description:
             "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, or `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent.",
         },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`.",
+        },
         "422": {
           description:
             "The bundle cannot be assembled from stored artifacts. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",

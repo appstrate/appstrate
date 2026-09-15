@@ -23,7 +23,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { eventData } from "../../helpers/sse.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { persistRunEvent } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import {
   addSubscriber,
@@ -57,7 +57,7 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const run = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,

@@ -35,7 +35,7 @@ import {
   seedPublishedVersion,
   seedApiKey,
   seedEndUser,
-  seedInstalledPackage,
+  seedSpacePackage,
   seedRun,
   seedSchedule,
 } from "../../helpers/seed.ts";
@@ -110,7 +110,7 @@ describe("run read isolation between members", () => {
     // below would answer `404 no_published_version` — a refusal about the
     // agent, in a suite about run isolation.
     await seedPublishedVersion(AGENT_ID, "0.1.0");
-    await seedInstalledPackage(owner.defaultSpaceId, AGENT_ID);
+    await seedSpacePackage(owner.defaultSpaceId, AGENT_ID);
 
     const common = {
       packageId: AGENT_ID,
