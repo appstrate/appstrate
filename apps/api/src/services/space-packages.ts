@@ -344,10 +344,19 @@ export async function activatePackageWithin(
   opts?: { shareBy?: string; keepExistingDecision?: boolean },
 ): Promise<PackageActivation> {
   const pkg = await loadPlaceablePackage(tx, scope, packageId);
-  const existing = await currentPlacement(tx, packageId, scope.spaceId);
   // The placement question, asked ONCE for both branches and BEFORE anything
   // is written — the offer this call may be about to create does not count.
+  //
+  // It comes BEFORE `currentPlacement`, and the ORDER is the contract: this
+  // takes `package_shares` and that takes `space_packages`, while
+  // `revokePackageShare` deletes the two in that same order (offer, then the
+  // placement it backs). Two transactions taking the same pair of row locks in
+  // OPPOSITE orders is a deadlock — one waits on the offer while holding the
+  // row, the other waits on the row while holding the offer, and PostgreSQL
+  // aborts one with `40P01`. Every path that touches both tables takes the
+  // OFFER first.
   const placedBefore = await placedHere(tx, pkg, scope.spaceId);
+  const existing = await currentPlacement(tx, packageId, scope.spaceId);
   // THE rule, read before the write: the row if there is one AND the package
   // is placed here, the deployment's default otherwise
   // (`services/package-activation.ts`).
@@ -481,11 +490,14 @@ export async function deactivatePackage(
 
   return db.transaction(async (tx) => {
     const pkg = await loadPlaceablePackage(tx, scope, packageId);
+    // Offer BEFORE placement row, the lock order every path that touches both
+    // tables takes — see `activatePackageWithin`.
+    const placed = await placedHere(tx, pkg, scope.spaceId);
     const existing = await currentPlacement(tx, packageId, scope.spaceId);
     // Same pre-write verdict the activation door reads, for the same reason:
     // `changed` drives the `package.deactivated` audit, and an ORPHAN row was
     // never running anything to switch off.
-    const wasActive = isActiveHere(pkg, existing, await placedHere(tx, pkg, scope.spaceId));
+    const wasActive = isActiveHere(pkg, existing, placed);
 
     if (existing) {
       if (existing.enabled) {

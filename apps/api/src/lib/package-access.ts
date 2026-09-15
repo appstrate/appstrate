@@ -7,6 +7,8 @@ import { packages, packageShares, spacePackages, spaces } from "@appstrate/db/sc
 import { extractDependencies } from "@appstrate/core/dependencies";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
+import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   VERSION_SELECTOR_DRAFT,
   VERSION_SELECTOR_PUBLISHED,
@@ -775,7 +777,17 @@ function isSystemPackageRow(pkg: { source: string }): boolean {
  * function before it is reached. A NULL that got here anyway matches no
  * accessible space and answers `false`, which is the safe half.
  */
-function holdsHomeAuthority(
+/**
+ * Does the caller hold `permission` in the package's HOME? — the predicate
+ * behind every `home_*` answer and every `assertHomeAuthority` verdict.
+ *
+ * Exported because the home can MOVE between the moment a route authorizes and
+ * the moment it writes: `POST …/shares` re-asks it against the home it has
+ * LOCKED, inside the transaction that writes the offer
+ * (`services/package-shares.ts`). It takes the home id rather than a Context so
+ * a caller holding a locked row can ask about THAT row.
+ */
+export function holdsHomeAuthority(
   pkg: { homeSpaceId: string | null },
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
   permission: Permission,
@@ -900,26 +912,52 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
   }
 }
 
+/**
+ * EVERY package this manifest names, as `{ id, type }` — `dependencies.*` AND
+ * the one reference that lives outside that block.
+ *
+ * An integration with `source.kind: "local"` names its mcp-server in
+ * `source.server.name` (AFPS §7.1), and `extractDependencies` does not see it:
+ * it reads `dependencies.{skills,mcp_servers,integrations}` and nothing else.
+ * That reference is not decorative — `integration-spawn-resolver.ts` resolves it
+ * at kickoff and spawns THOSE bytes. Leaving it out of the access check made it
+ * the one way to name a package the caller may not read: the spawn resolver
+ * applies the ORGANIZATION boundary (`resolveMcpServerForSpawn` →
+ * `resolvePublishedManifest(…, orgId, …)`) and asks nothing about placement, so
+ * an mcp-server homed in somebody else's PERSONAL space — a 404 on every
+ * package route, §3.6 — resolved and ran.
+ */
+function manifestPackageRefs(
+  manifest: Record<string, unknown>,
+): Array<{ id: string; type: PackageType }> {
+  const refs = extractDependencies(manifest).map((dependency) => ({
+    id: `${dependency.depScope}/${dependency.depName}`,
+    type: dependency.depType,
+  }));
+  const localServer = getLocalServerRef(manifest as unknown as IntegrationManifest);
+  if (localServer) refs.push({ id: localServer.name, type: "mcp-server" });
+  return refs;
+}
+
 /** Caller-authored references need live source read access; unchanged references need no new scope. */
 export async function assertPackageDependenciesAccessible(
   c: Context<AppEnv>,
   manifest: Record<string, unknown>,
   previous: Record<string, unknown> = {},
 ): Promise<void> {
-  const previousIds = new Set(
-    extractDependencies(previous).map(
-      (dependency) => `${dependency.depScope}/${dependency.depName}`,
-    ),
-  );
-  const dependencies = extractDependencies(manifest).filter(
-    (dependency) => !previousIds.has(`${dependency.depScope}/${dependency.depName}`),
-  );
-  if (!dependencies.length) return;
+  const previousIds = new Set(manifestPackageRefs(previous).map((ref) => ref.id));
+  const seen = new Set<string>();
+  const references = manifestPackageRefs(manifest).filter((ref) => {
+    if (previousIds.has(ref.id) || seen.has(ref.id)) return false;
+    seen.add(ref.id);
+    return true;
+  });
+  if (!references.length) return;
   const checked = new Set<string>();
-  for (const dependency of dependencies) {
-    if (checked.has(dependency.depType)) continue;
-    checked.add(dependency.depType);
-    await makePermissionGuard(packagePermission(dependency.depType, "read"))(c, async () => {});
+  for (const reference of references) {
+    if (checked.has(reference.type)) continue;
+    checked.add(reference.type);
+    await makePermissionGuard(packagePermission(reference.type, "read"))(c, async () => {});
   }
   const [accessible, existing] = await Promise.all([
     packageAccessSpaces(c),
@@ -929,7 +967,7 @@ export async function assertPackageDependenciesAccessible(
       .where(
         inArray(
           packages.id,
-          dependencies.map((dependency) => `${dependency.depScope}/${dependency.depName}`),
+          references.map((reference) => reference.id),
         ),
       ),
   ]);

@@ -674,6 +674,108 @@ describe("personal spaces — the write rules", () => {
   });
 });
 
+describe("personal spaces — references that bypass the package routes", () => {
+  let owner: TestContext;
+  let member: TestContext;
+  let personalId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    owner = await createTestContext({ orgSlug: "ref-bypass" });
+    member = await memberContext(owner, "member");
+    personalId = (await ownPersonalSpace(member)).id;
+  });
+
+  /** A `source.kind: "local"` integration — the shape that names an mcp-server. */
+  const localIntegrationManifest = (name: string, serverName: string) => ({
+    name,
+    version: "1.0.0",
+    type: "integration",
+    schema_version: "0.1",
+    display_name: "Local Integration",
+    description: "A local-source MCP integration",
+    source: { kind: "local", server: { name: serverName, version: "0.1.0" } },
+    auths: {
+      primary: {
+        type: "api_key",
+        authorized_uris: ["https://example.com/**"],
+        credentials: {
+          schema: {
+            type: "object",
+            required: ["api_key"],
+            properties: { api_key: { type: "string" } },
+          },
+        },
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.api_key}",
+          },
+        },
+      },
+    },
+  });
+
+  /** The packages routes are space-scoped: the owner acts from the DEFAULT space. */
+  const spaceHeaders = () => ({
+    ...orgOnlyHeaders(owner),
+    "X-Space-Id": owner.defaultSpaceId,
+  });
+
+  const createIntegration = (name: string, serverName: string) =>
+    app.request("/api/packages/integrations", {
+      method: "POST",
+      headers: { ...spaceHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ manifest: localIntegrationManifest(name, serverName) }),
+    });
+
+  it("refuses a local-source integration naming an mcp-server homed in somebody else's personal space", async () => {
+    // `source.server.name` is a reference the SPAWN path resolves and runs
+    // (`integration-spawn-resolver.ts`), and it lives OUTSIDE `dependencies.*`.
+    // The access check reads it for that reason: without it, naming a package
+    // was a way to reach one §3.6 says does not exist for the caller — the
+    // resolver applies the organization boundary and asks nothing about
+    // placement.
+    const SERVER = "@ref-bypass/private-server";
+    await seedPackage({
+      id: SERVER,
+      orgId: owner.orgId,
+      type: "mcp-server",
+      homeSpaceId: personalId,
+      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+    });
+
+    // The control: the package routes already refuse it to the organization owner.
+    const direct = await app.request(`/api/packages/${SERVER}`, {
+      headers: spaceHeaders(),
+    });
+    expect(direct.status).toBe(404);
+
+    const created = await createIntegration("@ref-bypass/leaky", SERVER);
+    expect(
+      [403, 404].includes(created.status),
+      `expected a refusal, got ${created.status}: ${await created.clone().text()}`,
+    ).toBe(true);
+  });
+
+  it("takes the same reference once the server is homed in a space the author reaches", async () => {
+    // The positive control: the refusal above is about PLACEMENT, not about the
+    // shape of the reference.
+    const SERVER = "@ref-bypass/team-server";
+    await seedPackage({
+      id: SERVER,
+      orgId: owner.orgId,
+      type: "mcp-server",
+      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+    });
+
+    const created = await createIntegration("@ref-bypass/fine", SERVER);
+    expect(created.status, await created.clone().text()).toBe(201);
+  });
+});
+
 describe("personal spaces — convert to a team space", () => {
   let owner: TestContext;
   let member: TestContext;
@@ -1175,6 +1277,33 @@ describe("personal spaces — offboarding", () => {
     expect(
       await db.select().from(packageShares).where(eq(packageShares.packageId, HOMED)),
     ).toHaveLength(0);
+  });
+
+  it("re-homes without touching the draft's timestamp", async () => {
+    // `updatedAt` is the DRAFT's timestamp and `computeHasUnpublishedChanges`
+    // compares it against the latest published version's. Re-homing changes no
+    // bytes, so stamping it would report a fully-published package as having
+    // unarchived changes — through a job nobody ran. The manual move states the
+    // same rule; this is the other caller of the same act.
+    const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
+    await seedPackage({
+      id: SHARED,
+      orgId: owner.orgId,
+      type: "agent",
+      homeSpaceId: personalId,
+      draftManifest: { name: SHARED, version: "0.1.0", type: "agent" },
+      draftContent: "prompt",
+    });
+    await seedPackageShare(team.id, SHARED);
+    const before = (await getDbRow(packages, eq(packages.id, SHARED))).updatedAt;
+
+    await removeMember(owner.orgId, member.user.id);
+    await ageOrphan(personalId);
+    expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
+
+    const after = await getDbRow(packages, eq(packages.id, SHARED));
+    expect(after.homeSpaceId).toBe(owner.defaultSpaceId);
+    expect(after.updatedAt).toEqual(before);
   });
 
   it("leaves a space inside the window alone", async () => {

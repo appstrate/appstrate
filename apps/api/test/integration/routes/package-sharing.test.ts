@@ -38,6 +38,7 @@ import {
 } from "@appstrate/db/schema";
 import { sql } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
+import { sharePackage } from "../../../src/services/package-shares.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
@@ -1642,6 +1643,56 @@ describeRequiresPostgres("a revoke racing an install (needs a real PostgreSQL)",
         eq(spacePackages.spaceId, recipient.personalSpaceId),
       )!,
     );
+  });
+});
+
+describe("the offer is judged against the LOCKED home", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("refuses when the caller holds no share authority in the home the insert is judged against", async () => {
+    // A CONTRACT test, not a race reproduction: it pins that `sharePackage`
+    // consults the predicate against the home it LOCKED, and refuses on a
+    // negative answer, before writing anything.
+    //
+    // Why it has to: the route authorizes with `assertPackageShareAccess`
+    // against the home as it stood when the request arrived, and
+    // `PATCH …/{scope}/{name}` can commit a new home in between. Judging the
+    // insert against the read row let an offer land carrying an authority
+    // nobody held in the home the package actually has.
+    const ctx = await createTestContext({ orgSlug: "locked-home" });
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    const AGENT_ID = "@locked-home/agent";
+    await seedPackage({
+      id: AGENT_ID,
+      orgId: ctx.orgId,
+      type: "agent",
+      draftManifest: { name: AGENT_ID, version: "0.1.0", type: "agent" },
+      draftContent: "prompt",
+    });
+
+    await expect(
+      sharePackage({
+        packageId: AGENT_ID,
+        spaceId: other.id,
+        sharedBy: ctx.user.id,
+        authorizeHome: () => false,
+      }),
+    ).rejects.toThrow();
+
+    // Nothing written: the refusal happens inside the transaction, before the
+    // insert, so a rejected offer leaves no row behind.
+    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT_ID));
+
+    // The positive control — the same call with the authority granted writes it.
+    const { created } = await sharePackage({
+      packageId: AGENT_ID,
+      spaceId: other.id,
+      sharedBy: ctx.user.id,
+      authorizeHome: () => true,
+    });
+    expect(created).toBe(true);
   });
 });
 

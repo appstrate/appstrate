@@ -85,6 +85,7 @@ import {
   homeWireForCaller,
   isPackageReadableInSpace,
   packageAccessSpaces,
+  holdsHomeAuthority,
   packagePermission,
   requireAgentRead,
 } from "../lib/package-access.ts";
@@ -2160,11 +2161,21 @@ export function createPackagesRouter() {
       spaceId = destination.id;
     }
 
-    // `share_target_is_home` is decided by `sharePackage`, under the lock that
-    // holds the home still for the length of the insert: the row read here was
-    // loaded before the target was resolved, and a concurrent home move would
-    // make a check on it a check on the wrong space.
-    const { created } = await sharePackage({ packageId, spaceId, sharedBy: c.get("user").id });
+    // BOTH the authority and `share_target_is_home` are decided by
+    // `sharePackage`, under the lock that holds the home still for the length of
+    // the insert. `assertPackageShareAccess` above judged the home as it stood
+    // when this request arrived; a `PATCH …/{scope}/{name}` committing in
+    // between moves the package to a home this caller may govern not at all, and
+    // the offer would land carrying an authority nobody holds. The predicate is
+    // the SAME rule that guard enforces, re-asked against the locked row.
+    const sharePermission = packagePermission(pkg.type, "share");
+    const { created } = await sharePackage({
+      packageId,
+      spaceId,
+      sharedBy: c.get("user").id,
+      authorizeHome: (homeSpaceId) =>
+        holdsHomeAuthority({ homeSpaceId }, accessible, sharePermission),
+    });
     if (created) {
       await recordAuditFromContext(c, {
         action: "package.shared",

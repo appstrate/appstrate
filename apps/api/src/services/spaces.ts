@@ -760,9 +760,15 @@ export async function emptyAndDeletePersonalSpace(
             `Cannot re-home '${pkg.id}': this organization has no default space to home it in.`,
           );
         }
+        // `updatedAt` is deliberately NOT stamped, the same rule the manual
+        // move states (`PATCH /api/packages/{scope}/{name}`): it is the DRAFT's
+        // timestamp, and `computeHasUnpublishedChanges` compares it against the
+        // latest published version's. Re-homing changes no bytes, so stamping
+        // it would report a fully-published package as having unarchived
+        // changes — on a package nobody touched, through a job nobody ran.
         await tx
           .update(packages)
-          .set({ homeSpaceId: defaultSpace.id, updatedAt: new Date() })
+          .set({ homeSpaceId: defaultSpace.id })
           .where(eq(packages.id, pkg.id));
         // Re-homing MOVES one of the two placements, and every space that
         // still holds a `space_packages` row needs the other or it is left

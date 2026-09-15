@@ -28,7 +28,7 @@ import {
   spaces,
   user,
 } from "@appstrate/db/schema";
-import { conflict, notFound } from "../lib/errors.ts";
+import { conflict, forbidden, notFound } from "../lib/errors.ts";
 
 /**
  * The `user` row of the person who shared, joined ALONGSIDE the personal-space
@@ -69,27 +69,38 @@ function sharerView(row: {
  * is a no-op, and `created` says which happened so the caller can skip the
  * notification and the audit event on a repeat.
  *
- * The home is re-read `FOR SHARE` and the refusal decided INSIDE the write's
+ * The home is re-read `FOR SHARE` and BOTH refusals decided INSIDE the write's
  * transaction, the same discipline `activatePackageWithin` applies for the same
  * reason (`services/space-packages.ts`): `PATCH /api/packages/{scope}/{name}`
- * rewrites `home_space_id` in a transaction of its own, so a check made on a
- * row this call does not hold interleaves — the route reads home A, the move
- * commits home B, and the insert writes an offer for the space the package now
- * LIVES in. That row places nothing new (the home already places it) and the
- * library renders `via: "home"` over it, so it is invisible rather than
- * harmful — until the home moves again and a space nobody offered the package
- * to finds it in its library. One transaction, one lock, and the refusal is
- * decided against the home the insert is actually judged against.
+ * rewrites `home_space_id` in a transaction of its own, so anything decided on
+ * a row this call does not hold interleaves — the route reads home A, the move
+ * commits home B, and the insert lands against a home nobody judged.
  *
- * @throws 409 `share_target_is_home`; 404 if the package went away under the
- *   caller's feet (the FK would refuse the insert anyway, less legibly).
+ * TWO questions travel together, and the second is the load-bearing one.
+ * `share_target_is_home` is the cheap invariant: an offer to the space the
+ * package lives in. `authorizeHome` is the AUTHORITY — `<type>:share` in the
+ * home — and it has to be re-asked here because the route asked it of home A
+ * while this insert is judged against home B, where the caller may hold
+ * nothing. Re-asking under the lock is what makes the answer true at COMMIT
+ * rather than at request time; the `FOR SHARE` freezes the column, so the home
+ * this reads is the home the row will have.
+ *
+ * @throws 403 when the caller holds no share authority in the LOCKED home; 409
+ *   `share_target_is_home`; 404 if the package went away under the caller's
+ *   feet (the FK would refuse the insert anyway, less legibly).
  */
 export async function sharePackage(params: {
   packageId: string;
   spaceId: string;
   sharedBy: string;
+  /**
+   * "Does the caller still hold `<type>:share` in THIS home?" — the route's own
+   * rule, handed in as a predicate so the service stays free of a Context while
+   * the decision is made against the locked row rather than the read one.
+   */
+  authorizeHome: (homeSpaceId: string | null) => boolean;
 }): Promise<{ created: boolean }> {
-  const { packageId, spaceId, sharedBy } = params;
+  const { packageId, spaceId, sharedBy, authorizeHome } = params;
   return db.transaction(async (tx) => {
     const [pkg] = await tx
       .select({ homeSpaceId: packages.homeSpaceId })
@@ -98,6 +109,14 @@ export async function sharePackage(params: {
       .limit(1)
       .for("share");
     if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);
+    // BEFORE the target check, because it is the stronger refusal: a caller who
+    // no longer governs this package must not learn whether the space they
+    // named happens to be its home.
+    if (!authorizeHome(pkg.homeSpaceId)) {
+      throw forbidden(
+        `Sharing '${packageId}' requires the share permission in its home space — the package moved home while this request was in flight.`,
+      );
+    }
     if (pkg.homeSpaceId === spaceId) {
       throw conflict(
         "share_target_is_home",
@@ -119,6 +138,12 @@ export async function sharePackage(params: {
  * space that is no longer allowed to see it, which is the whole failure mode
  * the two-table split exists to prevent. This is also the ONE path that deletes
  * a placement row: deactivating keeps it, settings and all.
+ *
+ * The offer goes FIRST, and that order is a contract rather than a preference:
+ * `activatePackageWithin` locks the same two rows and takes `package_shares`
+ * before `space_packages` for this reason. Two transactions taking one pair of
+ * row locks in opposite orders deadlock — PostgreSQL aborts one with `40P01` —
+ * and an activation racing a revoke is the ordinary case, not the exotic one.
  *
  * @returns `false` when there was no share row, which the route renders as 404.
  */
