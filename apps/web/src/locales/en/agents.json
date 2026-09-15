@@ -309,9 +309,6 @@
   "runs.filterKindPackage": "Agents",
   "runs.filterKindInline": "Inline",
   "runs.inlineBadge": "Inline",
-  "runs.inlineBadgeTitle": "Launched straight from the chat: no catalogued agent, no version, and no re-run from this page.",
-  "runs.agentBadge": "Agent",
-  "runs.agentBadgeTitle": "A run of an agent from the catalog, at a given version.",
   "runs.remoteBadge": "Remote",
   "runs.remoteBadgeTitle": "This run executed on the caller's host (CLI, GitHub Action, or self-hosted runner) and reported events back via a signed sink.",
   "runs.deletedAgent": "Deleted agent",
@@ -508,7 +505,7 @@
   "editor.description.prompt": "Write the primary instructions the agent will follow on every run.",
   "editor.description.schema": "Define the data received, produced, and configured by the agent.",
   "editor.description.skills": "Declare the reusable methods and knowledge this agent depends on.",
-  "editor.description.integrations": "Choose the integrations and tools allowed in this bundle. MCP servers are provided by these integrations; connected accounts are configured separately in the agent’s settings.",
+  "editor.description.integrations": "Choose the integrations the agent depends on and the tools it may call in each. Connected accounts are set in Configuration.",
   "editor.description.json": "View or directly edit the agent’s AFPS manifest.",
   "editor.discardChanges": "Discard changes",
   "editor.noUnsavedChanges": "No unsaved changes",
@@ -926,5 +923,11 @@
   "integrationEditor.toolsPolicy.nameRequired": "The tool name is required.",
   "integrationEditor.toolsPolicy.nameTaken": "This tool is already in the catalog.",
   "detail.emptyConfig": "This Agent declares no configurable input.",
-  "detail.bundle.inputSchema": "Input schema"
+  "detail.bundle.inputSchema": "Input schema",
+  "editor.tabTools": "Tools",
+  "editor.runtimeTool.output": "Return data as the run result. Required when an output schema is defined.",
+  "editor.runtimeTool.log": "Send progress messages to the user in real time.",
+  "editor.runtimeTool.note": "Append a long-term archive memory, recalled on demand via recall_memory.",
+  "editor.runtimeTool.pin": "Upsert a named slot pinned into the system prompt on every run.",
+  "editor.runtimeTool.publish_file": "Publish a file the agent created (e.g. an HTML report) as a durable run file."
 }

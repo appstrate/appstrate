@@ -276,8 +276,13 @@ function AgentEditorInner({
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "integrations", label: t("editor.tabIntegrations") },
+    // Embedded, the runtime tools are their own section of the package: they
+    // are the manifest's `runtime_tools`, not integration packages.
     ...(presentation === "embedded"
-      ? [{ id: "files" as const, label: t("editor.tabPackageFiles") }]
+      ? [
+          { id: "tools" as const, label: t("editor.tabTools") },
+          { id: "files" as const, label: t("editor.tabPackageFiles") },
+        ]
       : []),
     { id: "json", label: t("editor.tabJson") },
   ];
@@ -287,6 +292,7 @@ function AgentEditorInner({
     schema: t("editor.description.schema"),
     skills: t("editor.description.skills"),
     integrations: t("editor.description.integrations"),
+    tools: t("editor.runtimeToolsHint"),
     files: t("editor.description.packageFiles"),
     json: t("editor.description.json"),
   };
@@ -364,6 +370,19 @@ function AgentEditorInner({
           showHint={presentation === "page"}
         />
       )}
+      {activeTab === "tools" && presentation === "embedded" && (
+        <RuntimeToolsGroup
+          showHint={false}
+          selected={getRuntimeTools(state.manifest)}
+          onChange={(next) => {
+            setState((s) => {
+              const m = { ...s.manifest };
+              setRuntimeTools(m, next);
+              return { ...s, manifest: m };
+            });
+          }}
+        />
+      )}
       {activeTab === "files" && presentation === "embedded" && packageId && filesHref && (
         <PackageFilesSection
           type="agent"
@@ -416,7 +435,7 @@ function AgentEditorInner({
       )}
       {activeTab === "integrations" && (
         <div className={presentation === "page" ? undefined : "space-y-8"}>
-          {presentation !== "page" && (
+          {presentation === "panel-dialog" && (
             <section className="space-y-4">
               <div>
                 <h3 className="text-sm font-semibold">{t("editor.tabRuntimeTools")}</h3>
@@ -495,7 +514,7 @@ function AgentEditorInner({
 }
 
 export type AgentDefinitionSection =
-  "general" | "schema" | "skills" | "integrations" | "files" | "json";
+  "general" | "schema" | "skills" | "integrations" | "tools" | "files" | "json";
 
 /**
  * An agent's definition, edited where it is read: inside its settings, one

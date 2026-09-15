@@ -10,9 +10,11 @@ interface RuntimeToolsGroupProps {
   /** Currently selected runtime tool ids (manifest.runtime_tools). */
   selected: string[];
   onChange: (next: string[]) => void;
+  /** Off where the section heading already says what the tools are. */
+  showHint?: boolean;
 }
 
-export function RuntimeToolsGroup({ selected, onChange }: RuntimeToolsGroupProps) {
+export function RuntimeToolsGroup({ selected, onChange, showHint = true }: RuntimeToolsGroupProps) {
   const { t } = useTranslation(["agents", "common"]);
   const selectedSet = new Set(selected);
 
@@ -26,11 +28,14 @@ export function RuntimeToolsGroup({ selected, onChange }: RuntimeToolsGroupProps
 
   return (
     <div data-testid="runtime-tools-group">
-      <p className="text-muted-foreground mb-4 text-sm">{t("editor.runtimeToolsHint")}</p>
+      {showHint && (
+        <p className="text-muted-foreground mb-4 text-sm">{t("editor.runtimeToolsHint")}</p>
+      )}
       <PackageToolCatalog
         tools={RUNTIME_TOOL_CATALOG.map((tool) => ({
           name: tool.id,
-          description: tool.description,
+          // The catalog's English line is the fallback; the UI speaks the reader's language.
+          description: t(`editor.runtimeTool.${tool.id}`, { defaultValue: tool.description }),
         }))}
         selection={{ values: selectedSet, onToggle: toggle, testIdPrefix: "runtime-tool-" }}
       />

@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Workflow,
+  Wrench,
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
@@ -53,6 +54,7 @@ const DEFINITION_SECTION_IDS: readonly DefinitionRailSection[] = [
   "schema",
   "skills",
   "integrations",
+  "tools",
   "bundle",
 ];
 
@@ -88,6 +90,7 @@ const SETTINGS_GROUPS = [
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
       { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
       { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },
+      { id: "tools", icon: Wrench, labelKey: "editor.tabTools" },
       { id: "bundle", icon: FileArchive, labelKey: "editor.tabPackageFiles" },
     ],
   },

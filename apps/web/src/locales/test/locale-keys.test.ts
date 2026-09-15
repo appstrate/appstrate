@@ -185,6 +185,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.inventory.originDetail.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.reason.", // components/package-detail/package-tool-catalog.tsx
   "integration.inventory.rules.", // components/package-detail/package-tool-catalog.tsx
+  "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
   "integrations.protocol.", // pages/integration-list-columns.tsx, components/catalogue-columns.tsx — integrationProtocol()
   "integrations.execution.", // pages/integrations-page.tsx, components/org-catalogue-modal.tsx — tabs
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)

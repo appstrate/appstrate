@@ -309,9 +309,6 @@
   "runs.filterKindPackage": "Agents",
   "runs.filterKindInline": "Inline",
   "runs.inlineBadge": "Inline",
-  "runs.inlineBadgeTitle": "Run lancé directement depuis le chat : pas d'agent enregistré, pas de version, pas de relance depuis cette page.",
-  "runs.agentBadge": "Agent",
-  "runs.agentBadgeTitle": "Run d'un agent enregistré dans le catalogue, à une version donnée.",
   "runs.remoteBadge": "Distant",
   "runs.remoteBadgeTitle": "Ce run a été exécuté sur l'hôte de l'appelant (CLI, GitHub Action, ou runner auto-hébergé) et a renvoyé ses événements via un sink signé.",
   "runs.deletedAgent": "Agent supprimé",
@@ -508,7 +505,7 @@
   "editor.description.prompt": "Rédigez les instructions principales que l’agent suivra à chaque exécution.",
   "editor.description.schema": "Définissez les données reçues, produites et configurables par l’agent.",
   "editor.description.skills": "Déclarez les méthodes et connaissances réutilisables dont l’agent dépend.",
-  "editor.description.integrations": "Choisissez les intégrations et les outils autorisés dans ce bundle. Les serveurs MCP sont fournis par ces intégrations ; les comptes connectés se configurent séparément dans les paramètres de l’agent.",
+  "editor.description.integrations": "Choisissez les intégrations dont l’agent dépend et les outils qu’il peut appeler dans chacune. Les comptes connectés se règlent dans Configuration.",
   "editor.description.json": "Consultez ou modifiez directement le manifeste AFPS de l’agent.",
   "editor.discardChanges": "Annuler les modifications",
   "editor.noUnsavedChanges": "Aucune modification non enregistrée",
@@ -926,5 +923,11 @@
   "integrationEditor.toolsPolicy.nameRequired": "Le nom de l’outil est requis.",
   "integrationEditor.toolsPolicy.nameTaken": "Cet outil est déjà dans le catalogue.",
   "detail.emptyConfig": "Cet agent ne déclare aucune entrée configurable.",
-  "detail.bundle.inputSchema": "Schéma d'entrée"
+  "detail.bundle.inputSchema": "Schéma d'entrée",
+  "editor.tabTools": "Outils",
+  "editor.runtimeTool.output": "Renvoie des données comme résultat du run. Obligatoire quand un schéma de sortie est défini.",
+  "editor.runtimeTool.log": "Envoie des messages de progression à l’utilisateur en temps réel.",
+  "editor.runtimeTool.note": "Ajoute une mémoire d’archive à long terme, rappelée à la demande avec recall_memory.",
+  "editor.runtimeTool.pin": "Crée ou met à jour un emplacement nommé, épinglé dans le prompt système à chaque run.",
+  "editor.runtimeTool.publish_file": "Publie un fichier créé par l’agent (par exemple un rapport HTML) comme fichier durable du run."
 }
