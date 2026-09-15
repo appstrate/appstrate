@@ -893,7 +893,7 @@
   "editor.toolsEdit": "Edit allowed tools",
   "editor.toolsTitle": "Allowed tools: {{name}}",
   "detail.settings.versions": "Versions",
-  "editor.bundleFilesHint": "Only the main file and the manifest can be edited. The other files come with the imported bundle.",
+  "editor.bundleFilesHint": "Files are changed in Explorer › Files: new file, import, rename, delete and edit.",
   "editor.bundleFileColumn": "File",
   "editor.bundleSizeColumn": "Size",
   "editor.tabPackageFiles": "Contents",
@@ -943,5 +943,8 @@
   "files.errorGeneric": "Saving the files failed.",
   "files.pendingHint": "File changes are applied with the manifest when you click Save.",
   "files.createHint": "Files will be saved with the package when you click Create.",
-  "package.actions": "Package actions"
+  "package.actions": "Package actions",
+  "files.saved": "Files saved",
+  "files.pendingCount_one": "{{count}} unsaved file change",
+  "files.pendingCount_other": "{{count}} unsaved file changes"
 }

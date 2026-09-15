@@ -159,6 +159,7 @@ export function PackageSettingsView({
           packageId={packageId}
           initialVersion={version}
           initialPath={requestedFile}
+          editable={editable}
           editHref={
             editable
               ? (path) =>

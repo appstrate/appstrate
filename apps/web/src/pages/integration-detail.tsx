@@ -778,6 +778,7 @@ function IntegrationSettings({
           type="integration"
           packageId={packageId}
           initialPath={requestedFile}
+          editable={Boolean(definition)}
           editHref={
             definition
               ? (path) =>

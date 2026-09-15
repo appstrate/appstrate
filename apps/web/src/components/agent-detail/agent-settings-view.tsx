@@ -233,6 +233,7 @@ export function AgentSettingsView({
         initialFilePath={requestedFile}
         onOpenFiles={openFiles}
         fileEditHref={canEditDefinition ? fileEditHref : undefined}
+        canEditFiles={canEditDefinition}
       />
     ) : (
       <AgentConfigurationView

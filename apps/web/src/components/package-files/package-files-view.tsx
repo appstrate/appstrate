@@ -9,9 +9,18 @@
  * archive itself (manifest.json, the type's main file, references/, scripts/),
  * `Dépendances/` what runs beside it (an agent's skills, the local server an
  * integration launches), shown only when there is something to show.
+ *
+ * It is also the ONE place a package's files are changed. For whoever may
+ * write the package, on its draft, the tree carries the file gestures of the
+ * shared package draft (`lib/package-file-drafts`): new file, import, rename,
+ * delete, and a file's own Actions add Modifier (in a modal) and Remplacer.
+ * Every gesture stays local until the save bar sends them all, with the stored
+ * manifest and its lock version, in one package PUT. Dependencies and
+ * published versions stay read-only.
  */
-import { useMemo, useState } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useMemo, useRef, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -21,7 +30,10 @@ import {
   GitCompareArrows,
   Link2,
   Pencil,
+  RefreshCw,
   Search,
+  TextCursorInput,
+  Trash2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -44,18 +56,46 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import type { PackageType } from "@appstrate/core/validation";
+import { formatBytes } from "@appstrate/core/format";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { client, $api, ApiError } from "../../api/client";
+import { useModalParam } from "../../hooks/use-modal-param";
+import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { usePackageDetail, usePackageVersions, useVersionDetail } from "../../hooks/use-packages";
-import { type PackageFileEntry, type TreeNode } from "../../lib/package-file-tree";
-import { primaryDisplayFile } from "../../lib/package-files";
+import { useUnsavedChanges } from "../../hooks/use-unsaved-changes";
+import {
+  isPinnedEntry,
+  languageForPath,
+  previewBlockReason,
+  validateNewPath,
+  NEW_PATH_ERROR_KEYS,
+  type PackageFileEntry,
+  type PackageFileWriteOperation,
+  type TreeNode,
+} from "../../lib/package-file-tree";
+import {
+  fileTextOperation,
+  packageUpdateBody,
+  projectDraftFiles,
+  stageFileOperations,
+  uploadedFileOperation,
+  type DraftFile,
+} from "../../lib/package-file-drafts";
+import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
+import { ConfirmModal } from "../confirm-modal";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
 import { ErrorState, LoadingState } from "../page-states";
+import { ContentEditor } from "../package-editor/content-editor";
+import { Spinner } from "../spinner";
+import { UnsavedChangesModal } from "../unsaved-changes-modal";
+import { FilePathDialog } from "./file-path-dialog";
 import { FilePreview } from "./file-preview";
 import { FileTree } from "./file-tree";
-import { usePackageFileDownload } from "./use-package-file";
+import { usePackageFile, usePackageFileDownload } from "./use-package-file";
 import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 
 interface PackageReference {
@@ -66,10 +106,27 @@ interface PackageReference {
 
 interface VirtualFile {
   treeEntry: PackageFileEntry;
+  /** What a read fetches: a renamed draft file is still read at its stored path. */
   sourceEntry: PackageFileEntry;
+  /** A bundle file's path in the draft, which the file gestures address. */
+  bundlePath?: string;
   packageId: string;
   source: "bundle" | "dependency";
   dependency?: PackageReference;
+}
+
+const BUNDLE_ROOT = "Bundle AFPS/";
+
+type FileDialog = { kind: "create" } | { kind: "rename" | "delete"; path: string } | null;
+
+/** The file gestures a bundle file offers, when its draft is being edited. */
+interface FileGestures {
+  canEdit: boolean;
+  onEdit: () => void;
+  onReplace: () => void;
+  onRename?: () => void;
+  onDelete?: () => void;
+  busy: boolean;
 }
 
 type SelectedItem =
@@ -116,6 +173,7 @@ export function PackageFilesView({
   currentContent,
   editHref,
   initialPath,
+  editable = false,
 }: {
   type: PackageType;
   packageId: string;
@@ -131,9 +189,12 @@ export function PackageFilesView({
   editHref?: (path: string) => string | undefined;
   /** A bundle file to open on, when a link sent the reader to it; else the main file. */
   initialPath?: string;
+  /** The reader may write this package: its draft's files can be changed here. */
+  editable?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const scope = useOrgScope();
+  const queryClient = useQueryClient();
   const [selectedVersion, setSelectedVersion] = useState(initialVersion ?? "draft");
   const [compareVersion, setCompareVersion] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -166,6 +227,117 @@ export function PackageFilesView({
     },
     { enabled: scope.enabled },
   );
+
+  // ── The draft's file edits ──
+  const editing = editable && selectedVersion === "draft";
+  const { data: writableDraft } = usePackageDetail(type, editing ? packageId : undefined);
+  const updatePackage = useUpdatePackage(type, packageId);
+  const [operations, setOperations] = useState<PackageFileWriteOperation[]>([]);
+  // The tree the first edit started from. A refetch cannot rebase staged edits;
+  // the original lock version rejects the save if the package moved meanwhile.
+  const [base, setBase] = useState<readonly PackageFileEntry[] | null>(null);
+  const [dialog, setDialog] = useState<FileDialog>(null);
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const editingFile = useModalParam("editFile");
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const replaceTarget = useRef<string | null>(null);
+  const dirty = operations.length > 0;
+  const { blocker } = useUnsavedChanges(dirty);
+  const limit = formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES);
+  const bundleBase = base ?? bundleIndex?.entries;
+  const bundleEntries: readonly DraftFile[] | undefined =
+    editing && bundleBase ? projectDraftFiles(bundleBase, operations, type) : bundleIndex?.entries;
+
+  const stage = (added: PackageFileWriteOperation[]) => {
+    if (!bundleBase) return;
+    try {
+      const next = stageFileOperations(operations, added);
+      projectDraftFiles(bundleBase, next, type);
+      if (base === null) setBase(bundleBase);
+      setOperations(next);
+      setDialog(null);
+      setSaveError(null);
+      return true;
+    } catch (error) {
+      toast.error(t(packageFilesErrorKey(error) ?? "files.errorGeneric", { limit }));
+      return false;
+    }
+  };
+  const pickUpload = (target: string | null) => {
+    replaceTarget.current = target;
+    if (uploadRef.current) {
+      uploadRef.current.multiple = target === null;
+      uploadRef.current.click();
+    }
+  };
+  const upload = async (picked: File[]) => {
+    if (picked.some((file) => file.size > PACKAGE_FILE_INLINE_MAX_BYTES)) {
+      toast.error(t("files.errorTooLarge", { limit }));
+      return;
+    }
+    const target = replaceTarget.current;
+    if (target === null) {
+      // The whole selection is checked before anything is read or staged.
+      const planned: PackageFileEntry[] = [...(bundleEntries ?? [])];
+      for (const file of picked) {
+        const rejection = validateNewPath(planned, file.name);
+        if (rejection) {
+          toast.error(
+            t(
+              rejection === "exists" || rejection === "conflict"
+                ? "files.errorImportConflict"
+                : NEW_PATH_ERROR_KEYS[rejection],
+              { path: file.name },
+            ),
+          );
+          return;
+        }
+        planned.push({ path: file.name, size: file.size, media_kind: "binary" });
+      }
+    }
+    setBusy(true);
+    try {
+      stage(
+        await Promise.all(picked.map((file) => uploadedFileOperation(target ?? file.name, file))),
+      );
+    } catch {
+      toast.error(t("files.errorGeneric"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const discardEdits = () => {
+    setOperations([]);
+    setBase(null);
+    setSaveError(null);
+  };
+  const saveEdits = async () => {
+    if (!writableDraft || !dirty) return;
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await updatePackage.mutateAsync(
+        packageUpdateBody({
+          manifest: writableDraft.manifest ?? {},
+          lock_version: writableDraft.lock_version,
+          operations,
+        }),
+      );
+      // Start again from what the server now holds, not from the staged tree.
+      await queryClient.refetchQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files"] });
+      discardEdits();
+      toast.success(t("files.saved"));
+    } catch (error) {
+      const key = packageFilesErrorKey(error);
+      setSaveError(key ? t(key, { limit }) : getErrorMessage(error));
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const isPinned = (bundlePath: string) =>
+    bundlePath === "manifest.json" || isPinnedEntry(type, bundlePath);
 
   const draftManifest = currentManifest ?? storedDraft?.manifest;
   const manifest = selectedVersion === "draft" ? draftManifest : selectedVersionDetail?.manifest;
@@ -229,11 +401,13 @@ export function PackageFilesView({
 
   const files = useMemo<VirtualFile[]>(() => {
     const bundle =
-      bundleIndex?.entries.map((entry) => ({
+      bundleEntries?.map((entry: DraftFile) => ({
         source: "bundle" as const,
         packageId,
-        sourceEntry: entry,
-        treeEntry: { ...entry, path: `Bundle AFPS/${entry.path}` },
+        bundlePath: entry.path,
+        sourceEntry:
+          entry.sourcePath && !entry.inline ? { ...entry, path: entry.sourcePath } : entry,
+        treeEntry: { ...entry, path: `${BUNDLE_ROOT}${entry.path}` },
       })) ?? [];
     const runtimeSkills = skills.flatMap((skill, index) => {
       const entries = skillIndexes[index]?.data?.entries ?? [];
@@ -264,7 +438,7 @@ export function PackageFilesView({
       }));
     });
     return [...bundle, ...runtimeSkills, ...localServers];
-  }, [bundleIndex, localMcpIndexes, mcpServers, packageId, skillIndexes, skills]);
+  }, [bundleEntries, localMcpIndexes, mcpServers, packageId, skillIndexes, skills]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleFiles = useMemo(
@@ -281,8 +455,15 @@ export function PackageFilesView({
   const mainFile = `Bundle AFPS/${initialPath ?? primaryDisplayFile(type).name}`;
   const defaultFile =
     visibleFiles.find((file) => file.treeEntry.path === mainFile) ?? visibleFiles[0];
+  // A selected file is re-read from the current tree: an edit replaces its entry.
+  const reselected =
+    selected?.kind === "file"
+      ? fileByPath.get(selected.file.treeEntry.path)
+        ? { kind: "file" as const, file: fileByPath.get(selected.file.treeEntry.path)! }
+        : null
+      : selected;
   const activeSelection =
-    selected ?? (defaultFile ? { kind: "file" as const, file: defaultFile } : null);
+    reselected ?? (defaultFile ? { kind: "file" as const, file: defaultFile } : null);
   const selectedDependency =
     activeSelection?.kind === "file"
       ? activeSelection.file.dependency
@@ -371,6 +552,31 @@ export function PackageFilesView({
                   label={t("agents:files.treeLabel")}
                   controlsId="agent-file-preview"
                   className="h-full w-full p-1 text-left"
+                  actions={
+                    editing
+                      ? {
+                          onCreate: () => setDialog({ kind: "create" }),
+                          onUpload: () => pickUpload(null),
+                          onRename: (path) =>
+                            path.startsWith(BUNDLE_ROOT) &&
+                            setDialog({ kind: "rename", path: path.slice(BUNDLE_ROOT.length) }),
+                          onDelete: (path) =>
+                            path.startsWith(BUNDLE_ROOT) &&
+                            setDialog({ kind: "delete", path: path.slice(BUNDLE_ROOT.length) }),
+                          // Dependencies are other packages: never renamed or deleted here.
+                          isPinned: (path) =>
+                            !path.startsWith(BUNDLE_ROOT) ||
+                            isPinned(path.slice(BUNDLE_ROOT.length)),
+                          isBusy: busy,
+                          labels: {
+                            newFile: t("files.newFile"),
+                            upload: t("files.upload"),
+                            rename: t("files.rename"),
+                            delete: t("files.delete"),
+                          },
+                        }
+                      : undefined
+                  }
                 />
               )}
             </div>
@@ -380,7 +586,13 @@ export function PackageFilesView({
               </span>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="w-full justify-between">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-between"
+                    // Staged edits belong to the draft: finish them before reading a version.
+                    disabled={dirty}
+                  >
                     <span className="truncate">{selectedVersionLabel}</span>
                     <ChevronDown className="shrink-0" />
                   </Button>
@@ -449,6 +661,26 @@ export function PackageFilesView({
                 resolvedVersion={selectedDependencyDetail?.version ?? null}
                 // Only the draft is edited; a published version is read as it was.
                 editHref={selectedVersion === "draft" ? editHref : undefined}
+                gestures={
+                  editing && activeSelection.file.bundlePath
+                    ? {
+                        canEdit:
+                          activeSelection.file.bundlePath !== "manifest.json" &&
+                          previewBlockReason(activeSelection.file.sourceEntry) === null,
+                        onEdit: () => editingFile.open(activeSelection.file.bundlePath),
+                        onReplace: () => pickUpload(activeSelection.file.bundlePath!),
+                        onRename: isPinned(activeSelection.file.bundlePath)
+                          ? undefined
+                          : () =>
+                              setDialog({ kind: "rename", path: activeSelection.file.bundlePath! }),
+                        onDelete: isPinned(activeSelection.file.bundlePath)
+                          ? undefined
+                          : () =>
+                              setDialog({ kind: "delete", path: activeSelection.file.bundlePath! }),
+                        busy,
+                      }
+                    : undefined
+                }
                 fileVersion={
                   activeSelection.file.source === "bundle"
                     ? selectedVersion === "draft"
@@ -488,6 +720,105 @@ export function PackageFilesView({
         </div>
       </AgentDetailSplit>
 
+      {editing && dirty && (
+        <div className="bg-background border-border sticky bottom-0 z-10 flex min-h-16 flex-wrap items-center gap-3 border-t px-6 py-3">
+          <span className="text-muted-foreground text-sm">
+            {saveError ?? t("files.pendingCount", { count: operations.length })}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="outline" type="button" disabled={busy} onClick={discardEdits}>
+              {t("editor.discardChanges")}
+            </Button>
+            <Button
+              type="button"
+              disabled={busy || !writableDraft}
+              onClick={() => void saveEdits().catch(() => {})}
+            >
+              {busy ? <Spinner /> : t("btn.save", { ns: "common" })}
+            </Button>
+          </div>
+        </div>
+      )}
+      <input
+        ref={uploadRef}
+        type="file"
+        className="hidden"
+        onChange={(event) => {
+          const picked = [...(event.target.files ?? [])];
+          event.target.value = "";
+          if (picked.length) void upload(picked);
+        }}
+      />
+      {dialog?.kind === "create" && (
+        <FilePathDialog
+          title={t("files.newFile")}
+          confirmLabel={t("btn.create", { ns: "common" })}
+          initialPath=""
+          entries={bundleEntries ?? []}
+          onClose={() => setDialog(null)}
+          onSubmit={(path) => {
+            if (stage([fileTextOperation(path, "")])) {
+              setSelected({
+                kind: "file",
+                file: { ...emptyBundleFile(packageId, path) },
+              });
+            }
+          }}
+        />
+      )}
+      {dialog?.kind === "rename" && (
+        <FilePathDialog
+          title={t("files.newName")}
+          confirmLabel={t("files.rename")}
+          initialPath={dialog.path}
+          entries={(bundleEntries ?? []).filter((entry) => entry.path !== dialog.path)}
+          onClose={() => setDialog(null)}
+          onSubmit={(to) => {
+            if (stage([{ op: "move", from: dialog.path, to }])) setSelected(null);
+          }}
+        />
+      )}
+      <ConfirmModal
+        open={dialog?.kind === "delete"}
+        onClose={() => setDialog(null)}
+        title={t("files.delete")}
+        description={t("files.deleteConfirm", {
+          path: dialog?.kind === "delete" ? dialog.path : "",
+        })}
+        confirmLabel={t("files.delete")}
+        isPending={busy}
+        onConfirm={() => {
+          if (dialog?.kind === "delete" && stage([{ op: "delete", path: dialog.path }])) {
+            setSelected(null);
+          }
+        }}
+      />
+      {editing && editingFile.value !== null && (
+        <Modal
+          open
+          onClose={editingFile.close}
+          title={t("editor.editFile", { name: editingFile.value })}
+          className="sm:max-w-5xl"
+        >
+          <FileTextEditor
+            packageId={packageId}
+            entry={
+              files.find((file) => file.bundlePath === editingFile.value)?.sourceEntry ?? {
+                path: editingFile.value,
+                size: 0,
+                media_kind: "text",
+                inline: "",
+              }
+            }
+            path={editingFile.value}
+            onApply={(text) => {
+              if (stage([fileTextOperation(editingFile.value!, text)])) editingFile.close();
+            }}
+          />
+        </Modal>
+      )}
+      <UnsavedChangesModal blocker={blocker} onSaveDraft={writableDraft ? saveEdits : undefined} />
+
       <Modal
         open={compareVersion !== null}
         onClose={() => setCompareVersion(null)}
@@ -516,11 +847,13 @@ function SelectionHeader({
   resolvedVersion,
   fileVersion,
   editHref,
+  gestures,
 }: {
   selection: SelectedItem;
   resolvedVersion: string | null;
   fileVersion?: string;
   editHref?: (path: string) => string | undefined;
+  gestures?: FileGestures;
 }) {
   const path = selection.kind === "file" ? selection.file.treeEntry.path : selection.path;
   const dependency = selection.kind === "file" ? selection.file.dependency : selection.dependency;
@@ -555,10 +888,9 @@ function SelectionHeader({
             <FileSelectionActions
               file={selection.file}
               version={fileVersion}
+              gestures={gestures}
               editHref={
-                selection.file.source === "bundle"
-                  ? editHref?.(selection.file.sourceEntry.path)
-                  : undefined
+                selection.file.bundlePath ? editHref?.(selection.file.bundlePath) : undefined
               }
             />
           ) : dependency ? (
@@ -655,10 +987,12 @@ function FileSelectionActions({
   file,
   version,
   editHref,
+  gestures,
 }: {
   file: VirtualFile;
   version?: string;
   editHref?: string;
+  gestures?: FileGestures;
 }) {
   const { t } = useTranslation("agents");
   const download = usePackageFileDownload(file.packageId, version);
@@ -671,18 +1005,50 @@ function FileSelectionActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {editHref && (
-          <DropdownMenuItem asChild>
-            <Link to={editHref}>
-              <Pencil />
-              {t("btn.edit", { ns: "common" })}
-            </Link>
+        {gestures?.canEdit ? (
+          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onEdit}>
+            <Pencil />
+            {t("btn.edit", { ns: "common" })}
+          </DropdownMenuItem>
+        ) : (
+          editHref && (
+            <DropdownMenuItem asChild>
+              <Link to={editHref}>
+                <Pencil />
+                {t("btn.edit", { ns: "common" })}
+              </Link>
+            </DropdownMenuItem>
+          )
+        )}
+        {gestures && file.bundlePath !== "manifest.json" && (
+          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onReplace}>
+            <RefreshCw />
+            {t("files.replace")}
+          </DropdownMenuItem>
+        )}
+        {gestures?.onRename && (
+          <DropdownMenuItem disabled={gestures.busy} onSelect={gestures.onRename}>
+            <TextCursorInput />
+            {t("files.rename")}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onSelect={() => void download(file.sourceEntry.path)}>
           <Download />
           {t("files.downloadFile")}
         </DropdownMenuItem>
+        {gestures?.onDelete && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={gestures.busy}
+              onSelect={gestures.onDelete}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 />
+              {t("files.delete")}
+            </DropdownMenuItem>
+          </>
+        )}
         {file.dependency && (
           <DropdownMenuItem asChild>
             <Link to={packageDetailPath(file.dependency.type, file.dependency.id)}>
@@ -731,6 +1097,65 @@ function FolderPreview({ path, dependency }: { path: string; dependency?: Packag
           {t("detail.files.selectItem")}
         </p>
       )}
+    </div>
+  );
+}
+
+/** A file just created in the draft, before the tree hands back its entry. */
+function emptyBundleFile(packageId: string, path: string): VirtualFile {
+  const entry: PackageFileEntry = { path, size: 0, media_kind: "text", inline: "" };
+  return {
+    source: "bundle",
+    packageId,
+    bundlePath: path,
+    sourceEntry: entry,
+    treeEntry: { ...entry, path: `${BUNDLE_ROOT}${path}` },
+  };
+}
+
+/** A text file's editor in its modal: Appliquer stages it, the save bar saves it. */
+function FileTextEditor({
+  packageId,
+  entry,
+  path,
+  onApply,
+}: {
+  packageId: string;
+  entry: PackageFileEntry;
+  path: string;
+  onApply: (text: string) => void;
+}) {
+  const { t } = useTranslation("agents");
+  const { text, isLoading, isError } = usePackageFile(packageId, undefined, entry, true);
+  if (isError) return <ErrorState message={t("files.errorLoad")} />;
+  if (isLoading || text === undefined) return <LoadingState />;
+  return <FileTextEditorBody initial={text} path={path} onApply={onApply} />;
+}
+
+function FileTextEditorBody({
+  initial,
+  path,
+  onApply,
+}: {
+  initial: string;
+  path: string;
+  onApply: (text: string) => void;
+}) {
+  const { t } = useTranslation("agents");
+  const [value, setValue] = useState(initial);
+  return (
+    <div className="flex flex-col gap-3">
+      <ContentEditor
+        value={value}
+        onChange={setValue}
+        language={languageForPath(path)}
+        height="560px"
+      />
+      <div className="flex justify-end">
+        <Button type="button" onClick={() => onApply(value)}>
+          {t("editor.apply")}
+        </Button>
+      </div>
     </div>
   );
 }

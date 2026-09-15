@@ -9,8 +9,11 @@
  * announces itself in the console instead of showing up as an empty panel you
  * mistake for a design decision.
  */
+import type { PackageType } from "@appstrate/core/validation";
 import type { Scenario } from "./scenario";
 import * as f from "./fixtures";
+import { projectDraftFiles } from "../lib/package-file-drafts";
+import type { PackageFileEntry, PackageFileWriteOperation } from "../lib/package-file-tree";
 
 export type LabResponse = {
   status: number;
@@ -101,11 +104,42 @@ function isAgentUpdate(body: unknown): body is AgentUpdate {
     "manifest" in body &&
     typeof body.manifest === "object" &&
     body.manifest !== null &&
-    "content" in body &&
-    typeof body.content === "string" &&
     "lock_version" in body &&
     typeof body.lock_version === "number"
   );
+}
+
+/** Draft file trees changed by a save in this lab session. */
+const changedFileIndexes = new Map<string, { entries: PackageFileEntry[] }>();
+
+function labFileIndex(packageId: string): { entries: readonly PackageFileEntry[] } | undefined {
+  return (
+    changedFileIndexes.get(packageId) ??
+    (packageId === f.INTEGRATION_ID
+      ? f.integrationFiles
+      : packageId === "@lab/auth-methods"
+        ? f.integrationAuthLabFiles
+        : (f.packageFileIndexes[packageId] ?? integrationManifestIndex(packageId)))
+  );
+}
+
+/**
+ * A save's file operations, applied the way the platform applies them: the
+ * same reducer the editor projects its draft with. Returns the text of a file
+ * the save wrote, so a detail that mirrors it (prompt, SKILL.md) follows.
+ */
+function applyLabFileOperations(
+  packageId: string,
+  type: PackageType,
+  body: unknown,
+): (path: string) => string | undefined {
+  const operations = (body as { operations?: PackageFileWriteOperation[] } | null)?.operations;
+  if (!operations?.length) return () => undefined;
+  const entries = projectDraftFiles(labFileIndex(packageId)?.entries ?? [], operations, type).map(
+    ({ sourcePath: _source, ...entry }) => entry,
+  );
+  changedFileIndexes.set(packageId, { entries });
+  return (path) => entries.find((entry) => entry.path === path)?.inline;
 }
 
 function agentDetailFixture(packageId: string): LabAgentDetail {
@@ -799,11 +833,16 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
         changedPackageDrafts.get(id) ??
         [...f.skillDetails, ...f.mcpServerDetails].find((candidate) => candidate.id === id);
       if (!current || !update?.manifest) return { status: 400, body: {} };
+      const isSkill = url.pathname.includes("/skills/");
+      const written =
+        scenario === "error"
+          ? () => undefined
+          : applyLabFileOperations(id, isSkill ? "skill" : "mcp-server", body);
       const updated = {
         ...current,
         manifest: update.manifest,
-        content: url.pathname.includes("/skills/")
-          ? (update.content ?? current.content)
+        content: isSkill
+          ? (written("SKILL.md") ?? update.content ?? current.content)
           : current.content,
         lock_version: (update.lock_version ?? current.lock_version ?? 0) + 1,
       };
@@ -884,13 +923,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     method: "GET",
     pattern: /^\/api\/packages\/[^/]+\/[^/]+\/files$/,
     handler: (url) => {
-      const packageId = genericPackageId(url);
-      const files =
-        packageId === f.INTEGRATION_ID
-          ? f.integrationFiles
-          : packageId === "@lab/auth-methods"
-            ? f.integrationAuthLabFiles
-            : (f.packageFileIndexes[packageId] ?? integrationManifestIndex(packageId));
+      const files = labFileIndex(genericPackageId(url));
       return files ? { status: 200, body: files } : { status: 404, body: {} };
     },
   },
@@ -984,14 +1017,19 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       }
       const packageId = typedPackageId(url);
       const current = integrationPackageFor(packageId);
+      const written =
+        scenario === "error"
+          ? () => undefined
+          : applyLabFileOperations(packageId, "integration", body);
       const updated = {
         ...current,
         manifest: update.manifest,
         // As the API does: a manifest copy never overwrites a real document.
         content:
-          update.content === undefined || update.content.trim().startsWith("{")
+          written("INTEGRATION.md") ??
+          (update.content === undefined || update.content.trim().startsWith("{")
             ? current.content
-            : update.content,
+            : update.content),
         lock_version: update.lock_version + 1,
       } as typeof f.integrationPackage;
       if (scenario !== "error") changedIntegrationPackages.set(packageId, updated);
@@ -1005,10 +1043,14 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       if (!isAgentUpdate(body)) return { status: 400, body: {} };
       const packageId = typedPackageId(url);
       const current = agentDetailFixture(packageId);
+      const written =
+        scenario === "error" ? () => undefined : applyLabFileOperations(packageId, "agent", body);
       const updated: LabAgentDetail = {
         ...current,
         manifest: body.manifest,
-        prompt: body.content,
+        prompt:
+          written("prompt.md") ??
+          ("content" in body && typeof body.content === "string" ? body.content : current.prompt),
         lock_version: body.lock_version + 1,
       };
       if (scenario !== "error") changedAgentBundles.set(packageId, updated);

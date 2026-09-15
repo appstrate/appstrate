@@ -214,7 +214,7 @@ export function FileTree({
   return (
     <div className={cn("flex flex-col", className)}>
       {actions && (
-        <div className="border-border flex shrink-0 items-center gap-1 border-b p-1">
+        <div className="border-border flex shrink-0 flex-wrap items-center gap-1 border-b p-1">
           <Button
             variant="ghost"
             size="sm"

@@ -893,7 +893,7 @@
   "editor.toolsEdit": "Modifier les outils autorisés",
   "editor.toolsTitle": "Outils autorisés : {{name}}",
   "detail.settings.versions": "Versions",
-  "editor.bundleFilesHint": "Seuls le fichier principal et le manifeste sont modifiables. Les autres fichiers arrivent avec le bundle importé.",
+  "editor.bundleFilesHint": "Les fichiers se modifient dans Explorer › Fichiers : nouveau fichier, import, renommage, suppression et modification.",
   "editor.bundleFileColumn": "Fichier",
   "editor.bundleSizeColumn": "Taille",
   "editor.tabPackageFiles": "Contenu",
@@ -943,5 +943,8 @@
   "files.errorGeneric": "L'enregistrement des fichiers a échoué.",
   "files.pendingHint": "Les modifications des fichiers seront appliquées avec le manifeste en cliquant sur Enregistrer.",
   "files.createHint": "Les fichiers seront enregistrés avec le package en cliquant sur Créer.",
-  "package.actions": "Actions du package"
+  "package.actions": "Actions du package",
+  "files.saved": "Fichiers enregistrés",
+  "files.pendingCount_one": "{{count}} modification de fichier non enregistrée",
+  "files.pendingCount_other": "{{count}} modifications de fichiers non enregistrées"
 }

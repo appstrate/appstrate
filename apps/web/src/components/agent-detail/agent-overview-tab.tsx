@@ -289,6 +289,7 @@ export function AgentOverviewTab({
   contained = false,
   fileEditHref,
   initialFilePath,
+  canEditFiles = false,
 }: {
   packageId: string;
   detail: AgentDetail;
@@ -303,6 +304,8 @@ export function AgentOverviewTab({
   fileEditHref?: (path: string) => string | undefined;
   /** Explorer › Fichiers opened on this bundle file, when a link sent the reader to it. */
   initialFilePath?: string;
+  /** The reader may change the draft's files in Explorer › Fichiers. */
+  canEditFiles?: boolean;
 }) {
   const { t, i18n } = useTranslation("agents");
   const location = useLocation();
@@ -574,6 +577,7 @@ export function AgentOverviewTab({
         currentContent={currentContent}
         editHref={fileEditHref}
         initialPath={initialFilePath}
+        editable={canEditFiles}
       />
     );
   }
