@@ -2,19 +2,23 @@
 -- (RBAC spec §6.10).
 --
 -- WHY A SECOND TABLE. `space_packages` is the INSTALLATION: it carries the
--- version pin, the per-space model/proxy, the input defaults, and it is what
--- every execution path reads. A package runs with the RECIPIENT's credentials,
--- so activating one has to be the recipient's own act — and an "offered but not
--- accepted" state carried on `space_packages` would have had to be filtered at
--- each of that table's readers, where one miss runs a package nobody consented
--- to. Offered and activated are therefore two tables and two acts: sharing
--- writes here, accepting writes there, revoking deletes both in one
--- transaction.
+-- `enabled` switch, the per-space model/proxy, the input defaults, and it is
+-- what every execution path reads. A package runs with the RECIPIENT's
+-- credentials, so activating one has to be the recipient's own act — and an
+-- "offered but not accepted" state carried on `space_packages` would have had
+-- to be filtered at each of that table's readers, where one miss runs a package
+-- nobody consented to. Offered and activated are therefore two tables and two
+-- acts: sharing writes here, accepting writes there, revoking deletes both in
+-- one transaction.
 --
--- A row here grants READ and nothing else: the metadata a recipient needs to
--- decide, plus the "add to my space" affordance. Nothing else in the codebase
--- reads this table — not the runner, not the pin resolver, not the credential
--- resolver.
+-- A row here grants READ, and that is what PLACES the package in the space:
+-- the metadata a recipient needs to decide, plus the "add to my space"
+-- affordance. Every reader that asks the placement question joins this table —
+-- `placementReadFilter` is (homed here ∨ offered here), and the run gate's own
+-- predicate conjoins it (`activeHereSql`, `services/package-activation.ts`), so
+-- a `space_packages` row with no placement behind it counts for nothing. What a
+-- row here is NOT is an authorization to RUN: a run additionally needs an
+-- activation, and writing that stays the recipient's act on `space_packages`.
 --
 -- `ON DELETE CASCADE` on both halves: an audience entry is meaningless without
 -- its package or its space, and neither deletion loses access that was not

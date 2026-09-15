@@ -1934,6 +1934,25 @@ export function createPackagesRouter() {
     // A space the caller cannot reach must not be confirmed to exist — and the
     // 404 stays silent, since naming the permission would confirm it.
     if (!destination) throw notFound(`Space '${target}' not found`);
+    // A PERSONAL space is never a destination. A builder of a team space also
+    // holds `<type>:write` in their OWN personal space (preset `admin`), so the
+    // move went through — and §3.6 gives no administrator a way into a personal
+    // space, which left the team's package beyond every admin's reach (no edit,
+    // no delete, no move back) until its owner left the organization and the
+    // sweeper re-homed it. A private copy is `POST …/fork`, which creates a NEW
+    // package instead of carrying this one off.
+    //
+    // Conditioned on the home actually MOVING, because a package already homed
+    // in the caller's own personal space is a legitimate state — creating or
+    // forking there is how it got one — and a read-modify-write client that
+    // PATCHes the home it just read must get the idempotent 200 the no-op
+    // below answers with, not a refusal of the state it is already in.
+    if (target !== pkg.homeSpaceId && destination.ownerUserId !== null) {
+      throw conflict(
+        "home_move_into_personal_space",
+        `A personal space homes only what is created or forked in it — fork '${packageId}' to get a private copy.`,
+      );
+    }
     if (!destination.permissions.has(packagePermission(pkg.type, "write"))) {
       reportPermissionDenial(c, packagePermission(pkg.type, "write"));
       throw forbidden(
@@ -2010,11 +2029,23 @@ export function createPackagesRouter() {
           keepExistingDecision: true,
         });
       });
+      // The OLD home can be a personal space — its owner moving a package out
+      // to a team. Its id is withheld from the trail exactly as
+      // `package.shared` withholds it (§3.6), and the owner is recorded
+      // instead: that is the audited subject, and the space is its
+      // implementation. `after` needs no such care, a personal destination
+      // being refused above. The old home is necessarily in `accessible` —
+      // nothing else could have authorized the move.
+      const previousHomeOwnerId =
+        accessible.find((space) => space.id === pkg.homeSpaceId)?.ownerUserId ?? null;
       await recordAuditFromContext(c, {
         action: "package.home_space_changed",
         resourceType: "package",
         resourceId: packageId,
-        before: { home_space_id: pkg.homeSpaceId },
+        before:
+          previousHomeOwnerId === null
+            ? { home_space_id: pkg.homeSpaceId }
+            : { home_space_id: null, home_owner_user_id: previousHomeOwnerId },
         after: { home_space_id: target },
       });
       // Symmetric with the HTTP door: recorded only when the destination

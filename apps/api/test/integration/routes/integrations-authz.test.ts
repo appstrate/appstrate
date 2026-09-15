@@ -33,10 +33,15 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedApiKey, seedSpace } from "../../helpers/seed.ts";
+import { seedPackage, seedApiKey, seedSpace, seedPackageShare } from "../../helpers/seed.ts";
 import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
 import { and, eq } from "drizzle-orm";
-import { auditEvents, integrationConnections, spacePackages } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnections,
+  packageShares,
+  spacePackages,
+} from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -368,6 +373,87 @@ describe("block_user_connections — auto-active system integration", () => {
       .from(spacePackages)
       .where(eq(spacePackages.packageId, "@myorg/clickup"));
     expect(rows).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 1c. block_user_connections on an ORPHAN placement row
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * A `space_packages` row with neither a home nor a share behind it is the
+ * ORPHAN `scripts/migration/0016` repairs — inherited residue no live path
+ * writes, and a decision about an integration this space has LOST.
+ *
+ * The gate that enforces this flag (`isUserConnectionCreationBlocked`) asks
+ * PLACEMENT, so honouring the row here would persist a lock nothing enforces:
+ * `200 blocked: true`, a padlock on the Integrations page, and
+ * `POST …/connect` still admitting every member. The write must refuse instead
+ * — through the same 404 an integration that is not installed already gets.
+ */
+describe("block_user_connections — ORPHAN placement row", () => {
+  let ctx: TestContext;
+  const ORPHAN = "@myorg/orphan-gmail";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    // Homed in ANOTHER space of the org — reachable by the owner in session,
+    // so the route's gate passes and what the assertion reads is the placement
+    // conjunct, not an authorization refusal standing in for it.
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedIntegration(ctx.orgId, gmailManifest(ORPHAN), elsewhere.id);
+    // The row, and ONLY the row: no home here, no offer here.
+    await activate(ctx.defaultSpaceId, ORPHAN);
+  });
+
+  const patchBlock = (blocked: boolean) =>
+    app.request(`/api/integrations/${ORPHAN}/settings`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: blocked }),
+    });
+
+  it("404s the PATCH on an orphan row, writes no flag and grafts no share", async () => {
+    const res = await patchBlock(true);
+    expect(res.status, await res.clone().text()).toBe(404);
+
+    // The row is exactly as it was seeded — the UPDATE matched nothing, and
+    // the activation door it fell through to rolled the transaction back.
+    const [row] = await db
+      .select({
+        enabled: spacePackages.enabled,
+        blocked: spacePackages.blockUserConnections,
+      })
+      .from(spacePackages)
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, ORPHAN)),
+      );
+    expect(row?.blocked).toBe(false);
+    expect(row?.enabled).toBe(true);
+    // A refusal is not a repair: the offer that would place it is not written.
+    expect(
+      await db.select().from(packageShares).where(eq(packageShares.packageId, ORPHAN)),
+    ).toEqual([]);
+  });
+
+  it("succeeds on the exact same PATCH once a share PLACES the integration here", async () => {
+    // The discriminating control: same row, same request, one offer apart.
+    await seedPackageShare(ctx.defaultSpaceId, ORPHAN);
+
+    const res = await patchBlock(true);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await res.json()) as { block_user_connections: boolean }).toMatchObject({
+      block_user_connections: true,
+    });
+
+    const [row] = await db
+      .select({ blocked: spacePackages.blockUserConnections })
+      .from(spacePackages)
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, ORPHAN)),
+      );
+    expect(row?.blocked).toBe(true);
   });
 });
 

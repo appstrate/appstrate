@@ -33,6 +33,7 @@ import { eq, and } from "drizzle-orm";
 
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
 import { getLatestVersionInfo, getVersionDetail } from "./package-versions.ts";
+import { isPackageActiveHere } from "./space-packages.ts";
 
 interface Finding {
   packageId: string;
@@ -40,7 +41,11 @@ interface Finding {
   artifact: string;
   integrationId: string;
   reason: string;
-  /** Spaces where this package is PLACED, making this artifact explicitly selectable. */
+  /**
+   * Spaces where this package is ACTIVE — placed here AND switched on — making
+   * this artifact explicitly selectable. A `space_packages` row nothing places,
+   * or one switched off, runs nowhere and is not reported.
+   */
   placedIn: string[];
   /**
    * Spaces where a normal run/export path selects this artifact without
@@ -167,10 +172,20 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     }
     const latest = await getLatestVersionInfo(agent.id);
 
-    const placements = await db
+    // The ONE activation rule, asked once per space holding a row for this
+    // agent (`isPackageActiveHere`): an operator report that named rows would
+    // name spaces where the agent cannot run at all.
+    const rowSpaces = await db
       .select({ spaceId: spacePackages.spaceId })
       .from(spacePackages)
       .where(eq(spacePackages.packageId, agent.id));
+    const rowVerdicts = await Promise.all(
+      rowSpaces.map(async (row) => ({
+        spaceId: row.spaceId,
+        active: await isPackageActiveHere({ orgId, spaceId: row.spaceId }, agent.id),
+      })),
+    );
+    const placements = rowVerdicts.filter((row) => row.active);
     const agentSchedules = await db
       .select({
         id: schedules.id,

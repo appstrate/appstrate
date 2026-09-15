@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import {
@@ -166,6 +166,43 @@ describe("integration-scope-resolver", () => {
         authKey: "primary",
       });
       expect(out.required.sort()).toEqual(["read", "send"]);
+    });
+
+    // The floor is what the space will actually ASK an IdP for, so it counts
+    // agents this space RUNS — not `space_packages` rows. A switched-off agent
+    // and an ORPHAN row (no home here, no offer here) both run nowhere.
+    it("ignores an agent this space does not RUN (switched off, or an orphan row)", async () => {
+      await seedPackage({
+        id: "@scope/agent-off",
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: agentManifest("@scope/agent-off", {
+          version: "^1.0.0",
+          tools: ["send_message"],
+        }),
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@scope/agent-off", { enabled: false });
+
+      const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+      await seedPackage({
+        id: "@scope/agent-orphan",
+        homeSpaceId: elsewhere.id,
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: agentManifest("@scope/agent-orphan", {
+          version: "^1.0.0",
+          tools: ["delete_message"],
+        }),
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@scope/agent-orphan");
+
+      const out = await computeRequiredScopes({
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        integrationId: INTEGRATION_ID,
+        authKey: "primary",
+      });
+      expect(out.required).toEqual([]);
     });
 
     it("agent declaring the dep without a selection contributes zero scopes (least-privilege)", async () => {

@@ -171,9 +171,12 @@ function extractPackageId(c: Context<AppEnv>): string {
 /**
  * Package ownership plus mutation authority in the package's HOME space —
  * `packages.home_space_id`, the one authority over a draft, its versions and its
- * identity, whatever other spaces it is placed in (RBAC spec §6.9). A NULL
- * home is the org catalog: owners and admins on a session only. This is the
- * whole authorization for a mutation of an existing package; routes carrying it
+ * identity, whatever other spaces it is placed in (RBAC spec §6.9). There is no
+ * second authority beside it: an organization's package ALWAYS has a home
+ * (`packages_org_package_has_home`), the organization's default space homing the
+ * ones that belong to no team — `assertPackageMutationAccess`
+ * (`lib/package-access.ts`) states the rule in full. This is the whole
+ * authorization for a mutation of an existing package; routes carrying it
  * deliberately have no second permission guard against the current space.
  */
 export function requirePackageInOrg(action: "write" | "delete" = "write") {

@@ -12,12 +12,13 @@
  * space chose.
  */
 
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, exists, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spacePackages, packages, packageShares, packageDistTags } from "@appstrate/db/schema";
 import { notFound, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
@@ -101,9 +102,6 @@ export async function assertMcpServerActivatable(
   }
 }
 
-/** Transaction-local reads the placement rule needs. */
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
 /**
  * Is the package OFFERED to this space (`package_shares`)?
  *
@@ -153,6 +151,42 @@ async function placedHere(
   if (pkg.source === "system") return true;
   if (pkg.homeSpaceId === spaceId) return true;
   return sharedWith(tx, pkg.id, spaceId);
+}
+
+/**
+ * The same question as {@link placedHere}, expressed as a WHERE clause an
+ * UPDATE can carry — "this `space_packages` row is one the package is actually
+ * PLACED in this space".
+ *
+ * Drizzle's `update` has no join, so the placement rule cannot be read the way
+ * every SELECT reads it (`placementReadFilter` over a `packageShares` LEFT
+ * JOIN). It goes in as an `EXISTS` sub-select instead: same rule, same module,
+ * one statement — which is what keeps the write from deciding on a bare
+ * `(space_id, package_id)` pair while every reader answers "absent".
+ *
+ * Conjoin it into ANY update of a `space_packages` row that a caller can reach
+ * by id, and treat "zero rows updated" as "not placed here". Two callers today:
+ * {@link updateSpacePackage} under `requirePlacement` (the public
+ * `PUT /api/spaces/{id}/packages/{scope}/{name}`), and
+ * `setBlockUserConnections` (`services/integration-pins-service.ts`) — whose
+ * flag is enforced by a reader that already conjoins placement
+ * (`isUserConnectionCreationBlocked`), so a write that skipped it produced a
+ * `200 blocked: true` no door honoured.
+ *
+ * On an ORPHAN row the UPDATE therefore matches nothing, and the caller's
+ * refusal — "is not placed in this space" — is true rather than approximate.
+ */
+export function placedRowFilter(tx: DbOrTx, spaceId: string, packageId: string) {
+  return exists(
+    tx
+      .select({ one: sql`1` })
+      .from(packages)
+      .leftJoin(
+        packageShares,
+        and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
+      )
+      .where(and(eq(packages.id, packageId), placementReadFilter(spaceId))),
+  );
 }
 
 /**
@@ -1131,8 +1165,10 @@ export async function getResolvedRunConfig(
  * Two modes:
  *   - `requirePlacement: true` (the public
  *     `PUT /spaces/:id/packages/:packageId` route): the placement row
- *     MUST already exist — an update that would create a new row is a client
- *     error (404), never an implicit activation.
+ *     MUST already exist AND the package must be PLACED here
+ *     ({@link placedRowFilter}) — an update that would create a new row, or
+ *     that would act on an orphan row, is a client error (404), never an
+ *     implicit activation.
  *   - default (the agent input-settings / proxy / model routes): upsert, but
  *     ONLY where creating the row states no new decision. A package the
  *     deployment already switches on with no row — a system agent — legitimately
@@ -1191,11 +1227,21 @@ export async function updateSpacePackage(
     }
 
     if (opts?.requirePlacement) {
+      // PLACED here, not merely "there is a row": the pair alone matches an
+      // ORPHAN (`scripts/migration/0016`), and this route's own follow-up read
+      // (`getSpacePackage`, placement-joined) then finds nothing — the write
+      // landed and the 200 body was `{"object":"space_package"}`. The
+      // `EXISTS` makes the UPDATE match nothing instead, so the refusal below
+      // states the truth.
       const updated = await tx
         .update(spacePackages)
         .set(set)
         .where(
-          and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)),
+          and(
+            eq(spacePackages.spaceId, scope.spaceId),
+            eq(spacePackages.packageId, packageId),
+            placedRowFilter(tx, scope.spaceId, packageId),
+          ),
         )
         .returning({ packageId: spacePackages.packageId });
       if (updated.length === 0) {

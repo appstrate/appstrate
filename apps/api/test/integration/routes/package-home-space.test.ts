@@ -38,6 +38,7 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
+import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 import {
   setPermissionDenialHandler,
   type PermissionDenialContext,
@@ -681,6 +682,122 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
       has_unarchived_changes: false,
     });
     expect(await unarchivedChanges()).toBe(false);
+  });
+
+  it("refuses a move INTO a personal space, so a package cannot leave every admin's reach", async () => {
+    // The reproduced defect: an ordinary `member` holds the `admin` preset in
+    // their OWN personal space (§3.6), so `<type>:write` there was satisfied
+    // and the move went through — carrying a package the whole team authored
+    // into a space no administrator can enter, where it stayed beyond every
+    // edit, delete and move-back until its owner left the organization. The
+    // private copy people actually want is `POST …/fork`.
+    const builder = await createTestUser();
+    await addOrgMember(ctx.orgId, builder.id, "member");
+    await seedSpaceMember({ spaceId: alphaId, userId: builder.id, presetRole: "builder" });
+    const headers = { Cookie: builder.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": alphaId };
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, builder.id);
+
+    await expectProblem(await move(headers, personal.id), 409, {
+      code: "home_move_into_personal_space",
+    });
+
+    // Refused whole: the home stands, no offer was written for the personal
+    // space (Beta's fixture share is the only one), and the trail records no
+    // move.
+    expect(await homeOf()).toBe(alphaId);
+    expect((await sharedSpaceIds()).sort()).toEqual([betaId]);
+    const moves = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(eq(auditEvents.action, "package.home_space_changed"), eq(auditEvents.resourceId, ID))!,
+      );
+    expect(moves).toHaveLength(0);
+
+    // The 409 is reached only for a destination the caller REACHES — a space
+    // they hold nothing in still answers 404, never an existence oracle.
+    await expectProblem(await move(headers, betaId), 404);
+    expect(await homeOf()).toBe(alphaId);
+  });
+
+  it("withholds a PERSONAL old home from the move's audit trail, naming its owner", async () => {
+    // Moving OUT of a personal space stays legal — it is how a package written
+    // in one reaches a team. But `before.home_space_id` would then publish
+    // through the audit log the one id §3.6 withholds everywhere else (the same
+    // reason `package.shared` records a recipient and not their space), so the
+    // OWNER is recorded and the id is null.
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
+    const OWN = "@homes/private";
+    await seedPackage({
+      id: OWN,
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: personal.id,
+      createdBy: ctx.user.id,
+      draftManifest: { ...MANIFEST, name: OWN },
+      draftContent: CONTENT,
+    });
+
+    const res = await app.request(`/api/packages/${OWN}`, {
+      method: "PATCH",
+      headers: { ...owner(), "Content-Type": "application/json" },
+      body: JSON.stringify({ home_space_id: alphaId }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await getDbRow(packages, eq(packages.id, OWN))).homeSpaceId).toBe(alphaId);
+
+    const [moved] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(eq(auditEvents.action, "package.home_space_changed"), eq(auditEvents.resourceId, OWN))!,
+      );
+    expect(moved).toBeDefined();
+    expect(moved!.before).toEqual({ home_space_id: null, home_owner_user_id: ctx.user.id });
+    // The destination is a team space by construction now, so `after` carries
+    // its id plainly.
+    expect(moved!.after).toEqual({ home_space_id: alphaId });
+  });
+
+  it("accepts a no-op PATCH of a package already homed in the caller's personal space", async () => {
+    // The personal-space refusal guards a package CROSSING into a space no
+    // administrator can enter. A package created or forked in its author's own
+    // personal space is already there legitimately, so re-stating that home is
+    // not a move and must not be refused — a read-modify-write client that
+    // PATCHes back what it just GET'd would otherwise get a 409 for the state
+    // the server itself reported.
+    const personal = await ensurePersonalSpaceFor(ctx.orgId, ctx.user.id);
+    const OWN = "@homes/private";
+    await seedPackage({
+      id: OWN,
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: personal.id,
+      createdBy: ctx.user.id,
+      draftManifest: { ...MANIFEST, name: OWN },
+      draftContent: CONTENT,
+    });
+
+    const res = await app.request(`/api/packages/${OWN}`, {
+      method: "PATCH",
+      headers: { ...owner(), "Content-Type": "application/json" },
+      body: JSON.stringify({ home_space_id: personal.id }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    // The caller REACHES their own personal space, so the wire carries its id.
+    expect((await res.json()) as { home_space_id: string | null }).toMatchObject({
+      home_space_id: personal.id,
+    });
+    expect((await getDbRow(packages, eq(packages.id, OWN))).homeSpaceId).toBe(personal.id);
+
+    // Nothing moved, so the trail records nothing.
+    const moves = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(eq(auditEvents.action, "package.home_space_changed"), eq(auditEvents.resourceId, OWN))!,
+      );
+    expect(moves).toHaveLength(0);
   });
 
   it("rejects an unknown body field rather than dropping it", async () => {

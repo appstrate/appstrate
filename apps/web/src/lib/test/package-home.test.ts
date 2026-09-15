@@ -46,6 +46,23 @@ describe("writableDestinations", () => {
     ]);
   });
 
+  it("never offers a PERSONAL space, however writable it is", () => {
+    // Its owner holds the `admin` preset there, so the permission test passes
+    // and the API refuses the move all the same (409
+    // `home_move_into_personal_space`, RBAC spec §6.9): a personal space homes
+    // only what is created or forked in it. The team space beside it carries
+    // the very same permission and stays on the list, so what is excluded is
+    // the personal FLAG, not a missing grant.
+    const mixedSpaces = [
+      { ...space("spc_mine", ["skills:write"]), personal: true },
+      { ...space("spc_team", ["skills:write"]), personal: false },
+    ];
+
+    expect(writableDestinations(mixedSpaces, "skill", "spc_home").map((s) => s.id)).toEqual([
+      "spc_team",
+    ]);
+  });
+
   it("offers nothing while the space list is loading", () => {
     expect(writableDestinations(undefined, "skill", "spc_home")).toEqual([]);
   });

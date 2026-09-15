@@ -467,10 +467,11 @@ export interface MeConnectionEntry {
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
   /**
-   * Number of agents placed in this connection's space that
-   * declare this integration in their dependencies. Used by the UI to
-   * surface "reused by N agents" so members understand that the connection
-   * is shared across the org's agents rather than per-agent.
+   * Number of agents this connection's space RUNS — placed here and switched
+   * on, or on by the deployment's default — that declare this integration in
+   * their dependencies. Used by the UI to surface "reused by N agents" so
+   * members understand that the connection is shared across the org's agents
+   * rather than per-agent.
    */
   reused_by_agents: number;
   /** Where this connection lives (the connection is keyed per-space). */

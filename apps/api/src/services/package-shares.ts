@@ -9,12 +9,18 @@
  * `space-packages.ts`, because a package runs with the RECIPIENT's credentials
  * and switching one on is therefore the recipient's own decision.
  *
- * `package_shares` has exactly five readers in the codebase, and they are all
- * READS: this module, `placementGrantsRead`'s loaders (`lib/package-access.ts`),
- * the per-type index listing (`package-items/crud.ts`), the library projection
- * (`package-library.ts`) and the activation path (`space-packages.ts`), which
- * asks whether an offer exists inside the very transaction that acts on it.
- * Nothing on an execution path consults it.
+ * The table is read as PLACEMENT, and it is read wherever the placement
+ * question is asked: an offer is one half of `placementGrantsRead` (homed here
+ * ∨ offered here), so every reader of that rule joins it — the EXECUTION
+ * predicate included, which conjoins the placement filter so a `space_packages`
+ * row with no placement behind it counts for nothing. The exact set of files
+ * that name `packageShares`, and why each one does, is pinned by
+ * `test/integration/routes/package-sharing.test.ts` ("the table has no other
+ * reader"); that test is the authority, not a list in this comment.
+ *
+ * What a row here never is, on its own, is an authorization to RUN: it places
+ * and it opens a read. Activation is a second act, on `space_packages`, and it
+ * belongs to the recipient.
  */
 
 import { and, eq, inArray } from "drizzle-orm";

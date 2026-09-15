@@ -15,6 +15,7 @@ import {
 } from "../services/agent-version-resolver.ts";
 import { getLatestVersionId } from "../services/package-versions.ts";
 import { isPackageActiveHere } from "../services/space-packages.ts";
+import { activeHereSql } from "../services/package-activation.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
@@ -108,19 +109,64 @@ export function spacePackagePermission(
   return packagePermission(type, "write");
 }
 
-/** Existing catalog imports must hold the target's activation grant before placing it. */
+/**
+ * Existing catalog imports must hold the target's activation grant unless the
+ * import CHANGES nothing — i.e. unless the package is already ACTIVE here
+ * ({@link activeHereSql}, `services/package-activation.ts`).
+ *
+ * ACTIVE and not merely PLACED, because the act this gates is an activation:
+ * `importBundle` ends by calling `activatePackage` on the root, which writes
+ * `enabled = true` through the same door `POST /api/spaces/{id}/packages`
+ * uses. Waiving the grant on a placed row that says `false` let an import
+ * switch a package the space had deliberately switched OFF back on — the
+ * sticky opt-out is a decision with its own authority, and the import path is
+ * not entitled to overrule it any more than the HTTP door is. Reachable
+ * wherever a custom space role grants `<type>:write` without the activation
+ * string (both presets that write also activate, so no preset-only
+ * organization is affected).
+ *
+ * A bare `space_packages` row is not enough either, for the reason the
+ * activation rule conjoins placement: an ORPHAN row — one with neither a home
+ * nor a share behind it, the residue `scripts/migration/0016` repairs — reads
+ * as active nowhere, so leaning on it would let the leftover of a revoked
+ * offer stand in for the offer itself.
+ *
+ * The deployment's own default is an activation nobody performed, so it
+ * waives the grant on its own: a system package, and an integration named by
+ * `SYSTEM_INTEGRATIONS`, are already on here with no row at all and the
+ * import leaves them exactly as it found them.
+ */
 export async function assertExistingPackageActivationAccess(
   c: Context<AppEnv>,
   packageId: string,
   type: PackageType,
 ) {
   const target = c.get("space")?.id ?? c.get("spaceId");
-  const [placement] = await db
-    .select({ packageId: spacePackages.packageId })
-    .from(spacePackages)
-    .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, target)))
+  const [active] = await db
+    .select({ id: packages.id })
+    .from(packages)
+    // Both of `activeHereSql`'s LEFT JOINs, and they are the question rather
+    // than decoration: without the first the row half is always NULL and every
+    // package falls back to the deployment default, without the second every
+    // offered package reads as unplaced and its row stops counting.
+    .leftJoin(
+      spacePackages,
+      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, target)),
+    )
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, target)),
+    )
+    .where(
+      and(
+        eq(packages.id, packageId),
+        orgOrSystemFilter(c.get("orgId")),
+        notEphemeralFilter(),
+        activeHereSql(target),
+      ),
+    )
     .limit(1);
-  if (!placement)
+  if (!active)
     await makePermissionGuard(spacePackagePermission(type, "activate"))(c, async () => {});
 }
 
@@ -444,25 +490,50 @@ export async function assertPackageMutationAccess(
 }
 
 /**
- * The SAME rule as {@link assertPackageMutationAccess}'s `write`, asked as a
- * question instead of a refusal — and the ONE predicate behind every "may this
- * caller run the DRAFT" decision (plan decision 4).
+ * The home rule asked as a QUESTION rather than as a refusal — the ONE
+ * predicate behind every "may this caller write / share this package" decision
+ * that must not throw. `verb` picks which permission the HOME space has to
+ * carry; nothing else about the two answers differs, which is why they are one
+ * function.
  *
- * A draft is the author's working copy: it executes for whoever can WRITE the
- * package, wherever they launch it from, and for nobody else. That is not a new
- * rule, it is the write rule read in a place that must not throw — the run
- * routes, the schedules, the readiness endpoint and the detail page each answer
- * something of their own (a `403 draft_not_writable`, a published fallback, a
- * projection) and none of them wants this function's 404/403 split. Stating it
- * as a boolean here is what keeps the four of them from each re-deriving "who
- * owns the draft" and drifting apart.
+ * `write` is {@link assertPackageMutationAccess}'s `write` (plan decision 4),
+ * and it is what governs the DRAFT. A draft is the author's working copy: it
+ * executes for whoever can WRITE the package, wherever they launch it from, and
+ * for nobody else. That is not a new rule, it is the write rule read in a place
+ * that must not throw — the run routes, the schedules, the readiness endpoint
+ * and the detail page each answer something of their own (a
+ * `403 draft_not_writable`, a published fallback, a projection) and none of
+ * them wants the assert's 404/403 split. Stating it as a boolean here is what
+ * keeps the four of them from each re-deriving "who owns the draft" and
+ * drifting apart.
  *
- * `false`, never a throw, for every refusal the assert would spell out: a
- * package the org cannot see, a system package (nobody writes those), a home
- * the caller does not govern.
+ * `share` is {@link assertPackageShareAccess}, for the one caller that has to
+ * CHOOSE rather than refuse: a bundle import whose root already lives in
+ * another space activates it with the offer when the caller may make one, and
+ * reports `root_active: false` when they may not.
  *
- * Module-local on purpose. Every caller outside this file reaches it through
- * one of the three wordings below — {@link assertDraftSelectorAllowed},
+ * `false`, never a throw, for every refusal either assert would spell out: a
+ * package the org cannot see, a system package (nobody writes or shares those),
+ * a home the caller does not govern.
+ */
+async function holdsPackageAuthority(
+  c: Context<AppEnv>,
+  packageId: string,
+  verb: "write" | "share",
+  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
+): Promise<boolean> {
+  const orgId = c.get("orgId");
+  const pkg = await findPackageRow(packageId, orgId);
+  if (!pkg) return false;
+  if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
+  const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
+  return holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, verb));
+}
+
+/**
+ * The `write` half, module-local on purpose. Every caller outside this file
+ * reaches it through one of the three wordings below —
+ * {@link assertDraftSelectorAllowed},
  * {@link assertDependencyDraftOverridesAllowed},
  * {@link defaultDefinitionSelector} — so a route cannot invent a fourth way of
  * spelling the same refusal.
@@ -472,33 +543,16 @@ async function holdsPackageWriteAuthority(
   packageId: string,
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<boolean> {
-  const orgId = c.get("orgId");
-  const pkg = await findPackageRow(packageId, orgId);
-  if (!pkg) return false;
-  if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
-  const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
-  return holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "write"));
+  return holdsPackageAuthority(c, packageId, "write", resolvedSpaces);
 }
 
-/**
- * The SAME rule as {@link assertPackageShareAccess}, asked as a question — for
- * the one caller that has to CHOOSE rather than refuse: a bundle import whose
- * root already lives in another space activates it with the offer when the
- * caller may make one, and reports `root_active: false` when they may not.
- *
- * `false`, never a throw, for every refusal the assert would spell out.
- */
+/** The `share` half, for the bundle import that chooses instead of refusing. */
 export async function holdsPackageShareAuthority(
   c: Context<AppEnv>,
   packageId: string,
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<boolean> {
-  const orgId = c.get("orgId");
-  const pkg = await findPackageRow(packageId, orgId);
-  if (!pkg) return false;
-  if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
-  const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
-  return holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "share"));
+  return holdsPackageAuthority(c, packageId, "share", resolvedSpaces);
 }
 
 /**
@@ -765,7 +819,9 @@ function isSystemPackageRow(pkg: { source: string }): boolean {
 }
 
 /**
- * `<type>:<action>` in the home space — the whole rule, with nothing beside it.
+ * Does the caller hold `permission` in the package's HOME? — `<type>:<action>`
+ * in the home space, the whole rule, with nothing beside it, and the predicate
+ * behind every `home_*` answer and every `assertHomeAuthority` verdict.
  *
  * `accessible` is already the caller's standing in the organization that OWNS
  * the package: their own org everywhere except the cross-org fork reader,
@@ -776,10 +832,6 @@ function isSystemPackageRow(pkg: { source: string }): boolean {
  * (`packages_org_package_has_home`) — are refused by every caller of this
  * function before it is reached. A NULL that got here anyway matches no
  * accessible space and answers `false`, which is the safe half.
- */
-/**
- * Does the caller hold `permission` in the package's HOME? — the predicate
- * behind every `home_*` answer and every `assertHomeAuthority` verdict.
  *
  * Exported because the home can MOVE between the moment a route authorizes and
  * the moment it writes: `POST …/shares` re-asks it against the home it has

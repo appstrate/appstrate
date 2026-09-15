@@ -1698,7 +1698,7 @@ describe("the offer is judged against the LOCKED home", () => {
 });
 
 describe("the table has no other reader", () => {
-  it("names `package_shares` only in the share service, the placement loaders and the library", async () => {
+  it("names `package_shares` only in the share service, the library and the readers of the placement rule", async () => {
     // The two-table split is only worth anything while this stays true: a
     // reader on an execution path would run a package nobody consented to.
     const proc = Bun.spawnSync(["grep", "-rl", "packageShares", "apps/api/src", "packages/db/src"]);
@@ -1714,11 +1714,20 @@ describe("the table has no other reader", () => {
     // question of one package. `integration-service.ts` joins it for that
     // reason and no other: the Integrations page's own two routes narrow on
     // `placementReadFilter`, which needs this LEFT JOIN or an offered
-    // integration drops out of its own page.
+    // integration drops out of its own page. The four integration surfaces
+    // beside it ask the same rule rather than a bare `space_packages` row —
+    // `integration-connection-resolver.ts` conjoins `placementReadFilter`,
+    // `integration-pins-service.ts`, `integration-scope-resolver.ts` and
+    // `me-connections.ts` conjoin `activeHereSql`, both of which need this
+    // join, so a row nothing places counts for nothing there either.
     expect(files).toEqual([
       "apps/api/src/lib/package-access.ts",
+      "apps/api/src/services/integration-connection-resolver.ts",
       "apps/api/src/services/integration-connections.ts",
+      "apps/api/src/services/integration-pins-service.ts",
+      "apps/api/src/services/integration-scope-resolver.ts",
       "apps/api/src/services/integration-service.ts",
+      "apps/api/src/services/me-connections.ts",
       "apps/api/src/services/package-activation.ts",
       "apps/api/src/services/package-items/crud.ts",
       "apps/api/src/services/package-library.ts",

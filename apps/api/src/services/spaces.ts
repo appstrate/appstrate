@@ -7,7 +7,7 @@ import { db } from "@appstrate/db/client";
 import { files, organizations, packages, runs, spaces, uploads } from "@appstrate/db/schema";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
-import { scopedWhere } from "../lib/db-helpers.ts";
+import { scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
@@ -25,9 +25,6 @@ import {
 } from "../lib/space-role.ts";
 
 type SpaceRow = InferSelectModel<typeof spaces>;
-
-/** Accepts either the base client or an open transaction handle. */
-type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export const spaceSettingsSchema = z.object({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),

@@ -393,6 +393,63 @@ describe("Me API (/api/me)", () => {
       expect(body.data.find((g) => g.source_id === "@conn/secret")).toBeUndefined();
     });
 
+    // `reused_by_agents` is a claim about RUNS, so it counts the agents the
+    // space is ACTIVE for — not the `space_packages` rows it happens to hold.
+    it("counts only the agents the space RUNS in reused_by_agents", async () => {
+      const ctx = await createTestContext({ orgSlug: "reuse-org" });
+      const INTEGRATION = "@conn/reuse";
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+        userId: ctx.user.id,
+      });
+
+      const declaring = (id: string): Record<string, unknown> => ({
+        name: id,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: id,
+        dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+      });
+
+      for (const [id, home, enabled] of [
+        ["@reuse/runs-here", ctx.defaultSpaceId, true],
+        ["@reuse/switched-off", ctx.defaultSpaceId, false],
+      ] as const) {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "agent",
+          homeSpaceId: home,
+          draftManifest: declaring(id),
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, id, { enabled });
+      }
+      // ORPHAN: a row here, homed elsewhere, offered to nobody.
+      const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+      await seedPackage({
+        id: "@reuse/orphan",
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: elsewhere.id,
+        draftManifest: declaring("@reuse/orphan"),
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@reuse/orphan");
+
+      const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{
+          source_id: string;
+          connections: Array<{ reused_by_agents: number }>;
+        }>;
+      };
+      const group = body.data.find((g) => g.source_id === INTEGRATION);
+      expect(group?.connections[0]?.reused_by_agents).toBe(1);
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/connections");
       expect(res.status).toBe(401);

@@ -42,6 +42,11 @@
  * The two forms are twins, not two rules: a table-driven test
  * (`package-activation-parity.test.ts`) walks every (type × source × row ×
  * placed) cell and asserts they answer the same.
+ *
+ * Everything else PROJECTS one of the two rather than restating it — the
+ * library's `state` (`package-library.ts`) calls {@link isActiveHere} and only
+ * names WHY the answer was no (`inactive` a row saying `false`, `none` no row
+ * at all), so there is no third copy to drift.
  */
 
 import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";

@@ -3,7 +3,7 @@
 /**
  * Phase 2 — OAuth scope inference for integration connect flows.
  *
- * `computeRequiredScopes` walks every agent placed in the space,
+ * `computeRequiredScopes` walks every agent the space ACTIVELY runs,
  * reads its `integrations_configuration[id]` selection (§4.4), and
  * unions the scopes contributed by each:
  *
@@ -17,12 +17,12 @@
  *     allowed" default that mirrors Phase 3's runtime allowlist
  *     semantics).
  *
- * This is the floor every placed agent needs. It is NOT injected into
+ * This is the floor every active agent needs. It is NOT injected into
  * the connect kickoff — connecting requests the manifest defaults (plus
  * whatever the caller explicitly forwards), so a plain "connect" never
  * inherits unrelated agents' scopes. The union is consumed at refresh time
  * (`integration-credentials-resolver`) to detect when an IdP-side scope
- * shrink drops a connection below what the placed agents require, and
+ * shrink drops a connection below what the active agents require, and
  * the agent surface uses the per-agent slice to drive an explicit upgrade.
  *
  * `getCurrentScopesGranted` reads the `scopesGranted` of one connection row
@@ -34,13 +34,20 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { spacePackages, integrationConnections, packages } from "@appstrate/db/schema";
+import {
+  spacePackages,
+  packageShares,
+  integrationConnections,
+  packages,
+} from "@appstrate/db/schema";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { requiredScopesForAgent, resolveEffectiveToolSelection } from "@appstrate/core/integration";
 
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
+import { notEphemeralFilter, orgOrSystemFilter } from "../lib/package-helpers.ts";
+import { activeHereSql } from "./package-activation.ts";
 import { getIntegration } from "./integration-service.ts";
 
 interface ComputeRequiredScopesResult {
@@ -56,10 +63,10 @@ interface ScopeResolverInput {
 }
 
 /**
- * Compute the OAuth scope set required by every agent placed in the
- * space that depends on this integration's auth. Returns an empty
- * `required` array when no placed agent uses the integration (callers
- * should fall back to the manifest defaults).
+ * Compute the OAuth scope set required by every agent the space RUNS that
+ * depends on this integration's auth. Returns an empty `required` array when
+ * no active agent uses the integration (callers should fall back to the
+ * manifest defaults).
  *
  * Resolves the integration manifest fresh from DB on every call — cheap
  * (one row lookup + JSON parse) and avoids a stale cache hiding scope
@@ -79,18 +86,40 @@ export async function computeRequiredScopes(
     return { required: [] };
   }
 
-  // Walk the placed agents. We need the manifest of each to read its
+  // Walk the ACTIVE agents. We need the manifest of each to read its
   // `integrations_configuration`; that lives on `draftManifest`, same
   // column the runtime resolver reads at spawn time.
-  const placed = await db
+  //
+  // ACTIVE and not merely row-present ({@link activeHereSql}, both of its
+  // LEFT JOINs below): a required scope is one some run will actually ask the
+  // IdP for, and a deactivated agent — or an ORPHAN row, naming a package this
+  // space has lost — never runs. Counting it would raise the consent floor for
+  // an agent nobody can execute, and an IdP-side shrink below it would flag a
+  // healthy connection as under-scoped.
+  const { orgId, spaceId } = input.scope;
+  const active = await db
     .select({ draftManifest: packages.draftManifest })
-    .from(spacePackages)
-    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .where(and(eq(spacePackages.spaceId, input.scope.spaceId), eq(packages.type, "agent")));
+    .from(packages)
+    .leftJoin(
+      spacePackages,
+      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
+    )
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
+    )
+    .where(
+      and(
+        eq(packages.type, "agent"),
+        orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
+        activeHereSql(spaceId),
+      ),
+    );
 
   const required = new Set<string>();
 
-  for (const agent of placed) {
+  for (const agent of active) {
     if (!agent.draftManifest || typeof agent.draftManifest !== "object") continue;
     const integEntries = parseManifestIntegrations(agent.draftManifest as Record<string, unknown>);
     const entry = integEntries.find((e) => e.id === input.integrationId);

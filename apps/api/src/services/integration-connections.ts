@@ -455,7 +455,13 @@ export async function resolveIntegrationActivations(
       // not the package's provenance — so the catalogue join above serves the
       // placement question alone.
       active: isActiveHere({ id, type: "integration", source: null }, row, row?.placed ?? false),
-      blockUserConnections: row?.blockUserConnections ?? false,
+      // PLACEMENT gates the lock exactly as it gates `active` above, and it
+      // must: `isUserConnectionCreationBlocked`
+      // (`services/integration-connection-resolver.ts`) is the reader that
+      // ENFORCES this flag, and it conjoins the same rule — so an orphan row
+      // reported here as `true` would draw a padlock on the Integrations list
+      // and the detail page while `POST …/connect` let every member through.
+      blockUserConnections: (row?.placed ?? false) && row?.blockUserConnections === true,
     });
   }
   return result;

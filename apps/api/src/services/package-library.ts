@@ -17,7 +17,7 @@ import {
   packageAccessSpaces,
   packagePermission,
 } from "../lib/package-access.ts";
-import { isActiveWithoutRow } from "./package-activation.ts";
+import { isActiveHere } from "./package-activation.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 
@@ -290,32 +290,21 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
 }
 
 /**
- * Does this space RUN the package?
- *
- * The same rule the run gate, the hints and the index listing obey
- * (`services/package-activation.ts`), read one cell at a time: the placement
- * ROW always wins — `active` when it says `enabled`, `inactive` when it says
- * `false`, a system package included, because a switch that changes nothing is
- * worse than no switch. With NO row the deployment's default decides, and it
- * decides between `active` (a system package, an integration the deployment
- * offers) and `none` — a package placed here by its home or by an offer that
- * nobody has switched on yet.
- *
- * `none` is what the library renders as a pending offer, which is why an
- * unoffered default must not be folded into it: "nobody has taken this up" and
- * "somebody switched this off" are different facts about the space.
- *
- * The PLACEMENT half of the rule is settled before this is ever called: the
- * loop above builds a `Placement` only once `via` resolved to `home`,
- * `shared` or `system`, and skips the package otherwise. That is the same
- * conjunct `activeHereSql` carries in SQL, held here by the shape of the
- * caller rather than by a parameter — an ORPHAN row never reaches this
- * function to be rendered `inactive`.
+ * Does this space RUN the package? A PROJECTION of the one rule
+ * (`isActiveHere`, `services/package-activation.ts`), not a second statement of
+ * it: that rule answers `active`, and the other two labels only say why it
+ * answered no — `inactive` a row saying `false` (a system package included,
+ * because a switch that changes nothing is worse than no switch), `none` no row
+ * at all, which the library renders as a pending offer. Folding them together
+ * would lose the difference between "nobody has taken this up" and "somebody
+ * switched this off". PLACEMENT is settled by the caller — a `Placement` exists
+ * only once `via` resolved — so an ORPHAN row never reaches here to be rendered
+ * `inactive`, and `placed` is `true` by construction.
  */
 function placementState(
   pkg: { id: string; type: PackageType; source: string },
   enabled: boolean | undefined,
 ): PlacementState {
-  if (enabled !== undefined) return enabled ? "active" : "inactive";
-  return isActiveWithoutRow(pkg) ? "active" : "none";
+  const row = enabled === undefined ? undefined : { enabled };
+  return isActiveHere(pkg, row, true) ? "active" : row ? "inactive" : "none";
 }

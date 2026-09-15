@@ -478,6 +478,23 @@ buys is the members who will not log in soon — their space exists before someo
 shares a package to them. Idempotent; a second run inserts zero rows and
 `missing_personal_space_after` must print 0.
 
+### Next release — `0068 … VALIDATE CONSTRAINT`, and why it is not in this one
+
+`0067` adds `packages_org_package_has_home` `NOT VALID` and `0014` — an operator
+script — is what validates it, so the drizzle tree by itself never does: a fresh
+install keeps `pg_constraint.convalidated = false` for ever, and
+`docs/NO_TRANSITIONAL_CODE.md` §2's pattern (`ADD … NOT VALID` in one migration,
+`VALIDATE` in a later one) is left half-written. It cannot be closed HERE: step 5
+applies `0063`–`0067` as one boot batch BEFORE `0014` runs, so a
+`0068 … VALIDATE CONSTRAINT` inside that batch would scan `packages` while every
+`home_space_id` is still NULL, raise `23514` and roll the whole batch back — the
+deploy failing on the very migration meant to confirm it. The FOLLOW-UP release
+must therefore carry `0068_packages_org_home_validate.sql`, whose only statement
+is `ALTER TABLE "packages" VALIDATE CONSTRAINT "packages_org_package_has_home";`.
+By then `0014` has committed: it is a no-op on a database that ran it and on a
+fresh one, idempotent on replay, and on a deployment that skipped `0014` it fails
+loudly with `23514` — which is the intended failure, not an accident.
+
 ### Rollback — what is actually reversible
 
 Per file, and they do not agree:

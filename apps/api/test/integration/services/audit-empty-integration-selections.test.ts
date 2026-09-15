@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion, seedSchedule, seedSpace } from "../../helpers/seed.ts";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { spacePackages, packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -146,6 +146,34 @@ describe("auditEmptyIntegrationSelections", () => {
     expect(reachable[0]?.placedIn).toEqual([ctx.defaultSpaceId]);
     expect(reachable[0]?.activeIn).toEqual([]);
     expect(findings.filter(isBlocking)).toHaveLength(0);
+  });
+
+  // The report names spaces the agent can RUN in. A `space_packages` row is
+  // not that: switched off, or with nothing placing it, the agent runs nowhere
+  // and the space belongs in no finding.
+  it("does not name a space that merely holds a row", async () => {
+    await seedSplitAgent();
+    await db
+      .insert(spacePackages)
+      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, enabled: false });
+
+    let draft = (await auditEmptyIntegrationSelections()).find((f) => f.artifact === "draft");
+    expect(draft?.placedIn).toEqual([]);
+    expect(draft && isReachable(draft)).toBe(false);
+
+    // ORPHAN: switched back on, but re-homed elsewhere and offered to nobody.
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await db.update(packages).set({ homeSpaceId: elsewhere.id }).where(eq(packages.id, AGENT_ID));
+    await db
+      .update(spacePackages)
+      .set({ enabled: true })
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, AGENT_ID)),
+      );
+
+    draft = (await auditEmptyIntegrationSelections()).find((f) => f.artifact === "draft");
+    expect(draft?.placedIn).toEqual([]);
+    expect(draft && isReachable(draft)).toBe(false);
   });
 
   it("a healthy published default leaves its explicitly selectable broken draft as a warning", async () => {

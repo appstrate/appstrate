@@ -428,6 +428,57 @@ describe("Spaces API", () => {
       expect(body.object).toBe("space_package");
     });
 
+    /**
+     * An ORPHAN row — `space_packages` with neither a home nor a share behind
+     * it — is the inherited residue `scripts/migration/0016` repairs, and the
+     * placement rule reads it as absent everywhere. The UPDATE used to test
+     * for a ROW instead, so it landed on the orphan and the route's follow-up
+     * `getSpacePackage` (placement-joined) then found nothing: a 200 whose
+     * whole body was `{"object":"space_package"}`.
+     *
+     * The message "is not placed in this space" is now literally true.
+     */
+    it("404s on an ORPHAN row, writes nothing, and succeeds once a share PLACES the package", async () => {
+      const ORPHAN = "@testorg/orphan-row";
+      // Homed in ANOTHER team space of the org: the owner reaches it, so the
+      // route's gate passes and the refusal read below is the placement
+      // conjunct rather than an authorization refusal standing in for it.
+      const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+      await seedPackage({ id: ORPHAN, orgId: ctx.orgId, homeSpaceId: elsewhere.id });
+      // The row, and ONLY the row: no home here, no offer here.
+      await seedSpacePackage(ctx.defaultSpaceId, ORPHAN, { proxyId: "prx_before" });
+
+      const refused = await putPackage(ORPHAN, { proxyId: "prx_after" });
+      expect(refused.status, await refused.clone().text()).toBe(404);
+      expect(await refused.json()).toMatchObject({
+        code: "not_found",
+        detail: `Package '${ORPHAN}' is not placed in this space`,
+      });
+      // The write did not land on the orphan.
+      const [untouched] = await db
+        .select({ proxyId: spacePackages.proxyId })
+        .from(spacePackages)
+        .where(placementRowWhere(ORPHAN));
+      expect(untouched?.proxyId).toBe("prx_before");
+
+      // The discriminating control: same row, same request, one offer apart.
+      await seedPackageShare(ctx.defaultSpaceId, ORPHAN);
+
+      const ok = await putPackage(ORPHAN, { proxyId: "prx_after" });
+      expect(ok.status, await ok.clone().text()).toBe(200);
+      // The FULL body — pre-fix the orphan path answered 200 with nothing but
+      // `object`, because the follow-up read applies the placement rule.
+      expect((await ok.json()) as { packageId?: string }).toMatchObject({
+        object: "space_package",
+        packageId: ORPHAN,
+      });
+      const [written] = await db
+        .select({ proxyId: spacePackages.proxyId })
+        .from(spacePackages)
+        .where(placementRowWhere(ORPHAN));
+      expect(written?.proxyId).toBe("prx_after");
+    });
+
     it("refuses an `enabled` key — activation is not a setting on this body", async () => {
       // `enabled` left this route when activation got its own pair of doors.
       // `.strict()` makes the retired field FAIL loudly rather than be dropped

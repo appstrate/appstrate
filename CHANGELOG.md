@@ -429,7 +429,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `home_space_id` on package reads and on `GET /api/library`, and is moved by the
   new `PATCH /api/packages/{scope}/{name}`, whose `home_space_id` is a REQUIRED
   space id (`null` is a 400) and which requires that permission in both
-  the old and the new home (an unreachable destination answers 404). It is a
+  the old and the new home (an unreachable destination answers 404). A PERSONAL
+  space is never a destination — 409 `home_move_into_personal_space`: a personal
+  space homes only what is created or forked in it, and every member but a guest
+  holds `write` in their own, so the move would otherwise put a team's package
+  beyond every administrator's reach (nobody enters a personal space) for as
+  long as its owner stays a member; `POST …/fork` is the private copy. It is a
   read grant too, everywhere: the home is one of the two placements that make a
   package readable (the other is a SHARE), so a draft nobody has been offered —
   or one placed only where its author cannot go — stays visible to them, on the
