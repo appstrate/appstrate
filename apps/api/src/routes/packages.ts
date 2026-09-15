@@ -2160,13 +2160,10 @@ export function createPackagesRouter() {
       spaceId = destination.id;
     }
 
-    if (spaceId === pkg.homeSpaceId) {
-      throw conflict(
-        "share_target_is_home",
-        "This package already lives in that space — sharing it there would offer it to itself.",
-      );
-    }
-
+    // `share_target_is_home` is decided by `sharePackage`, under the lock that
+    // holds the home still for the length of the insert: the row read here was
+    // loaded before the target was resolved, and a concurrent home move would
+    // make a check on it a check on the wrong space.
     const { created } = await sharePackage({ packageId, spaceId, sharedBy: c.get("user").id });
     if (created) {
       await recordAuditFromContext(c, {

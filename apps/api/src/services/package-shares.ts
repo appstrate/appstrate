@@ -23,10 +23,12 @@ import { db } from "@appstrate/db/client";
 import {
   organizationMembers,
   packageShares,
+  packages,
   spacePackages,
   spaces,
   user,
 } from "@appstrate/db/schema";
+import { conflict, notFound } from "../lib/errors.ts";
 
 /**
  * The `user` row of the person who shared, joined ALONGSIDE the personal-space
@@ -66,18 +68,49 @@ function sharerView(row: {
  * Offer `packageId` to `spaceId`. Idempotent — a second share of the same pair
  * is a no-op, and `created` says which happened so the caller can skip the
  * notification and the audit event on a repeat.
+ *
+ * The home is re-read `FOR SHARE` and the refusal decided INSIDE the write's
+ * transaction, the same discipline `activatePackageWithin` applies for the same
+ * reason (`services/space-packages.ts`): `PATCH /api/packages/{scope}/{name}`
+ * rewrites `home_space_id` in a transaction of its own, so a check made on a
+ * row this call does not hold interleaves — the route reads home A, the move
+ * commits home B, and the insert writes an offer for the space the package now
+ * LIVES in. That row places nothing new (the home already places it) and the
+ * library renders `via: "home"` over it, so it is invisible rather than
+ * harmful — until the home moves again and a space nobody offered the package
+ * to finds it in its library. One transaction, one lock, and the refusal is
+ * decided against the home the insert is actually judged against.
+ *
+ * @throws 409 `share_target_is_home`; 404 if the package went away under the
+ *   caller's feet (the FK would refuse the insert anyway, less legibly).
  */
 export async function sharePackage(params: {
   packageId: string;
   spaceId: string;
   sharedBy: string;
 }): Promise<{ created: boolean }> {
-  const inserted = await db
-    .insert(packageShares)
-    .values(params)
-    .onConflictDoNothing()
-    .returning({ packageId: packageShares.packageId });
-  return { created: inserted.length > 0 };
+  const { packageId, spaceId, sharedBy } = params;
+  return db.transaction(async (tx) => {
+    const [pkg] = await tx
+      .select({ homeSpaceId: packages.homeSpaceId })
+      .from(packages)
+      .where(eq(packages.id, packageId))
+      .limit(1)
+      .for("share");
+    if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);
+    if (pkg.homeSpaceId === spaceId) {
+      throw conflict(
+        "share_target_is_home",
+        "This package already lives in that space — sharing it there would offer it to itself.",
+      );
+    }
+    const inserted = await tx
+      .insert(packageShares)
+      .values({ packageId, spaceId, sharedBy })
+      .onConflictDoNothing()
+      .returning({ packageId: packageShares.packageId });
+    return { created: inserted.length > 0 };
+  });
 }
 
 /**
