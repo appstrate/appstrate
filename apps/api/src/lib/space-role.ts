@@ -19,6 +19,8 @@ export interface SpaceAccessRow {
   id: string;
   visibility: SpaceVisibility;
   defaultRole: SpaceRolePreset;
+  /** Set on a personal space — the ONE member it belongs to (RBAC spec §3.6). */
+  ownerUserId: string | null;
 }
 
 export interface CustomSpaceRole {
@@ -39,12 +41,35 @@ export interface SpaceMemberRow {
 /**
  * `null` means no access. Callers turn that into 403 for `open`/`closed` and
  * 404 for `private` — a private space does not exist for someone not in it.
+ *
+ * `callerId` is the USER whose personal spaces are reachable, or `null` when
+ * the principal is not one: an API key (pinned to a space, and its creator's
+ * private drafts are not its business) or an end-user. Every caller passes it
+ * explicitly — a default would silently hand a key its creator's personal space.
  */
 export function resolveSpaceRole(
   orgRole: OrgRole,
   space: SpaceAccessRow,
   memberRow: SpaceMemberRow | null,
+  callerId: string | null,
 ): SpaceRoleRef | null {
+  // FIRST LINE, before the org role: a personal space belongs to one member and
+  // to nobody else (RBAC spec §3.6). An organization owner or admin gets
+  // `null` here, and every caller renders that as 404 — the space is `private`,
+  // so for them it does not exist. Converting it to a team space
+  // (`POST /api/spaces/{id}/convert-to-team`) is the one way in, and it is
+  // audited.
+  //
+  // The owner holds `admin` there — except a GUEST, who holds `operator`. A
+  // guest is an external identity with no implicit reach into any space (§3.2),
+  // invited to USE one thing; `admin` in their own space would let them author
+  // and launch arbitrary agents on the organization's LLM budget, which is the
+  // one thing their org role exists to withhold. `operator` is receive-and-run:
+  // exactly what a space shared TO them is for.
+  if (space.ownerUserId !== null) {
+    if (space.ownerUserId !== callerId) return null;
+    return { kind: "preset", preset: orgRole === "guest" ? "operator" : "admin" };
+  }
   // By org role, which is why an explicit row for them is refused at write.
   if (orgRole === "owner" || orgRole === "admin") return { kind: "preset", preset: "admin" };
   // Explicit beats implicit: a `viewer` row in a `builder`-default open space

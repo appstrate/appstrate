@@ -64,6 +64,7 @@ export const spacesPaths = {
                 },
                 visibility: "open",
                 default_role: "operator",
+                personal: false,
                 access: "member",
                 role: { kind: "preset", key: "admin", name: "admin" },
                 permissions: ["agents:read", "agents:run"],
@@ -121,6 +122,7 @@ export const spacesPaths = {
                     settings: { allowedRedirectDomains: [] },
                     visibility: "open",
                     default_role: "operator",
+                    personal: false,
                     access: "member",
                     role: { kind: "preset", key: "operator", name: "operator" },
                     permissions: ["agents:read", "agents:run"],
@@ -137,6 +139,7 @@ export const spacesPaths = {
                     settings: { allowedRedirectDomains: ["myapp.com"] },
                     visibility: "closed",
                     default_role: "operator",
+                    personal: false,
                     access: "none",
                     role: null,
                     permissions: ["org:read", "spaces:read"],
@@ -189,7 +192,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Update a space",
       description:
-        "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400.",
+        "Update space name, settings, visibility or default role. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility` or `default_role` is a 409 `personal_space_immutable`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -250,6 +253,15 @@ export const spacesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The space is a personal space and the body changes more than its name (`personal_space_immutable`).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
@@ -257,7 +269,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Delete a space",
       description:
-        "Delete a space and all associated end-users. The default space cannot be deleted.",
+        "Delete a space and all associated end-users. The default space cannot be deleted; neither can a space with runs in progress (the delete cascade-drops `runs`, which would rip the rows out from under a live container), nor one that is the home of one or more packages (`packages.home_space_id`, the space whose `<type>:write` governs them): move those with `PATCH /api/packages/{scope}/{name}` first. A personal space is not deletable here at all — it goes away through offboarding, once its owner has left the organization; a live personal space that is not the caller's own answers 404 rather than 409, and an API key is never its owner (a key carries its creator's authority, not their privacy), so it gets the 404 too.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -271,16 +283,97 @@ export const spacesPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/spaces/{id}/convert-to-team": {
+    post: {
+      operationId: "convertSpaceToTeam",
+      tags: ["Spaces"],
+      summary: "Convert a personal space to a team space",
+      description:
+        "Turn an ORPHANED personal space — one whose owner has left the organization — into an ordinary team space: it stops belonging to them, the offboarding window (`orphaned_at`) is cleared, and its `visibility` stays `private`. This is what keeps what a departing member built, and the ONE way an administrator reaches what is inside a personal space; it is recorded in the audit log (`space.converted_to_team`). A LIVE personal space is refused — an active member's private workspace is not administrable — and refused as a **404** to anybody but its owner, because a 409 there would confirm that the id is somebody's personal space. Requires the org-level `spaces:write` (owner or admin); API keys are refused.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "The space, now a team space",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SpaceObject" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The space is already a team space (`space_not_personal`), or it is the CALLER'S OWN personal space and its owner — them — is still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404, not 409.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+  },
+  "/api/spaces/{id}/sweep-now": {
+    post: {
+      operationId: "sweepPersonalSpace",
+      tags: ["Spaces"],
+      summary: "Sweep an orphaned personal space now",
+      description:
+        "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either re-homed to the organization's default space (when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "The space was swept",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SpaceSweepResult" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "Runs are in progress in the space (`space_has_active_runs`) — the sweep deletes the space, whose cascade drops `runs`, so it refuses for the same reason `DELETE` does and before it has emptied anything —, the space is a team space (`space_not_personal`), it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`), or the organization has no default space to re-home the swept packages into (`organization_has_no_default_space`): a package the organization still runs elsewhere has to land somewhere, and the default space is where a package that belongs to no team lives. Give the organization a default space and re-run. Somebody else's live personal space answers 404.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
   "/api/spaces/{spaceId}/packages": {
     get: {
-      operationId: "listInstalledPackages",
+      operationId: "listSpacePackages",
       tags: ["Space Packages"],
-      summary: "List installed packages",
+      summary: "List this space's package placements",
       description:
-        "List packages installed in this space, with their model/proxy/version overrides. Returns only package types the caller has permission to read, within the credential scope ceiling.",
+        "List the packages PLACED in this space — active and inactive alike — with their `enabled` flag and their model/proxy overrides. A row survives deactivation, so an inactive entry still carries the settings the space chose. Returns only package types the caller has permission to read, within the credential scope ceiling.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -294,7 +387,7 @@ export const spacesPaths = {
       ],
       responses: {
         "200": {
-          description: "Installed packages list",
+          description: "Placement list",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -322,10 +415,17 @@ export const spacesPaths = {
       },
     },
     post: {
-      operationId: "installPackage",
+      operationId: "activatePackage",
       tags: ["Space Packages"],
-      summary: "Install a package",
-      description: "Install a package from the organization catalog into this space.",
+      summary: "Activate a package in this space",
+      description:
+        "Activate a package here — the ONE activation door, for every package type, for a personal space as for a team one. " +
+        "Idempotent: a package that is already active answers `200` with the same body, and one that was switched off comes back with the per-space model, proxy and input settings it kept. " +
+        "A package must be PLACED here first: homed in this space, or shared with it (`POST /api/packages/{scope}/{name}/shares`); system packages are placed everywhere. " +
+        "If it is not, this call can create the share itself, but only for a caller holding the package type's `share` permission in the package's HOME space — `403` otherwise, `404` when the package id is not reachable at all. " +
+        "An API key never carries `share`, so it activates only what is already placed. " +
+        "In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest takes up a package offered to them. " +
+        "The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -350,8 +450,19 @@ export const spacesPaths = {
         },
       },
       responses: {
+        "200": {
+          description:
+            "Already active here — nothing changed. A package the deployment switches on without any placement row (a system package, an integration named by `SYSTEM_INTEGRATIONS`) was active before this call, so its first activation answers `200` too and writes no audit entry.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/SpacePackage" },
+            },
+          },
+        },
         "201": {
-          description: "Package installed",
+          description:
+            "This call turned the package on here — it was not active before, and now it is.",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -361,13 +472,27 @@ export const spacesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The caller lacks the package type's activation grant in this space, or — for a package not yet placed here — its `share` permission in the package's home space.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description: "Package already installed in this space",
+        "422": {
+          description:
+            "The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json.",
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
+              example: {
+                type: "about:blank",
+                title: "Invalid MCP Server Bundle",
+                status: 422,
+                detail: "MCP-server package '@myorg/tools' has no activatable published version.",
+                code: "bundle_invalid",
+                requestId: "req_abc123",
+              },
             },
           },
         },
@@ -376,10 +501,11 @@ export const spacesPaths = {
   },
   "/api/spaces/{spaceId}/packages/{scope}/{name}": {
     get: {
-      operationId: "getInstalledPackage",
+      operationId: "getSpacePackage",
       tags: ["Space Packages"],
-      summary: "Get installed package",
-      description: "Get an installed package detail with its model/proxy/version overrides.",
+      summary: "Get one placement",
+      description:
+        "Get one of this space's package placements with its `enabled` flag and its model and proxy overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -388,7 +514,7 @@ export const spacesPaths = {
       ],
       responses: {
         "200": {
-          description: "Installed package detail",
+          description: "Placement detail",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -402,11 +528,13 @@ export const spacesPaths = {
       },
     },
     put: {
-      operationId: "updateInstalledPackage",
+      operationId: "updateSpacePackage",
       tags: ["Space Packages"],
-      summary: "Update installed package overrides",
+      summary: "Configure how this space runs a placed package",
       description:
-        "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
+        "Update the model/proxy overrides and generation settings of a package PLACED in this space. Requires the package type's `configure` grant, personal space included: selecting a model spends the organization's budget. " +
+        "There is no `enabled` field: activating and deactivating are their own acts, on `POST /api/spaces/{spaceId}/packages` and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`, where the placement rule and the offer that may have to be created with it are stated once. Sending it is a `400`. " +
+        "There is no version field either: a placement carries no version — outside its home space a package runs its latest published version, and its draft runs for whoever can write it. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -427,8 +555,6 @@ export const spacesPaths = {
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
-                version_id: { type: ["integer", "null"] },
-                enabled: { type: "boolean" },
               },
               additionalProperties: false,
             },
@@ -437,7 +563,7 @@ export const spacesPaths = {
       },
       responses: {
         "200": {
-          description: "Updated installed package",
+          description: "Updated placement",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
@@ -447,15 +573,19 @@ export const spacesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description: "The caller lacks the package type's `configure` grant in this space.",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
     delete: {
-      operationId: "uninstallPackage",
+      operationId: "deactivatePackage",
       tags: ["Space Packages"],
-      summary: "Uninstall a package",
-      description: "Remove a package from this space.",
+      summary: "Deactivate a package in this space",
+      description:
+        "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only revoking the share that placed the package removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row and is not a system package: an offer nobody has taken up is not on, so there is nothing to switch off, and it stays an offer rather than becoming a refusal its recipient never made.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -463,7 +593,9 @@ export const spacesPaths = {
         { $ref: "#/components/parameters/PackageName" },
       ],
       responses: {
-        "204": { description: "Package uninstalled" },
+        "204": {
+          description: "Switched off here, or already off. No audit entry when nothing changed.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -476,7 +608,7 @@ export const spacesPaths = {
       tags: ["Space Packages"],
       summary: "Get the resolved per-space run configuration",
       description:
-        "Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.",
+        "Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, and the stored input layer (editor values plus locked fields). It carries no version — which bytes run is decided per launch by the `version` selector, defaulting to the latest published version. Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
@@ -491,7 +623,7 @@ export const spacesPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["generation", "modelId", "proxyId", "version_pin", "input"],
+                required: ["generation", "modelId", "proxyId", "input"],
                 properties: {
                   generation: {
                     oneOf: [
@@ -501,7 +633,6 @@ export const spacesPaths = {
                   },
                   modelId: { type: ["string", "null"] },
                   proxyId: { type: ["string", "null"] },
-                  version_pin: { type: ["string", "null"] },
                   input: {
                     type: "object",
                     allOf: [{ $ref: "#/components/schemas/AgentInputSettings" }],
@@ -514,7 +645,6 @@ export const spacesPaths = {
                 generation: { temperature: 0.2, reasoningLevel: "high" },
                 modelId: "claude-sonnet-4-6",
                 proxyId: null,
-                version_pin: "1.2.3",
                 input: { values: { dry_run: true }, locked_fields: ["dry_run"] },
               },
             },

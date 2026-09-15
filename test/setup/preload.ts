@@ -427,6 +427,21 @@ createAuth({
 const { buildModuleInitContext } = await import("../../apps/api/src/lib/modules/registry.ts");
 await loadModulesFromInstances(importedModules, buildModuleInitContext());
 
+// Phase 4: seed the system-integration registry once, for the whole run.
+// `isSystemIntegration()` fails fast on access-before-init — boot.ts calls
+// `initSystemIntegrations()` before any request is served, and the accessor
+// throws rather than lazily self-initializing. A test file that drives an
+// activation service directly instead of through HTTP
+// (`activatePackageWithin` → `isActiveHere` → `isSystemIntegration`) never
+// reaches that boot step, so the registry has to be armed here, next to the
+// other process-wide singletons. Empty is the canonical test baseline: the
+// deployment offers no system integration unless a file seeds one with
+// `initSystemIntegrations([...])`, and `__resetSystemIntegrationsForTest()`
+// returns to exactly this state.
+const { initSystemIntegrations } =
+  await import("../../apps/api/src/services/integration-client-registry.ts");
+initSystemIntegrations([]);
+
 // Mirror the production post-bootstrap wiring (boot.ts) so the bootstrap
 // after-hook does the same provisioning under test as it does in prod.
 // Without this, the bootstrap test would only ever see the org row — the

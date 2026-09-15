@@ -3,8 +3,9 @@
 /** Shared file editor against the real API. @tags @critical */
 import { zipSync } from "fflate";
 const encoder = new TextEncoder();
-import { test, expect } from "../../fixtures/browser.fixture.ts";
-import { createAgent, createSkill } from "../../helpers/seed.ts";
+import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
+import { createAgent, createSkill, createSpace, registerUser } from "../../helpers/seed.ts";
+import { E2E_BASE_URL } from "../../helpers/base-url.ts";
 import type { ApiClient } from "../../helpers/api-client.ts";
 import { PackageEditorPage } from "../../pages/package-editor-page.ts";
 import {
@@ -473,4 +474,71 @@ test("discarding a new package's files creates nothing on the server", async ({
   await editor.dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
   await expect(page).toHaveURL("/agents");
   expect(writes).toEqual([]);
+});
+
+test("a MCP home author edits files while browsing a read-only placement", async ({
+  request,
+  browser,
+  browserCtx,
+  orgOnlyClient,
+  apiClient,
+}) => {
+  const { orgId, orgSlug, defaultSpaceId: homeId } = browserCtx.org;
+  const scope = `@${orgSlug}`;
+  const name = `home-mcp-${Date.now()}`;
+  const id = `${scope}/${name}`;
+  const destination = await createSpace(orgOnlyClient, "Read-only destination");
+  const destinationId = destination.id;
+  const zip = zipSync({
+    "manifest.json": encoder.encode(JSON.stringify(mcpServerManifest({ name: id }))),
+    "main.js": encoder.encode("export {};"),
+  });
+  const imported = await request.post("/api/packages/import", {
+    headers: { Cookie: browserCtx.auth.cookie, "X-Org-Id": orgId, "X-Space-Id": homeId },
+    multipart: {
+      file: { name: "server.afps", mimeType: "application/zip", buffer: Buffer.from(zip) },
+    },
+  });
+  expect(imported.status()).toBe(201);
+  expect(
+    (await apiClient.post(`/spaces/${destinationId}/packages`, { packageId: id })).status(),
+  ).toBe(201);
+  const author = await registerUser(request);
+  const invitation = await orgOnlyClient.post(`/orgs/${orgId}/members`, {
+    email: author.email,
+    role: "guest",
+    space_assignments: [
+      { space_id: homeId, preset_role: "builder" },
+      { space_id: destinationId, preset_role: "viewer" },
+    ],
+  });
+  expect(invitation.status()).toBe(201);
+  expect(
+    (
+      await request.post(`/invite/${(await invitation.json()).token}/accept`, {
+        headers: { Cookie: author.cookie, Origin: E2E_BASE_URL },
+      })
+    ).status(),
+  ).toBe(200);
+  const context = await createAuthedContext(browser, author, orgId, destinationId);
+  try {
+    const page = await context.newPage();
+    const editor = new PackageEditorPage(page, scope, name, "mcp-servers");
+    await editor.goto();
+    await editor.openFilesTab();
+    await editor.createFile("notes.txt");
+    await editor.typeIntoEditor("notes.txt", "Written by the home author");
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().includes(`/packages/mcp-servers/${id}`),
+    );
+    await editor.saveButton.click();
+    expect((await saved).status()).toBe(200);
+    expect(
+      (await listFiles(apiClient, id)).find((entry) => entry.path === "notes.txt")?.inline,
+    ).toBe("Written by the home author");
+  } finally {
+    await context.close();
+  }
 });

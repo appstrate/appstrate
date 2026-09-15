@@ -210,7 +210,10 @@ export interface IntegrationOrgDefault {
   updatedAt: string;
 }
 
-/** An installed agent that declares a given integration as a dependency. */
+/**
+ * An agent ACTIVE in the space — placed here and switched on, or on by the
+ * deployment's default — that declares a given integration as a dependency.
+ */
 export interface ConsumingAgentSummary {
   packageId: string;
   display_name: string;

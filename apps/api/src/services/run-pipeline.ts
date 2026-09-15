@@ -25,7 +25,7 @@ import {
   type IntegrationManifestCache,
   type ResolvedIntegrationVersionMap,
 } from "./integration-service.ts";
-import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
+import { assertDependencyOverrideKeysDeclared } from "../lib/launch-schemas.ts";
 import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
@@ -170,7 +170,7 @@ interface RunPipelineSuccess {
  *
  * Returns nothing: readiness is a gate, and the per-space run settings
  * (model, generation config, proxy) are read by each origin from the
- * `InstalledPackageSettings` row it already loaded to resolve the input
+ * `SpacePackageSettings` row it already loaded to resolve the input
  * layers — projecting them back through here only duplicated that read.
  *
  * Connection overrides are forwarded to readiness so a caller that
@@ -212,7 +212,7 @@ export async function resolveRunPreflight(params: {
   // --- Seed the manifest memo with the PINNED integration manifests ---
   //
   // Readiness reads every declared integration's manifest three times over
-  // (manifest-health gate, install/enable gate, connection cascade), all
+  // (manifest-health gate, activation gate, connection cascade), all
   // through this memo. Unseeded, `fetchIntegrationManifest` falls through to
   // `packages.draft_manifest` — so readiness judged manifest health, required
   // scopes and auth keys against the integration AUTHOR'S LIVE DRAFT, while
@@ -235,7 +235,7 @@ export async function resolveRunPreflight(params: {
   // though that is the pin's single enforcement point for a run. That function
   // is a GATE: calling it here would move its 422 (unsatisfiable /
   // never-published pin) and 400 (undeclared override key) ahead of EVERY
-  // readiness check, so an agent whose integration is merely uninstalled,
+  // readiness check, so an agent whose integration is merely inactive,
   // disabled, or carrying an invalid draft manifest would stop reporting
   // `integration_not_active` / `integration_invalid_manifest` / `not_connected`
   // and report an unresolved dependency instead — measured at 9 of the 15 cases
@@ -290,6 +290,9 @@ export async function resolveRunPreflight(params: {
  *
  *   - Rejects an override KEY that names no declared skill/integration with a
  *     400 (the "fails silently on the key axis" trap the value gate can't see).
+ *     Every HTTP launch surface has already made that refusal, BEFORE its own
+ *     draft-authority gate, so this restates it for the one caller that arrives
+ *     with no request behind it: the scheduler's fire.
  *   - Seeds the shared `manifestCache` (when given) so every kickoff reader
  *     threading it honors the pin with no per-caller change.
  *   - Throws a structured `dependency_unresolved` (422) on an unsatisfiable /
@@ -308,22 +311,14 @@ export async function freezeRunSpawnDependencies(params: {
   dependencyOverrides?: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
 }): Promise<ResolvedIntegrationVersionMap> {
-  if (params.dependencyOverrides) {
-    const declaredDeps = collectOverridableDependencyIds(
-      params.agent.manifest as Record<string, unknown>,
-    );
-    const unknownKey = Object.keys(params.dependencyOverrides).find(
-      (key) => !declaredDeps.has(key),
-    );
-    if (unknownKey) {
-      throw new ApiError({
-        status: 400,
-        code: "invalid_request",
-        title: "Bad Request",
-        detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill or integration dependency of this agent`,
-      });
-    }
-  }
+  // The same refusal the HTTP surfaces already made, restated for the callers
+  // that reach here without one: the scheduler's fire, which runs with no
+  // request. Idempotent by construction — a key this rejects never made it
+  // past a launch route.
+  assertDependencyOverrideKeysDeclared(
+    params.agent.manifest as Record<string, unknown>,
+    params.dependencyOverrides,
+  );
 
   const resolved = await resolveRunIntegrationVersions({
     agentManifest: params.agent.manifest as Record<string, unknown>,
@@ -707,7 +702,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   });
 
   // Degradation marker — one `warn` run log per integration the agent
-  // declared but that could not be resolved (not installed / not connected /
+  // declared but that could not be resolved (not active / not connected /
   // unresolvable reference). Without it a run that started with a subset of
   // its tools is indistinguishable from an agent that chose not to call them.
   // Awaited (not fire-and-forget like the breadcrumbs above) so the marker is

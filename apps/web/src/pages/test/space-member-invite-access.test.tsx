@@ -43,6 +43,7 @@ function pageFor(
     settings: {},
     visibility: options.visibility ?? "open",
     default_role: "viewer",
+    personal: false,
     access: "member",
     role: null,
     permissions,

@@ -26,15 +26,17 @@
  * input, report the drop on read.
  */
 
+import { asRecord } from "@appstrate/core/safe-json";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion, seedSpacePackage } from "../../helpers/seed.ts";
 import { seedDefaultOrgModel } from "../../helpers/run-connection-fixtures.ts";
 import { resolveRegistryAgent } from "../../../src/services/registry-run-resolver.ts";
 import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
+import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { buildRunContext } from "../../../src/services/run-context-builder.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { validateInlineManifest } from "../../../src/services/inline-manifest-validation.ts";
@@ -77,8 +79,13 @@ describe("publish_file across every launch path", () => {
   });
 
   it("drops an unknown id from a stored published manifest, and does not guess", async () => {
-    await seedPackage({ orgId: ctx.orgId, id: "@compatorg/published", type: "agent" });
-    await seedInstalledPackage(ctx.defaultSpaceId, "@compatorg/published");
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@compatorg/published",
+      type: "agent",
+      homeSpaceId: ctx.defaultSpaceId,
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, "@compatorg/published");
     // A PUBLISHED version is immutable by construction — it cannot be repaired
     // in place, so this is the strictest case for the read direction: a hard
     // enum rejection here would make the agent permanently unrunnable.
@@ -159,7 +166,7 @@ describe("publish_file across every launch path", () => {
       },
       draftContent: "Do the thing.",
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, "@compatorg/draft-agent");
+    await seedSpacePackage(ctx.defaultSpaceId, "@compatorg/draft-agent");
 
     // Exactly what `routes/runs.ts` puts on the context via `c.get("package")`.
     const agent = await getPackage("@compatorg/draft-agent", ctx.orgId);
@@ -190,8 +197,8 @@ describe("publish_file across every launch path", () => {
       },
       draftContent: "Do the thing.",
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, "@compatorg/scheduled");
-    await seedPackageVersion({
+    await seedSpacePackage(ctx.defaultSpaceId, "@compatorg/scheduled");
+    const published = await seedPackageVersion({
       packageId: "@compatorg/scheduled",
       version: "1.0.0",
       manifest: {
@@ -204,6 +211,12 @@ describe("publish_file across every launch path", () => {
         runtime_tools: ["log", "publish_file"],
       },
     });
+
+    await uploadPackageZip(
+      "@compatorg/scheduled",
+      "1.0.0",
+      buildMinimalZip(asRecord(published.manifest), "Published prompt.", "prompt.md"),
+    );
 
     const draftAgent = await getPackage("@compatorg/scheduled", ctx.orgId);
     const resolved = await resolveAgentRunVersion(draftAgent!, "1.0.0");

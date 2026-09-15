@@ -111,7 +111,7 @@ export const apiKeysPaths = {
       tags: ["API Keys"],
       summary: "Create an API key",
       description:
-        "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later.",
+        "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later. The key is bound to the space named by `X-Space-Id`, which must be a TEAM space: a personal space takes no keys (409 `personal_space_takes_no_keys`), because a key carries no user and so could never resolve one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -186,6 +186,15 @@ export const apiKeysPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description:
+            "The current space is a personal space (`personal_space_takes_no_keys`). API keys are team-space only.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },

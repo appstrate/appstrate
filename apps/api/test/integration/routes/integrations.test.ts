@@ -20,7 +20,7 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { eq, and } from "drizzle-orm";
 import {
   integrationConnections,
@@ -138,13 +138,19 @@ function remoteMcpManifest(name = "@myorg/remote-mcp"): IntegrationManifest {
   } as unknown as IntegrationManifest;
 }
 
-async function seedIntegration(orgId: string, manifest: IntegrationManifest) {
+/**
+ * `homeSpaceId` is the PLACEMENT, not decoration: a `space_packages` row only
+ * speaks for a space the package is placed in, so an integration seeded with
+ * no home and activated in a space would read as inactive everywhere.
+ */
+async function seedIntegration(orgId: string, manifest: IntegrationManifest, homeSpaceId?: string) {
   return seedPackage({
     id: manifest.name,
     orgId,
     type: "integration",
     source: "local",
     draftManifest: manifest,
+    ...(homeSpaceId ? { homeSpaceId } : {}),
   });
 }
 
@@ -169,7 +175,7 @@ describe("GET /api/integrations", () => {
   });
 
   it("decorates `active: true` when the integration is activated in the space", async () => {
-    const pkg = await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    const pkg = await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"), ctx.defaultSpaceId);
     await db.insert(spacePackages).values({
       spaceId: ctx.defaultSpaceId,
       packageId: pkg.id,
@@ -448,60 +454,71 @@ describe("GET /api/integrations/:packageId", () => {
   });
 });
 
-describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", () => {
+describe("activation goes through the spaces doors, for an integration like anything else", () => {
+  // There is no per-type activation route: activating is one act with one pair
+  // of doors, whatever the package type (RBAC spec §6.10). The two behaviours
+  // an integration needs — the sticky opt-out and the idempotence — are
+  // properties of those doors, and this block pins them there.
   let ctx: TestContext;
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
 
-  it("activates and deactivates the integration in the current space", async () => {
-    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    const activate = await app.request("/api/integrations/@myorg/gmail/activate", {
+  const activate = (packageId: string) =>
+    app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ packageId }),
     });
-    expect(activate.status).toBe(201);
-    const body = (await activate.json()) as {
-      active: boolean;
-      block_user_connections: boolean;
-      manifest: { name: string };
-      auths: unknown[];
-      tool_catalog: unknown[];
-      allow_undeclared_tools: boolean;
-    } & Record<string, unknown>;
-    // 201 + the bare integration detail resource (#657): same shape as
-    // GET /:packageId — activation state is the resource's `active` field,
-    // no `activated_at` operation scrap.
-    expect(body.active).toBe(true);
-    expect(body.block_user_connections).toBe(false);
-    expect("activated_at" in body).toBe(false);
-    expect(body.manifest.name).toBe("@myorg/gmail");
-    expect(Array.isArray(body.auths)).toBe(true);
-    expect(Array.isArray(body.tool_catalog)).toBe(true);
-    expect(typeof body.allow_undeclared_tools).toBe("boolean");
 
-    const activeRow = await db
-      .select()
-      .from(spacePackages)
-      .where(
-        and(
-          eq(spacePackages.spaceId, ctx.defaultSpaceId),
-          eq(spacePackages.packageId, "@myorg/gmail"),
-        ),
-      );
-    expect(activeRow).toHaveLength(1);
-
-    const deactivate = await app.request("/api/integrations/@myorg/gmail/deactivate", {
+  const deactivate = (packageId: string) =>
+    app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${packageId}`, {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
-    // DELETE → 204 empty (#657): deactivation flips `enabled` to false (the
-    // row persists — it is the explicit opt-out, not a delete). The detail
-    // stays GET-able afterwards and serves `active: false`.
-    expect(deactivate.status).toBe(204);
-    expect(await deactivate.text()).toBe("");
+
+  const placement = (packageId: string) =>
+    db
+      .select({ enabled: spacePackages.enabled })
+      .from(spacePackages)
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, packageId)),
+      );
+
+  it("answers 404 on the retired per-type routes", async () => {
+    // A retired name FAILS, it does not quietly keep working
+    // (`docs/NO_TRANSITIONAL_CODE.md` §1). Hono has no route left to match.
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    const activated = await app.request("/api/integrations/@myorg/gmail/activate", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(activated.status).toBe(404);
+    const deactivated = await app.request("/api/integrations/@myorg/gmail/deactivate", {
+      method: "DELETE",
+      headers: authHeaders(ctx),
+    });
+    expect(deactivated.status).toBe(404);
+  });
+
+  it("activates and deactivates the integration in the current space", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    const res = await activate("@myorg/gmail");
+    expect(res.status, await res.clone().text()).toBe(201);
+    expect(await res.json()).toMatchObject({ object: "space_package", enabled: true });
+    expect(await placement("@myorg/gmail")).toEqual([{ enabled: true }]);
+
+    const detail = await app.request("/api/integrations/@myorg/gmail", {
+      headers: authHeaders(ctx),
+    });
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({ active: true });
+
+    const off = await deactivate("@myorg/gmail");
+    expect(off.status, await off.clone().text()).toBe(204);
+    expect(await off.text()).toBe("");
 
     const detailAfter = await app.request("/api/integrations/@myorg/gmail", {
       headers: authHeaders(ctx),
@@ -521,87 +538,83 @@ describe("POST /api/integrations/:packageId/activate + DELETE .../deactivate", (
     expect(typeof detailBody.allow_undeclared_tools).toBe("boolean");
     // The row survives, flagged disabled — this is the sticky opt-out, not a
     // delete (deleting would let a system integration re-trigger auto-active).
-    const after = await db
-      .select({ enabled: spacePackages.enabled })
-      .from(spacePackages)
-      .where(
-        and(
-          eq(spacePackages.spaceId, ctx.defaultSpaceId),
-          eq(spacePackages.packageId, "@myorg/gmail"),
-        ),
-      );
-    expect(after).toHaveLength(1);
-    expect(after[0]?.enabled).toBe(false);
+    expect(await placement("@myorg/gmail")).toEqual([{ enabled: false }]);
   });
 
-  it("refuses to activate a non-integration package as integration (409)", async () => {
-    await seedPackage({
-      id: "@myorg/agent-x",
-      orgId: ctx.orgId,
-      type: "agent",
-      source: "local",
-    });
-    const res = await app.request("/api/integrations/@myorg/agent-x/activate", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    expect(res.status).toBe(409);
-  });
-
-  it("is idempotent on repeat activate", async () => {
-    // Activation is a flag upsert (enabled=true), so re-activating an already
-    // active integration is a no-op success — not a 409. This is what lets a
-    // disabled (opt-out) integration be re-activated cleanly.
+  it("is idempotent on repeat activation — 201 then 200, one row", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
-    const first = await app.request("/api/integrations/@myorg/gmail/activate", {
-      method: "POST",
-      headers,
-      body: "{}",
-    });
-    expect(first.status).toBe(201);
-    const dup = await app.request("/api/integrations/@myorg/gmail/activate", {
-      method: "POST",
-      headers,
-      body: "{}",
-    });
-    expect(dup.status).toBe(201);
-
-    // Exactly one row, enabled.
-    const rows = await db
-      .select({ enabled: spacePackages.enabled })
-      .from(spacePackages)
-      .where(
-        and(
-          eq(spacePackages.spaceId, ctx.defaultSpaceId),
-          eq(spacePackages.packageId, "@myorg/gmail"),
-        ),
-      );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.enabled).toBe(true);
+    const first = await activate("@myorg/gmail");
+    expect(first.status, await first.clone().text()).toBe(201);
+    const dup = await activate("@myorg/gmail");
+    expect(dup.status, await dup.clone().text()).toBe(200);
+    expect(await placement("@myorg/gmail")).toEqual([{ enabled: true }]);
   });
 
-  it("re-activates a deactivated integration (opt-out cleared)", async () => {
+  it("reactivates a deactivated integration (opt-out cleared)", async () => {
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
-    const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
-    await app.request("/api/integrations/@myorg/gmail/activate", {
-      method: "POST",
-      headers,
-      body: "{}",
-    });
-    await app.request("/api/integrations/@myorg/gmail/deactivate", {
-      method: "DELETE",
+    expect((await activate("@myorg/gmail")).status).toBe(201);
+    expect((await deactivate("@myorg/gmail")).status).toBe(204);
+    // 201: the status reports what the CALL did, and this one turned the
+    // integration back on.
+    const back = await activate("@myorg/gmail");
+    expect(back.status, await back.clone().text()).toBe(201);
+    expect(await placement("@myorg/gmail")).toEqual([{ enabled: true }]);
+    const detail = await app.request("/api/integrations/@myorg/gmail", {
       headers: authHeaders(ctx),
     });
-    const reactivate = await app.request("/api/integrations/@myorg/gmail/activate", {
-      method: "POST",
-      headers,
-      body: "{}",
+    expect(await detail.json()).toMatchObject({ active: true });
+  });
+
+  it("materializes the sticky opt-out of an integration the deployment OFFERS", async () => {
+    // The shape an offered integration is in before anybody touches it: active
+    // with NO placement row. Deactivating has to WRITE the row that says
+    // `false`, or the deployment's default turns it back on at the next run.
+    await seedPackage({
+      id: "@myorg/homed",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: gmailManifest("@myorg/homed"),
     });
-    expect(reactivate.status).toBe(201);
-    const body = (await reactivate.json()) as { active: boolean };
-    expect(body.active).toBe(true);
+    initSystemIntegrations([{ id: "@myorg/homed", clients: [] }]);
+    expect(await placement("@myorg/homed")).toEqual([]);
+    expect((await deactivate("@myorg/homed")).status).toBe(204);
+    expect(await placement("@myorg/homed")).toEqual([{ enabled: false }]);
+  });
+
+  it("refuses to switch off a package that is not on and has no row", async () => {
+    // An offer nobody took up, or an integration the deployment does not offer:
+    // there is nothing to switch off, and writing `enabled: false` would turn a
+    // pending offer into a refusal its recipient never made.
+    await seedPackage({
+      id: "@myorg/unoffered",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: gmailManifest("@myorg/unoffered"),
+    });
+    expect((await deactivate("@myorg/unoffered")).status).toBe(404);
+    expect(await placement("@myorg/unoffered")).toEqual([]);
+  });
+
+  it("refuses to deactivate a package the space has no placement for (404)", async () => {
+    // The negative control on the deactivate door: it has no `shareBy` escape
+    // hatch, so the placement rule is the whole answer. A package homed in
+    // ANOTHER space and offered to nobody is not placed here, and the id is
+    // not confirmed to exist.
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    await seedPackage({
+      id: "@myorg/elsewhere",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      homeSpaceId: other.id,
+      draftManifest: gmailManifest("@myorg/elsewhere"),
+    });
+    expect((await deactivate("@myorg/elsewhere")).status).toBe(404);
+    expect(await placement("@myorg/elsewhere")).toEqual([]);
   });
 });
 

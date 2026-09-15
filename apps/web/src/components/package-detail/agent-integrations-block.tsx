@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Loader2, Puzzle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
-  useActivateIntegration,
   useIntegrations,
   useIntegrationDetail,
   useIntegrationAgentResolution,
@@ -14,6 +14,10 @@ import {
   type IntegrationCandidate,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
+import { useSetPackageActive } from "../../hooks/use-library";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
+import { maySetPackageActive } from "../../lib/package-permissions";
 import { connectionDisplayLabel } from "../integration-connect/connection-label";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import { resolutionBlocksRun } from "../integration-connect/integration-run-readiness";
@@ -45,7 +49,7 @@ interface AgentIntegrationsBlockProps {
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
-  // The list carries `active` (installed + enabled in this space). An agent can
+  // The list carries `active` (placed here and switched on). An agent can
   // declare an integration that was never activated here (or got disabled);
   // those cards render a read-only "not active" state instead of a connect
   // affordance, mirroring the run-time `integration_not_active` gate.
@@ -78,7 +82,7 @@ interface IntegrationConnectionCardProps {
   packageId: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
-  /** Whether the integration is active (installed + enabled) in this space. */
+  /** Whether the integration is active — placed in this space and switched on. */
   appActive: boolean;
   agentPackageId?: string;
 }
@@ -90,9 +94,14 @@ function IntegrationConnectionCard({
   appActive,
   agentPackageId,
 }: IntegrationConnectionCardProps) {
-  const { t } = useTranslation(["agents"]);
+  const { t } = useTranslation(["agents", "common"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
-  const activate = useActivateIntegration();
+  const setActive = useSetPackageActive();
+  const currentSpaceId = useCurrentSpaceId();
+  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
+  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
+  const spaceGrant = useCurrentSpaceGrant();
+  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
   const displayName = detail?.manifest.display_name ?? packageId;
 
   if (detailPending || !detail) {
@@ -119,16 +128,28 @@ function IntegrationConnectionCard({
             {t("detail.integrationInactive")}
           </span>
           {/* The sentence asks for an activation; without this the reader had to
-              go find the integration page to perform it. A non-admin gets the
-              API's refusal as a toast, which still beats a dead sentence. */}
+              go find the integration page to perform it. Somebody the route
+              would refuse gets the button DEAD with the reason on it, rather
+              than a click that ends in a toast. */}
           <Button
             variant="outline"
             size="sm"
-            disabled={activate.isPending}
-            onClick={() => activate.mutate({ params: { path: { packageId } } })}
+            disabled={setActive.isPending || !currentSpaceId || !canActivate}
+            title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
+            onClick={() => {
+              if (!currentSpaceId || !canActivate) return;
+              setActive.mutate(
+                { spaceId: currentSpaceId, packageId, active: true },
+                {
+                  onSuccess: () =>
+                    toast.success(t("integrations.activate.success", { ns: "settings" })),
+                  onError: () => toast.error(t("integrations.activate.error", { ns: "settings" })),
+                },
+              );
+            }}
             data-testid={`integration-activate-${packageId}`}
           >
-            {activate.isPending ? (
+            {setActive.isPending ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
               t("editor.activateIntegration")

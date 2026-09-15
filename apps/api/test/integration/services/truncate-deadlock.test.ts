@@ -26,7 +26,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { isTransientLockError } from "../../helpers/deadlock-retry.ts";
 import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import { organizations, spaces } from "@appstrate/db/schema";
-import { prefixedId } from "../../../src/lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 describeRequiresPostgres("truncateAll deadlock resilience (issue #883)", () => {
   it(

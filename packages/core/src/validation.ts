@@ -133,8 +133,8 @@ const compatibilityObjectSchema = z.looseObject({
  * cannot be cleanly re-exported here. The upstream variant additionally folds
  * in the §10.1 reserved-prefix negative-lookahead; this local copy deliberately
  * OMITS that lookahead because its sole consumer
- * (`apps/api/src/services/integration-install-warnings.ts`) only emits
- * non-blocking install-time warnings — reserved-prefix keys are already
+ * (`apps/api/src/services/integration-import-warnings.ts`) only emits
+ * non-blocking import-time warnings — reserved-prefix keys are already
  * hard-rejected upstream at manifest-validation time and never reach the
  * warning path, so adding the lookahead here would not change behavior.
  */
@@ -308,7 +308,7 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
  * `output` is opt-in like every runtime tool (none is auto-injected). But an
  * agent that declares an `output.schema` promises a typed result, so it MUST
  * enable the `output` tool — otherwise it has no way to emit that result and
- * the run would fail post-hoc output validation. Caught at save/install time
+ * the run would fail post-hoc output validation. Caught at save/import time
  * here so the editor surfaces it on the `runtimeTools` field. Agents with no
  * output schema may finish without ever calling output (side-effect-only run).
  */

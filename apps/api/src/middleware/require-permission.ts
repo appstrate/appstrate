@@ -28,10 +28,10 @@ import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 
 /** Stamped by every route-level permission guard (core's `makePermissionGuard`
  *  stamps it too). Read by the agent-lookup ordering conformance test. */
-const PERMISSION_GUARD = Symbol.for("appstrate.permissionGuard");
+export const PERMISSION_GUARD = Symbol.for("appstrate.permissionGuard");
 
-/** True when `handler` is a route-level permission guard, i.e. it 403s a
- *  caller lacking the permission before the handler chain continues. */
+/** True when `handler` rejects unauthorized callers before the chain continues.
+ *  Resource-aware guards may conceal unreachable resources with a 404. */
 export function isPermissionGuard(handler: unknown): boolean {
   return hasHandlerMarker(handler, PERMISSION_GUARD);
 }

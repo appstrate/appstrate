@@ -33,7 +33,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedSchedule } from "../../helpers/seed.ts";
+import { seedPackage, seedSchedule } from "../../helpers/seed.ts";
+
+/** A skill the fixture agent DECLARES and this caller writes (homed in their space). */
+const DECLARED_SKILL = "@schedbodyorg/dep-skill";
+/** A second declared skill, for the value cases that need a non-`draft` spec. */
+const DECLARED_OTHER = "@schedbodyorg/dep-other";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 
@@ -51,11 +56,32 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     // manifest the schedule will FIRE, and with no `version_override` that is
     // the published version — a draft-only agent 404s before any body rule is
     // reached, which would make every control below vacuous.
+    // The two dependencies the `dependency_overrides` cases key on. A key that
+    // names nothing the effective manifest declares is refused on its own rule
+    // (400, before the authority gate), so a control that wants to exercise the
+    // VALUE gate has to name declared ones.
+    await seedPackage({
+      id: DECLARED_SKILL,
+      type: "skill",
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      draftManifest: { name: DECLARED_SKILL, version: "1.0.0", type: "skill" },
+    });
     await seedSchedulableAgent({
       id: agentRef,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
+      manifest: {
+        name: agentRef,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Sched Body Agent",
+        author: "tester",
+        dependencies: { skills: { [DECLARED_SKILL]: "^1.0.0", [DECLARED_OTHER]: "^1.0.0" } },
+      },
     });
   });
 
@@ -106,12 +132,32 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     await expectRejectedField(res, "dependency_overrides");
   });
 
-  it('accepts "draft" and a semver spec as dependency_overrides values (control)', async () => {
+  it("rejects a dependency_overrides KEY the manifest does not declare, before the authority gate", async () => {
+    // Form before authority: an override on a dependency the agent does not
+    // declare has no effect downstream, so it is a malformed request rather
+    // than an unauthorized one — and `draft` is spelled here deliberately, to
+    // pin that the 400 wins over the 403 the value would otherwise attract.
     const res = await post({
       cron_expression: "0 9 * * 1-5",
-      dependency_overrides: { "@acme/skill": "draft", "@acme/other": "^1.2.0" },
+      dependency_overrides: { "@schedbodyorg/undeclared": "draft" },
     });
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(400);
+    const problem = (await res.json()) as { code?: string; detail?: string };
+    expect(problem.code).toBe("invalid_request");
+    expect(problem.detail).toContain("@schedbodyorg/undeclared");
+  });
+
+  it('accepts "draft" and a semver spec as dependency_overrides values (control)', async () => {
+    // Both keys are DECLARED, so the key gate is satisfied and the case is
+    // about the VALUE gate alone. `draft` is keyed on the skill this caller
+    // demonstrably writes (homed in their own space): a `draft` entry also
+    // proves WRITE authority over the package it names, so keying it on an id
+    // nobody owns would answer 403 on that rule instead.
+    const res = await post({
+      cron_expression: "0 9 * * 1-5",
+      dependency_overrides: { [DECLARED_SKILL]: "draft", [DECLARED_OTHER]: "^1.2.0" },
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
   });
 });
 

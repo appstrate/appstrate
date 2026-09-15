@@ -29,7 +29,7 @@
  * that lets a tokenless client start the OAuth flow against the right org.
  */
 
-import { authorizeBundlePackages } from "../../lib/package-access.ts";
+import { authorizeBundlePackages, holdsPackageShareAuthority } from "../../lib/package-access.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -179,8 +179,8 @@ export function buildServerInstructions(
     ? "The client renders the connect button from this result on its own; your text must NOT duplicate it — do NOT paste the link, do not describe the button or where to click. End your turn with ONE short sentence saying you'll continue once the integration is connected — do NOT poll, loop, wait, or run in the same turn."
     : "Give the caller that `connect_url` to open, in one short sentence, and end your turn — do NOT poll, loop, wait, or run in the same turn.";
   const packageImportGuidance = packageImportAvailable
-    ? "Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add/install the package."
-    : "Package import is not available to this caller. If validation succeeds, report the result without claiming you can install it.";
+    ? "Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package."
+    : "Package import is not available to this caller. If validation succeeds, report the result without claiming you can import it.";
   return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema. When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. The runAgent and runInline operations remain available through describe_operation and invoke_operation for intentionally fire-and-forget runs.
 
 ## Core model
@@ -471,6 +471,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // the forwarded auth headers. The index is scoped to the caller's role.
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
+      mayShareRoot: (packageId: string) => holdsPackageShareAuthority(c, packageId),
       origin,
       permissions,
       authHeaders,

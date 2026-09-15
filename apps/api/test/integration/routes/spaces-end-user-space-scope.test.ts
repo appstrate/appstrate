@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedInstalledPackage, seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedSpacePackage, seedPackage, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
 import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
 
 let currentCtx: TestContext | null = null;
@@ -83,12 +83,17 @@ describe("an end-user token pinned to a space and the spaces router (issue #1313
       orgId: currentCtx.orgId,
       id: AGENT_ID,
       type: "agent",
+      homeSpaceId: currentCtx.defaultSpaceId,
       draftManifest: { name: AGENT_ID, version: "1.0.0", type: "agent" },
     });
-    await seedInstalledPackage(currentCtx.defaultSpaceId, AGENT_ID, {
+    await seedSpacePackage(currentCtx.defaultSpaceId, AGENT_ID, {
       inputSettings: { values: { folder: "own-space" }, locked: ["folder"] },
     });
-    await seedInstalledPackage(otherSpaceId, AGENT_ID, {
+    // The private space is placed by an OFFER: its row has to carry a real
+    // secret for the refusal below to mean anything, and a row nothing places
+    // reads as no row at all.
+    await seedPackageShare(otherSpaceId, AGENT_ID);
+    await seedSpacePackage(otherSpaceId, AGENT_ID, {
       inputSettings: { values: { api_token: "SECRET-FROM-OTHER-SPACE" }, locked: ["api_token"] },
     });
   });

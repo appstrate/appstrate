@@ -27,6 +27,15 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
 
+/**
+ * These three guards read every source file of three workspaces on each run.
+ * Under the default 5 s that is comfortable on an idle machine and a coin
+ * flip on a loaded one (a cold page cache, or a second `bun test` running
+ * beside this one), which makes them fail for a reason that has nothing to do
+ * with the locales. The budget is deliberately far above the measured cost.
+ */
+const SCAN_TIMEOUT_MS = 30_000;
+
 const LOCALES_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const WEB_SRC = dirname(LOCALES_DIR);
 const REPO_ROOT = dirname(dirname(dirname(WEB_SRC)));
@@ -129,33 +138,37 @@ function lineOf(src: string, index: number): number {
 }
 
 describe("t() keys", () => {
-  it("all resolve to a declared locale key", () => {
-    const missing: string[] = [];
+  it(
+    "all resolve to a declared locale key",
+    () => {
+      const missing: string[] = [];
 
-    for (const file of SOURCES) {
-      const src = readFileSync(file, "utf8");
-      for (const [pattern, quoteAt, literalAt] of [
-        [T_CALL, 1, 2],
-        [TRANS_KEY, 3, -1],
-      ] as const) {
-        pattern.lastIndex = 0;
-        let match: RegExpExecArray | null;
-        while ((match = pattern.exec(src))) {
-          const literal =
-            literalAt >= 0 ? match[literalAt]! : (match[1] ?? match[2] ?? match[4] ?? "");
-          const quote = match[quoteAt];
-          // Template literal with an interpolation — not statically resolvable.
-          if (quote === "`" && literal.includes("${")) continue;
-          if (literal === "") continue;
+      for (const file of SOURCES) {
+        const src = readFileSync(file, "utf8");
+        for (const [pattern, quoteAt, literalAt] of [
+          [T_CALL, 1, 2],
+          [TRANS_KEY, 3, -1],
+        ] as const) {
+          pattern.lastIndex = 0;
+          let match: RegExpExecArray | null;
+          while ((match = pattern.exec(src))) {
+            const literal =
+              literalAt >= 0 ? match[literalAt]! : (match[1] ?? match[2] ?? match[4] ?? "");
+            const quote = match[quoteAt];
+            // Template literal with an interpolation — not statically resolvable.
+            if (quote === "`" && literal.includes("${")) continue;
+            if (literal === "") continue;
 
-          if (isDeclared(stripNamespace(literal))) continue;
-          missing.push(`${relative(REPO_ROOT, file)}:${lineOf(src, match.index)} → "${literal}"`);
+            if (isDeclared(stripNamespace(literal))) continue;
+            missing.push(`${relative(REPO_ROOT, file)}:${lineOf(src, match.index)} → "${literal}"`);
+          }
         }
       }
-    }
 
-    expect(missing).toEqual([]);
-  });
+      expect(missing).toEqual([]);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 });
 
 /**
@@ -211,27 +224,35 @@ function isShielded(key: string): boolean {
 }
 
 describe("declared keys", () => {
-  it("are all still referenced by the source", () => {
-    // The guard the other direction lacks: deleting the last call site of a
-    // key leaves the translation behind in both bundles, and nothing notices.
-    const orphans = [...allKeys]
-      .filter((key) => !isShielded(key))
-      .filter((key) => !isReferenced(key) && !isReferenced(key.replace(PLURAL_SUFFIX, "")))
-      .sort();
+  it(
+    "are all still referenced by the source",
+    () => {
+      // The guard the other direction lacks: deleting the last call site of a
+      // key leaves the translation behind in both bundles, and nothing notices.
+      const orphans = [...allKeys]
+        .filter((key) => !isShielded(key))
+        .filter((key) => !isReferenced(key) && !isReferenced(key.replace(PLURAL_SUFFIX, "")))
+        .sort();
 
-    expect(orphans).toEqual([]);
-  });
+      expect(orphans).toEqual([]);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 
-  it("keep every dynamic-prefix exemption backed by a real interpolation site", () => {
-    // An exemption is only legitimate while the code it excuses exists. This
-    // is what stops the allow-list from being widened to silence a failure:
-    // an invented prefix has no `` `prefix.${…}` `` anywhere and fails here.
-    const unjustified = DYNAMIC_KEY_PREFIXES.filter((prefix) => {
-      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // Optional `namespace:` — some sites interpolate `settings:foo.${x}`.
-      return !new RegExp("`(?:[\\w-]+:)?" + escaped + "\\$\\{").test(SOURCE_BLOB);
-    });
+  it(
+    "keep every dynamic-prefix exemption backed by a real interpolation site",
+    () => {
+      // An exemption is only legitimate while the code it excuses exists. This
+      // is what stops the allow-list from being widened to silence a failure:
+      // an invented prefix has no `` `prefix.${…}` `` anywhere and fails here.
+      const unjustified = DYNAMIC_KEY_PREFIXES.filter((prefix) => {
+        const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        // Optional `namespace:` — some sites interpolate `settings:foo.${x}`.
+        return !new RegExp("`(?:[\\w-]+:)?" + escaped + "\\$\\{").test(SOURCE_BLOB);
+      });
 
-    expect(unjustified).toEqual([]);
-  });
+      expect(unjustified).toEqual([]);
+    },
+    SCAN_TIMEOUT_MS,
+  );
 });

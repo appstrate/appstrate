@@ -49,7 +49,10 @@ export function OrgSettingsLayout() {
       to: "/org-settings/space/members",
       icon: Users,
       label: t("spaceMembers.tabTitle"),
-      show: can("space-members:read") || can("space-members:invite"),
+      // A personal space takes no members at all (RBAC spec §3.6): the write
+      // routes answer 409 and the list would only ever hold its owner, so the
+      // tab is not there rather than there and empty.
+      show: !space?.personal && (can("space-members:read") || can("space-members:invite")),
     },
     {
       to: "/org-settings/space/api-keys",

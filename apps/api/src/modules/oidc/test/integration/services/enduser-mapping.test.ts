@@ -22,7 +22,7 @@ import {
   SpaceSignupClosedError,
 } from "../../../services/enduser-mapping.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
-import { prefixedId } from "../../../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 describe("resolveOrCreateEndUser", () => {
   let orgId: string;

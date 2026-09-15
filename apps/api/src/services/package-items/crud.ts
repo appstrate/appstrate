@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, and, or, ne, desc, sql, isNotNull } from "drizzle-orm";
+import { eq, and, or, ne, desc, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages } from "@appstrate/db/schema";
+import { spacePackages, packages, packageShares } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -18,6 +18,7 @@ import {
 import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
+import { activeHereSql } from "../package-activation.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -144,6 +145,17 @@ export interface CreateItemInput {
   description?: string;
   content: string;
   createdBy?: string;
+  /**
+   * The space whose `<type>:write` will govern this package
+   * (`packages.home_space_id`). REQUIRED: every organization package has a
+   * home (`packages_org_package_has_home`), and every door that creates one
+   * runs inside a space context — the authoring routes, the ZIP and bundle
+   * imports, the fork, the new organization's demo agent. A per-org MCP bearer
+   * token reaches those routes through the in-process re-entry, which resolves
+   * the organization's DEFAULT space (`requireSpaceContext`), so even the
+   * space-less-looking caller arrives with one.
+   */
+  homeSpaceId: string;
 }
 
 /**
@@ -177,6 +189,7 @@ export async function createOrgItem(
     .values({
       id: packageId,
       orgId,
+      homeSpaceId: item.homeSpaceId,
       type: cfg.type,
       source: "local",
       draftManifest: finalManifest,
@@ -235,22 +248,24 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
-/** List items of a type accessible to a space (system + installed). */
-export async function listOrgItems(
-  orgId: string,
-  cfg: PackageTypeConfig,
-  spaceId: string,
-  opts?: { activeOnly?: boolean },
-) {
-  // Default: catalogue view — system packages (always visible) + org packages
-  // installed in this space. `activeOnly` narrows to packages that are actually
-  // active in THIS space: an enabled `space_packages` row, dropping the
-  // "system always shows" branch. Used by the agent editor's integration
-  // picker so it only offers usable integrations (server-side filter — the
-  // full catalogue can be large).
-  const installFilter = opts?.activeOnly
-    ? and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true))
-    : or(eq(packages.source, "system"), isNotNull(spacePackages.packageId));
+/** List the items of a type this space RUNS — the activation rule, per type. */
+export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceId: string) {
+  // The index page of a type answers ONE question — "what can I launch here?"
+  // — so it renders the ACTIVE set and nothing else ({@link activeHereSql}:
+  // the placement row's verdict where the package is placed, the deployment's
+  // default where there is no row). "What is PLACED here, and in what state?"
+  // is the other question, and it has its own page: the space library
+  // (`GET /api/spaces/{id}/library`), which is where an offer is taken up and
+  // a switched-off package is switched back on.
+  //
+  // One rule rather than two views of the same list: the caller-context hints
+  // the model is given, the run gate and this page agree by construction, so
+  // the editor's integration picker cannot offer what a run would refuse, and
+  // a page cannot show a launch control that 404s on click. NOT a bare
+  // row-and-enabled predicate: that hides every system package the space runs
+  // without a row, and then the integrations listing needs a correction pass
+  // to put them back.
+  //
   // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
   // projected: the list mapper never reads it, and it is by far the largest
   // column on the row.
@@ -266,6 +281,7 @@ export async function listOrgItems(
       updatedAt: packages.updatedAt,
       autoInstalled: packages.autoInstalled,
       forkedFrom: packages.forkedFrom,
+      homeSpaceId: packages.homeSpaceId,
       lockVersion: packages.lockVersion,
     })
     .from(packages)
@@ -273,12 +289,16 @@ export async function listOrgItems(
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
     )
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
+    )
     .where(
       and(
         orgOrSystemFilter(orgId),
         eq(packages.type, cfg.type),
         notEphemeralFilter(),
-        installFilter,
+        activeHereSql(spaceId),
       ),
     )
     .orderBy(
@@ -297,6 +317,17 @@ export async function listOrgItems(
       orgId: row.orgId,
       name: getPackageDisplayName(row),
       description: m.description ?? null,
+      // The two fields an INDEX page needs that a name and a description do not
+      // give it: the icon it draws each card with, and the keywords its search
+      // box matches on. Read off the SAME rendered manifest as `name` and
+      // `description` (`getPackageDisplayName` reads `display_name` from this
+      // very column), so a page has no reason to fetch a second, wider route to
+      // draw its own list — which is exactly how the Integrations page ended up
+      // reading a listing that obeyed no placement rule.
+      icon: typeof m.icon === "string" ? m.icon : null,
+      keywords: Array.isArray(m.keywords)
+        ? m.keywords.filter((k): k is string => typeof k === "string")
+        : [],
       source: row.source ?? "local",
       created_by: row.createdBy,
       createdAt: toISORequired(row.createdAt),
@@ -305,6 +336,10 @@ export async function listOrgItems(
       version: typeof m.version === "string" ? m.version : null,
       auto_installed: row.autoInstalled,
       forked_from: row.forkedFrom ?? null,
+      // camelCase, and NOT on the wire: the route projects the pair
+      // `home_space_id` / `home_writable` through `homeWireForCaller`, which
+      // needs the caller's reach and so cannot live in a service.
+      homeSpaceId: row.homeSpaceId,
     };
   });
 }
@@ -329,6 +364,8 @@ export async function getOrgItem(orgId: string, itemId: string, cfg: PackageType
   return {
     id: data.id,
     orgId: data.orgId,
+    // camelCase, and NOT on the wire — see the note in `listOrgItems`.
+    homeSpaceId: data.homeSpaceId,
     name: getPackageDisplayName(data),
     description: m.description ?? null,
     content: data.draftContent,

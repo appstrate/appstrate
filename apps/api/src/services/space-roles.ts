@@ -15,7 +15,7 @@ import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permis
 import { isForeignKeyViolation, isUniqueViolation } from "../lib/db-helpers.ts";
 import { getAppConfig } from "../lib/app-config.ts";
 import { ApiError, conflict, invalidRequest, notFound } from "../lib/errors.ts";
-import { prefixedId } from "../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 import {
   knownSpaceLevelPermissions,
   partitionSpacePermissions,

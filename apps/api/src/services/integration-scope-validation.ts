@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1 — install-time validation that an agent's
+ * Phase 1 — import-time validation that an agent's
  * `integrations_configuration[id]` selections (tools / scopes, §4.4)
  * are consistent with the catalog declared on each referenced
  * integration's manifest.
@@ -9,17 +9,17 @@
  * Pure-function core (`validateAgentIntegrationScopes` in
  * `@appstrate/core/integration`) handles the per-pair comparison; this
  * service-layer wrapper resolves each integration's manifest from the
- * DB (org-scoped + system, mirroring the visibility rules used by
- * `getIntegration`) and folds the per-pair errors into the route-layer
- * `ValidationFieldError` shape.
+ * DB (org-scoped + system — `getOrgWideIntegrationManifest`, the ORGANIZATION
+ * catalogue a declared dependency resolves against, RBAC spec §6.9) and folds
+ * the per-pair errors into the route-layer `ValidationFieldError` shape.
  *
  * Short-circuit cases (no validation, no error):
  *  - Agent declares the integration with no `integrations_configuration`
  *    entry → nothing to validate.
- *  - Integration not (yet) installed / not visible to the org →
+ *  - Integration not (yet) present / not visible to the org →
  *    validation is skipped silently. The run-readiness check
  *    (`agent-readiness.ts`) is the authority on "integration must be
- *    installed", not us.
+ *    active in the space", not us.
  *  - Integration declares no `tools_policy` block or no `scope_catalog`
  *    catalog → the corresponding subset check is skipped (matches the
  *    Phase 0 schema semantics).
@@ -55,7 +55,7 @@ import { packageDistTags, packageVersions, packages } from "@appstrate/db/schema
 import { and, eq, isNull, or } from "drizzle-orm";
 
 import {
-  getIntegration,
+  getOrgWideIntegrationManifest,
   fetchMcpServerManifest,
   resolveMcpServerForSpawn,
   resolveRunIntegrationVersions,
@@ -184,9 +184,9 @@ interface ValidateAgentIntegrationSelectionsInput {
    *
    * Without it a self-contained bundle bypassed the gate entirely: its
    * integration is not in the registry yet, the DB lookup misses, and
-   * "not installed → skip silently" waved the agent through into an immutable
-   * version. The catalog a bundle must be judged against is
-   * `incoming ∪ already-installed`, not the DB alone. Resolution models the
+   * "not in the catalog → skip silently" waved the agent through into an
+   * immutable version. The catalog a bundle must be judged against is
+   * `incoming ∪ already-published`, not the DB alone. Resolution models the
    * post-import catalog, including yanks, dist-tags and `latest` movement.
    *
    * KEYED BY ID BUT VERSIONED. A bundle can legitimately carry several versions
@@ -255,7 +255,8 @@ function selectsNoCallableTool(
  * Resolve, for every integration the agent declares, the manifest AT the
  * version its `dependencies.integrations.<id>` pin will resolve to on a run.
  *
- * WHY NOT THE DRAFT. `getIntegration` reads `packages.draft_manifest`, but a
+ * WHY NOT THE DRAFT. `getOrgWideIntegrationManifest` reads
+ * `packages.draft_manifest`, but a
  * run never does: `resolveRunIntegrationVersions` freezes each pin and the
  * spawn resolver reads THAT version's manifest. Judging from the integration
  * author's live draft would refuse publishes the runtime would run perfectly —
@@ -382,11 +383,16 @@ export async function validateAgentIntegrationSelections(
     const postImportManifest = carriedVersions
       ? await resolvePostImportManifest(entry.id, entry.version, orgId, carriedVersions)
       : null;
-    const integration = postImportManifest
-      ? { manifest: postImportManifest as unknown as IntegrationManifest }
-      : await getIntegration(orgId, entry.id);
-    if (!integration) {
-      // Integration not visible / not installed — defer to run-time
+    // Org-wide on purpose: a declared dependency resolves against the
+    // ORGANIZATION's catalogue (RBAC spec §6.9), which is exactly what the run
+    // itself resolves (`resolveRunIntegrationVersions`). A placement-scoped
+    // read here — `getIntegration`, which the space-scoped surfaces use —
+    // would make this gate narrower than the runtime it gates.
+    const catalogManifest = postImportManifest
+      ? (postImportManifest as unknown as IntegrationManifest)
+      : await getOrgWideIntegrationManifest(orgId, entry.id);
+    if (!catalogManifest) {
+      // Integration not visible / not in the catalog — defer to run-time
       // dependency validation rather than emit a misleading error
       // about scopes against a non-existent catalog.
       continue;
@@ -406,7 +412,7 @@ export async function validateAgentIntegrationSelections(
     const pinnedManifest = postImportManifest
       ? (postImportManifest as unknown as IntegrationManifest)
       : pinnedManifests?.get(entry.id);
-    const judgedManifest = pinnedManifest ?? integration.manifest;
+    const judgedManifest = pinnedManifest ?? catalogManifest;
 
     // For local-source integrations the catalog comes from the referenced
     // mcp-server's MCPB tools. Fetched BEFORE both checks: the emptiness gate

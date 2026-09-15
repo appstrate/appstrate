@@ -16,7 +16,7 @@ import {
 } from "../services/state/runs.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
-import { getInstalledPackageSettings } from "../services/space-packages.ts";
+import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { abortRun } from "../services/run-tracker.ts";
@@ -33,7 +33,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 import { connectionOverridesSchema } from "../lib/launch-schemas.ts";
-import { requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
 import { logger } from "../lib/logger.ts";
@@ -50,7 +50,12 @@ import {
   normalizeContextFileUris,
   triggerInlineRun,
 } from "../services/inline-run.ts";
-import { agentReadIsSummary, assertPackageDependenciesAccessible } from "../lib/package-access.ts";
+import {
+  agentReadIsSummary,
+  assertDraftSelectorAllowed,
+  assertDependencyDraftOverridesAllowed,
+  assertPackageDependenciesAccessible,
+} from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
@@ -232,6 +237,10 @@ export function createRunsRouter() {
     rateLimit(20),
     requirePermission("agents", "run"),
     requireAgent(),
+    // The execution gate, and only here: an agent placed in this space but
+    // switched off does not run, a rerun of one of its past runs included —
+    // `rerun_from` is a body field of THIS route, so it passes the same door.
+    requireActiveAgent(),
     idempotency(replayRun),
     async (c) => {
       const agent = c.get("package");
@@ -245,12 +254,12 @@ export function createRunsRouter() {
       // instead of being swallowed into `{}` and launched as an input-less run.
       const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
 
-      // Version selector from query param: `draft`, `published`, or a
-      // version spec (exact / dist-tag / semver range). Omitted ≡ `published`
-      // for EVERY caller (latest published; 404 when none, #636) — the working
-      // copy is opt-in via `version=draft` only, never an implicit default.
-      // The editor UI passes `version=draft` explicitly.
+      // Omitted ⇒ the latest PUBLISHED version (#636). The working copy is
+      // opt-in via `version=draft`, and only for a caller who can WRITE the
+      // agent — the resolver honours the selector, this decides who may name it
+      // (plan decision 4).
       const versionOverride = c.req.query("version");
+      await assertDraftSelectorAllowed(c, agent.id, versionOverride);
       const { agent: effectiveAgent, overrideVersionLabel } = await resolveAgentRunVersion(
         agent,
         versionOverride,
@@ -271,7 +280,10 @@ export function createRunsRouter() {
         // Per-space settings first: they carry the editor defaults and
         // the locked-field list the input resolution needs, and the readiness
         // preflight below reuses this same row (one read per trigger).
-        const packageSettings = await getInstalledPackageSettings(c.get("spaceId"), agent.id);
+        const packageSettings = await getSpacePackageSettings(
+          { orgId, spaceId: c.get("spaceId") },
+          agent.id,
+        );
 
         const inputResult = await parseRequestInput(
           c,
@@ -300,6 +312,16 @@ export function createRunsRouter() {
           connectionOverrides,
           dependencyOverrides,
         } = inputResult;
+
+        // A dependency opted into its working copy is the same act as
+        // `version=draft` on the agent, one package down: the authority that
+        // decides is the OVERRIDDEN package's, so ask it per entry — after the
+        // effective manifest has said the key names a dependency at all.
+        await assertDependencyDraftOverridesAllowed(
+          c,
+          dependencyOverrides,
+          effectiveAgent.manifest as unknown as Record<string, unknown>,
+        );
 
         // An explicit per-run `modelId` override must reference a real model
         // (system key or org-model UUID). Reject unknown/malformed values with a

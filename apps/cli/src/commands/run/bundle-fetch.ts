@@ -26,7 +26,7 @@ export class BundleFetchError extends Error {
   constructor(
     public readonly code:
       | "package_not_found"
-      | "package_not_installed_in_space"
+      | "package_not_active_in_space"
       | "version_not_found"
       | "integrity_mismatch"
       | "bundle_fetch_failed",
@@ -45,7 +45,13 @@ interface BundleFetchInput {
   orgId?: string;
   /** `@scope/name`. */
   packageId: string;
-  /** Spec after `@` (semver, range, dist-tag); undefined → server-side default. */
+  /**
+   * Spec after `@` — a semver, a range, a dist-tag, or one of the two
+   * reserved selectors the platform also honours on `?version=`:
+   * `draft` (the author's working copy) and `published` (the latest
+   * release). Undefined → the latest published version, same as every
+   * other surface.
+   */
   spec: string | undefined;
   /** Test-only fetch override. */
   fetchImpl?: typeof fetch;
@@ -93,28 +99,28 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     const text = await safeText(res);
     // Server-issued problem+json carries a `code` field that distinguishes
     // the three 404 sub-cases. Parsing it here lets us surface a clearer
-    // hint than the historical "not found — verify the agent is installed"
+    // hint than the historical "not found — verify the agent is available"
     // catch-all (which left users staring at the message wondering whether
     // their agent existed at all).
     const errorCode = parseProblemCode(text);
-    if (errorCode === "agent_not_installed_in_space") {
+    if (errorCode === "agent_not_active_in_space") {
       throw new BundleFetchError(
-        "package_not_installed_in_space",
-        `Package ${input.packageId} exists in your organization catalog but is not installed in the pinned space`,
-        `Install it from the dashboard, or run:\n  appstrate api -X POST /api/spaces/${input.spaceId}/packages -d '{"packageId":"${input.packageId}"}'`,
+        "package_not_active_in_space",
+        `Package ${input.packageId} exists in your organization but is not active in the pinned space`,
+        `Activate it from the dashboard, or run:\n  appstrate api -X POST /api/spaces/${input.spaceId}/packages -d '{"packageId":"${input.packageId}"}'`,
       );
     }
     if (/version/i.test(text) && input.spec) {
       throw new BundleFetchError(
         "version_not_found",
         `No version of ${input.packageId} matches "${input.spec}"`,
-        "Check the spec or remove it to fall back to the version installed for this space.",
+        "Check the spec, or drop it to run the latest published version.",
       );
     }
     throw new BundleFetchError(
       "package_not_found",
       `Package ${input.packageId} not found on ${host}`,
-      "The agent does not exist in your organization catalog. Check the spelling or run `appstrate org list` to confirm you're pinned to the right org.",
+      "The agent does not exist in your organization. Check the spelling or run `appstrate org list` to confirm you're pinned to the right org.",
     );
   }
   if (!res.ok) {
@@ -148,10 +154,11 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     );
   }
   const version = versionHeader;
-  // `?source=draft` was sent ⇔ the server returned the draft. We don't
-  // trust `versionHeader === "draft"` alone for this — the request shape
-  // is the authoritative signal, and the response is a sanity check.
-  const stage: "draft" | "published" = input.spec === undefined ? "draft" : "published";
+  // `?source=draft` was sent ⇔ the server returned the draft, and only an
+  // explicit `@draft` sends it. We don't trust `versionHeader === "draft"`
+  // alone for this — the request shape is the authoritative signal, and the
+  // response is a sanity check.
+  const stage: "draft" | "published" = input.spec === "draft" ? "draft" : "published";
 
   const bytes = new Uint8Array(await res.arrayBuffer());
   // The bytes we just downloaded must match the server-issued integrity.
@@ -193,14 +200,17 @@ function buildBundleUrl(
   // Hono's RegExpRouter matches against the raw (encoded) path. The
   // version spec is encoded because it can include `+`, `>=`, etc.
   //
-  // No `--version` → `?source=draft`. Mirrors the dashboard "Run"
-  // button: a never-published agent (or one with uncommitted edits)
-  // must run from its current draft on both surfaces. Without this,
-  // `appstrate run @scope/agent` fails with `no_published_version` on
-  // an agent the UI runs happily — breaking the CLI<>UI parity promise.
-  // `--version=X` opts back into the published-archive path.
+  // No spec → no `source`: the route's default is the latest published
+  // version, which is what every other surface runs when nobody names a
+  // version. The working copy belongs to whoever can write the package,
+  // so it is reached only by SAYING so — `@scope/agent@draft` — and the
+  // server answers `403 draft_not_writable` to anyone else. `@published`
+  // is accepted for symmetry with the platform's `?version=` vocabulary:
+  // both keywords are reserved dist-tag names, so neither can collide
+  // with a real tag.
   const base = `${instance}/api/agents/${scope}/${name}/bundle`;
-  if (!spec) return `${base}?source=draft`;
+  if (!spec) return base;
+  if (spec === "draft" || spec === "published") return `${base}?source=${spec}`;
   return `${base}?version=${encodeURIComponent(spec)}`;
 }
 

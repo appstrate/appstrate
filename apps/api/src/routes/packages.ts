@@ -2,7 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import { makePermissionGuard } from "@appstrate/core/permissions";
+import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { parsePackageZip, PackageZipError, zipArtifact } from "@appstrate/core/zip";
@@ -13,8 +13,16 @@ import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
-import { installPackage, hasPackageAccess } from "../services/space-packages.ts";
-import { resolveIntegrationActivations } from "../services/integration-connections.ts";
+import {
+  activatePackage,
+  activatePackageWithin,
+  assertMcpServerActivatable,
+} from "../services/space-packages.ts";
+import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
+import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
+import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
+import { createPackageShareNotification } from "../services/state/notifications.ts";
+import { getOrgMember } from "../services/organizations.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { unzipPackageArchive } from "../services/package-archive.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -48,6 +56,7 @@ import {
   getMatchingDistTags,
   listPackageVersions,
   getVersionInfo,
+  getLatestVersionId,
   getLatestVersionCreatedAt,
   computeHasUnpublishedChanges,
   createVersionFromDraft,
@@ -58,15 +67,25 @@ import {
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { VERSION_SELECTOR_DRAFT } from "../services/agent-version-resolver.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import {
   assertCatalogPackageAccess,
+  assertDraftSelectorAllowed,
+  assertPackageCopyAllowed,
   assertPackageDependenciesAccessible,
   assertForkSourceAccess,
   authorizeBundlePackages,
-  assertExistingPackageInstallAccess,
+  assertExistingPackageActivationAccess,
+  defaultDefinitionSelector,
   PACKAGE_WRITE_PERMISSIONS,
   assertPackageMutationAccess,
+  assertPackageShareAccess,
+  holdsPackageShareAuthority,
+  homeWireForCaller,
+  isPackageReadableInSpace,
+  packageAccessSpaces,
+  holdsHomeAuthority,
   packagePermission,
   requireAgentRead,
 } from "../lib/package-access.ts";
@@ -80,6 +99,7 @@ import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
 import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { assertSpaceId, isSpaceId } from "../lib/ids.ts";
 import {
   resolvePackageFileValidator,
   readPackageSnapshot,
@@ -102,8 +122,8 @@ import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/pa
 import {
   collectConnectLoginWarnings,
   collectMetaWarnings,
-} from "../services/integration-install-warnings.ts";
-import { collectAgentInstallWarnings } from "../services/agent-install-warnings.ts";
+} from "../services/integration-import-warnings.ts";
+import { collectAgentImportWarnings } from "../services/agent-import-warnings.ts";
 import {
   ApiError,
   invalidRequest,
@@ -323,6 +343,58 @@ export const packageJsonUpdateSchema = z
 
 export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
 
+/**
+ * Body of `PATCH /api/packages/{scope}/{name}` — the package's home space,
+ * i.e. the space whose `<type>:write` governs it (`packages.home_space_id`).
+ * REQUIRED and non-nullable: an organization's package is always homed in one
+ * of its spaces (`packages_org_package_has_home`), so there is no "move it
+ * nowhere" to express — a package that belongs to no team is homed in the
+ * organization's DEFAULT space like any other. `.strict()` so this route can
+ * never be mistaken for the draft editor: the draft is `PUT`, with its
+ * optimistic lock.
+ *
+ * The id is SHAPE-CHECKED, like every other space id arriving in a body
+ * (`lib/space-role-assignment.ts`): a retired `app_` spelling resolves to no
+ * space, and without the refinement this route reports that as "space not
+ * found" — the silence `SPACE_ID_RE` exists to end.
+ */
+export const packageHomeSpaceSchema = z
+  .object({
+    home_space_id: z.string().refine(isSpaceId, {
+      message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+    }),
+  })
+  .strict();
+
+/**
+ * Body of `POST /api/packages/{scope}/{name}/shares` — WHO the package is
+ * offered to (RBAC spec §6.10).
+ *
+ * Two kinds, and a person is not a space: a `user` target is resolved
+ * server-side to that member's personal space, so the sharer never handles
+ * (nor learns) the id of a space §3.6 says does not exist for them. A `space`
+ * target must be one the sharer can already reach, and is SHAPE-CHECKED like
+ * every other space id in a body (`lib/space-role-assignment.ts`) so a
+ * malformed one is a 400 rather than the 404 an unreachable space answers.
+ * `.strict()` on both arms — a typo'd key is a 400, not a share to the wrong
+ * subject.
+ */
+export const shareTargetSchema = z
+  .object({
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("user"), user_id: z.string().min(1) }).strict(),
+      z
+        .object({
+          kind: z.literal("space"),
+          space_id: z.string().refine(isSpaceId, {
+            message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+          }),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
   items: T[],
@@ -499,8 +571,9 @@ const ROUTE_CONFIGS: Record<PackageType, PackageRouteConfig> = {
     getHandler: agentDetailHandler,
     // Mutating endpoints echo the full Agent detail (same serializer as the
     // GET). `requireAccess: false` — the caller just wrote this agent in their
-    // org, so the space-install gate must not 404 a successful write.
-    detailDto: (c, itemId) => buildAgentDetailDto(c, { itemId, requireAccess: false }),
+    // org, so the space activation gate must not 404 a successful write.
+    detailDto: (c, itemId) =>
+      buildAgentDetailDto(c, { itemId, requireAccess: false, version: "draft" }),
   },
   // Integrations are authored via a JSON-body manifest editor (parity with
   // agents/skills). The stored `manifest.json` content mirrors the DB
@@ -530,29 +603,35 @@ function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
-    // `?active=true` narrows to packages active in this space (agent-editor
-    // integration picker). For most types "active" means an installed +
-    // enabled `space_packages` row (generic SQL narrowing in
-    // `listOrgItems`). INTEGRATIONS additionally auto-activate env-backed
-    // SYSTEM integrations that have no row — so they resolve through the
-    // canonical activation rule (`resolveIntegrationActivations`), the single
-    // source of truth shared with the settings list + detail endpoints, rather
-    // than the generic SQL filter (which would hide them).
-    const wantActive = c.req.query("active") === "true";
-    const isIntegration = rcfg.cfg.type === "integration";
-    const items = await listOrgItems(orgId, rcfg.cfg, spaceId, {
-      activeOnly: wantActive && !isIntegration,
-    });
-    let visible = items;
-    if (wantActive && isIntegration) {
-      const activations = await resolveIntegrationActivations(
-        items.map((i) => i.id),
-        spaceId,
-      );
-      visible = items.filter((i) => activations.get(i.id)?.active);
-    }
-    const enriched = await enrichWithCreatorNames(visible);
-    return c.json(listResponse(enriched));
+    // The ACTIVE set of this space, and only it — the index page answers "what
+    // can I launch here?". The ONE activation rule decides
+    // (`services/package-activation.ts`, applied in SQL by `listOrgItems`): the
+    // placement row when there is one and the package is placed here, the
+    // deployment's default when there is not. That is the same rule the
+    // integration resolver, the run gate and the caller-context hints state,
+    // the env-backed system integrations active without a row included, so no
+    // type needs a correction pass behind this listing.
+    //
+    // What is merely PLACED here — a pending offer, a package switched off —
+    // belongs to the space library (`GET /api/spaces/{spaceId}/library`), which
+    // carries the per-placement state and the switch that repairs it.
+    const items = await listOrgItems(orgId, rcfg.cfg, spaceId);
+    const enriched = await enrichWithCreatorNames(items);
+    // `home_space_id` / `home_writable` are computed HERE, not in
+    // `listOrgItems`: both depend on the caller's reach (RBAC spec §6.9), which
+    // a service has no access to. One `packageAccessSpaces` read for the page.
+    const accessible = await packageAccessSpaces(c);
+    return c.json(
+      listResponse(
+        enriched.map(({ homeSpaceId, ...item }) => ({
+          ...item,
+          ...homeWireForCaller(
+            { type: rcfg.cfg.type, source: item.source, homeSpaceId },
+            accessible,
+          ),
+        })),
+      ),
+    );
   };
 }
 
@@ -650,6 +729,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         id: packageId,
         content,
         createdBy: user.id,
+        homeSpaceId: c.get("spaceId"),
         type: rcfg.cfg.type,
         manifest: validatedManifest,
         files: normalizedFiles,
@@ -682,6 +762,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         description: parsed.description,
         content: canonical.content,
         createdBy: user.id,
+        homeSpaceId: c.get("spaceId"),
         type: rcfg.cfg.type,
         manifest: canonical.manifest,
         files: canonical.files,
@@ -703,10 +784,14 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       normalizedFiles: draft.files,
       lockVersion: createdItem.lockVersion,
     });
+    // The package was just created HERE (`homeSpaceId: spaceId` above), so the
+    // placement rule is satisfied and this is an upsert that cannot conflict.
+    // WARN nonetheless: a create whose package never became active in the space
+    // is a half-finished act, and it has to be visible to an operator.
     const spaceId = c.get("spaceId");
     if (spaceId && versionCreated) {
-      await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
+      await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+        logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
       );
     }
     await recordAuditFromContext(c, {
@@ -752,29 +837,121 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
 }
 
 /**
+ * The manifest-derived half of a package detail, read from a PUBLISHED
+ * snapshot instead of the draft columns — `getOrgItem`'s projection applied to
+ * a version's own manifest and archive, so the two halves of a detail response
+ * never come from two different definitions.
+ *
+ * The manifest is the `package_versions.manifest` column: authoritative, one
+ * DB read, and immune to an archive that will not open. The CONTENT is the
+ * archive entry this type is authored around ({@link PACKAGE_CONTENT_ENTRY}),
+ * and the fallbacks below are the exact inverse of `applyDraftOverlay`: a type
+ * with no content entry at all (`mcp-server`, whose content IS its manifest)
+ * and an `integration` published without its optional `INTEGRATION.md` both
+ * store the manifest TEXT in `draft_content`, so the published projection
+ * reproduces that rather than handing back a `null` the editor would render as
+ * an empty file. A REQUIRED entry has no such fallback — a published `SKILL.md`
+ * the storage cannot produce is a broken artifact, and it gets the same 422 the
+ * run path answers for a published agent with no readable prompt.
+ */
+async function loadPublishedDefinition(
+  type: PackageType,
+  packageId: string,
+  spec: string,
+): Promise<Record<string, unknown>> {
+  const detail = await getVersionDetail(packageId, spec);
+  if (!detail) throw notFound(`Version '${spec}' not found`);
+  const m = asRecord(detail.manifest);
+  const entry = PACKAGE_CONTENT_ENTRY[type];
+  const bytes = entry ? detail.content?.[entry.path] : undefined;
+  if (entry?.required && !bytes) {
+    throw new ApiError({
+      status: 422,
+      code: "version_artifact_unavailable",
+      title: "Version Artifact Unavailable",
+      detail: `Published '${packageId}@${detail.version}' has no readable '${entry.path}' in its archive`,
+    });
+  }
+  return {
+    // Same projection `getOrgItem` runs over the draft manifest, field for
+    // field: a reader must not be able to tell which definition answered by
+    // the SHAPE of what came back.
+    name: typeof m.display_name === "string" ? m.display_name : packageId,
+    description: typeof m.description === "string" ? m.description : null,
+    version: typeof m.version === "string" ? m.version : null,
+    manifest_name: typeof m.name === "string" ? m.name : null,
+    manifest: m,
+    content: bytes ? decodeSkillMarkdown(bytes) : JSON.stringify(m, null, 2),
+  };
+}
+
+/**
  * Build the canonical package detail DTO for skills / integrations / mcp-servers
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
- * Org-scoped (no space-install gate): the GET handler applies that gate before
+ * Org-scoped (no space activation gate): the GET handler applies that gate before
  * calling this, while mutating endpoints (create / update / fork) reuse this
  * directly to echo what the caller just wrote (issue #646). Returns `null` when
  * the package is not found in the org.
+ *
+ * WHICH definition the manifest-derived fields are projected from is the agent
+ * page's question, answered by the agent page's two functions — `?version=draft`
+ * is an author's act (`403 draft_not_writable`), and with no selector a caller
+ * who may WRITE the package reads their draft while everybody else reads the
+ * latest published version, falling back to the draft when nothing is published
+ * at all. {@link resolveFileExplorerVersion} is that pair, already worded once;
+ * calling it here is what stops this page and its own Files tab answering
+ * "which definition am I looking at" differently in the same second.
+ *
+ * Mutating callers pass `draft` explicitly: they have just written that copy,
+ * and the echo has to be it whether or not a version is published.
  */
 async function buildPackageDetailDto(
+  c: Context<AppEnv>,
   rcfg: PackageRouteConfig,
   itemId: string,
   orgId: string,
+  opts: { version?: string } = {},
 ): Promise<Record<string, unknown> | null> {
-  const [item, versionCount, latestVersionDate] = await Promise.all([
+  const [item, versionCount, latestVersionDate, accessible] = await Promise.all([
     getOrgItem(orgId, itemId, rcfg.cfg),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
+    packageAccessSpaces(c),
   ]);
 
   if (!item) return null;
 
+  const spec = await resolveFileExplorerVersion(
+    c,
+    { id: item.id, source: item.source },
+    opts.version?.trim() || undefined,
+  );
+  // The answer comes back in the version-SPEC vocabulary, where the stored tree
+  // has two spellings — an omitted selector and the literal `draft` — and
+  // `resolvePackageFileValidator` treats them as one. So must this: `draft` is
+  // not a row in `package_versions`, and handing it to the version resolver
+  // would 404 the very page an author just asked for by name.
+  const rendersStoredTree = spec === undefined || spec === VERSION_SELECTOR_DRAFT;
+  // For an org-authored package that stored tree IS the draft; for a system
+  // package it is the definition the platform ships, published by
+  // construction. The bytes are the same either way — only the wire name
+  // differs, and a system package must never be labelled `draft` or the SPA
+  // renders "never published" over something that cannot be published at all.
+  const definition = rendersStoredTree && item.source !== "system" ? "draft" : "published";
+  const published = rendersStoredTree
+    ? null
+    : await loadPublishedDefinition(rcfg.cfg.type, item.id, spec);
+
+  const { homeSpaceId, ...rest } = item;
   return {
-    ...item,
+    ...rest,
+    ...published,
+    definition,
+    ...homeWireForCaller({ type: rcfg.cfg.type, source: item.source, homeSpaceId }, accessible),
     version_count: versionCount,
+    // Authoring metadata, never projected: it compares the DRAFT against the
+    // latest version, and that answer does not change with the definition the
+    // reader was served.
     has_unarchived_changes: computeHasUnpublishedChanges(
       item.source,
       versionCount,
@@ -789,6 +966,13 @@ async function buildPackageDetailDto(
  * richer Agent detail when configured (`rcfg.detailDto`), otherwise the generic
  * package detail. Single source of truth so create / update / fork stay in
  * lockstep with their respective GET serializers.
+ *
+ * `draft` is named on BOTH branches, for the reason the agent branch already
+ * names it: a write echoes the bytes it just wrote. Left to the default
+ * selector, a caller who publishes and then saves would read their new save
+ * back as the published version they are now ahead of. The selector costs them
+ * nothing — naming the draft requires write authority, which they have just
+ * exercised.
  */
 function loadPackageDetailDto(
   c: Context<AppEnv>,
@@ -798,7 +982,7 @@ function loadPackageDetailDto(
 ): Promise<Record<string, unknown> | null> {
   return rcfg.detailDto
     ? rcfg.detailDto(c, itemId, orgId)
-    : buildPackageDetailDto(rcfg, itemId, orgId);
+    : buildPackageDetailDto(c, rcfg, itemId, orgId, { version: VERSION_SELECTOR_DRAFT });
 }
 
 function makeGetHandler(rcfg: PackageRouteConfig) {
@@ -807,12 +991,14 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     const spaceId = c.get("spaceId");
     const itemId = getItemId(c);
 
-    // Enforce space-level access: all spaces can only access installed packages
-    if (!(await hasPackageAccess({ orgId, spaceId }, itemId))) {
+    // Space-level visibility: offered here, homed here, or a system package.
+    if (!(await isPackageReadableInSpace(spaceId, itemId))) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
 
-    const dto = await buildPackageDetailDto(rcfg, itemId, orgId);
+    const dto = await buildPackageDetailDto(c, rcfg, itemId, orgId, {
+      version: c.req.query("version"),
+    });
     if (!dto) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
@@ -1340,19 +1526,20 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  *
  * Two gates that answer different questions, both required:
  *
- * - `hasPackageAccess` is VISIBILITY: "is this a system package, or installed
- *   in THIS space?" (it also excludes ephemeral shadows). It says
- *   nothing about what the caller is ALLOWED to do — a credential with
- *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
- *   had to undo across the rest of the package surface.
+ * - `isPackageReadableInSpace` is VISIBILITY: "is this a system package,
+ *   offered to THIS space, or homed here?" (it also excludes ephemeral
+ *   shadows). It says nothing about what the caller is ALLOWED to do — a
+ *   credential with `scopes: []` passes it. Believing otherwise is exactly the
+ *   mistake #1124 had to undo across the rest of the package surface.
  * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
  *   `<type>:read` scope. Both file-explorer routes are registered on the
  *   router ROOT, so the RBAC resource is not knowable from the path — only
  *   from the row — which is why the guard runs here and not as route-level
  *   middleware.
  *
- * The row read in between adds the org boundary (`hasPackageAccess` does not
- * filter `orgId`) and fetches the draft columns the overlay needs.
+ * The row read in between adds the org boundary (`isPackageReadableInSpace`
+ * does not filter `orgId`) and fetches the draft columns the overlay needs
+ * plus the `source` {@link resolveFileExplorerVersion} reads.
  *
  * Authorizing HERE rather than at each call site is what makes the ordering
  * safe. Both handlers call this before they touch a validator, so no
@@ -1365,12 +1552,12 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * the row, so visibility has to be settled first. Same order as
  * `/{version}/download`.
  */
-async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileSource> {
+async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<FileExplorerPackage> {
   const packageId = getItemId(c);
   const orgId = c.get("orgId");
   const spaceId = c.get("spaceId");
 
-  if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
+  if (!(await isPackageReadableInSpace(spaceId, packageId))) {
     throw notFound("Package not found");
   }
 
@@ -1378,6 +1565,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
     .select({
       id: packages.id,
       type: packages.type,
+      source: packages.source,
       orgId: packages.orgId,
       draftManifest: packages.draftManifest,
       draftContent: packages.draftContent,
@@ -1398,6 +1586,59 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
 }
 
 /**
+ * The file-explorer row: a {@link PackageFileSource} plus the `source` column,
+ * which is what tells a platform-shipped definition from an org-authored one.
+ */
+type FileExplorerPackage = PackageFileSource & { source: string };
+
+/**
+ * WHICH definition a file-explorer read renders — the same question the agent
+ * detail page answers, from the same two functions, because they are the same
+ * question (RBAC spec §6.10).
+ *
+ * Reading is not executing, so an omitted `?version` gets the definition that
+ * EXISTS for this caller: the author's draft when they may write the package,
+ * the latest published version otherwise, and the draft again when nothing is
+ * published — a readable package whose explorer 404s is a tab the detail page
+ * has just promised and cannot honour. That is {@link defaultDefinitionSelector},
+ * verbatim, mapped onto the version-spec vocabulary these two routes speak:
+ * `undefined` is their word for the draft and `latest` for the published tag.
+ *
+ * An EXPLICIT `?version=draft` is the other act, and keeps the other rule:
+ * naming the working copy is an author's move, refused with
+ * `403 draft_not_writable` ({@link assertDraftSelectorAllowed}). Without it
+ * these two routes would be the fifth door to a draft the run, the schedule,
+ * the readiness and the bundle export all close — and the loosest, since they
+ * hand over every byte one file at a time.
+ *
+ * A system package ships its definition with the platform and owns no
+ * `package_versions` rows, so `latest` would resolve to nothing: its stored
+ * tree IS its published definition, and every selector but ONE reads it. The
+ * exception is the named `draft`, refused a line earlier like everybody
+ * else's: nobody writes a platform-shipped package, so nobody may ask for a
+ * working copy it does not have. Same rule the run path applies
+ * (`resolveAgentRunVersion` ignores the selector for `source === "system"`) —
+ * stated here rather than inherited, because the 404 it prevents would only
+ * show up on a system package's Files tab.
+ *
+ * Takes the two columns it reads rather than a whole row, because the DETAIL
+ * projection asks the same question from a different query
+ * ({@link buildPackageDetailDto}) and must get it from this function rather
+ * than from a second spelling of it.
+ */
+async function resolveFileExplorerVersion(
+  c: Context<AppEnv>,
+  pkg: Pick<FileExplorerPackage, "id" | "source">,
+  explicit: string | undefined,
+): Promise<string | undefined> {
+  await assertDraftSelectorAllowed(c, pkg.id, explicit);
+  if (pkg.source === "system") return undefined;
+  if (explicit) return explicit;
+  const { selector } = await defaultDefinitionSelector(c, pkg);
+  return selector === VERSION_SELECTOR_DRAFT ? undefined : "latest";
+}
+
+/**
  * One policy for every response on both routes: `private, no-cache`.
  *
  * `private` is mandatory: these are authenticated, tenant-scoped bytes and a
@@ -1405,21 +1646,22 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * reason — it still allows the 304 round-trip, it only forbids serving without
  * one, and that round-trip is what keeps authorization live. Any fresh window,
  * however short, is served by the browser with ZERO server contact: revoke
- * `<type>:read`, remove the member from the org, or uninstall the package from
- * the space, and the cached 200 keeps being handed out until it expires.
+ * `<type>:read`, remove the member from the org, or revoke the offer that
+ * places the package in the space, and the cached 200 keeps being handed out
+ * until it expires.
  * `Vary` cannot rescue that — revocation changes no request header. Forcing the
- * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
- * `requirePackageReadPermission` run on every hit.
+ * round-trip re-enters `loadFileExplorerPackage`, so `isPackageReadableInSpace`
+ * and `requirePackageReadPermission` run on every hit.
  *
  * The revalidation this costs is nearly free: `resolvePackageFileValidator`
  * answers a version's 304 from one DB read, with no storage GET and no unzip.
  * That is the entire reason it is split out from `readPackageSnapshot`.
  *
  * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
- * `X-Space-Id` (via `hasPackageAccess`) while the URL does not mention
+ * `X-Space-Id` (via `isPackageReadableInSpace`) while the URL does not mention
  * either. Without it, switching spaces in the SPA re-issues an identical
  * URL and the browser answers from cache — showing space B an artifact
- * that is only installed in space A.
+ * that is only placed in space A.
  */
 function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string> {
   const headers: Record<string, string> = {
@@ -1587,11 +1829,14 @@ export function createPackagesRouter() {
     // Permission resource matches the route path (e.g. "skills", "agents", "integrations")
     const resource = path as import("../lib/permissions.ts").Resource;
     const readGuard = requirePermission(resource, "read");
+    // Creation only. Every route that mutates an EXISTING package is guarded by
+    // `requirePackageInOrg()` alone: authority is the package's home space, and
+    // a second guard against the current space would re-impose the conjunction
+    // the home rule replaced (RBAC spec §6.9).
     const writeGuard = requirePermission(resource, "write");
-    const deleteGuard = requirePermission(resource, "delete");
 
-    // `readGuard` on every GET: the install/system visibility check inside the
-    // handlers (`hasPackageAccess`) answers "is this package reachable from
+    // `readGuard` on every GET: the visibility check inside the handlers
+    // (`isPackageReadableInSpace`) answers "is this package reachable from
     // this space", never "may this caller read it". Without the guard a
     // credential scoped without `<type>:read` still gets the manifest and, on
     // the detail route, the full `content` (SKILL.md / prompt.md).
@@ -1612,19 +1857,16 @@ export function createPackagesRouter() {
     router.post(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions`,
       requirePackageInOrg(),
-      writeGuard,
       makeCreateVersionHandler(rcfg),
     );
     router.post(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version/restore`,
       requirePackageInOrg(),
-      writeGuard,
       makeRestoreVersionHandler(rcfg),
     );
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}/versions/:version`,
       requirePackageInOrg("delete"),
-      deleteGuard,
       makeDeleteVersionHandler(rcfg),
     );
     router.get(
@@ -1641,16 +1883,10 @@ export function createPackagesRouter() {
       rcfg.cfg.type === "agent" ? requireAgentRead : readGuard,
       rcfg.getHandler ?? makeGetHandler(rcfg),
     );
-    router.put(
-      `/${path}/${SCOPED_PACKAGE_ROUTE}`,
-      requirePackageInOrg(),
-      writeGuard,
-      makeUpdateHandler(rcfg),
-    );
+    router.put(`/${path}/${SCOPED_PACKAGE_ROUTE}`, requirePackageInOrg(), makeUpdateHandler(rcfg));
     router.delete(
       `/${path}/${SCOPED_PACKAGE_ROUTE}`,
       requirePackageInOrg("delete"),
-      deleteGuard,
       makeDeleteHandler(rcfg),
     );
     // There is deliberately no unscoped `/:id` variant.
@@ -1672,6 +1908,170 @@ export function createPackagesRouter() {
     // its message.
   }
 
+  // --- Move a package to another home space ---
+  //
+  // Without it a package is a prisoner of the space it was born in: write
+  // authority follows `home_space_id` and nothing else could change it.
+  //
+  // No route-level permission guard: like every other mutation of an existing
+  // package, the authority is the home space, which `assertPackageMutationAccess`
+  // is the one reader of. It runs before the body is parsed so a caller who may
+  // not touch this package learns nothing about the body's shape.
+  router.patch(`/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+
+    const accessible = await packageAccessSpaces(c);
+    // Authority in the CURRENT home first — 404 for an id the caller cannot
+    // reach at all, 403 when they can see it but do not govern it. It hands
+    // back the row, so the type and the old home are not read twice.
+    const pkg = await assertPackageMutationAccess(c, packageId, "write", accessible);
+
+    const body = await readJsonBody(c, packageHomeSpaceSchema);
+    const target = body.home_space_id;
+
+    const destination = accessible.find((space) => space.id === target);
+    // A space the caller cannot reach must not be confirmed to exist — and the
+    // 404 stays silent, since naming the permission would confirm it.
+    if (!destination) throw notFound(`Space '${target}' not found`);
+    // A PERSONAL space is never a destination. A builder of a team space also
+    // holds `<type>:write` in their OWN personal space (preset `admin`), so the
+    // move went through — and §3.6 gives no administrator a way into a personal
+    // space, which left the team's package beyond every admin's reach (no edit,
+    // no delete, no move back) until its owner left the organization and the
+    // sweeper re-homed it. A private copy is `POST …/fork`, which creates a NEW
+    // package instead of carrying this one off.
+    //
+    // Conditioned on the home actually MOVING, because a package already homed
+    // in the caller's own personal space is a legitimate state — creating or
+    // forking there is how it got one — and a read-modify-write client that
+    // PATCHes the home it just read must get the idempotent 200 the no-op
+    // below answers with, not a refusal of the state it is already in.
+    if (target !== pkg.homeSpaceId && destination.ownerUserId !== null) {
+      throw conflict(
+        "home_move_into_personal_space",
+        `A personal space homes only what is created or forked in it — fork '${packageId}' to get a private copy.`,
+      );
+    }
+    if (!destination.permissions.has(packagePermission(pkg.type, "write"))) {
+      reportPermissionDenial(c, packagePermission(pkg.type, "write"));
+      throw forbidden(
+        `Moving '${packageId}' into that space requires '${packagePermission(pkg.type, "write")}' there.`,
+      );
+    }
+
+    if (target !== pkg.homeSpaceId) {
+      // `updatedAt` is deliberately NOT stamped: it is the DRAFT's timestamp,
+      // and `has_unarchived_changes` compares it against the latest version's
+      // (`computeHasUnpublishedChanges`). Moving the home changes no bytes, so
+      // touching it would report a fully-published package as dirty.
+      //
+      // The move and the PLACEMENTS it invalidates travel in ONE transaction,
+      // through `reconcilePlacementsAfterRehome` — the same function the
+      // personal-space sweeper calls when it re-homes a package whose author
+      // left. Its docstring carries the reasoning; it is a function because
+      // there are two ways to move a home and the invariant belongs to the
+      // act, not to either caller.
+      // An mcp-server whose `latest` archive does not parse is refused
+      // activation by the door; the move must not be the way in. Run outside
+      // the transaction, exactly as `activatePackage` runs it, because it reads
+      // object storage — a 422 here fails the whole move, which is the point.
+      await assertMcpServerActivatable({ orgId, spaceId: target }, packageId);
+      const activation = await db.transaction(async (tx) => {
+        // The SOURCE authority, re-asked against the home this transaction
+        // HOLDS — the same discipline `sharePackage` applies, against the same
+        // race and for a heavier stake. `assertPackageMutationAccess` above
+        // judged the home as it stood when this request arrived; a concurrent
+        // `PATCH` committing in between leaves the package homed somewhere this
+        // caller may govern not at all, and the move would then carry it OUT of
+        // a space whose write they never held. `FOR UPDATE` rather than
+        // `FOR SHARE`: this transaction is about to rewrite that column, so two
+        // moves racing must serialize rather than both read the same home.
+        const [locked] = await tx
+          .select({ homeSpaceId: packages.homeSpaceId })
+          .from(packages)
+          .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+          .limit(1)
+          .for("update");
+        if (!locked) throw notFound(`Package '${packageId}' not found`);
+        if (locked.homeSpaceId !== pkg.homeSpaceId) {
+          // It moved under us. Re-ask the rule rather than re-deriving it, and
+          // refuse plainly: the caller's own next read shows the new home, and
+          // retrying from there is one request.
+          if (!holdsHomeAuthority(locked, accessible, packagePermission(pkg.type, "write"))) {
+            throw forbidden(
+              `Moving '${packageId}' requires '${packagePermission(pkg.type, "write")}' in its home space — the package moved home while this request was in flight.`,
+            );
+          }
+          // No special case for "a concurrent move already put it on `target`":
+          // the UPDATE, the reconciliation and the activation below are each
+          // idempotent, so the loser of that race commits the same state the
+          // winner did rather than a refusal the caller cannot act on.
+        }
+        await tx
+          .update(packages)
+          .set({ homeSpaceId: target })
+          .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)));
+        await reconcilePlacementsAfterRehome(tx, {
+          packageId,
+          orgId,
+          newHomeSpaceId: target,
+        });
+        // The new home ACTIVATES it, exactly as creation does: a package lives
+        // where it is written, and arriving in a space that cannot run it
+        // would make the move a two-step act with no second button on the page
+        // that performed it. Through the activation door itself, in THIS
+        // transaction, so `space_packages` keeps a single writer and the act is
+        // audited like any other activation. `keepExistingDecision`: a space
+        // that deliberately switched the package off keeps that decision,
+        // because the move is about authority, not about what this space runs.
+        return activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
+          keepExistingDecision: true,
+        });
+      });
+      // The OLD home can be a personal space — its owner moving a package out
+      // to a team. Its id is withheld from the trail exactly as
+      // `package.shared` withholds it (§3.6), and the owner is recorded
+      // instead: that is the audited subject, and the space is its
+      // implementation. `after` needs no such care, a personal destination
+      // being refused above. The old home is necessarily in `accessible` —
+      // nothing else could have authorized the move.
+      const previousHomeOwnerId =
+        accessible.find((space) => space.id === pkg.homeSpaceId)?.ownerUserId ?? null;
+      await recordAuditFromContext(c, {
+        action: "package.home_space_changed",
+        resourceType: "package",
+        resourceId: packageId,
+        before:
+          previousHomeOwnerId === null
+            ? { home_space_id: pkg.homeSpaceId }
+            : { home_space_id: null, home_owner_user_id: previousHomeOwnerId },
+        after: { home_space_id: target },
+      });
+      // Symmetric with the HTTP door: recorded only when the destination
+      // actually started running the package, and naming the act that did it —
+      // the move, not a click on a switch that nobody pressed. A destination
+      // that kept an `enabled = false` row changed nothing and is audited as
+      // nothing.
+      if (activation.placement.enabled && !activation.wasActive) {
+        await recordAuditFromContext(c, {
+          action: "package.activated",
+          resourceType: "package",
+          resourceId: packageId,
+          after: { spaceId: target, via: "move" },
+        });
+      }
+    }
+
+    const rcfg = ROUTE_CONFIGS[pkg.type];
+    const detail = rcfg ? await loadPackageDetailDto(c, rcfg, packageId, orgId) : null;
+    if (!detail) {
+      logger.error("Moved package could not be re-read", { packageId, orgId });
+      throw internalError();
+    }
+    return c.json(detail);
+  });
+
   // --- Fork route ---
   router.post(`/${SCOPED_PACKAGE_ROUTE}/fork`, requireAnyPackageWrite, async (c) => {
     const packageId = getItemId(c);
@@ -1687,7 +2087,16 @@ export function createPackagesRouter() {
     const source = await assertForkSourceAccess(c, packageId);
     await makePermissionGuard(packagePermission(source.type, "write"))(c, async () => {});
 
-    const result = await forkPackage(orgId, orgSlug, packageId, user.id, customName);
+    const result = await forkPackage(
+      orgId,
+      orgSlug,
+      packageId,
+      // The fork is a NEW package in the space the caller forked from; the
+      // source's home says nothing about who may edit the copy.
+      c.get("spaceId"),
+      user.id,
+      customName,
+    );
 
     if ("code" in result) {
       switch (result.code) {
@@ -1709,14 +2118,16 @@ export function createPackagesRouter() {
       }
     }
 
-    // Auto-install the forked package in the current space (non-fatal)
+    // The fork is homed in the current space, so its placement is this space's
+    // by construction and the activation is an upsert that cannot conflict.
+    // WARN, not debug: a fork the caller cannot find afterwards is a bug report.
     const spaceId = c.get("spaceId");
     if (spaceId) {
-      await installPackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", {
+      await activatePackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
+        logger.warn("auto-activation skipped", {
           packageId: result.packageId,
           spaceId,
-          err: String(e),
+          err: getErrorMessage(e),
         }),
       );
     }
@@ -1744,6 +2155,206 @@ export function createPackagesRouter() {
       throw internalError();
     }
     return c.json(detail, 201);
+  });
+
+  // --- Sharing: a package's AUDIENCE (RBAC spec §6.10) ---
+  //
+  // All three routes — offer, list, revoke — are authorized by `<type>:share`
+  // in the package's HOME space, the same authority helper the write routes
+  // use, so they have no route-level permission guard either. `share` is in no
+  // API key's allowlist, so all three are session-borne in effect without a
+  // transport check of their own.
+  //
+  // There is no ACCEPT route: taking up an offer is ACTIVATING, and activating
+  // has one door, `POST /api/spaces/{spaceId}/packages` — for a personal space
+  // exactly as for a team one, with ownership standing in for the activation grant
+  // there (§3.6).
+  //
+  // Registered BEFORE `/{scope}/{name}/:version/download`: `:version` would
+  // otherwise match the literal segment `shares`.
+
+  router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    const accessible = await packageAccessSpaces(c);
+    // Authority first, before the body is read: a caller who may not share this
+    // package learns nothing about the body's shape (or the package's existence).
+    const pkg = await assertPackageShareAccess(c, packageId, accessible);
+    const { target } = await readJsonBody(c, shareTargetSchema);
+
+    // Outside its home a package runs the LATEST PUBLISHED version, always
+    // (plan decisions 3 and 6) — so an offer of a package with nothing
+    // published is an offer of nothing: the recipient activates it and every
+    // launch answers `404 no_published_version`. Refusing HERE puts the refusal
+    // on the only principal who can clear it — the author, in the act they are
+    // performing, where the dialogue offers "Publish and share" — instead of on
+    // a recipient three screens away who cannot publish anything.
+    //
+    // EVERY target, person or space: both receive the package under the same
+    // rule — the latest published version — so both are offered nothing when
+    // there is none. Checked BEFORE the target is resolved, so a refused offer
+    // provisions no personal space.
+    if ((await getLatestVersionId(packageId)) === null) {
+      throw conflict(
+        "package_has_no_version",
+        `Package '${packageId}' has no published version to offer — publish one first, since a package runs its latest published version outside the space that owns it.`,
+      );
+    }
+
+    let spaceId: string;
+    let recipientUserId: string | null = null;
+    if (target.kind === "user") {
+      // Naming a person means reading the org directory — the same permission
+      // the member picker needs. A `guest` does not hold it, which is why a
+      // guest shares to a space they reach and not to a colleague.
+      await makePermissionGuard("members:read")(c, async () => {});
+      const membership = await getOrgMember(orgId, target.user_id);
+      if (!membership) throw notFound(`User '${target.user_id}' not found in this organization`);
+      const space = await ensurePersonalSpaceFor(orgId, target.user_id);
+      spaceId = space.id;
+      recipientUserId = target.user_id;
+    } else {
+      // A space the caller cannot reach must not be confirmed to exist. Since
+      // `packageAccessSpaces` never loads somebody else's personal space, this
+      // is also what makes such a space untargetable by a guessed id.
+      const destination = accessible.find((space) => space.id === target.space_id);
+      if (!destination) throw notFound(`Space '${target.space_id}' not found`);
+      spaceId = destination.id;
+    }
+
+    // BOTH the authority and `share_target_is_home` are decided by
+    // `sharePackage`, under the lock that holds the home still for the length of
+    // the insert. `assertPackageShareAccess` above judged the home as it stood
+    // when this request arrived; a `PATCH …/{scope}/{name}` committing in
+    // between moves the package to a home this caller may govern not at all, and
+    // the offer would land carrying an authority nobody holds. The predicate is
+    // the SAME rule that guard enforces, re-asked against the locked row.
+    const sharePermission = packagePermission(pkg.type, "share");
+    const { created } = await sharePackage({
+      packageId,
+      spaceId,
+      sharedBy: c.get("user").id,
+      authorizeHome: (homeSpaceId) =>
+        holdsHomeAuthority({ homeSpaceId }, accessible, sharePermission),
+    });
+    if (created) {
+      await recordAuditFromContext(c, {
+        action: "package.shared",
+        resourceType: "package",
+        resourceId: packageId,
+        // The SUBJECT as the sharer named it. A `user` target records the
+        // person, never the personal space it resolved to: that id is withheld
+        // from the sharer on the wire (plan decision 5b), so writing it into
+        // the trail would publish through the audit log what §3.6 withholds
+        // everywhere else — and it names the wrong thing besides, since the
+        // space is an implementation of "Bob" and not the audited act.
+        after: recipientUserId
+          ? { recipientUserId, targetKind: "user" }
+          : { spaceId, targetKind: "space" },
+      });
+      if (recipientUserId) {
+        // Best-effort: the share is committed, and a notification row that
+        // will not write must not report it as failed.
+        try {
+          await createPackageShareNotification({
+            orgId,
+            spaceId,
+            recipientUserId,
+            packageId,
+            packageType: pkg.type,
+            sharedByName: c.get("user").name,
+          });
+        } catch (err) {
+          logger.warn("package share notification failed", {
+            packageId,
+            spaceId,
+            err: String(err),
+          });
+        }
+      }
+    }
+
+    // 200 either way — sharing the same pair twice is the same state, not a
+    // conflict. Rendered through the SAME projection as the listing, so a
+    // personal-space target comes back as its owner here too.
+    const [view] = await listPackageShares(packageId, orgId, spaceId);
+    if (!view) {
+      logger.error("Share could not be re-read", { packageId, spaceId, orgId });
+      throw internalError();
+    }
+    return c.json({ object: "package_share", ...view });
+  });
+
+  router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    await assertPackageShareAccess(c, packageId);
+    const shares = await listPackageShares(packageId, orgId);
+    return c.json(listResponse(shares.map((share) => ({ object: "package_share", ...share }))));
+  });
+
+  // The path segment is the target as the LISTING published it: a space id for
+  // a space share, a member's user id for a share made to a person. There is
+  // deliberately no third spelling — the id of somebody else's personal space
+  // is never on the wire (plan decision 5b), so it cannot be the handle here.
+  router.delete(`/${SCOPED_PACKAGE_ROUTE}/shares/:target`, async (c) => {
+    const packageId = getItemId(c);
+    const target = c.req.param("target")!;
+    const orgId = c.get("orgId");
+    const revokeSpaces = await packageAccessSpaces(c);
+    const revokePkg = await assertPackageShareAccess(c, packageId, revokeSpaces);
+
+    let spaceId: string;
+    let recipientUserId: string | null = null;
+    // The `spc_` prefix DISCRIMINATES; the full shape is then asserted. Testing
+    // the whole shape as the discriminator instead sends a malformed space id
+    // down the user-id branch, where it reports "not a member of this
+    // organization" — a wrong reason for a malformed id, and the 400 this
+    // asserts is the right one. A user id never starts with `spc_`
+    // (Better Auth mints unprefixed ids), so the prefix is unambiguous.
+    if (target.startsWith("spc_")) {
+      assertSpaceId(target, "target");
+      spaceId = target;
+    } else {
+      const membership = await getOrgMember(orgId, target);
+      if (!membership) throw notFound(`User '${target}' not found in this organization`);
+      // READ-ONLY, unlike the offer route: a revoke must not be the act that
+      // brings the recipient's personal space into existence. No space means no
+      // share to withdraw, which is the same 404 the missing row answers.
+      const space = await findPersonalSpace(orgId, target);
+      if (!space) throw notFound(`Package '${packageId}' is not shared with '${target}'`);
+      spaceId = space.id;
+      recipientUserId = target;
+    }
+
+    // Withdrawing the offer withdraws the placement it backs, in one
+    // transaction (plan decision 3) — otherwise the package keeps running in a
+    // space that is no longer allowed to see it.
+    const revoked = await revokePackageShare({
+      packageId,
+      spaceId,
+      orgId,
+      authorizeHome: (homeSpaceId) =>
+        holdsHomeAuthority(
+          { homeSpaceId },
+          revokeSpaces,
+          packagePermission(revokePkg.type, "share"),
+        ),
+    });
+    if (!revoked) throw notFound(`Package '${packageId}' is not shared with '${target}'`);
+    await recordAuditFromContext(c, {
+      action: "package.unshared",
+      resourceType: "package",
+      resourceId: packageId,
+      // The subject as the caller named it — a person for a `user` target, and
+      // never the personal space it resolved to, for the reason `package.shared`
+      // states. `placement_removed` is the other half of what this act did: the
+      // offer went, and the placement row it backed went with it.
+      after: recipientUserId
+        ? { recipientUserId, targetKind: "user", placement_removed: revoked.placementRemoved }
+        : { spaceId, targetKind: "space", placement_removed: revoked.placementRemoved },
+    });
+    return c.body(null, 204);
   });
 
   // --- Package import/download/publish routes ---
@@ -1880,7 +2491,7 @@ export function createPackagesRouter() {
 
     if (existing?.orgId === orgId) {
       await assertPackageMutationAccess(c, packageId, "write");
-      await assertExistingPackageInstallAccess(c, packageId, existing.type);
+      await assertExistingPackageActivationAccess(c, packageId, existing.type);
     }
     await assertPackageDependenciesAccessible(
       c,
@@ -1953,6 +2564,7 @@ export function createPackagesRouter() {
         content,
         files,
         zipBuffer: artifact,
+        homeSpaceId: c.get("spaceId"),
         draftManifest: manifest as Record<string, unknown>,
         lockVersion: force ? undefined : existing?.lockVersion,
       });
@@ -1969,11 +2581,13 @@ export function createPackagesRouter() {
       });
     }
 
-    // Auto-install in the current space (non-fatal, skip if already installed)
+    // Same as the create route: the import homes the package here, so the
+    // placement rule is satisfied and the upsert cannot conflict. WARN so a
+    // silent non-activation is still visible.
     const spaceId = c.get("spaceId");
     if (spaceId) {
-      await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
+      await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+        logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
       );
     }
 
@@ -2010,7 +2624,7 @@ export function createPackagesRouter() {
     });
     // Surface engine-subset limitations for integration manifests as
     // non-blocking warnings (AFPS §7.7). Publishers learn
-    // about unsupported `connect.login` selectors / criteria at install
+    // about unsupported `connect.login` selectors / criteria at import
     // time rather than chasing the runtime LoginError later. Also lift the
     // validator's `_meta` Appendix B regex soft-fail warnings to the same
     // channel so publishers see them on import. Same channel again for an
@@ -2019,17 +2633,17 @@ export function createPackagesRouter() {
     // No retired-dependency-key warning here, unlike the bundle path: this
     // route parses through `parseZipWithSkillFallback`, which rejects them
     // outright, so such a manifest is a 400 long before this line.
-    const installWarnings = [
+    const importWarnings = [
       ...collectConnectLoginWarnings(manifest),
       ...collectMetaWarnings(manifest),
-      ...collectAgentInstallWarnings(manifest),
+      ...collectAgentImportWarnings(manifest),
     ];
     return c.json(
       {
         packageId,
         type: packageType,
         version: importedVersion,
-        ...(installWarnings.length > 0 ? { warnings: installWarnings } : {}),
+        ...(importWarnings.length > 0 ? { warnings: importWarnings } : {}),
       },
       201,
     );
@@ -2060,8 +2674,14 @@ export function createPackagesRouter() {
 
     let result: Awaited<ReturnType<typeof handleImportBundle>>;
     try {
-      result = await handleImportBundle(bytes, { orgId, spaceId }, userId, (bundle) =>
-        authorizeBundlePackages(c, bundle),
+      result = await handleImportBundle(
+        bytes,
+        { orgId, spaceId },
+        userId,
+        (bundle) => authorizeBundlePackages(c, bundle),
+        // A root that already lives in another space is placed here by the same
+        // rule as any activation: the offer, when this caller may make one.
+        (packageId) => holdsPackageShareAuthority(c, packageId),
       );
     } catch (err) {
       // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
@@ -2146,10 +2766,15 @@ export function createPackagesRouter() {
 
   // GET /api/packages/:scope/:name/files — flat index of the artifact's files
   router.get(`/${SCOPED_PACKAGE_ROUTE}/files`, rateLimit(50), async (c) => {
-    const { version } = parseFileQuery(c, fileIndexQuerySchema);
+    const { version: requested } = parseFileQuery(c, fileIndexQuerySchema);
     // Visibility + `<type>:read` are both settled inside this call, BEFORE any
     // validator is resolved — nothing below can answer an unauthorized caller.
     const pkg = await loadFileExplorerPackage(c);
+    // WHICH definition, and whether an explicit `draft` is this caller's to
+    // ask for. Above the ETag short-circuit for the same reason the permission
+    // check is: a 304 answered before the refusal would confirm the draft's
+    // content to someone the refusal exists to keep out.
+    const version = await resolveFileExplorerVersion(c, pkg, requested);
     const inm = c.req.header("if-none-match");
 
     // Resolve the validator FIRST. A published version's snapshot id comes
@@ -2179,11 +2804,13 @@ export function createPackagesRouter() {
   // Serves preview AND download: a small text file that fell past the index's
   // inline budget stays previewable through here.
   router.get(`/${SCOPED_PACKAGE_ROUTE}/files/content`, rateLimit(50), async (c) => {
-    const { version, path } = parseFileQuery(c, fileContentQuerySchema);
+    const { version: requested, path } = parseFileQuery(c, fileContentQuerySchema);
     // Must stay ABOVE the validator: the 304 short-circuit below answers
     // without reading the artifact, so a permission check placed after it
-    // would turn `If-None-Match` into a file-existence oracle.
+    // would turn `If-None-Match` into a file-existence oracle. The definition
+    // selector rides in the same window, for the same reason.
     const pkg = await loadFileExplorerPackage(c);
+    const version = await resolveFileExplorerVersion(c, pkg, requested);
     const inm = c.req.header("if-none-match");
 
     // Same short-circuit as the index, but the tag folds in the PATH: a
@@ -2245,17 +2872,22 @@ export function createPackagesRouter() {
     const spaceId = c.get("spaceId");
     const versionSpec = c.req.param("version")!;
 
-    // Visibility first — "system package OR installed in THIS space",
-    // the same gate the rest of the package surface applies. Without it this
-    // route served the artifact bytes of packages that are merely owned by the
-    // org and installed nowhere the caller can reach.
-    if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
+    // Visibility first — "system package, offered to THIS space, or homed
+    // here", the same gate the rest of the package read surface applies.
+    // Without it this route served the artifact bytes of packages that are
+    // merely owned by the org and placed nowhere the caller can reach.
+    if (!(await isPackageReadableInSpace(spaceId, packageId))) {
       throw notFound("Package not found");
     }
 
     // Verify org ownership (or system package). Ephemeral shadows are hidden.
     const [pkg] = await db
-      .select({ id: packages.id, type: packages.type })
+      .select({
+        id: packages.id,
+        type: packages.type,
+        source: packages.source,
+        homeSpaceId: packages.homeSpaceId,
+      })
       .from(packages)
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId), notEphemeralFilter()))
       .limit(1);
@@ -2266,6 +2898,18 @@ export function createPackagesRouter() {
     // The ZIP carries the manifest and every authored file, so it is at least
     // as sensitive as the detail route — it needs the same `<type>:read`.
     await requirePackageReadPermission(c, pkg.type);
+
+    // …and, when the organization restricts copying (plan decision 12), the
+    // source's `<type>:share`. This is the route the archive leaves through,
+    // so reading it and taking it away are two different permissions there.
+    // Skills and system packages are exempt inside the helper: the CLI's
+    // skills sync is this route's other consumer and its copies are local by
+    // design, and a shipped system package has no owning space to protect.
+    await assertPackageCopyAllowed(
+      c,
+      { ...pkg, type: pkg.type as PackageType },
+      { orgId, accessible: await packageAccessSpaces(c, orgId) },
+    );
 
     const ver = await getVersionForDownload(packageId, versionSpec);
     if (!ver) {

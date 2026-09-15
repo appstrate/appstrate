@@ -17,12 +17,8 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers, runs, schedules } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg, addOrgMember } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace, seedEndUser } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace, seedSpacePackage, seedEndUser } from "../../helpers/seed.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
-import {
-  initSystemIntegrations,
-  __resetSystemIntegrationsForTest,
-} from "../../../src/services/integration-client-registry.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
 import {
@@ -47,7 +43,6 @@ describeRequiresRedis("scheduler service", () => {
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
-    initSystemIntegrations([]);
     const { cookie: _cookie, ...user } = await createTestUser();
     userId = user.id;
     const { org, defaultSpaceId: spaceId } = await createTestOrg(userId, { slug: "testorg" });
@@ -57,10 +52,18 @@ describeRequiresRedis("scheduler service", () => {
 
     actor = { type: "user", id: userId };
 
-    // Seed an agent package that schedules will reference
+    // Seed an agent package that schedules will reference — PLACED here (the
+    // default space is its home) and ACTIVE here (`space_packages`, enabled by
+    // default). Both halves are fixture, not subject: the tick asks the
+    // executable predicate (`agentExecutionBlock` — placed ∧ active, RBAC spec
+    // §6.9) BEFORE it resolves a version or reads a manifest, so an agent
+    // homed nowhere would make every `triggerScheduledRun` case below fail on
+    // placement and assert nothing about what it means to assert.
+    // `scheduler-activation-gate.test.ts` is the suite that owns that gate.
     const pkg = await seedPackage({
       orgId,
       id: `@${orgSlug}/scheduled-agent`,
+      homeSpaceId: defaultSpaceId,
       draftManifest: {
         name: `@${orgSlug}/scheduled-agent`,
         version: "0.1.0",
@@ -69,10 +72,10 @@ describeRequiresRedis("scheduler service", () => {
       },
     });
     packageId = pkg.id;
+    await seedSpacePackage(defaultSpaceId, packageId);
   });
 
   afterAll(async () => {
-    __resetSystemIntegrationsForTest();
     await closeRedis();
   });
 
@@ -687,9 +690,12 @@ describeRequiresRedis("scheduler service", () => {
 
   describe("triggerScheduledRun integration manifest health (#737)", () => {
     it("fails fast with a visible failed run when a declared integration package is missing", async () => {
+      // Placed + active here, like the suite's own agent: the integration this
+      // case is about is only reached once the execution gate has passed.
       const agent = await seedPackage({
         orgId,
         id: `@${orgSlug}/missing-integration-agent`,
+        homeSpaceId: defaultSpaceId,
         draftManifest: {
           name: `@${orgSlug}/missing-integration-agent`,
           version: "0.1.0",
@@ -698,6 +704,7 @@ describeRequiresRedis("scheduler service", () => {
           dependencies: { integrations: { "@vendor/does-not-exist": "1.0.0" } },
         },
       });
+      await seedSpacePackage(defaultSpaceId, agent.id);
 
       const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, agent.id, actor, {
         cronExpression: "0 * * * *",
@@ -830,6 +837,11 @@ describeRequiresRedis("scheduler service", () => {
       const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(fired).toHaveLength(1);
       expect((fired[0]!.error ?? "").toLowerCase()).not.toContain("no longer a member");
+      // …and it failed on the version, POSITIVELY: a control that only names
+      // the cause it rules out passes on any other refusal — including the
+      // execution gate two steps later — and would have reported "the actor
+      // was fine" about a fire that never reached the resolver at all.
+      expect((fired[0]!.error ?? "").toLowerCase()).toContain("no published version");
 
       const [row] = await db
         .select({ enabled: schedules.enabled })

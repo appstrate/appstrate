@@ -26,7 +26,13 @@
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, integrationPins, spacePackages } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationPins,
+  packageShares,
+  packages,
+  spacePackages,
+} from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -55,6 +61,7 @@ import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
+import { placementReadFilter } from "./package-placement.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -653,7 +660,7 @@ interface ResolveConnectionsForRunInput {
    * caller already refused them for a more precise reason.
    *
    * The readiness gate passes the ids it flagged `integration_not_active`. An
-   * integration that is not installed/enabled in the space has no business also
+   * integration that is not ACTIVE in the space has no business also
    * producing a `not_connected` — the run is refused either way, but the second
    * error names a remedy (connect your account) that does not apply and, for a
    * caller opted into the connect-offer relay, gets a live link minted for it.
@@ -966,10 +973,25 @@ export async function isUserConnectionCreationBlocked(
   spaceId: string,
   integrationId: string,
 ): Promise<boolean> {
+  // PLACEMENT, not activation (`placementReadFilter` + its `packageShares`
+  // join): the flag is this space's decision about an integration it HOLDS, so
+  // an ORPHAN row is nobody's decision here. `enabled` is deliberately NOT
+  // required — a lock on a switched-off integration is still the space's call.
   const rows = await db
     .select({ blocked: spacePackages.blockUserConnections })
     .from(spacePackages)
-    .where(and(eq(spacePackages.spaceId, spaceId), eq(spacePackages.packageId, integrationId)))
+    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, spacePackages.packageId), eq(packageShares.spaceId, spaceId)),
+    )
+    .where(
+      and(
+        eq(spacePackages.spaceId, spaceId),
+        eq(spacePackages.packageId, integrationId),
+        placementReadFilter(spaceId),
+      ),
+    )
     .limit(1);
   return rows[0]?.blocked === true;
 }

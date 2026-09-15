@@ -26,7 +26,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
-  seedInstalledPackage,
+  seedSpacePackage,
   seedMcpServer,
   seedSpace,
   seedSpaceMember,
@@ -61,8 +61,10 @@ describe("space package detail follows the list's visibility", () => {
   }
 
   beforeEach(async () => {
-    await seedMcpServer({ id: MCP_ID, orgId: ctx.orgId });
-    await seedInstalledPackage(ctx.defaultSpaceId, MCP_ID);
+    // Homed here, so the row means something: what these two cases separate is
+    // the caller's TYPE read scope, not the placement.
+    await seedMcpServer({ id: MCP_ID, orgId: ctx.orgId, homeSpaceId: ctx.defaultSpaceId });
+    await seedSpacePackage(ctx.defaultSpaceId, MCP_ID);
   });
 
   it("hides an mcp-server row from a role holding only agents:read, in the list AND by id", async () => {
@@ -76,7 +78,7 @@ describe("space package detail follows the list's visibility", () => {
       headers,
     });
     expect(byId.status).toBe(404);
-    expect(await byId.json()).toMatchObject({ code: "package_not_installed" });
+    expect(await byId.json()).toMatchObject({ code: "package_not_placed" });
   });
 
   it("serves the same row to a role that does hold mcp-servers:read", async () => {

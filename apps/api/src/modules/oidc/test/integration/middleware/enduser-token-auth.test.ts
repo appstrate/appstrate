@@ -29,7 +29,7 @@ import { endUsers, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
-import { prefixedId } from "../../../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 let privateKey: jose.CryptoKey;
 let kid: string;
@@ -569,10 +569,10 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
 
     expect((await app.request("/api/agents", { headers })).status).toBe(200);
 
-    const { seedPackage, seedInstalledPackage } =
+    const { seedPackage, seedSpacePackage } =
       await import("../../../../../../test/helpers/seed.ts");
     await seedPackage({ orgId, id: "@oidc/agent", type: "agent" });
-    await seedInstalledPackage(spaceId, "@oidc/agent");
+    await seedSpacePackage(spaceId, "@oidc/agent");
     const ran = await app.request("/api/agents/@oidc/agent/run", {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },

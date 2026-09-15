@@ -13,7 +13,7 @@
  * The stake is asymmetric in both directions, which is why this file exists:
  *
  *   * wrap too little and `space_packages.input_settings` keeps a raw
- *     `config` object, `getInstalledPackageSettings` resolves `asRecord(…)` to
+ *     `config` object, `getSpacePackageSettings` resolves `asRecord(…)` to
  *     `{}`, and every configured input value is silently gone;
  *   * wrap too much and every row nests a second time into
  *     `{"values":{"values":…,"locked":[]},"locked":[]}`.

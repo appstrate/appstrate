@@ -4,23 +4,33 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test"
 import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedAgent,
-  seedRun,
-  seedSpace,
+  seedSpacePackage,
   seedOrgModel,
   seedOrgModelProviderKey,
   seedOrgModelProviderOAuth,
+  seedPackageShare,
+  seedRun,
+  seedSpace,
+  seedSpaceMember,
+  seedUnreachableSpace,
 } from "../../helpers/seed.ts";
 import {
   getSystemModels,
   initSystemModelProviderKeys,
 } from "../../../src/services/model-registry.ts";
 import {
-  getInstalledPackageSettings,
-  installPackage,
-  updateInstalledPackage,
+  getSpacePackageSettings,
+  activatePackage,
+  updateSpacePackage,
 } from "../../../src/services/space-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
@@ -32,12 +42,11 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 const app = getTestApp();
 
 /** Seed an agent and install it in the default space. */
-async function seedInstalledAgent(
-  overrides: Parameters<typeof seedAgent>[0] & { spaceId: string },
-) {
+async function seedActiveAgent(overrides: Parameters<typeof seedAgent>[0] & { spaceId: string }) {
   const { spaceId, ...rest } = overrides;
   const pkg = await seedAgent(rest);
-  await installPackage({ orgId: rest.orgId!, spaceId: spaceId }, pkg.id);
+  await seedPackageShare(spaceId, pkg.id);
+  await activatePackage({ orgId: rest.orgId!, spaceId: spaceId }, pkg.id);
   return pkg;
 }
 
@@ -48,6 +57,13 @@ describe("Agents API", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
   });
+
+  /**
+   * The scope the service reads under. `getSpacePackageSettings` carries the
+   * org boundary and the placement rule in its own query, so a bare space id
+   * is not enough to name the row it may act on.
+   */
+  const spaceScope = () => ({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
   describe("GET /api/agents", () => {
     it("returns empty list when no agents exist", async () => {
@@ -62,7 +78,7 @@ describe("Agents API", () => {
     });
 
     it("returns agents installed in the current space", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/test-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -82,7 +98,7 @@ describe("Agents API", () => {
     });
 
     it("returns scope WITH the @ sigil — directly usable as a {scope} path param (#629)", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/scoped-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -127,7 +143,7 @@ describe("Agents API", () => {
 
   describe("GET /api/packages/agents/:scope/:name (agent detail)", () => {
     it("returns agent detail when installed", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/detail-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -164,9 +180,15 @@ describe("Agents API", () => {
     });
 
     it("returns 404 from default space when agent is not installed (no bypass)", async () => {
-      await seedAgent({ id: "@myorg/default-hidden", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: "@myorg/default-hidden",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        homeSpaceId: await seedUnreachableSpace(ctx.orgId),
+      });
 
-      // Agent is in the org catalog but NOT installed in the default space
+      // The organization owns the agent, but it is placed nowhere this space
+      // reaches
       const res = await app.request("/api/packages/agents/@myorg/default-hidden", {
         headers: authHeaders(ctx),
       });
@@ -175,7 +197,7 @@ describe("Agents API", () => {
     });
 
     it("returns 200 from default space when agent is installed", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/default-installed",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -208,14 +230,18 @@ describe("Agents API", () => {
     });
 
     it("returns 200 from custom space when agent is installed", async () => {
-      await seedAgent({ id: "@myorg/custom-installed", orgId: ctx.orgId, createdBy: ctx.user.id });
-
       const customApp = await seedSpace({
         orgId: ctx.orgId,
         name: "Custom Installed",
         createdBy: ctx.user.id,
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@myorg/custom-installed");
+      await seedAgent({
+        id: "@myorg/custom-installed",
+        homeSpaceId: customApp.id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@myorg/custom-installed");
 
       const res = await app.request("/api/packages/agents/@myorg/custom-installed", {
         headers: { ...authHeaders(ctx), "X-Space-Id": customApp.id },
@@ -248,7 +274,7 @@ describe("Agents API", () => {
       };
 
       // Seed draft = the to-be-published manifest, then freeze it as 1.0.0.
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: VER,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -311,6 +337,7 @@ describe("Agents API", () => {
     it("stores input values and field locks", async () => {
       await seedAgent({
         id: "@myorg/input-settings-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -323,7 +350,7 @@ describe("Agents API", () => {
           },
         },
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@myorg/input-settings-agent",
       );
@@ -349,6 +376,7 @@ describe("Agents API", () => {
     it("rejects a body missing locked_fields with 400 and leaves the stored row intact", async () => {
       await seedAgent({
         id: "@myorg/partial-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -361,11 +389,11 @@ describe("Agents API", () => {
           },
         },
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@myorg/partial-agent",
       );
-      await updateInstalledPackage(
+      await updateSpacePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@myorg/partial-agent",
         {
@@ -380,7 +408,7 @@ describe("Agents API", () => {
       });
 
       expect(res.status).toBe(400);
-      const stored = await getInstalledPackageSettings(ctx.defaultSpaceId, "@myorg/partial-agent");
+      const stored = await getSpacePackageSettings(spaceScope(), "@myorg/partial-agent");
       expect(stored.values).toEqual({ folder: "archive" });
       expect(stored.locked).toEqual(["folder"]);
     });
@@ -388,6 +416,7 @@ describe("Agents API", () => {
     it("rejects a body carrying an unknown key with 400 and leaves the stored row intact", async () => {
       await seedAgent({
         id: "@myorg/unknown-key-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -400,11 +429,11 @@ describe("Agents API", () => {
           },
         },
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@myorg/unknown-key-agent",
       );
-      await updateInstalledPackage(
+      await updateSpacePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@myorg/unknown-key-agent",
         { inputSettings: { values: { folder: "archive" }, locked: ["folder"] } },
@@ -418,10 +447,7 @@ describe("Agents API", () => {
       });
 
       expect(res.status).toBe(400);
-      const stored = await getInstalledPackageSettings(
-        ctx.defaultSpaceId,
-        "@myorg/unknown-key-agent",
-      );
+      const stored = await getSpacePackageSettings(spaceScope(), "@myorg/unknown-key-agent");
       expect(stored.values).toEqual({ folder: "archive" });
       expect(stored.locked).toEqual(["folder"]);
     });
@@ -429,6 +455,7 @@ describe("Agents API", () => {
     it("rejects a wrong-typed stored value with 400", async () => {
       await seedAgent({
         id: "@myorg/typed-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -441,7 +468,10 @@ describe("Agents API", () => {
           },
         },
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@myorg/typed-agent");
+      await activatePackage(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@myorg/typed-agent",
+      );
 
       const res = await app.request("/api/agents/@myorg/typed-agent/input-settings", {
         method: "PUT",
@@ -464,6 +494,7 @@ describe("Agents API", () => {
     it("prunes a value key that names no declared property and still returns 200", async () => {
       await seedAgent({
         id: "@myorg/orphan-key-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -476,7 +507,7 @@ describe("Agents API", () => {
           },
         },
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@myorg/orphan-key-agent",
       );
@@ -495,10 +526,7 @@ describe("Agents API", () => {
       const body = (await res.json()) as Record<string, unknown>;
       expect(body.values).toEqual({ folder: "inbox" });
 
-      const stored = await getInstalledPackageSettings(
-        ctx.defaultSpaceId,
-        "@myorg/orphan-key-agent",
-      );
+      const stored = await getSpacePackageSettings(spaceScope(), "@myorg/orphan-key-agent");
       expect(stored.values).toEqual({ folder: "inbox" });
       // Pruning is not the same as materialising: a declared property the
       // editor left empty stays ABSENT — `values` is a partial layer.
@@ -508,6 +536,7 @@ describe("Agents API", () => {
     it("stays saveable when the schema declares additionalProperties: false", async () => {
       await seedAgent({
         id: "@myorg/closed-schema-agent",
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -524,7 +553,7 @@ describe("Agents API", () => {
           },
         },
       });
-      await installPackage(
+      await activatePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@myorg/closed-schema-agent",
       );
@@ -541,10 +570,7 @@ describe("Agents API", () => {
       // Pruning happens BEFORE validation, so the orphan key never reaches
       // AJV — otherwise the row would be permanently unsaveable (400 forever).
       expect(res.status).toBe(200);
-      const stored = await getInstalledPackageSettings(
-        ctx.defaultSpaceId,
-        "@myorg/closed-schema-agent",
-      );
+      const stored = await getSpacePackageSettings(spaceScope(), "@myorg/closed-schema-agent");
       expect(stored.values).toEqual({ folder: "inbox" });
     });
 
@@ -575,7 +601,8 @@ describe("Agents API", () => {
           },
         },
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+      await seedPackageShare(ctx.defaultSpaceId, id);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
 
     /** Create a schedule on `id` through the public route. */
@@ -635,7 +662,7 @@ describe("Agents API", () => {
       // (`triggerScheduledRun` → `resolveEffectiveInput`): stored settings
       // plus the schedule's frozen values. Before the fix this threw
       // `locked_input_field` on every tick, forever.
-      const stored = await getInstalledPackageSettings(ctx.defaultSpaceId, agentId);
+      const stored = await getSpacePackageSettings(spaceScope(), agentId);
       const row = await readScheduleRow(schedule.id);
       const effective = resolveEffectiveInput({
         schema: asJSONSchemaObject({
@@ -658,14 +685,14 @@ describe("Agents API", () => {
     // ─── 16 KB byte cap on the stored document ─────────────────────────────
     //
     // `space_packages.input_settings` is read on EVERY run launch
-    // (`getInstalledPackageSettings`) and on every agent-detail load, yet
+    // (`getSpacePackageSettings`) and on every agent-detail load, yet
     // neither of its members was bounded: `values` is pruned to the schema's
     // declared properties but a declared string's LENGTH is not, and
     // `locked_fields` is stored verbatim without being pruned at all. The only
     // ceiling was the global 10 MiB body limit — 640× the cap on the column's
     // closest sibling, `package_schedules.input` (16 KB).
     //
-    // The cap lives in `updateInstalledPackage`, the column's ONE write path,
+    // The cap lives in `updateSpacePackage`, the column's ONE write path,
     // not in the route body schema: the route is not the only caller, and a
     // caller that never sees `agentInputSettingsSchema` must be refused too.
 
@@ -683,7 +710,8 @@ describe("Agents API", () => {
           input: { schema: { type: "object", properties: { note: { type: "string" } } } },
         },
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+      await seedPackageShare(ctx.defaultSpaceId, id);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
 
     /** A `values` document whose JSON weighs well over 16 KB — and well under
@@ -706,8 +734,8 @@ describe("Agents API", () => {
       expect(body.errors?.[0]?.message).toMatch(/max is 16384/);
 
       // Nothing reached Postgres: the row still holds the empty default
-      // `installPackage` wrote.
-      const stored = await getInstalledPackageSettings(ctx.defaultSpaceId, agentId);
+      // `activatePackage` wrote.
+      const stored = await getSpacePackageSettings(spaceScope(), agentId);
       expect(stored.values).toEqual({});
     });
 
@@ -716,12 +744,12 @@ describe("Agents API", () => {
       await seedNoteAgent(agentId);
 
       await expect(
-        updateInstalledPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId, {
+        updateSpacePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId, {
           inputSettings: { values: overCapValues, locked: [] },
         }),
       ).rejects.toThrow(/max is 16384/);
 
-      const stored = await getInstalledPackageSettings(ctx.defaultSpaceId, agentId);
+      const stored = await getSpacePackageSettings(spaceScope(), agentId);
       expect(stored.values).toEqual({});
     });
 
@@ -739,17 +767,18 @@ describe("Agents API", () => {
       });
 
       expect(res.status).toBe(200);
-      const stored = await getInstalledPackageSettings(ctx.defaultSpaceId, agentId);
+      const stored = await getSpacePackageSettings(spaceScope(), agentId);
       expect(stored.values).toEqual({ note });
     });
   });
 
   describe("GET /api/agents/:scope/:name/bundle — 404 distinction", () => {
-    // The bundle route deliberately distinguishes "agent doesn't exist in
-    // this org" from "agent exists in org but isn't installed in the
-    // pinned space" — the CLI's run-by-id flow needs to tell the
-    // user whether to fix the spelling or run an install. Pin both
-    // branches so the contract holds across refactors.
+    // `requireAgent()` distinguishes "this space holds no placement for the
+    // agent" from "it holds one that is switched off" — the CLI's run-by-id
+    // flow needs to tell the user whether to fix the spelling or activate the
+    // agent. The opaque code is the DEFAULT: a space with no placement learns
+    // nothing about the agent, so only the placed-but-off case is named. Pin
+    // both branches so the contract holds across refactors.
 
     it("returns 404 agent_not_found when the package isn't in the org catalog", async () => {
       const res = await app.request("/api/agents/@myorg/does-not-exist/bundle", {
@@ -760,44 +789,69 @@ describe("Agents API", () => {
       expect(body.code).toBe("agent_not_found");
     });
 
-    it("returns 404 agent_not_installed_in_space when the package exists in org but is not installed in the pinned space", async () => {
-      // Seed the agent at the org level, but DON'T install it into the space.
+    it("keeps the OPAQUE code when the org has the package but this space holds no placement", async () => {
+      // Homed out of reach and offered nowhere here: the space is told
+      // nothing. Naming "exists but is not placed here" would hand any member
+      // an existence oracle over every id in the organization.
       await seedAgent({
-        id: "@myorg/uninstalled-agent",
+        id: "@myorg/inactive-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
+        homeSpaceId: await seedUnreachableSpace(ctx.orgId),
       });
 
-      const res = await app.request("/api/agents/@myorg/uninstalled-agent/bundle", {
+      const res = await app.request("/api/agents/@myorg/inactive-agent/bundle", {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(404);
       const body = (await res.json()) as { code?: string; detail?: string };
-      expect(body.code).toBe("agent_not_installed_in_space");
-      // The detail names the space and the install endpoint so the
-      // CLI's hint can quote it back to the user verbatim.
+      expect(body.code).toBe("agent_not_found");
+      expect(body.detail).not.toContain("/api/spaces/");
+    });
+
+    it("says PLACED-but-off when the row is there and disabled — same 404, different reading", async () => {
+      // The negative control on R19: before it, a disabled placement RAN. Now
+      // it answers the same 404 as no placement at all, and the message is the
+      // only thing that distinguishes "one click away" from "never offered".
+      await seedActiveAgent({
+        id: "@myorg/switched-off-agent",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        spaceId: ctx.defaultSpaceId,
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@myorg/switched-off-agent", { enabled: false });
+
+      const res = await app.request("/api/agents/@myorg/switched-off-agent/bundle", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("agent_not_active_in_space");
+      expect(body.detail).toContain("but not active there");
+      // The detail names the space and the activation endpoint so the CLI's
+      // hint can quote it back to the user verbatim.
       expect(body.detail).toContain(ctx.defaultSpaceId);
       expect(body.detail).toContain("/api/spaces/");
     });
 
-    it("passes the access gate when the package is installed (subsequent failures are version/artifact, not access)", async () => {
+    it("passes the access gate when the package is active (subsequent failures are version/artifact, not access)", async () => {
       // The 200/version-resolution path requires a published artifact in
       // storage that the seed helpers don't set up. The relevant contract
-      // for *this* gate is that we don't surface `agent_not_installed_in_space`
-      // for an installed package — version-resolution failures throw
+      // for *this* gate is that we don't surface `agent_not_active_in_space`
+      // for an active package — version-resolution failures throw
       // `not_found`, a different code.
-      await seedInstalledAgent({
-        id: "@myorg/installed-agent",
+      await seedActiveAgent({
+        id: "@myorg/active-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         spaceId: ctx.defaultSpaceId,
       });
 
-      const res = await app.request("/api/agents/@myorg/installed-agent/bundle", {
+      const res = await app.request("/api/agents/@myorg/active-agent/bundle", {
         headers: authHeaders(ctx),
       });
       const body = (await res.json()) as { code?: string };
-      expect(body.code).not.toBe("agent_not_installed_in_space");
+      expect(body.code).not.toBe("agent_not_active_in_space");
       expect(body.code).not.toBe("agent_not_found");
     });
   });
@@ -809,7 +863,7 @@ describe("Agents API", () => {
     // on agents the dashboard runs happily.
 
     it("returns 200 + a deterministic .afps-bundle for an installed never-published agent", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/draft-only",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -838,7 +892,7 @@ describe("Agents API", () => {
     });
 
     it("rejects ?source=draft combined with ?version= (400 draft_with_version)", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/draft-with-version",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -855,6 +909,15 @@ describe("Agents API", () => {
     });
 
     it("rejects ?source=foo (400 invalid_source)", async () => {
+      // On an ACTIVE agent: the route mounts `requireAgent()` like every other
+      // execution door, so an agent this space cannot run answers its 404 first
+      // — a query-string 400 is never a free reachability probe.
+      await seedActiveAgent({
+        id: "@myorg/anything",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        spaceId: ctx.defaultSpaceId,
+      });
       const res = await app.request("/api/agents/@myorg/anything/bundle?source=experimental", {
         headers: authHeaders(ctx),
       });
@@ -866,7 +929,7 @@ describe("Agents API", () => {
 
   describe("Multi-tenancy isolation", () => {
     it("isolates run counts per org", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/counted-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -910,7 +973,7 @@ describe("Agents API", () => {
 
   describe("GET /api/agents/:scope/:name/persistence", () => {
     it("returns pinned slots as an array (admin sees every actor's row)", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/persist-list",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -953,7 +1016,7 @@ describe("Agents API", () => {
     });
 
     it("returns Letta-style named pinned slots alongside the checkpoint slot", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/persist-named-pin",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -1002,7 +1065,7 @@ describe("Agents API", () => {
     });
 
     it("filters memories by runId", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/persist-runid",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -1052,7 +1115,7 @@ describe("Agents API", () => {
 
   describe("DELETE /api/agents/:scope/:name/persistence/pinned/:id", () => {
     it("deletes a single pinned slot by id", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/persist-del-cp",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -1090,7 +1153,7 @@ describe("Agents API", () => {
     });
 
     it("deletes a Letta-style named pinned slot (e.g. persona) by id", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/persist-del-persona",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -1121,7 +1184,7 @@ describe("Agents API", () => {
     });
 
     it("returns 404 for unknown pinned slot id", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/persist-del-404",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -1138,7 +1201,7 @@ describe("Agents API", () => {
 
   describe("PUT /api/agents/:scope/:name/proxy", () => {
     it("returns the bare proxy-setting resource (same shape as GET)", async () => {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/proxy-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -1192,7 +1255,7 @@ describe("Agents API", () => {
     });
 
     async function seedModelAgent() {
-      await seedInstalledAgent({
+      await seedActiveAgent({
         id: "@myorg/model-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
@@ -1304,7 +1367,7 @@ describe("Agents API", () => {
 
     it("reconciles persisted generation defaults when the model changes", async () => {
       await seedModelAgent();
-      await updateInstalledPackage(
+      await updateSpacePackage(
         { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@myorg/model-agent",
         { generationConfig: { temperature: 0.7 } },
@@ -1342,6 +1405,138 @@ describe("Agents API", () => {
       });
       const body = (await get.json()) as { modelId: string | null };
       expect(body.modelId).toBeNull();
+    });
+  });
+});
+
+/**
+ * Reading a package is not executing it (RBAC spec §6.10).
+ *
+ * An agent nobody has published yet has exactly ONE definition — the author's
+ * draft. The package list shows it to every reader of its home, so its detail
+ * page has to exist for them too: a 404 there is a link the list just promised
+ * and cannot honour, and hiding the page protects nothing (`GET …/files` and
+ * the list already show the same draft).
+ *
+ * The refusals stay where they belong. Naming the working copy — an explicit
+ * `?version=draft` — is an author's act and answers `403 draft_not_writable`.
+ * LAUNCHING with no selector is the published version and answers
+ * `404 no_published_version`. The `definition` field is what lets a client tell
+ * the two situations apart and say so instead of offering a dead button.
+ */
+describe("GET /api/packages/agents/:scope/:name — a never-published agent is readable", () => {
+  let ctx: TestContext;
+  let homeId: string;
+  const NEVER = "@myorg/never-published";
+
+  /** A member holding `preset` in the agent's home, and nothing elsewhere. */
+  async function memberIn(preset: "viewer" | "operator" | "builder") {
+    const user = await createTestUser();
+    await addOrgMember(ctx.orgId, user.id, "member");
+    await seedSpaceMember({ spaceId: homeId, userId: user.id, presetRole: preset });
+    return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": homeId };
+  }
+
+  const detail = (headers: Record<string, string>, suffix = "") =>
+    app.request(`/api/packages/agents/${NEVER}${suffix}`, { headers });
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    homeId = (await seedSpace({ orgId: ctx.orgId, name: "Home", visibility: "closed" })).id;
+    await seedAgent({
+      id: NEVER,
+      homeSpaceId: homeId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: NEVER,
+        version: "0.1.0",
+        type: "agent",
+        description: "Work in progress",
+      },
+      draftContent: "The author's working copy.",
+    });
+    await seedSpacePackage(homeId, NEVER);
+  });
+
+  for (const preset of ["viewer", "operator"] as const) {
+    it(`serves the draft in read-only to a ${preset} of the home`, async () => {
+      const headers = await memberIn(preset);
+      // The control: the list DOES show it, which is what makes a 404 on the
+      // detail a contradiction rather than a policy.
+      const listed = await app.request("/api/agents", { headers });
+      expect(listed.status, await listed.clone().text()).toBe(200);
+      expect(
+        ((await listed.json()) as { data: { id: string }[] }).data.map((row) => row.id),
+      ).toContain(NEVER);
+
+      const res = await detail(headers);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect((await res.json()) as Record<string, unknown>).toMatchObject({
+        id: NEVER,
+        definition: "draft",
+        home_writable: false,
+      });
+    });
+  }
+
+  it("still refuses an EXPLICIT ?version=draft to a reader who cannot write it", async () => {
+    // The discriminating pair: the same caller, the same agent, the same
+    // definition — only the selector changes. Naming the working copy is the
+    // author's act; landing on it because nothing else exists is not.
+    const headers = await memberIn("operator");
+    expect((await detail(headers)).status).toBe(200);
+    const named = await detail(headers, "?version=draft");
+    expect(named.status, await named.clone().text()).toBe(403);
+    expect((await named.json()) as { code?: string }).toMatchObject({
+      code: "draft_not_writable",
+    });
+  });
+
+  it("answers readiness on the SAME definition the page rendered", async () => {
+    // The badge and the page must judge the SAME definition. Deriving the
+    // default selector in two places is how one of them 404s what the other
+    // has just rendered, so both read `defaultDefinitionSelector`.
+    const headers = await memberIn("operator");
+    const res = await app.request(`/api/agents/${NEVER}/connection-readiness`, { headers });
+    expect(res.status, await res.clone().text()).toBe(200);
+  });
+
+  it("keeps the LAUNCH refused — reading is not executing", async () => {
+    const headers = await memberIn("operator");
+    const res = await app.request(`/api/agents/${NEVER}/run`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ input: {} }),
+    });
+    expect(res.status, await res.clone().text()).toBe(404);
+    expect((await res.json()) as { code?: string }).toMatchObject({
+      code: "no_published_version",
+    });
+  });
+
+  it("reports `definition: published` once a version exists, for the same reader", async () => {
+    // The other half of the field's meaning: with something published, a
+    // non-author reads THAT, not the author's in-flight edits.
+    await createVersionFromDraft({ packageId: NEVER, orgId: ctx.orgId, userId: ctx.user.id });
+    const headers = await memberIn("operator");
+    const res = await detail(headers);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await res.json()) as Record<string, unknown>).toMatchObject({
+      definition: "published",
+      home_writable: false,
+    });
+  });
+
+  it("reports `definition: draft` to the author, published or not", async () => {
+    await createVersionFromDraft({ packageId: NEVER, orgId: ctx.orgId, userId: ctx.user.id });
+    const headers = await memberIn("builder");
+    const res = await detail(headers);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await res.json()) as Record<string, unknown>).toMatchObject({
+      definition: "draft",
+      home_writable: true,
     });
   });
 });

@@ -17,16 +17,36 @@
  *   - `stage: "draft"`     → `getPackage` reads `draftManifest`/`draftContent`.
  *                            `versionLabel = "draft"`. `spec` is rejected.
  *   - `stage: "published"` → `resolveExportVersion` (explicit `spec` →
- *                            pinned-in-space version → `latest` dist-tag).
- *                            Manifest + prompt loaded from `package_versions`.
+ *                            `latest` dist-tag). Manifest + prompt loaded from
+ *                            `package_versions`.
  *
- * Access control: the package must exist in the org's catalog AND be
- * installed in the calling space — same 404 semantics the bundle
- * route already enforces.
+ * Access control: the package must exist in the org's catalog AND be runnable
+ * in the calling space — {@link agentExecutionBlock}, PLACED here and ACTIVE
+ * here, the same verdict `requireActiveAgent()` puts in front of `POST …/run`,
+ * `POST …/schedules` and `GET …/bundle`, and the same one the scheduler tick
+ * reads. This is the FOURTH execution door and it asks the whole question:
+ * half of it — the activation half alone — would run an ORPHAN placement, a
+ * `space_packages` row with neither a home nor a share behind it, from a space
+ * every HTTP door refuses to serve it to.
+ *
+ * The two verdicts are rendered differently on purpose. `not_active` names the
+ * switch and the call that flips it, because the caller can already see this
+ * package. `not_placed` answers exactly what a nonexistent id answers, byte
+ * for byte: a space with no placement learns nothing here, not even that the
+ * package exists — this route takes a package id straight from the caller, so
+ * a distinguishable refusal would be an existence oracle over every package
+ * the organization owns.
+ *
+ * `stage: "draft"` carries one more condition, and it is NOT asked here: write
+ * authority over the package (`assertDraftSelectorAllowed`, 403
+ * `draft_not_writable`). It needs the Hono context — the caller's role in the
+ * package's HOME space, its view-as persona, its credential ceiling — which
+ * this resolver deliberately does not take, so the route asserts it before
+ * calling in. A future second caller must do the same.
  */
 
 import { getPackage } from "./package-catalog.ts";
-import { hasPackageAccess } from "./space-packages.ts";
+import { agentExecutionBlock } from "../lib/package-access.ts";
 import { getVersionDetail } from "./package-versions.ts";
 import { resolveExportVersion } from "./bundle-assembly.ts";
 import { ApiError } from "../lib/errors.ts";
@@ -70,24 +90,30 @@ export async function resolveRegistryAgent(
     });
   }
 
-  const pkg = await getPackage(packageId, orgId);
-  if (!pkg) {
-    throw new ApiError({
+  const notFoundHere = () =>
+    new ApiError({
       status: 404,
       code: "package_not_found",
       title: "Package Not Found",
       detail: `Package '${packageId}' not found in this organization`,
     });
-  }
 
-  if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
+  const pkg = await getPackage(packageId, orgId);
+  if (!pkg) throw notFoundHere();
+
+  const block = await agentExecutionBlock({ orgId, spaceId }, packageId);
+  // One `ApiError` for both branches of "you cannot see this", built by the
+  // same factory rather than copied: the opacity is only worth anything while
+  // the two bodies stay identical.
+  if (block === "not_placed") throw notFoundHere();
+  if (block === "not_active") {
     throw new ApiError({
       status: 404,
-      code: "package_not_installed_in_space",
-      title: "Package Not Installed",
+      code: "package_not_active_in_space",
+      title: "Package Not Active",
       detail:
-        `Package '${packageId}' exists in this organization but is not installed in space '${spaceId}'. ` +
-        `Install it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
+        `Package '${packageId}' exists in this organization but is not active in space '${spaceId}'. ` +
+        `Activate it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
     });
   }
 
@@ -135,10 +161,10 @@ export async function resolveRegistryAgent(
     return { agent: pkg, versionLabel: "draft" };
   }
 
-  // Published path. `resolveExportVersion` handles three resolution
-  // shapes: explicit spec, pinned-in-space version, "latest" dist-tag.
-  // It throws `notFound` if nothing resolves — let it bubble.
-  const version = await resolveExportVersion(packageId, { orgId, spaceId }, spec ?? null);
+  // Published path. `resolveExportVersion` handles both resolution shapes:
+  // an explicit spec, else the "latest" dist-tag. It throws `notFound` if
+  // nothing resolves — let it bubble.
+  const version = await resolveExportVersion(packageId, spec ?? null);
   const detail = await getVersionDetail(packageId, version);
   if (!detail) {
     throw new ApiError({

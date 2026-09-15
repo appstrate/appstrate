@@ -6,12 +6,18 @@
  * `packages.draftManifest` column + the `package-items` storage
  * bucket) rather than against published versions.
  *
- * This is the catalog used on the run hot path by `buildAgentPackage`,
- * where runs must see the latest skill/integration edits without a
- * republish step. The counterpart {@link DbPackageCatalog} resolves
- * against published versions (signed, version-range-pinned) and is
- * used by the import/export endpoints, where reproducibility matters
- * more than edit-loop responsiveness.
+ * It has ONE caller: {@link RunPackageCatalog}, and only for a dependency
+ * a run explicitly overrode with `"draft"` — the skill-development edit loop
+ * (edit SKILL.md → run → observe, no republish per iteration). That override
+ * is an act of authorship and carries its own gate
+ * (`assertDependencyDraftOverridesAllowed`, RBAC spec §6.10), so every path
+ * through this class has already proven write authority over the package whose
+ * working copy it is about to read.
+ *
+ * Nothing else resolves against drafts. A run with no override, and the bundle
+ * EXPORT of a draft agent (`?source=draft`), both walk the closure with
+ * {@link DbPackageCatalog} against published versions — the #666 rule, and what
+ * keeps the exported archive byte-identical to what the server would execute.
  *
  * Contract details:
  *   - `resolve(name, versionSpec)` ignores `versionSpec` — draft deps

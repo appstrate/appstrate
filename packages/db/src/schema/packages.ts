@@ -21,6 +21,24 @@ import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
+/**
+ * Package ACTIVATION, per space — one row per (space, package) saying this
+ * space runs it, plus everything the space chose about how: the model, the
+ * proxy, the generation settings, the agent's stored input values.
+ *
+ * A row is not a placement. WHERE a package is, is decided by `packages.
+ * home_space_id` and by {@link packageShares}; a row here is what a space does
+ * with a package already placed in it, and the platform reads the two together
+ * (`services/package-activation.ts`). A row that outlives its placement — the
+ * home moved away, the offer was revoked — decides nothing anywhere: not on the
+ * run gate, not in the listings, not in the caller context handed to the model.
+ *
+ * `enabled` is sticky in both directions and the ROW always wins over the
+ * deployment's default, which is what makes a system package switchable off
+ * per space. Deactivating never deletes the row: it holds the configuration,
+ * so switching a package off for a week costs nothing to undo. Only the revoke
+ * of the share that placed the package removes it, along with the placement.
+ */
 export const spacePackages = pgTable(
   "space_packages",
   {
@@ -30,9 +48,11 @@ export const spacePackages = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    versionId: integer("version_id").references(() => packageVersions.id, {
-      onDelete: "set null",
-    }),
+    // This table carries no version: outside the package's home a space runs
+    // the `latest` published version, always (RBAC spec §6.10). The draft
+    // belongs to whoever can write it, and dependency versions come from the
+    // agent's own manifest ranges — nothing here selects a definition.
+    //
     // The agent's stored input settings for this space, in one
     // document:
     //   `values` — editor-set defaults for the agent's INPUT fields (AFPS
@@ -73,11 +93,81 @@ export const spacePackages = pgTable(
   ],
 );
 
+/**
+ * Package sharing — AUDIENCE, one of the two PLACEMENTS (RBAC spec §6.10).
+ *
+ * A row here says "this package is OFFERED to that space". It grants READ (the
+ * metadata a recipient needs to decide, and the "add to my space" affordance)
+ * and NOTHING else: running a package, resolving its pins and resolving its
+ * credentials all ask {@link spacePackages} as well, and the recipient writes
+ * that row themselves by ACTIVATING the package
+ * (`POST /api/spaces/{spaceId}/packages`). That separation is the whole point
+ * of a second table — an agent runs with the recipient's credentials, so
+ * switching it on has to be the recipient's own act, and a state carried on
+ * `space_packages` would have had to be filtered at each of its readers, where
+ * one miss executes a package nobody consented to.
+ *
+ * Revoking a share deletes the activation row it backs, in the same
+ * transaction: the offer was the placement, so nothing survives it.
+ *
+ * `shared_by` is `SET NULL` rather than `RESTRICT`: the sharer leaving the
+ * organization must not keep the audience alive as a foreign-key obstacle, and
+ * the audit event records who shared it anyway.
+ */
+export const packageShares = pgTable(
+  "package_shares",
+  {
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    spaceId: text("space_id")
+      .notNull()
+      .references(() => spaces.id, { onDelete: "cascade" }),
+    sharedBy: text("shared_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.packageId, table.spaceId] }),
+    // "What is shared WITH this space" — the library's `shared` section and the
+    // read predicate both ask it, and it backs the `spaces` cascade.
+    index("idx_package_shares_space_id").on(table.spaceId),
+    // Referencing-side index for the `user` SET NULL action.
+    index("idx_package_shares_shared_by").on(table.sharedBy),
+  ],
+);
+
 export const packages = pgTable(
   "packages",
   {
     id: text("id").primaryKey(),
     orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    // WHO MAY WRITE THIS PACKAGE — the one authority, read by
+    // `assertPackageMutationAccess` (`apps/api/src/lib/package-access.ts`).
+    // Holding `<type>:write` in THIS space is what authorizes editing,
+    // publishing, renaming and deleting the package; every other space it is
+    // placed in consumes it and never gains a say. It is also the other
+    // PLACEMENT, and a READ grant with it — a draft nobody has been offered is
+    // still readable at home.
+    //
+    // An ORGANIZATION package always has one: the space its author wrote it
+    // in, or the organization's DEFAULT space when it belongs to no team.
+    // `packages_org_package_has_home` below is that sentence as a constraint,
+    // and it names the only two rows allowed to be homeless: a SYSTEM package
+    // (`org_id IS NULL`), which the deployment ships readable in every space
+    // rather than housing in one, and an inline run's shadow row
+    // (`ephemeral`).
+    //
+    // Moving it moves a placement: every space still holding a
+    // `space_packages` row needs the offer that now places it, written in the
+    // same transaction (`reconcilePlacementsAfterRehome`).
+    //
+    // `ON DELETE RESTRICT`: a space that homes packages cannot be dropped out
+    // from under them. `deleteSpace` therefore refuses with 409
+    // `space_homes_packages` and names them, so moving them stays the caller's
+    // act, and the personal-space sweeper re-homes them to the organization's
+    // default space before it deletes. Inline shadow rows are left homeless
+    // for the same reason inverted: one run must not wedge its space.
+    homeSpaceId: text("home_space_id").references(() => spaces.id, { onDelete: "restrict" }),
     type: packageTypeEnum("type").notNull(),
     source: packageSourceEnum("source").notNull().default("local"),
     draftManifest: jsonb("draft_manifest"),
@@ -102,6 +192,10 @@ export const packages = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_packages_created_by").on(table.createdBy),
+    // Referencing-side index for the `spaces` RESTRICT action, and for the
+    // "what does this space home" sweep the write guard and the offboarding
+    // path both run.
+    index("idx_packages_home_space_id").on(table.homeSpaceId),
     // Partial index sized for the compaction sweep (`ephemeral = true AND
     // created_at < now() - interval '30 days'`). Keeps the hot set tiny.
     index("idx_packages_ephemeral_created")
@@ -115,6 +209,23 @@ export const packages = pgTable(
     check(
       "packages_draft_manifest_v0",
       sql`"draft_manifest" IS NULL OR ("draft_manifest" ->> 'schema_version') IS NULL OR ("draft_manifest" ->> 'schema_version') LIKE '0.%'`,
+    ),
+    // An organization's package is always homed in one of that organization's
+    // spaces (RBAC spec §6.9). Write authority is per HOME, so a homeless
+    // organization package would be a package nobody in the organization can
+    // author — the state `0014` exists to end, and the one this refuses to let
+    // any writer re-create.
+    //
+    // The two exceptions are named rather than tolerated. A SYSTEM package
+    // (`org_id IS NULL`) is a DELIVERY, not a residency: the deployment ships
+    // it readable in every space of every organization, so no single space
+    // owns it. An `ephemeral` row is an inline run's shadow manifest,
+    // unreachable from every package route; giving it a home would only make
+    // its space undeletable until the compaction sweep removes it
+    // (`ON DELETE RESTRICT`).
+    check(
+      "packages_org_package_has_home",
+      sql`${table.orgId} IS NULL OR ${table.ephemeral} OR ${table.homeSpaceId} IS NOT NULL`,
     ),
   ],
 );
