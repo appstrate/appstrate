@@ -186,10 +186,11 @@ describe("assertPackageMutationAccess", () => {
   it("refuses when the HOME withholds the permission, whatever the current space grants", async () => {
     await seedSpacePackage(homeId, SKILL);
     // The caller reads the home and nothing more there, while their coarse
-    // current-space set carries the full builder bundle. The old rule asked
-    // both and refused on the weaker; the rule asks the home, so it refuses on
-    // the home — and the reverse case, a rich home under a poor current space,
-    // is the 200 the route suite pins.
+    // current-space set carries the full builder bundle. The rule asks the
+    // HOME and only the home, so it refuses on the home — and the reverse
+    // case, a rich home under a poor current space, is the 200 the route suite
+    // pins. Conjoining the two sets instead would refuse on the weaker of
+    // them, which is the authority the home rule replaced.
     const accessible: AccessibleSpaces = [space(homeId, ["skills:read"])];
     const refused = await refusal(
       assertPackageMutationAccess(

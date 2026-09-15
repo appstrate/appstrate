@@ -3,11 +3,12 @@
 /**
  * RBAC on the package READ surface (issue #1123).
  *
- * Every `GET` under `/api/packages` used to be gated on `isPackageActiveHere`
- * alone — a visibility check ("is this package a system package, or installed
- * in THIS space?"), never an authorization one. A credential scoped
- * without `skills:read` could therefore read a skill's manifest AND its full
- * `SKILL.md` through the detail route, and pull the published ZIP through
+ * Every `GET` under `/api/packages` carries `readGuard` — the type's
+ * `<type>:read` — on top of the visibility question `isPackageActiveHere`
+ * answers ("is this package a system package, or active in THIS space?").
+ * Visibility is not authorization: on its own it lets a credential scoped
+ * without `skills:read` read a skill's manifest AND its full `SKILL.md`
+ * through the detail route, and pull the published ZIP through
  * `/{version}/download`.
  *
  * These tests pin the guard per route rather than once: the value of the fix

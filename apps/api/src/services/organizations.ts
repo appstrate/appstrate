@@ -78,9 +78,9 @@ export async function createOrganization(
 ): Promise<OrgResult> {
   // Org row, owner membership, default space and the owner's personal space are
   // ONE unit — `provisionOrg` (`@appstrate/db/provision-org`), shared with the
-  // bootstrap path so neither can provision half an organization. The default
-  // space used to be created after this commit, outside the transaction, with a
-  // swallowed `.catch`.
+  // bootstrap path so neither can provision half an organization. A default
+  // space created after this commit, outside the transaction, is an
+  // organization that can commit without one.
   const { org } = await db.transaction(async (tx) =>
     provisionOrg(tx, {
       name,

@@ -690,8 +690,8 @@ async function assertHomeAuthority(
  * `home_writable` is that answer, and it is `assertPackageMutationAccess`'s
  * WHOLE rule, not just its home half: a SYSTEM package is refused there before
  * the home is ever consulted, so it answers `false` here too however much
- * authority the caller holds. It used to answer `true` to owners and admins on
- * a system package the write route refuses, which is a button that 403s.
+ * authority the caller holds. Answering `true` for an owner or admin on a
+ * system package would render a button that 403s on click.
  *
  * It is computed for the type's `write`; the SPA gates delete and move on it
  * too, and the server still checks `<type>:delete` in its own right (they

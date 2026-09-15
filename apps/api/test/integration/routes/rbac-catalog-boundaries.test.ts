@@ -403,8 +403,9 @@ describe("shared package authority", () => {
     await homeIn(ctx.defaultSpaceId);
     await activateIn(ctx.defaultSpaceId);
     await activateIn(privateId);
-    // A `viewer` row in the other installation used to veto the delete. The
-    // home is the authority now, so it does not.
+    // The home is the authority, so a `viewer` row in another installation
+    // does not veto the delete — conjoining every installation would let the
+    // weakest of them decide.
     await seedSpaceMember({ spaceId: privateId, userId: guestId, presetRole: "viewer" });
     expect((await deleteSkill(headers)).status).toBe(204);
   });

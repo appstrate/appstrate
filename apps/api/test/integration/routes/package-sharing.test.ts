@@ -1513,9 +1513,10 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
 
   it("on: `/bundle` needs `agents:share` in the home — a viewer is refused", async () => {
     await setRestrictCopy(true);
-    // The widest copy door of the three, and the one that used to be gated on
-    // read + installed alone: without it a restricted organization's `download`
-    // refusal was one `appstrate run --local` away from being pointless.
+    // The widest copy door of the three, and the one that has to carry the
+    // same gate: read + placement alone would leave a restricted
+    // organization's `download` refusal one `appstrate run --local` away from
+    // being pointless.
     await expectProblem(await bundle(viewer), 403, { code: "package_copy_restricted" });
     // The home's builder holds it, so the archive is served.
     const allowed = await bundle(author);

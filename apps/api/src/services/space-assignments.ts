@@ -16,13 +16,13 @@ import { assertCustomRolesFeature } from "./space-roles.ts";
  * Admins need no explicit grants, and no role needs one. All referenced spaces
  * and custom roles must belong to the organization.
  *
- * A `guest` used to be required to name at least one space, because without a
- * grant the invitation produced an account that could reach nothing. That is no
- * longer true: every membership provisions the member's own personal space
+ * A `guest` needs no team space either, and that is the interesting case: an
+ * invitation with no grant still produces an account that can reach something,
+ * because every membership provisions the member's own personal space
  * (`provisionMember`, RBAC spec §3.6), where a guest holds `operator` — which
  * is the whole point of inviting one for a single shared agent (plan decision
- * 4). Requiring a team space on top granted MORE than the invitation meant to,
- * so the rule is gone rather than worked around at the call sites.
+ * 4). Demanding a team space on top would grant MORE than the invitation
+ * means to.
  */
 export async function assertSpaceAssignmentsValid(
   params: {

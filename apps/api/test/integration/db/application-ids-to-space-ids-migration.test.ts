@@ -496,11 +496,10 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     // the twenty-one `c` (cascade), and exactly one `r` (restrict):
     // `packages.home_space_id`, from `0063_packages_home_space`, where SET NULL
     // would silently promote a package to the org catalogue on a space delete
-    // and WIDEN who may write it. `audit_events` used to be one more entry at
-    // `n` (set null); `0055_schema_integrity_repairs` dropped that FK, because
-    // the SET NULL was doing exactly what the old comment here warned a wrong
-    // action would do — erasing the space attribution of every historical audit
-    // row — and doing it on purpose, on every space delete.
+    // and WIDEN who may write it. `audit_events` carries no such FK —
+    // `0055_schema_integrity_repairs` dropped it, because SET NULL there erased
+    // the space attribution of every historical audit row on each space
+    // delete.
     //
     // So the assertion names its one exception instead of allowing any
     // non-cascade action: a resurrected `n`, or a second `r`, means either 0055

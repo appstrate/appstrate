@@ -6,8 +6,8 @@
  * An org needs its owner's membership, a default space for that owner to land
  * in, and the owner's own personal space; a member needs their membership row
  * and their personal space. Every one of those writes belongs in the SAME
- * transaction as the row it depends on — the default space used to be created
- * after the commit, outside it, with a swallowed `.catch`, in two places.
+ * transaction as the row it depends on: a default space written after the
+ * commit, outside it, is an organization that can exist without one.
  *
  * It lives in `packages/db` rather than in `apps/api/src/services` because
  * `bootstrap-org.ts` (right next door) provisions the root organization before

@@ -179,11 +179,10 @@ describe("space package activate/configure/deactivate — permission is per pack
   });
 
   it("refuses an id it cannot reach in the SAME words as one that does not exist, on all three doors", async () => {
-    // The oracle this closes: a caller who PASSES the gate used to get two
-    // different `detail` strings — "not found in this organization" for a
-    // nonexistent id and "is not placed in this space" for one that exists but
-    // lives somewhere they cannot reach. Guessing ids then told them which
-    // packages the organization has, personal spaces included (RBAC §3.6).
+    // The oracle this closes: a caller who PASSES the gate must get ONE
+    // `detail` string for both a nonexistent id and one that exists but lives
+    // somewhere they cannot reach. Two strings would let id-guessing enumerate
+    // the organization's packages, personal spaces included (RBAC §3.6).
     // All three doors now read the catalogue through the same reachability
     // rule the READ routes obey, so the two bodies are byte-identical.
     const stranger = await memberContext(owner, "member");

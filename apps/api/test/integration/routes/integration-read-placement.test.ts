@@ -4,10 +4,11 @@
  * `GET /api/integrations` and `GET /api/integrations/{packageId}` obey
  * PLACEMENT — the same rule every other package read obeys.
  *
- * These two routes are the Integrations page's own surface, and they used to
- * ask a question no other read asks: "does this organization own the row?",
- * with no placement conjunct at all. An integration homed in somebody's
- * PERSONAL space and offered to nobody therefore came back in full — name,
+ * These two routes are the Integrations page's own surface, and they ask the
+ * same placement question every other read asks. Narrowing on ownership alone
+ * — "does this organization own the row?", with no placement conjunct — is
+ * what these pin against: an integration homed in somebody's PERSONAL space
+ * and offered to nobody would come back in full — name,
  * description, `auths` with their `authorized_uris`, tool catalog — to any
  * caller holding `integrations:read`, organization owners included. RBAC spec
  * §3.6 says the opposite in as many words: owners and admins neither read nor
