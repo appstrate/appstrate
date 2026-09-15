@@ -133,5 +133,7 @@
   "nav.catalogue": "Catalogue",
   "products.unread_one": "{{count}} unread conversation",
   "products.unread_other": "{{count}} unread conversations",
-  "viewAs.bannerOwn": "What you created stays visible — your runs, your files, your connections. This role sees less."
+  "viewAs.bannerOwn": "What you created stays visible — your runs, your files, your connections. This role sees less.",
+  "settingRow.showDetails": "See details",
+  "settingRow.hideDetails": "Hide details"
 }

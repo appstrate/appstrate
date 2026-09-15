@@ -11,9 +11,21 @@
  *
  * Fields follow their explanation and take a readable line of their own.
  * Toggles sit beside their label. Actions stay opposite their explanation.
+ *
+ * A setting whose explanation is documentation rather than a decision keeps a
+ * one-line description and folds the rest behind "Voir les détails" (`details`):
+ * the row reads like every other one, and the depth is one click away. What
+ * must be seen to act (a reason the control is disabled) stays in `description`.
  */
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { SettingsHeading } from "./settings-heading";
 
 /** Read-only counterpart of a setting field. Render inside a description list. */
@@ -64,23 +76,27 @@ export function SettingRow({
   description,
   children,
   status,
+  details,
   className,
 }: {
   variant?: "field" | "toggle" | "action";
   label: ReactNode;
   description?: ReactNode;
+  /** The long explanation, folded under the description behind "Voir les détails". */
+  details?: ReactNode;
   /** The control. Its kind decides the row's shape. */
   children: ReactNode;
   /** Transient state rendered beside the control, such as a saving spinner. */
   status?: ReactNode;
   className?: string;
 }) {
+  const explanation = (description || details) && (
+    <RowExplanation description={description} details={details} />
+  );
   const copy = (
     <div className="min-w-0">
       <div className="text-sm font-medium">{label}</div>
-      {description && (
-        <div className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</div>
-      )}
+      {explanation}
     </div>
   );
 
@@ -108,9 +124,7 @@ export function SettingRow({
           <div className="text-sm font-medium">{label}</div>
           {status}
         </div>
-        {description && (
-          <div className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</div>
-        )}
+        {explanation}
       </div>
     );
   }
@@ -127,5 +141,41 @@ export function SettingRow({
         {status}
       </div>
     </div>
+  );
+}
+
+function RowExplanation({
+  description,
+  details,
+}: {
+  description?: ReactNode;
+  details?: ReactNode;
+}) {
+  const { t } = useTranslation("common");
+  if (!details) {
+    return <div className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</div>;
+  }
+  return (
+    <Collapsible className="group/details">
+      <div className="text-muted-foreground mt-1 text-xs leading-relaxed">
+        {description}
+        {description && " "}
+        <CollapsibleTrigger className="text-foreground focus-visible:ring-ring inline-flex h-auto items-center gap-0.5 rounded-sm bg-transparent p-0 text-xs font-medium underline-offset-2 outline-none hover:underline focus-visible:ring-2">
+          <span className="group-data-[state=open]/details:hidden">
+            {t("settingRow.showDetails")}
+          </span>
+          <span className="hidden group-data-[state=open]/details:inline">
+            {t("settingRow.hideDetails")}
+          </span>
+          <ChevronDown
+            className="size-3 transition-transform group-data-[state=open]/details:rotate-180"
+            aria-hidden
+          />
+        </CollapsibleTrigger>
+      </div>
+      <CollapsibleContent className="text-muted-foreground mt-2 max-w-3xl text-xs leading-relaxed">
+        {details}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

@@ -946,5 +946,6 @@
   "package.actions": "Package actions",
   "files.saved": "Files saved",
   "files.pendingCount_one": "{{count}} unsaved file change",
-  "files.pendingCount_other": "{{count}} unsaved file changes"
+  "files.pendingCount_other": "{{count}} unsaved file changes",
+  "integrationEditor.allowUndeclaredTools.summary": "Agents may pick every tool of the server, including ones added after publication."
 }

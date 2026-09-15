@@ -276,7 +276,8 @@ function AllowUndeclaredToggle({
         }
         description={
           <>
-            {t("integrationEditor.allowUndeclaredTools.description")}
+            {t("integrationEditor.allowUndeclaredTools.summary")}
+            {/* Why the toggle is off stays in view: it is what the reader acts on. */}
             {!usable && (
               <span className="text-destructive mt-1 block">
                 {t("integrationEditor.allowUndeclaredTools.requiresWildcardUsableAuth")}
@@ -284,6 +285,7 @@ function AllowUndeclaredToggle({
             )}
           </>
         }
+        details={t("integrationEditor.allowUndeclaredTools.description")}
       >
         <Switch
           id="allow-undeclared-tools"

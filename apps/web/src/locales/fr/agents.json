@@ -946,5 +946,6 @@
   "package.actions": "Actions du package",
   "files.saved": "Fichiers enregistrés",
   "files.pendingCount_one": "{{count}} modification de fichier non enregistrée",
-  "files.pendingCount_other": "{{count}} modifications de fichiers non enregistrées"
+  "files.pendingCount_other": "{{count}} modifications de fichiers non enregistrées",
+  "integrationEditor.allowUndeclaredTools.summary": "Les agents peuvent choisir tous les outils du serveur, y compris ceux ajoutés après la publication."
 }
