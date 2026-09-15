@@ -111,7 +111,7 @@ export function InputSettingsSection({
   };
 
   return (
-    <div className="max-w-2xl space-y-3 py-4">
+    <div className="space-y-3 py-4">
       {showDescription && (
         <p className="text-muted-foreground text-sm">{t("detail.inputSettings.hint")}</p>
       )}

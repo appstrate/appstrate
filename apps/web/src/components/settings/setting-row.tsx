@@ -88,7 +88,7 @@ export function SettingRow({
     return (
       <div data-slot="setting-row" data-variant="field" className={cn("pb-8 last:pb-0", className)}>
         {copy}
-        <div className="mt-3 flex w-full max-w-lg items-center gap-2">
+        <div className="mt-3 flex w-full items-center gap-2">
           {children}
           {status}
         </div>

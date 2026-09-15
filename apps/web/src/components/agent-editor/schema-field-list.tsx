@@ -55,6 +55,7 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { PageActionsMenu } from "../page-actions-menu";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { toLiveSlug, toSlug } from "../../lib/strings";
 import { Modal } from "../modal";
@@ -105,10 +106,14 @@ export function SchemaFieldList({
           <h3 className="text-sm font-semibold">{title}</h3>
           <Badge variant="secondary">{fields.length}</Badge>
         </div>
-        <Button type="button" size="sm" onClick={() => editing.open("new")}>
-          <Plus />
-          {t("editor.fieldAdd")}
-        </Button>
+        {/* The list's one "Actions" menu, white like every table's, as the
+            skills and integrations sections have it. */}
+        <PageActionsMenu>
+          <DropdownMenuItem onSelect={() => editing.open("new")}>
+            <Plus />
+            {t("editor.fieldAdd")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </div>
 
       {fields.length === 0 ? (
@@ -212,7 +217,7 @@ function FieldRow({
           <GripVertical className="size-4" />
         </Button>
       </TableCell>
-      <TableCell className="font-mono text-sm">{field.key || "—"}</TableCell>
+      <TableCell className="text-sm">{field.key || "—"}</TableCell>
       <TableCell>
         <Badge variant="outline" className="font-normal">
           {field.isFile ? t("editor.fieldTypeFile") : field.type}
