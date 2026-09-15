@@ -107,9 +107,9 @@ describe("a system package is switchable, and the row outranks the default", () 
     expect(await auditCount("package.deactivated", SYSTEM_SKILL)).toHaveLength(1);
 
     // …and only HERE. The other space never answered, so it keeps the default.
-    expect(await isPackageActiveHere({ orgId: ctx.orgId, spaceId: otherSpaceId }, SYSTEM_SKILL)).toBe(
-      true,
-    );
+    expect(
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: otherSpaceId }, SYSTEM_SKILL),
+    ).toBe(true);
   });
 
   it("comes back on with 201 — this call is what turned it on", async () => {

@@ -625,9 +625,9 @@ describe("package file explorer", () => {
       // The same predicate answers `true` for the org that DOES own it — so
       // the `false` above is the boundary talking, not the fixture failing to
       // activate anything.
-      expect(await isPackageActiveHere({ orgId: other.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
-        true,
-      );
+      expect(
+        await isPackageActiveHere({ orgId: other.orgId, spaceId: ctx.defaultSpaceId }, id),
+      ).toBe(true);
 
       const { res } = await listFiles(ctx, id);
       expect(res.status).toBe(404);
