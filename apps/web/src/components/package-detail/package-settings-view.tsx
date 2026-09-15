@@ -106,7 +106,7 @@ export function PackageSettingsView({
       label: t("detail.settings.definitionGroup"),
       items: [
         ...(editable
-          ? [{ id: "general" as const, icon: IdCard, label: t("editor.tabIdentity") }]
+          ? [{ id: "general" as const, icon: IdCard, label: t("editor.tabGeneral") }]
           : []),
         { id: "bundle" as const, icon: FileArchive, label: t("editor.tabPackageFiles") },
       ],

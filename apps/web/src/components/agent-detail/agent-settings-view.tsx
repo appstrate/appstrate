@@ -81,7 +81,7 @@ const SETTINGS_GROUPS = [
   {
     labelKey: "detail.settings.definitionGroup",
     items: [
-      { id: "general", icon: IdCard, labelKey: "editor.tabIdentity" },
+      { id: "general", icon: IdCard, labelKey: "editor.tabGeneral" },
       { id: "schema", icon: Braces, labelKey: "editor.tabSchema" },
       { id: "skills", icon: Sparkles, labelKey: "editor.tabSkills" },
       { id: "integrations", icon: Boxes, labelKey: "editor.tabIntegrations" },

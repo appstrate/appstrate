@@ -111,7 +111,7 @@ async function saveEmbedded(
   }
 }
 
-/** The manifest's raw editor under the forms, for fields no form covers. */
+/** The manifest's raw editor, opened from `manifest.json` in Explorer › Fichiers. */
 function EmbeddedManifestEntry({
   type,
   manifest,
@@ -125,7 +125,6 @@ function EmbeddedManifestEntry({
     <ManifestEditEntry
       value={manifest}
       schema={{ uri: AFPS_SCHEMA_URLS[type], schema: PACKAGE_SCHEMAS[type] ?? {} }}
-      showLink
       onApply={onApply}
     />
   );
@@ -284,7 +283,7 @@ function AgentEditorInner({
 
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = embedded
     ? [
-        { id: "general", label: t("editor.tabIdentity") },
+        { id: "general", label: t("editor.tabGeneral") },
         { id: "schema", label: t("editor.tabSchema") },
         { id: "skills", label: t("editor.tabSkills") },
         { id: "integrations", label: t("editor.tabIntegrations") },
@@ -586,7 +585,7 @@ function PackageEditorInner({
   };
 
   const pkgTabs: Array<{ id: GenericEditorTab; label: string }> = embedded
-    ? [{ id: "general", label: t("editor.tabIdentity") }]
+    ? [{ id: "general", label: t("editor.tabGeneral") }]
     : [
         { id: "general", label: t("editor.tabGeneral") },
         { id: "files", label: t("files.tabLabel") },
@@ -751,7 +750,7 @@ function IntegrationEditorInner({
   // Embedded, the labels are the settings rail's, so heading and rail agree.
   const integrationTabs: Array<{ id: GenericEditorTab; label: string }> = embedded
     ? [
-        { id: "general", label: t("editor.tabIdentity") },
+        { id: "general", label: t("editor.tabGeneral") },
         { id: "source", label: t("integrationEditor.tabSource") },
         { id: "auths", label: t("integrationEditor.tabAuthMethods") },
         { id: "tools", label: t("integrationEditor.tabTools") },

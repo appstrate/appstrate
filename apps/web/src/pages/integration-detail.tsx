@@ -687,7 +687,7 @@ function IntegrationSettings({
       label: t("detail.settings.definitionGroup", { ns: "agents" }),
       items: definition
         ? [
-            { id: "identity", label: t("editor.tabIdentity", { ns: "agents" }), icon: IdCard },
+            { id: "identity", label: t("editor.tabGeneral", { ns: "agents" }), icon: IdCard },
             {
               id: "source",
               label: t("integrationEditor.tabSource", { ns: "agents" }),

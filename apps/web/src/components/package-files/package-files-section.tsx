@@ -12,10 +12,9 @@
  */
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Braces, FolderOpen } from "lucide-react";
+import { FolderOpen } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { formatBytes } from "@appstrate/core/format";
-import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import {
   Table,
@@ -133,57 +132,38 @@ export function PackageFilesSection({
  * The AFPS manifest, edited raw: the escape hatch, not a section.
  *
  * Every form of Package AFPS writes into `manifest.json`, but the manifest also
- * holds fields no form covers, so its raw editor stays reachable: a quiet link
- * under the forms (`?editManifest=1`). What it applies joins the same draft the
- * forms write.
+ * holds fields no form covers. Its raw editor is reached like every other file:
+ * `manifest.json` in Explorer › Fichiers, Actions › Modifier, which opens this
+ * modal (`?editManifest=1`) over Général. What it applies joins the same draft
+ * the forms write, saved by their save bar.
  */
 export function ManifestEditEntry({
   value,
   schema,
   onApply,
-  showLink,
 }: {
   value: Record<string, unknown>;
   schema?: { uri: string; schema: object };
   onApply: (value: Record<string, unknown>) => void;
-  /** The link sits under forms; the files table has its own "Modifier". */
-  showLink: boolean;
 }) {
   const { t } = useTranslation("agents");
   const editing = useModalParam("editManifest");
+  if (editing.value === null) return null;
   return (
-    <>
-      {showLink && (
-        <div className="border-border mt-8 border-t pt-4">
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="text-muted-foreground h-auto px-0"
-            onClick={() => editing.open()}
-          >
-            <Braces />
-            {t("editor.editManifestLink")}
-          </Button>
-        </div>
-      )}
-      {editing.value !== null && (
-        <Modal
-          open
-          onClose={editing.close}
-          title={t("editor.editFile", { name: "manifest.json" })}
-          className="sm:max-w-5xl"
-        >
-          <JsonEditor
-            value={value}
-            schema={schema}
-            onApply={(next) => {
-              onApply(next);
-              editing.close();
-            }}
-          />
-        </Modal>
-      )}
-    </>
+    <Modal
+      open
+      onClose={editing.close}
+      title={t("editor.editFile", { name: "manifest.json" })}
+      className="sm:max-w-5xl"
+    >
+      <JsonEditor
+        value={value}
+        schema={schema}
+        onApply={(next) => {
+          onApply(next);
+          editing.close();
+        }}
+      />
+    </Modal>
   );
 }
