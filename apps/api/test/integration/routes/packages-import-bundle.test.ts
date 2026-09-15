@@ -16,7 +16,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
 import { db } from "../../helpers/db.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
@@ -1298,5 +1303,95 @@ describe("POST /api/packages/import-bundle — §3.3 gates the root, not depende
       await skillRootBundle("---\nname: root-skill\ndescription: A root skill.\n---\nBody."),
     );
     expect(res.status).toBe(201);
+  });
+});
+
+describe("import-bundle — references the bundle names but does not carry", () => {
+  /**
+   * `authorizeBundlePackages` authorizes what the archive BRINGS. A manifest may
+   * also point OUTWARD — a declared dependency, or the `source.server.name` of a
+   * `source.kind: "local"` integration — and `importBundle` writes
+   * `draftManifest` straight from the archive. An unchecked outward reference is
+   * therefore written verbatim and resolved at kickoff by the spawn resolver,
+   * which asks the ORGANIZATION boundary and nothing about placement: the
+   * archive was a way to name a package the importer may not read.
+   */
+  let owner: TestContext;
+  let member: TestContext;
+  let personalId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    owner = await createTestContext({ orgSlug: "outward-ref" });
+    member = await memberContext(owner, "member");
+    const listed = await app.request("/api/spaces", { headers: authHeaders(member) });
+    const spacesBody = (await listed.json()) as { data: { id: string; personal: boolean }[] };
+    personalId = spacesBody.data.find((s) => s.personal)!.id;
+  });
+
+  async function agentBundleDeclaring(
+    serverId: string,
+    agentId = "@outward-ref/agent",
+  ): Promise<Uint8Array> {
+    const manifest = {
+      name: agentId,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Outward",
+      description: "Declares an mcp-server it does not carry",
+      dependencies: { mcp_servers: { [serverId]: "^0.1.0" } },
+    };
+    const afps = buildAfps({ manifest, content: "Prompt.", type: "agent" });
+    const emptyCatalog: PackageCatalog = {
+      resolve: async () => null,
+      fetch: async () => {
+        throw new Error("nothing is carried");
+      },
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), emptyCatalog, {
+      depTypes: [],
+    });
+    return writeBundleToBuffer(bundle);
+  }
+
+  async function importAs(ctx: TestContext, bytes: Uint8Array) {
+    const form = new FormData();
+    form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+    return app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+  }
+
+  it("refuses an mcp-server homed in somebody else's personal space", async () => {
+    const SERVER = "@outward-ref/private-server";
+    await seedPackage({
+      id: SERVER,
+      orgId: owner.orgId,
+      type: "mcp-server",
+      homeSpaceId: personalId,
+      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+    });
+
+    const res = await importAs(owner, await agentBundleDeclaring(SERVER));
+    expect(
+      [403, 404].includes(res.status),
+      `expected a refusal, got ${res.status}: ${await res.clone().text()}`,
+    ).toBe(true);
+  });
+
+  it("takes the same bundle when the server is placed where the importer reaches it", async () => {
+    const SERVER = "@outward-ref/team-server";
+    await seedPackage({
+      id: SERVER,
+      orgId: owner.orgId,
+      type: "mcp-server",
+      draftManifest: { name: SERVER, version: "0.1.0", type: "mcp-server" },
+    });
+
+    const res = await importAs(owner, await agentBundleDeclaring(SERVER));
+    expect(res.status, await res.clone().text()).toBe(201);
   });
 });

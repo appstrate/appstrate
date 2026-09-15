@@ -4,10 +4,10 @@ import type { Context } from "hono";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
-import { extractDependencies } from "@appstrate/core/dependencies";
 import { assertDependencyOverrideKeysDeclared } from "./launch-schemas.ts";
 import { isSystemPackage } from "../services/system-packages.ts";
 import { getLocalServerRef } from "../services/integration-manifest-helpers.ts";
+import { asRecord } from "@appstrate/core/safe-json";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   VERSION_SELECTOR_DRAFT,
@@ -910,7 +910,51 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
         await assertExistingPackageActivationAccess(c, packageId, existing.type);
     }
   }
+
+  // Every package the bundle's manifests NAME but do not CARRY, checked with
+  // the rule the package routes use ({@link assertPackageDependenciesAccessible}).
+  //
+  // The loop above authorizes what the bundle brings. A manifest may also point
+  // OUTWARD — a declared dependency, or the `source.server.name` of a
+  // `source.kind: "local"` integration — and `importBundle` writes
+  // `draftManifest` straight from the archive, so an unchecked outward
+  // reference is written verbatim and resolved at kickoff by
+  // `integration-spawn-resolver.ts`, which asks the ORGANIZATION boundary and
+  // nothing about placement. Without this pass, an archive was the way to name
+  // a package the importer may not read — an mcp-server homed in somebody
+  // else's personal space included (§3.6).
+  //
+  // References the bundle carries are excluded: those are the rows the loop
+  // above already authorized, and they may not exist in the catalog yet.
+  const carried = new Set<string>();
+  for (const identity of bundle.packages.keys()) {
+    const id = parsePackageIdentity(identity)?.packageId;
+    if (id) carried.add(id);
+  }
+  const outward = new Map<PackageIdString, PackageType>();
+  for (const [, pkg] of bundle.packages) {
+    for (const ref of manifestPackageRefs(asRecord(pkg.manifest))) {
+      if (!carried.has(ref.id)) outward.set(ref.id, ref.type);
+    }
+  }
+  if (outward.size === 0) return;
+  const checkedTypes = new Set<PackageType>();
+  for (const type of outward.values()) {
+    if (checkedTypes.has(type)) continue;
+    checkedTypes.add(type);
+    await makePermissionGuard(packagePermission(type, "read"))(c, async () => {});
+  }
+  const known = await db
+    .select({ id: packages.id })
+    .from(packages)
+    .where(inArray(packages.id, [...outward.keys()]));
+  // A reference to nothing stays the existing missing-dependency error; a
+  // reference to something the caller cannot reach is hidden, as everywhere.
+  for (const { id } of known) await assertCatalogPackageAccess(c, id, accessible);
 }
+
+/** `@scope/name`, the shape both `packages.id` and the catalog reads are typed with. */
+type PackageIdString = `@${string}/${string}`;
 
 /**
  * EVERY package this manifest names, as `{ id, type }` — `dependencies.*` AND
@@ -927,15 +971,35 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
  * an mcp-server homed in somebody else's PERSONAL space — a 404 on every
  * package route, §3.6 — resolved and ran.
  */
+const DEPENDENCY_GROUPS = [
+  ["skills", "skill"],
+  ["mcp_servers", "mcp-server"],
+  ["integrations", "integration"],
+] as const satisfies ReadonlyArray<readonly [string, PackageType]>;
+
 function manifestPackageRefs(
   manifest: Record<string, unknown>,
-): Array<{ id: string; type: PackageType }> {
-  const refs = extractDependencies(manifest).map((dependency) => ({
-    id: `${dependency.depScope}/${dependency.depName}`,
-    type: dependency.depType,
-  }));
+): Array<{ id: PackageIdString; type: PackageType }> {
+  // The NAMES, read tolerantly. `extractDependencies` validates the semver
+  // range beside each one and THROWS on a bad one — right for a write path,
+  // wrong here: whether a caller may read `@scope/server` does not depend on
+  // the range written next to it, and letting a malformed range decide an
+  // authorization answer turns a schema question into a 500. A name that
+  // matches no catalog row grants nothing, which is the only outcome a
+  // malformed one can reach.
+  const refs: Array<{ id: PackageIdString; type: PackageType }> = [];
+  const dependencies = asRecord(manifest.dependencies);
+  for (const [group, type] of DEPENDENCY_GROUPS) {
+    for (const name of Object.keys(asRecord(dependencies[group]))) {
+      refs.push({ id: name as PackageIdString, type });
+    }
+  }
   const localServer = getLocalServerRef(manifest as unknown as IntegrationManifest);
-  if (localServer) refs.push({ id: localServer.name, type: "mcp-server" });
+  // `source.server.name` is a free-form string in the raw manifest; the schema
+  // that validates the package has already refused anything that is not a
+  // scoped name, and a reference that still does not match simply matches no
+  // catalog row below.
+  if (localServer) refs.push({ id: localServer.name as PackageIdString, type: "mcp-server" });
   return refs;
 }
 
