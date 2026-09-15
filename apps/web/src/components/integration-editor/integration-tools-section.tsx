@@ -23,12 +23,13 @@ import type {
   IntegrationToolInspectionEntry,
 } from "@appstrate/core/integration";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Switch } from "@appstrate/ui/components/switch";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../modal";
+import { SettingRow, SettingsGroup } from "../settings/setting-row";
 import { PageActionsMenu } from "../page-actions-menu";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { TableRowActions } from "../table-row-actions";
@@ -261,34 +262,37 @@ function AllowUndeclaredToggle({
   const usable = getAuths(manifest).some(
     (auth) => auth.type !== "oauth2" || auth.defaultScopes.length > 0,
   );
+  // The grammar of every activation setting (collaborator SSO, for one): a
+  // toggle row, its consequence as the description.
   return (
-    <div className="border-border bg-muted/30 rounded-md border border-dashed p-3">
-      <label
-        className={`flex items-start gap-2 ${
-          usable || allowUndeclared ? "cursor-pointer" : "cursor-not-allowed opacity-60"
-        }`}
-        data-testid="integration-editor-allow-undeclared-tools"
+    <SettingsGroup>
+      <SettingRow
+        variant="toggle"
+        className="pb-0"
+        label={
+          <Label htmlFor="allow-undeclared-tools" className="cursor-pointer">
+            {t("integrationEditor.allowUndeclaredTools.label")}
+          </Label>
+        }
+        description={
+          <>
+            {t("integrationEditor.allowUndeclaredTools.description")}
+            {!usable && (
+              <span className="text-destructive mt-1 block">
+                {t("integrationEditor.allowUndeclaredTools.requiresWildcardUsableAuth")}
+              </span>
+            )}
+          </>
+        }
       >
-        <Checkbox
+        <Switch
+          id="allow-undeclared-tools"
+          data-testid="integration-editor-allow-undeclared-tools"
           checked={allowUndeclared}
           disabled={!usable && !allowUndeclared}
-          onCheckedChange={(value) => onChange(setAllowUndeclaredTools(manifest, value === true))}
-          className="mt-0.5"
+          onCheckedChange={(checked) => onChange(setAllowUndeclaredTools(manifest, checked))}
         />
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-sm font-medium">
-            {t("integrationEditor.allowUndeclaredTools.label")}
-          </span>
-          <span className="text-muted-foreground text-xs">
-            {t("integrationEditor.allowUndeclaredTools.description")}
-          </span>
-          {!usable && (
-            <span className="text-destructive text-xs">
-              {t("integrationEditor.allowUndeclaredTools.requiresWildcardUsableAuth")}
-            </span>
-          )}
-        </span>
-      </label>
-    </div>
+      </SettingRow>
+    </SettingsGroup>
   );
 }
