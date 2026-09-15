@@ -67,7 +67,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   **Outside its home, a package runs the latest PUBLISHED version, always.**
   Publishing IS the rollout — the model of Copilot Studio, custom GPTs, n8n and
   Apps Script — so an author ships a fix and every recipient gets it on their
-  next launch, with nothing to accept a second time. A recipient cannot repair an
+  next launch, with nothing to accept a second time. It is a policy the product
+  chose rather than one the field agrees on: Figma hands the consumer a
+  review-and-accept step instead, and that flow was weighed and declined. A recipient cannot repair an
   agent they do not own, so freezing one on bytes its author had stopped
   maintaining bought them nothing; the real hazard, a new version demanding an
   access they never granted, is already refused at the right moment by 412
