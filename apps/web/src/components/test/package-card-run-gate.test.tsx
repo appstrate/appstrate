@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The launch control on an agent card, against the two facts the index page
+ * The launch control on an agent card, against the ONE fact the index page
  * carries per row.
  *
- * `GET /api/agents` lists what the space READS — homed here, offered here, or
- * system — while a run needs that placement switched ON in this space
- * (`AgentListItem.active`). The card is where a reader meets both: it must say
- * which of the two is missing instead of letting the click come back a 404.
+ * `GET /api/agents` lists the ACTIVE set — placed in this space and switched on
+ * — which is the very predicate the launch routes check. So the card has no
+ * second half to report: a row on the index is a row that runs here, and the
+ * launcher is live. An agent placed here but switched off is not on this list
+ * at all; it lives in the space library, with its switch (RBAC spec §6.8/§6.9).
+ *
+ * This pins that the card offers no activation verdict of its own — neither a
+ * badge nor a disabled launcher — because inventing one would either lie about
+ * a row the server already filtered, or need a fact the wire no longer carries.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -30,7 +35,7 @@ const i18n = i18nModule.default;
 const ORG_ID = "org_a";
 
 /** Render one agent card for a caller who holds `agents:run`. */
-function cardFor(active: boolean): string {
+function agentCard(): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     ["orgs"],
@@ -51,14 +56,10 @@ function cardFor(active: boolean): string {
   });
   try {
     return render(
-      <PackageCard
-        id="@acme/worker"
-        displayName="Worker"
-        type="agent"
-        source="local"
-        active={active}
-      />,
-      { queryClient },
+      <PackageCard id="@acme/worker" displayName="Worker" type="agent" source="local" />,
+      {
+        queryClient,
+      },
     );
   } finally {
     snapshot.mockRestore();
@@ -76,23 +77,21 @@ function launchButton(html: string): { tag: string; disabled: boolean } {
   return { tag: tag!, disabled: / disabled=""/.test(tag!) };
 }
 
-describe("an agent readable here but not active here", () => {
-  it("greys the launcher out and names the missing activation", () => {
-    const html = cardFor(false);
-    const button = launchButton(html);
-    expect(button.disabled).toBe(true);
-    expect(button.tag).toContain(i18n.t("detail.titleNotActive", { ns: "agents" }));
-    // And the card says so beside the name, not only in a tooltip nobody hovers.
-    expect(html).toContain(i18n.t("list.badgeInactive", { ns: "agents" }));
-  });
-});
-
-describe("an agent active here", () => {
-  it("CONTROL: leaves the launcher live, so `active` is the gate", () => {
-    const html = cardFor(true);
+describe("an agent card on the index", () => {
+  it("leaves the launcher live: being listed is what makes it runnable", () => {
+    const html = agentCard();
     const button = launchButton(html);
     expect(button.disabled).toBe(false);
     expect(button.tag).toContain(i18n.t("detail.run", { ns: "agents" }));
-    expect(html).not.toContain(i18n.t("list.badgeInactive", { ns: "agents" }));
+  });
+
+  it("CONTROL: states no activation of its own, in either direction", () => {
+    // The two sentences a card would need if the index followed the PLACEMENT
+    // rule and had to warn that a listed agent might not run. Both are
+    // unanswerable — the row carries no activation fact — so neither may
+    // appear through a default or a guess.
+    const html = agentCard();
+    expect(html).not.toContain(i18n.t("detail.titleNotActive", { ns: "agents" }));
+    expect(html).not.toContain("Inactif");
   });
 });

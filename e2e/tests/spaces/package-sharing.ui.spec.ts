@@ -147,16 +147,21 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
       guestPage.getByText(/Vous n'avez pas accès|You do not have access/).first(),
     ).toBeVisible();
 
-    // The index LISTS what the space reads, so the agent is already on it —
-    // and says, on the card itself, that it does not run here yet.
+    // The index lists what RUNS here, and an offer nobody took up runs nowhere
+    // — so it is not on it. The absence is read after the list response lands,
+    // not against a loading page.
+    const indexRead = guestPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" && new URL(response.url()).pathname === "/api/agents",
+    );
     await guestPage.goto("/agents");
-    await expect(guestPage.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
-    await expect(guestPage.getByText(/^(Inactif|Inactive)$/).first()).toBeVisible();
+    expect((await indexRead).status()).toBe(200);
+    await expect(guestPage.getByText(`Test Agent ${name}`, { exact: true })).toHaveCount(0);
 
-    // THE door, and the only one: switching an offer on in one's own space is
-    // the same route the organization catalog's checkboxes call for a team
-    // space. A guest holds no `agents:configure` anywhere — owning the space is
-    // the authorization (RBAC spec §3.6).
+    // The library is where the offer lives, and THE door — the only one — where
+    // it is taken up: the same route the organization library's checkboxes call
+    // for a team space. A guest holds no `agents:configure` anywhere; owning the
+    // space is the authorization (RBAC spec §3.6).
     await guestPage.goto("/space/packages");
     const row = guestPage.getByRole("row").filter({ hasText: `Test Agent ${name}` });
     await expect(row.getByText(/Proposé|Offered/)).toBeVisible();
@@ -235,7 +240,17 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
   expect((await adminRuns.json()).data ?? []).toHaveLength(0);
 });
 
-test("an offer opens in its destination space and activating refreshes an already visited agent list", async ({
+/**
+ * An offer is taken up from the space LIBRARY, and the index follows.
+ *
+ * The recipient never meets the offer on the index — that page is the active
+ * set — so the library is both where they learn a package was sent to them and
+ * where they switch it on. What this drives from the browser, and no route test
+ * can, is the cache seam behind that split: the index visited BEFORE the
+ * activation must show the agent AFTER it, in the same SPA session, because the
+ * activation invalidates the list it was absent from.
+ */
+test("an offer is taken up from the library and lands on an already visited index", async ({
   request,
   browser,
   browserCtx,
@@ -269,27 +284,43 @@ test("an offer opens in its destination space and activating refreshes an alread
 
   const page = await (await createAuthedContext(browser, member, orgId, personalId)).newPage();
   try {
+    // The index is visited FIRST and is empty of it: the offer is a placement
+    // nobody switched on, so nothing on this page can run and nothing is shown.
+    const indexRead = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" && new URL(response.url()).pathname === "/api/agents",
+    );
     await page.goto("/agents");
+    expect((await indexRead).status()).toBe(200);
+    await expect(page.getByText(`Test Agent ${name}`, { exact: true })).toHaveCount(0);
+
+    // Stay in one SPA session from here: a reload would discard the cache
+    // under test. The library is reached the way a reader reaches it — from the
+    // switcher, which offers it and not the organization library.
+    await page.getByTestId("org-switcher-button").click();
+    await expect(page.locator('a[href="/library"]')).toHaveCount(0);
+    // By ROLE, not by href: the empty index now carries a link to the same
+    // page in its hint, and an href locator would pick that one — behind the
+    // open menu, where it cannot be clicked.
+    await page
+      .getByRole("menuitem", { name: /Packages de cet espace|Packages in this space/ })
+      .click();
+    const row = page.getByRole("row").filter({ hasText: `Test Agent ${name}` });
+    await expect(row.getByText(/Proposé|Offered/)).toBeVisible();
+
+    // The row's name opens the package in THIS space — the detail of an
+    // untaken offer reads, which is what makes the decision an informed one.
     const detailResponse = page.waitForResponse((response) =>
       response.url().includes(`/api/packages/agents/${scope}/${name}`),
     );
-    // The card itself is the link: the whole tile navigates, so the name is a
-    // heading inside it and not an anchor of its own.
-    await page.getByText(`Test Agent ${name}`, { exact: true }).first().click();
+    await row.getByRole("link", { name: `Test Agent ${name}` }).click();
     const detail = await detailResponse;
     expect(detail.status()).toBe(200);
     expect(detail.request().headers()["x-space-id"]).toBe(personalId);
     await expect(page).toHaveURL(new RegExp(`/agents/${scope}/${name}$`));
 
-    // Stay in one SPA session: a reload would discard the cache under test.
-    // The index lists the placement even before anybody switches it on, and
-    // marks it as not running here.
-    await page.locator('a[href="/agents"]').first().click();
-    await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/^(Inactif|Inactive)$/).first()).toBeVisible();
-    await page.getByTestId("org-switcher-button").click();
-    await expect(page.locator('a[href="/library"]')).toHaveCount(0);
-    await page.locator('a[href="/space/packages"]').first().click();
+    // Back to the library, and switched on there.
+    await page.goBack();
     const activated = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -301,11 +332,11 @@ test("an offer opens in its destination space and activating refreshes an alread
       .getByRole("checkbox")
       .click();
     expect((await activated).status()).toBe(201);
-    // Back on the index, the same card no longer says it is off — the caches
-    // the activation invalidates are what makes that true without a reload.
+
+    // And now it is on the index that was visited before any of this — without
+    // a reload, because the activation invalidates that very list.
     await page.locator('a[href="/agents"]').first().click();
     await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/^(Inactif|Inactive)$/)).toHaveCount(0);
   } finally {
     await page.context().close();
   }

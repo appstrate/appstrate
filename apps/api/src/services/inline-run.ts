@@ -77,10 +77,12 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
     await db.insert(packages).values({
       id,
       orgId,
-      // No home. `home_space_id` exists to say who may WRITE a package through
-      // the package routes, and a shadow row is never reachable from them; a
-      // home would only make the run's space undeletable until the row is
-      // swept (`ON DELETE RESTRICT`).
+      // No home — the `ephemeral` half of `packages_org_package_has_home`, the
+      // constraint that otherwise requires every organization package to have
+      // one. `home_space_id` exists to say who may WRITE a package through the
+      // package routes, and a shadow row is never reachable from them; a home
+      // would only make the run's space undeletable until the compaction sweep
+      // removes the row (`ON DELETE RESTRICT`).
       homeSpaceId: null,
       type: "agent",
       source: "local",

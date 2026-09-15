@@ -415,7 +415,7 @@ export function createIntegrationsRouter() {
     const scope = getSpaceScope(c);
     const fields = parseFieldSelection(c, INTEGRATION_FIELDS);
     const pagination = parseListPagination(c, { defaultLimit: 100 });
-    const summaries = await listIntegrations(scope.orgId);
+    const summaries = await listIntegrations(scope);
     // Decorate with `active` + `block_user_connections` flags for the current
     // space via the shared resolver — the single source of truth, also
     // used by the agent-editor detail endpoint, so the two surfaces can never

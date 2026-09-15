@@ -106,7 +106,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     if (errorCode === "agent_not_active_in_space") {
       throw new BundleFetchError(
         "package_not_active_in_space",
-        `Package ${input.packageId} exists in your organization catalog but is not active in the pinned space`,
+        `Package ${input.packageId} exists in your organization but is not active in the pinned space`,
         `Activate it from the dashboard, or run:\n  appstrate api -X POST /api/spaces/${input.spaceId}/packages -d '{"packageId":"${input.packageId}"}'`,
       );
     }
@@ -120,7 +120,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     throw new BundleFetchError(
       "package_not_found",
       `Package ${input.packageId} not found on ${host}`,
-      "The agent does not exist in your organization catalog. Check the spelling or run `appstrate org list` to confirm you're pinned to the right org.",
+      "The agent does not exist in your organization. Check the spelling or run `appstrate org list` to confirm you're pinned to the right org.",
     );
   }
   if (!res.ok) {

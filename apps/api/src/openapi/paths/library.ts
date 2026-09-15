@@ -120,8 +120,7 @@ const organizationLibraryPaths = {
         "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its " +
         "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there " +
         "(`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). " +
-        "Organization owners and admins also see organization-catalogue packages (`home_space_id: null`) placed " +
-        "nowhere, with their read permissions. Members, guests and API keys cannot access this administrative " +
+        "Members, guests and API keys cannot access this administrative " +
         "endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the " +
         "caller can enter, and each package type also requires that type's read permission in the space. " +
         "Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` " +
@@ -169,7 +168,7 @@ export const libraryPaths = {
       tags: ["Library"],
       summary: "One space's placements, and what the caller could still place there",
       description:
-        "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, offered here, or shipped with the platform, with `state` saying whether the space runs it — `none` is exactly a pending offer, taken up with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then creates the offer) and the organization catalogue for an owner or admin; for a PERSONAL destination, nothing beyond what is already placed — an offer into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
+        "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, offered here, or shipped with the platform, with `state` saying whether the space runs it — `none` is exactly a pending offer, taken up with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then creates the offer); for a PERSONAL destination, nothing beyond what is already placed — an offer into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },

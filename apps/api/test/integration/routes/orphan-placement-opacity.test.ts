@@ -19,9 +19,9 @@
  *      prompt handed to the MODEL. A leak here is not a page the user has to
  *      open: the agent is told it may invoke the package, by name and
  *      description;
- *   2. `?active=true` on a type index — what the CLI's skill sync writes into
- *      the caller's Claude Code, and what the agent editor's integration
- *      picker offers;
+ *   2. the per-type index page — what the CLI's skill sync writes into the
+ *      caller's Claude Code, and what the agent editor's integration picker
+ *      offers;
  *   3. `GET /api/spaces/{id}/packages`, its per-package detail and its
  *      `run-config` — whose projection carries `draft_manifest`, so a leak is
  *      the draft's display name and description, not merely its id.
@@ -112,23 +112,16 @@ describe("the caller context handed to the model", () => {
   });
 });
 
-describe("`?active=true` — the CLI's skill sync and the agent editor's picker", () => {
-  it("does not list the orphan, while the placement view does not either", async () => {
-    const active = await app.request("/api/packages/skills?active=true", {
-      headers: authHeaders(ctx),
-    });
-    expect(active.status).toBe(200);
-    const activeText = await active.clone().text();
-    const activeBody = (await active.json()) as { data: { id: string }[] };
-    expect(activeBody.data.map((r) => r.id)).not.toContain(SKILL);
-    expect(activeText).not.toContain(SECRET);
-
-    // The two views agree, which is the point of `activeOnly` NARROWING the
-    // placement filter instead of replacing it: `active` can only ever be a
-    // subset of what the space may read.
-    const placed = await app.request("/api/packages/skills", { headers: authHeaders(ctx) });
-    const placedBody = (await placed.json()) as { data: { id: string }[] };
-    expect(placedBody.data.map((r) => r.id)).not.toContain(SKILL);
+describe("the type index — the CLI's skill sync and the agent editor's picker", () => {
+  it("does not list the orphan, nor name it anywhere in the payload", async () => {
+    const index = await app.request("/api/packages/skills", { headers: authHeaders(ctx) });
+    expect(index.status).toBe(200);
+    const text = await index.clone().text();
+    const body = (await index.json()) as { data: { id: string }[] };
+    expect(body.data.map((r) => r.id)).not.toContain(SKILL);
+    // The listing carries the manifest's display name and description, so the
+    // id check alone would miss the actual disclosure.
+    expect(text).not.toContain(SECRET);
   });
 });
 
@@ -194,8 +187,8 @@ describe("`POST /api/runs/remote` — the fourth execution door", () => {
       detail: `Package '${AGENT}' not found in this organization`,
     });
     // Byte for byte apart from the id: a distinguishable refusal here is an
-    // existence oracle over the whole organization catalogue, on a route that
-    // takes the id straight from the caller.
+    // existence oracle over every package the organization owns, on a route
+    // that takes the id straight from the caller.
     expect(ghost).toEqual({
       status: 404,
       code: "package_not_found",
@@ -317,7 +310,7 @@ describe("`POST /api/spaces/{id}/packages` — the activation door", () => {
     // to refuse a reachable id, and it is the placement read.
     await expect(
       activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT),
-    ).rejects.toThrow(/not found in organization catalog/);
+    ).rejects.toThrow(/not found in this organization/);
     expect(await db.select().from(packageShares).where(eq(packageShares.packageId, AGENT))).toEqual(
       [],
     );
@@ -326,15 +319,17 @@ describe("`POST /api/spaces/{id}/packages` — the activation door", () => {
   it("REPAIRS the orphan for a caller who holds `share` in its home", async () => {
     // The other half of the contract, and the reason the refusal above is not
     // a dead end: the door that refuses to honour an orphan is the same one
-    // that can fix it. This package belongs to the organization catalogue
-    // (`home_space_id IS NULL`), so the owner in session holds `share` over it
-    // — and one call writes the offer that places it and switches the row on.
-    const CATALOG = "@testorg/catalog-orphan";
+    // that can fix it. This package is homed in a TEAM space of the
+    // organization, which the owner in session reaches — so they hold `share`
+    // over it, and one call writes the offer that places it in the space
+    // holding the orphan row and switches that row on.
+    const CATALOG = "@testorg/team-orphan";
+    const team = await seedSpace({ orgId: ctx.orgId, name: "Team" });
     await seedPackage({
       id: CATALOG,
       orgId: ctx.orgId,
       type: "agent",
-      homeSpaceId: null,
+      homeSpaceId: team.id,
       draftManifest: { name: CATALOG, version: "0.1.0", type: "agent" },
       draftContent: "prompt",
     });

@@ -22,10 +22,10 @@
  * row — one with neither a home nor a share behind it, the residue
  * `scripts/migration/0016` repairs — is a decision about a package the space
  * no longer holds, and it must not read as "on" ANYWHERE: not in the caller
- * context handed to the model, not in `?active=true`, not on the run gate, not
- * on the space-package reads. A rule that answered "active" there would let a
- * space run, and see the draft of, a package every placement-aware page
- * correctly refuses to show it.
+ * context handed to the model, not on a type's index page, not on the run
+ * gate, not on the space-package reads. A rule that answered "active" there
+ * would let a space run, and see the draft of, a package every placement-aware
+ * page correctly refuses to show it.
  *
  * The default WITHOUT a row needs no placement conjunct: it only ever switches
  * on packages the deployment ships, and those are placed in every space by

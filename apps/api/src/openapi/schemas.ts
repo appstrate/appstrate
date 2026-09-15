@@ -46,7 +46,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_space_id: {
     type: ["string", "null"],
     description:
-      "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority.",
+      "Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority.",
   },
   home_writable: {
     type: "boolean",
@@ -508,10 +508,12 @@ export const schemas = {
   },
   AgentListItem: {
     type: "object",
-    // `running_runs`/`dependencies`/`scope`/`keywords`/`version`/`active` are
-    // always emitted by the GET /api/agents mapper. `display_name`/`description`/
+    // `running_runs`/`dependencies`/`scope`/`keywords`/`version` are always
+    // emitted by the GET /api/agents mapper. `display_name`/`description`/
     // `schema_version`/`author` stay optional (manifest-derived, may be absent);
     // `forked_from` is not emitted by the list endpoint (shared-type optional).
+    // There is no `active`: the listing IS the active set, so the field could
+    // only ever say `true` — `AgentDetail.active` is where the switch is read.
     required: [
       "id",
       "source",
@@ -521,7 +523,6 @@ export const schemas = {
       "scope",
       "keywords",
       "version",
-      "active",
     ],
     properties: {
       id: { type: "string" },
@@ -543,11 +544,6 @@ export const schemas = {
         enum: ["agent", "skill", "mcp-server", "integration"],
       },
       running_runs: { type: "integer" },
-      active: {
-        type: "boolean",
-        description:
-          "Whether the agent is ACTIVE in the space this listing was read from — the placement row's `enabled` when the space has one, the deployment's default (a system package) when it has none. The listing itself follows the READ rule — homed in this space, offered to it, or system — which a RUN does not: when this is `false` the launch routes answer `404 agent_not_active_in_space` here until somebody activates it through `POST /api/spaces/{spaceId}/packages`. Always emitted.",
-      },
       dependencies: {
         type: "object",
         // `integrations` — which SaaS the agent talks to — is emitted to every
@@ -769,7 +765,7 @@ export const schemas = {
       active: {
         type: "boolean",
         description:
-          "Whether the agent is ACTIVE in the space this detail was read from — the same rule as `AgentListItem.active`: the placement row's `enabled` when the space has one, the deployment's default when it has none. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. Always emitted.",
+          "Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted.",
       },
     },
   },
@@ -1428,6 +1424,8 @@ export const schemas = {
       "updatedAt",
       "name",
       "description",
+      "icon",
+      "keywords",
       "created_by",
       "used_by_agents",
       "version",
@@ -1445,6 +1443,17 @@ export const schemas = {
       },
       name: { type: "string" }, // getPackageDisplayName always returns a string (falls back to id)
       description: { type: ["string", "null"] },
+      icon: {
+        type: ["string", "null"],
+        description:
+          "The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone.",
+      },
+      keywords: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description.",
+      },
       source: { type: "string", enum: ["system", "local"] },
       created_by: { type: ["string", "null"] },
       created_by_name: { type: "string" },
@@ -1914,7 +1923,7 @@ export const schemas = {
       rehomed_packages: {
         type: "integer",
         description:
-          "Packages this space homed that another space has placed: handed to the organization catalogue (`home_space_id = null`) rather than deleted",
+          "Packages this space homed that another space has placed: re-homed to the organization's default space rather than deleted",
       },
       deleted_packages: {
         type: "integer",
@@ -2268,8 +2277,7 @@ export const schemas = {
           description:
             "Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the " +
             "package is placed nowhere the caller can see — which the space form still lists when the caller " +
-            "could place it there in one click (the organization catalogue they administer, or a package whose " +
-            "home grants them `<type>:share`).",
+            "could place it there in one click (a package whose home grants them `<type>:share`).",
           items: { $ref: "#/components/schemas/PackagePlacement" },
         },
       },

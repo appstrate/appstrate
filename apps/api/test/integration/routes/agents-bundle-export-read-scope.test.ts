@@ -328,8 +328,11 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
   it("still resolves the same draft dependency on the RUN path", async () => {
     // Unplaced in the calling space: no installation AND no home there, which
     // is what makes the `/files` 404 at the end of this test the space boundary.
+    // The home moves to a space of its own rather than away — an organization's
+    // package always has one (`packages_org_package_has_home`).
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
     await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
-    await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, SKILL_ID));
+    await db.update(packages).set({ homeSpaceId: elsewhere.id }).where(eq(packages.id, SKILL_ID));
     // `DraftPackageCatalog` is SHARED with the run path (`RunPackageCatalog`
     // routes a `"draft"` dependency override to it), so the fix stayed out of
     // its query on purpose. This pins the behaviour that tightening it would

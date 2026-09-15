@@ -180,7 +180,7 @@ describe("space package activate/configure/deactivate — permission is per pack
 
   it("refuses an id it cannot reach in the SAME words as one that does not exist, on all three doors", async () => {
     // The oracle this closes: a caller who PASSES the gate used to get two
-    // different `detail` strings — "not found in organization catalog" for a
+    // different `detail` strings — "not found in this organization" for a
     // nonexistent id and "is not placed in this space" for one that exists but
     // lives somewhere they cannot reach. Guessing ids then told them which
     // packages the organization has, personal spaces included (RBAC §3.6).

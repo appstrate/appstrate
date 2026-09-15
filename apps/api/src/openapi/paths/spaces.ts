@@ -337,7 +337,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "Sweep an orphaned personal space now",
       description:
-        "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).",
+        "Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either re-homed to the organization's default space (when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -357,7 +357,7 @@ export const spacesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Runs are in progress in the space (`space_has_active_runs`) — the sweep deletes the space, whose cascade drops `runs`, so it refuses for the same reason `DELETE` does and before it has emptied anything —, the space is a team space (`space_not_personal`), or it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404.",
+            "Runs are in progress in the space (`space_has_active_runs`) — the sweep deletes the space, whose cascade drops `runs`, so it refuses for the same reason `DELETE` does and before it has emptied anything —, the space is a team space (`space_not_personal`), it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`), or the organization has no default space to re-home the swept packages into (`organization_has_no_default_space`): a package the organization still runs elsewhere has to land somewhere, and the default space is where a package that belongs to no team lives. Give the organization a default space and re-run. Somebody else's live personal space answers 404.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

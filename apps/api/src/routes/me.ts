@@ -411,8 +411,8 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // model whether a draft-only package is THIS caller's to run, and computing
   // it needs the caller's reach over every space, not the package rows.
   const accessible = await packageAccessSpaces(c);
-  const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[1]) =>
-    homeWireForCaller(c, pkg, accessible).home_writable;
+  const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
+    homeWireForCaller(pkg, accessible).home_writable;
   const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
     listUsableIntegrationsForActor(scope, actor),
     canRun

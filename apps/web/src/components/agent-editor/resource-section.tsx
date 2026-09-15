@@ -108,12 +108,13 @@ export function ResourceSection({
 }: ResourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // An integration is usable here only when it is placed in this space and
-  // switched on. Filter server-side (`?active=true`) so the editor never pulls
-  // the full catalogue — only active integrations are offered.
-  const { data: items, isLoading } = usePackageList(type, {
-    activeOnly: type === "integration",
-  });
+  // The picker offers what this space RUNS: activation governs what a space
+  // offers — hints, CLI sync, this list — so the index (placed here and
+  // switched on, every type) is the offer. It is narrower than what a manifest
+  // may declare: resolving a DECLARED dependency name stays org-wide (RBAC
+  // §6.9, `services/package-catalog.ts`), so an agent can legally depend on a
+  // package this space does not run, and the entry below stays visible for it.
+  const { data: items, isLoading } = usePackageList(type);
   const upload = useUploadPackage(type);
   const setActive = useSetPackageActive();
   const currentSpaceId = useCurrentSpaceId();

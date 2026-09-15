@@ -14,16 +14,28 @@
  *   - the activation filter applied to the page but not the count → a
  *     deactivated placement is asserted absent from `total` as well as from
  *     `items`;
- *   - a different total order than `listReadablePackages` (system first,
+ *   - a different total order than `listActivePackages` (system first,
  *     then id — load-bearing for the prompt cache) → the page's ids are
  *     asserted in that order, with a system package seeded to lead it.
+ *
+ * The last `describe` pins the other half of the contract: the hints and the
+ * per-type INDEX page render the same set. They are two queries over one rule
+ * (`activeHereSql`), and nothing but a table makes them agree — a caller
+ * context that names an agent the index does not show is a model told it may
+ * invoke something the page has no row for, and the reverse is a launch
+ * control the model never hears about.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { afterEach, describe, it, expect, beforeEach } from "bun:test";
 import { listRunnableAgents, listActiveSkills } from "../../../src/services/space-packages.ts";
+import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
+import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage, seedPackageShare, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import {
+  initSystemIntegrations,
+  __resetSystemIntegrationsForTest,
+} from "../../../src/services/integration-client-registry.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 
 describe("listActivePackageHints — bounded in SQL", () => {
@@ -120,5 +132,87 @@ describe("listActivePackageHints — bounded in SQL", () => {
   it("reports an empty catalog as zero, not truncated", async () => {
     const page = await listRunnableAgents(scope);
     expect(page).toEqual({ agents: [], truncated: false, total: 0 });
+  });
+});
+
+/**
+ * The caller-context hints and the per-type index page, over one fixture that
+ * holds every shape a space can be in: a system package with no row, the same
+ * with a row saying `false`, a local package switched on, one switched off, an
+ * offer nobody took up, and an ORPHAN row.
+ *
+ * Both listings are compared against the SAME written-out set, rather than
+ * against each other: "they agree" is worth nothing when they agree on the
+ * wrong thing, and these two share `activeHereSql`, so a mistake in the rule
+ * moves both at once.
+ */
+describe("the hints and the type index render one set", () => {
+  const app = getTestApp();
+  let ctx: TestContext;
+  let scope: SpaceScope;
+
+  /** A system integration the deployment OFFERS — on with no row at all. */
+  const SYS_ON = "@sysorg/offered-integration";
+  /** A system integration the deployment ships but does NOT offer. */
+  const SYS_SHIPPED = "@sysorg/shipped-integration";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "twoviews" });
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    initSystemIntegrations([{ id: SYS_ON, clients: [] }]);
+  });
+
+  afterEach(() => {
+    __resetSystemIntegrationsForTest();
+  });
+
+  async function indexIds(path: string): Promise<string[]> {
+    const res = await app.request(path, { headers: authHeaders(ctx) });
+    expect(res.status, await res.clone().text()).toBe(200);
+    return ((await res.json()) as { data: { id: string }[] }).data.map((row) => row.id);
+  }
+
+  it("agrees cell for cell — system, local, offered, orphaned", async () => {
+    const home = ctx.defaultSpaceId;
+    const elsewhere = (await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" })).id;
+
+    // 1. A SYSTEM agent with no row — on by the deployment's default.
+    await seedPackage({ id: "@asys/system-agent", orgId: null, source: "system" });
+    // 2. The same, with a row saying `false` — the operator's decision wins.
+    await seedPackage({ id: "@asys/system-off", orgId: null, source: "system" });
+    await seedSpacePackage(home, "@asys/system-off", { enabled: false });
+    // 3. A local agent homed here and switched ON.
+    await seedPackage({ id: "@twoviews/local-on", orgId: ctx.orgId, homeSpaceId: home });
+    await seedSpacePackage(home, "@twoviews/local-on");
+    // 4. A local agent homed here and switched OFF.
+    await seedPackage({ id: "@twoviews/local-off", orgId: ctx.orgId, homeSpaceId: home });
+    await seedSpacePackage(home, "@twoviews/local-off", { enabled: false });
+    // 5. OFFERED here and never taken up — placed, not active.
+    await seedPackage({ id: "@twoviews/offered", orgId: ctx.orgId, homeSpaceId: elsewhere });
+    await seedPackageShare(home, "@twoviews/offered");
+    // 6. An ORPHAN row: `enabled`, with neither a home here nor an offer.
+    await seedPackage({ id: "@twoviews/orphan", orgId: ctx.orgId, homeSpaceId: elsewhere });
+    await seedSpacePackage(home, "@twoviews/orphan");
+
+    const expected = ["@asys/system-agent", "@twoviews/local-on"];
+
+    const hinted = (await listRunnableAgents(scope, { limit: 50 })).agents.map((a) => a.package_id);
+    const indexed = await indexIds("/api/packages/agents");
+    expect(hinted.slice().sort()).toEqual(expected);
+    expect(indexed.slice().sort()).toEqual(expected);
+    // `GET /api/agents` is the agents index the SPA renders, and it is a third
+    // query over the same rule.
+    expect((await indexIds("/api/agents")).slice().sort()).toEqual(expected);
+  });
+
+  it("agrees on the integration default, which is the one per-type exception", async () => {
+    // Integrations do not default on because they are `source: system` — only
+    // the subset `SYSTEM_INTEGRATIONS` names does. A listing that read `source`
+    // alone would switch a shipped catalogue of tens of them on in every space.
+    await seedPackage({ id: SYS_ON, orgId: null, type: "integration", source: "system" });
+    await seedPackage({ id: SYS_SHIPPED, orgId: null, type: "integration", source: "system" });
+
+    expect(await indexIds("/api/packages/integrations")).toEqual([SYS_ON]);
   });
 });

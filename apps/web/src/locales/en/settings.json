@@ -164,8 +164,7 @@
   "packages.type.mcp-servers": "MCP Servers",
   "packages.type.integration": "integration",
   "packages.type.integrations": "Integrations",
-  "packages.emptyItems": "No {{type}} in packages.",
-  "packages.emptyItemsHint": "Upload an AFPS file containing a {{type}}",
+  "packages.emptyItems": "No active {{type}} in this space.",
   "packages.deleteConfirm": "Delete {{type}} \"{{name}}\"? This will permanently remove it from the organization. It will be removed from all spaces.",
   "packages.deactivate": "Deactivate here",
   "packages.deactivateConfirm": "Deactivate “{{name}}” in this space? Its settings are kept and you can switch it back on whenever you like.",
@@ -829,12 +828,9 @@
   "webhooks.daysAgo": "{{count}}d ago",
   "webhooks.eventsRequired": "Please select at least one event.",
   "integrations.title": "Integrations",
-  "integrations.subtitle": "AFPS integration catalogue — connect third-party services to your agents.",
+  "integrations.subtitle": "The integrations active in this space — connect third-party services to your agents.",
   "integrations.create": "New integration",
-  "integrations.tabs.active": "Active",
-  "integrations.tabs.all": "All",
-  "integrations.empty.active": "No active integrations. Activate one from the “All” tab.",
-  "integrations.empty.all": "No integrations available in this organization.",
+  "integrations.empty": "No active integration in this space.",
   "integrations.search.placeholder": "Search integrations…",
   "integrations.badge.active": "Active",
   "integrations.badge.inactive": "Inactive",
@@ -1119,6 +1115,6 @@
   "spaces.personal.convertConfirm": "Convert this personal space into a team space? Its former owner has left the organization and gains nothing: the space stays private, and its contents become readable and writable by the organization's owners and administrators.",
   "spaces.personal.converted": "Space converted to a team space.",
   "spaces.personal.sweep": "Delete now",
-  "spaces.personal.sweepConfirm": "Permanently delete this space and everything in it? Packages it homes that are placed in another space move to the organization catalogue; the others are deleted.",
-  "spaces.personal.swept": "Space deleted ({{rehomed}} package(s) handed to the catalogue, {{deleted}} deleted)."
+  "spaces.personal.sweepConfirm": "Permanently delete this space and everything in it? Packages it homes that are placed in another space move to the organization's default space; the others are deleted.",
+  "spaces.personal.swept": "Space deleted ({{rehomed}} package(s) moved to the organization's default space, {{deleted}} deleted)."
 }

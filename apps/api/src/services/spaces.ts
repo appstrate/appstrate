@@ -639,20 +639,29 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  * question it turns on is TAKEN UP ELSEWHERE — does another space of the
  * organization hold a `space_packages` row for it:
  *
- *   - yes → `home_space_id = NULL`, the organization catalogue, AND the offer
- *     that keeps each of those spaces placed
+ *   - yes → re-homed to the organization's DEFAULT space, AND the offer that
+ *     keeps each of the other spaces placed
  *     ({@link reconcilePlacementsAfterRehome}). Somebody else is running it, so
- *     it is already not private, and owners/admins are the right authority for
- *     an author who has left. The offer is not a courtesy: a row without one is
- *     a placement nothing places, and the space would silently lose the package
- *     from every page while its schedules failed each tick.
+ *     it is already not private; the default space is where a package that
+ *     belongs to no team lives, and it needs no offer of its own because it
+ *     HOSTS the package from here on. The offer to the others is not a
+ *     courtesy: a row without one is a placement nothing places, and the space
+ *     would silently lose the package from every page while its schedules
+ *     failed each tick.
+ *
+ *     What this HANDS OVER is deliberate and worth naming: the package —
+ *     draft included — becomes readable and writable from the default space,
+ *     i.e. from the organization, under the default's own `<type>:read` /
+ *     `<type>:write`. That is the meaning of "an organization package with no
+ *     team", and the alternative was a package nobody could author, which is
+ *     the state `packages_org_package_has_home` refuses.
  *   - no → deleted, with its published artifacts enqueued for physical
  *     removal. It was private to a person who is gone. An OFFER nobody took up
  *     does not save it, deliberately: nothing runs on an offer, and keeping a
  *     dead author's draft alive because somebody was once shown its name would
- *     hand the organization catalogue a package no one asked for. The revoke
- *     of that offer is the space's own act and this one does not pre-empt it —
- *     the `package_shares` row goes with the package, by cascade.
+ *     hand the organization a package no one asked for. The revoke of that
+ *     offer is the space's own act and this one does not pre-empt it — the
+ *     `package_shares` row goes with the package, by cascade.
  *
  * ONE transaction, and every refusal comes BEFORE the first package mutation.
  * Both properties are load-bearing:
@@ -672,8 +681,9 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  * {@link deleteSpace} uses; re-taking either inside it is free.
  *
  * @throws 404 when the space is not in `orgId`; 409 `space_not_personal`,
- *   `personal_space_not_orphaned` or `space_has_active_runs` — the sweeper logs
- *   the refusal and retries on the next pass.
+ *   `personal_space_not_orphaned`, `space_has_active_runs` or
+ *   `organization_has_no_default_space` — the sweeper logs the refusal and
+ *   retries on the next pass.
  */
 export async function emptyAndDeletePersonalSpace(
   orgId: string,
@@ -712,6 +722,19 @@ export async function emptyAndDeletePersonalSpace(
       throw spaceHasActiveRuns();
     }
 
+    // The destination of every re-homing below, read ONCE and under a lock: an
+    // organization has exactly one default space (`idx_spaces_one_default`),
+    // and `FOR SHARE` keeps it from being deleted or un-defaulted between this
+    // read and the `home_space_id` writes that reference it. A missing one is
+    // a refusal rather than a NULL home — `packages_org_package_has_home`
+    // would reject the write anyway, and this says why.
+    const [defaultSpace] = await tx
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(and(eq(spaces.orgId, orgId), eq(spaces.isDefault, true)))
+      .limit(1)
+      .for("share");
+
     // The SAME predicate `deleteSpace` refuses on, deliberately: anything it
     // would count has to be dealt with here, ephemeral rows included.
     const homed = await tx
@@ -729,22 +752,31 @@ export async function emptyAndDeletePersonalSpace(
         .where(and(eq(spacePackages.packageId, pkg.id), ne(spacePackages.spaceId, spaceId)))
         .limit(1);
       if (elsewhere) {
+        if (!defaultSpace) {
+          throw conflict(
+            "organization_has_no_default_space",
+            `Cannot re-home '${pkg.id}': this organization has no default space to home it in.`,
+          );
+        }
         await tx
           .update(packages)
-          .set({ homeSpaceId: null, updatedAt: new Date() })
+          .set({ homeSpaceId: defaultSpace.id, updatedAt: new Date() })
           .where(eq(packages.id, pkg.id));
         // Re-homing MOVES one of the two placements, and every space that
         // still holds a `space_packages` row needs the other or it is left
         // with a placement nothing places. The same reconciliation the home
         // MOVE runs, called for the same reason — see
-        // `reconcilePlacementsAfterRehome`. Without it this sweeper was the
-        // one live producer of the orphan rows the rest of the platform
-        // refuses to honour, and the spaces still running the package would
-        // have lost it from every page while their schedules failed each tick.
+        // `reconcilePlacementsAfterRehome`. It also drops the destination's own
+        // offer if one existed: the default space now HOMES the package, and a
+        // package is not offered to the space it lives in. Without this the
+        // sweeper was the one live producer of the orphan rows the rest of the
+        // platform refuses to honour, and the spaces still running the package
+        // would have lost it from every page while their schedules failed each
+        // tick.
         await reconcilePlacementsAfterRehome(tx, {
           packageId: pkg.id,
           orgId,
-          newHomeSpaceId: null,
+          newHomeSpaceId: defaultSpace.id,
         });
         rehomedPackages++;
         continue;

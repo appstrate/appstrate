@@ -129,17 +129,24 @@ async function fetchPackageDetail(
   return normalizePackageItemDetail(data!);
 }
 
-function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
+/**
+ * One type's INDEX for the current space: what runs here, and nothing else.
+ *
+ * `GET /api/packages/{type}` answers the active set — placed in this space and
+ * switched on — which is the same rule every launch route checks, so a row on
+ * this list is a row that can be used. What is placed here but switched off, and
+ * what has merely been offered, lives in the space library (`/space/packages`),
+ * the one management view. There is no selector: a narrower and a wider list
+ * would be two answers to one question.
+ */
+function usePackageList(type: PackageType) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const cfg = PACKAGE_CONFIG[type];
-  const activeOnly = opts?.activeOnly ?? false;
   return useQuery({
-    queryKey: packageKeys.list(cfg.path, orgId, spaceId, activeOnly ? "active" : "all"),
+    queryKey: packageKeys.list(cfg.path, orgId, spaceId),
     queryFn: async (): Promise<OrgPackageItem[]> => {
-      const { data } = await client.GET(`/api/packages/${cfg.path}`, {
-        params: { query: activeOnly ? { active: "true" } : undefined },
-      });
+      const { data } = await client.GET(`/api/packages/${cfg.path}`);
       // The spec marks most item fields optional — normalize to the
       // non-optional shape consumers have always used. `scope` is not
       // returned by the list endpoints.
@@ -147,6 +154,10 @@ function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
         ...item,
         name: item.name,
         description: item.description,
+        // Manifest-derived, emitted by every type's list mapper: the index
+        // pages draw their cards and run their search off this row alone.
+        icon: item.icon,
+        keywords: item.keywords,
         scope: null,
         version: item.version,
         forked_from: item.forked_from,
@@ -262,6 +273,13 @@ export {
 
 // --- Agents ---
 
+/**
+ * The agent index for the current space — the ACTIVE set, like every other
+ * index ({@link usePackageList}). Every consumer (the index page, the dashboard,
+ * the nav, the run list, the schedule pickers, the notification bell) reads it
+ * as it comes: a listed agent is a runnable agent, so no surface has to gate a
+ * launch control on an activation fact the row no longer carries.
+ */
 export function useAgents() {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();

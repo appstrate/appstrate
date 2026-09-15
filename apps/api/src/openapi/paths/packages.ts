@@ -7,10 +7,12 @@ import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
  * integrations / mcp-servers) — only the leading noun differs.
  */
 const listPackagesSharedDescription =
-  "system packages, plus organization packages placed in this space. " +
-  "Organization packages that exist but are not placed here are NOT returned — for " +
-  "the organization-wide map of placements, use " +
-  "`GET /api/library`.";
+  "ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system " +
+  "package, or one placed here (homed or offered) and switched on. A package placed " +
+  "here and switched OFF, and an offer nobody has taken up, are NOT on it — that is " +
+  "the space library's subject (`GET /api/spaces/{spaceId}/library`), which names " +
+  "each placement's origin and state and carries the switch that activates it. For " +
+  "the organization-wide map of placements, use `GET /api/library`.";
 
 /**
  * The `?version` selector of the three generic package detail routes (skill /
@@ -110,7 +112,7 @@ function versionRestoreResponseSchema(detailRef: string) {
  * `X-Space-Id` is not what authorizes them.
  */
 const PACKAGE_MUTATION_AUTHORITY =
-  " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.";
+  " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.";
 
 const fileOperationsProperty = {
   type: "array",
@@ -721,13 +723,10 @@ export const packagesPaths = {
       operationId: "listSkills",
       tags: ["Packages"],
       summary: "List skills",
-      description:
-        "List the skills available to the current space (`X-Space-Id`): " +
-        listPackagesSharedDescription,
+      description: "List the skills " + listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -755,6 +754,8 @@ export const packagesPaths = {
                     id: "@acme/summarize",
                     name: "Summarize",
                     description: "Summarizes long text into key points",
+                    icon: "lucide:file-text",
+                    keywords: ["summary", "text"],
                     source: "local",
                     version: "1.0.0",
                     created_by: "usr_cm3abc123",
@@ -1228,13 +1229,10 @@ export const packagesPaths = {
       operationId: "listAgentPackages",
       tags: ["Packages"],
       summary: "List agent packages",
-      description:
-        "List the agent packages available to the current space (`X-Space-Id`): " +
-        listPackagesSharedDescription,
+      description: "List the agent packages " + listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -1692,7 +1690,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Move a package to another home space",
       description:
-        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1708,9 +1706,9 @@ export const packagesPaths = {
               required: ["home_space_id"],
               properties: {
                 home_space_id: {
-                  type: ["string", "null"],
+                  type: "string",
                   description:
-                    "Destination space id (`spc_…`), or `null` for the organization catalog.",
+                    "Destination space id (`spc_…`). Required and non-nullable — a package always has a home space.",
                 },
               },
               additionalProperties: false,
@@ -1980,14 +1978,10 @@ export const packagesPaths = {
       operationId: "listIntegrationPackages",
       tags: ["Packages"],
       summary: "List integration packages",
-      description:
-        "List the integration packages available to the current space " +
-        "(`X-Space-Id`): " +
-        listPackagesSharedDescription,
+      description: "List the integration packages " + listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {
@@ -2444,14 +2438,10 @@ export const packagesPaths = {
       operationId: "listMcpServerPackages",
       tags: ["Packages"],
       summary: "List MCP-server packages",
-      description:
-        "List the MCP-server packages available to the current space " +
-        "(`X-Space-Id`): " +
-        listPackagesSharedDescription,
+      description: "List the MCP-server packages " + listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
         "200": {

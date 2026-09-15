@@ -523,15 +523,6 @@ export interface AgentListItem extends BasePackageListItem {
   type: PackageType;
   /** Always emitted by the agent-list mapper (`@scope` or null). */
   scope: string | null;
-  /**
-   * Whether the agent is ACTIVE in the space this listing was read from. The
-   * placement ROW always wins — a system agent switched off here is `false`;
-   * with no row the deployment's default decides (`source: "system"`). The list
-   * itself is the READ rule (homed here, offered here, or system), which a run
-   * does not follow: `false` means the launch routes refuse it here until
-   * somebody activates it through `POST /api/spaces/{spaceId}/packages`.
-   */
-  active: boolean;
 }
 
 export interface AgentDetail {
@@ -624,10 +615,11 @@ export interface AgentDetail {
   /**
    * The space whose `agents:write` governs this agent
    * (`packages.home_space_id`) — emitted ONLY when the caller reaches that
-   * space. `null` means "not a space you can see": the organization catalog, or
-   * a home whose id is withheld (a colleague's personal space, readable through
-   * a placement but never nameable). Read {@link home_writable}, never this
-   * field, to decide whether a write may be offered.
+   * space. `null` means "not a space you can see": a home whose id is withheld
+   * (a colleague's personal space, readable through a placement but never
+   * nameable), or a system agent, which the platform ships into every space
+   * instead of housing in one. Read {@link home_writable}, never this field, to
+   * decide whether a write may be offered.
    */
   home_space_id: string | null;
   /**
@@ -658,11 +650,14 @@ export interface AgentDetail {
   effective_timeout_seconds: number;
   /**
    * Whether the agent is ACTIVE in the space this detail was read from — the
-   * same rule as {@link AgentListItem.active}, answered by the detail itself so
-   * a page that has loaded the agent needs no second call to learn whether it
-   * runs. Reading an agent never requires it to be active; `false` is the state
-   * this page exists to repair, and it is why the three execution doors answer
-   * `404 agent_not_active_in_space` while this one answers 200.
+   * placement row's `enabled` where the package is placed here, the
+   * deployment's default where the space holds no row. Answered by the detail
+   * itself so a page that has loaded the agent needs no second call to learn
+   * whether it runs. Reading an agent never requires it to be active; `false`
+   * is the state this page exists to repair, and it is why the three execution
+   * doors answer `404 agent_not_active_in_space` while this one answers 200.
+   * The agents INDEX carries no such field: it lists the active set, so the
+   * answer there would only ever be `true`.
    */
   active: boolean;
 }
@@ -674,6 +669,19 @@ export interface OrgPackageItem extends BasePackageListItem {
   name: string;
   /** Always emitted by the org-package list/detail mappers. */
   description: string | null;
+  /**
+   * The manifest's `icon` — an Iconify id for the card the index page draws.
+   * `null` when the manifest declares none. Read off the same rendered
+   * manifest as `name` and `description`, so an index page needs no second
+   * route to draw itself. Always emitted by the list mapper.
+   */
+  icon: string | null;
+  /**
+   * The manifest's `keywords`, `[]` when it declares none — what an index
+   * page's search box matches on beyond the name and the description. Always
+   * emitted by the list mapper.
+   */
+  keywords: string[];
   forked_from: string | null;
   created_by: string | null;
   /** Omitted when the creating user is unknown. */
@@ -685,8 +693,9 @@ export interface OrgPackageItem extends BasePackageListItem {
   /**
    * The space whose `<type>:write` governs this package
    * (`packages.home_space_id`) — emitted ONLY when the caller reaches that
-   * space; `null` means the organization catalog or a withheld home. Always
-   * emitted by the org-package mappers.
+   * space; `null` means a withheld home, or a system package, which the
+   * platform ships into every space instead of housing in one. Always emitted
+   * by the org-package mappers.
    */
   home_space_id: string | null;
   /**
@@ -706,8 +715,13 @@ export interface OrgPackageItem extends BasePackageListItem {
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
 // dropped from the base via Omit (a sub-interface can't loosen a required
-// field to optional).
-export interface OrgPackageItemDetail extends Omit<OrgPackageItem, "used_by_agents"> {
+// field to optional). `icon` and `keywords` go the same way and for the
+// mirror-image reason: they exist so an INDEX row can be drawn without its
+// manifest, and the detail ships `manifest` itself.
+export interface OrgPackageItemDetail extends Omit<
+  OrgPackageItem,
+  "used_by_agents" | "icon" | "keywords"
+> {
   /**
    * WHICH definition `content`, `manifest` and every field projected from it
    * (`name`, `description`, `version`, `manifest_name`) were read from —

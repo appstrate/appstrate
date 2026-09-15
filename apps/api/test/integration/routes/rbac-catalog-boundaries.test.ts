@@ -68,12 +68,15 @@ const placeIn = async (spaceId: string) => {
 };
 
 /**
- * Give the seeded skill a home space — the ONE authority over its draft
- * (`packages.home_space_id`). The fixture seeds it without one on purpose: no
- * home is the ORG CATALOG, which is the shape of an admin-level import and of
- * every row that predates the column.
+ * MOVE the seeded skill's home — the ONE authority over its draft
+ * (`packages.home_space_id`). The fixture homes it in the CONFIDENTIAL space on
+ * purpose: every organization package has a home
+ * (`packages_org_package_has_home`), so "not placed where the caller looks"
+ * means homed somewhere they do not reach, and the confidential space is one
+ * the guest is not a member of while the org owner reaches it like any other
+ * team space.
  */
-const homeIn = (spaceId: string | null) =>
+const homeIn = (spaceId: string) =>
   db.update(packages).set({ homeSpaceId: spaceId }).where(eq(packages.id, ID));
 
 async function keyHeaders(scopes: string[]) {
@@ -205,6 +208,7 @@ beforeEach(async () => {
     orgId: ctx.orgId,
     createdBy: ctx.user.id,
     type: "skill",
+    homeSpaceId: privateId,
     draftManifest: manifest,
     draftContent: content,
   });
@@ -372,10 +376,11 @@ describe("shared package authority", () => {
     await assertDbCount(packages, eq(packages.id, ID), 1);
   });
 
-  it("refuses a builder on a package with no home, and admits them once it has theirs", async () => {
+  it("refuses a builder whose space merely HOLDS the package, and admits them once it is homed there", async () => {
     await placeIn(ctx.defaultSpaceId);
-    // No home = the org catalog: the guest is a builder where it is placed,
-    // and that is deliberately not enough.
+    // Homed in the confidential space: the guest is a builder where the package
+    // is placed, and that is deliberately not enough — a placement consumes a
+    // package, it never gains a say over it.
     expect((await deleteSkill(headers)).status).toBe(403);
     await assertDbCount(packages, eq(packages.id, ID), 1);
 

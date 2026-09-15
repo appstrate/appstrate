@@ -99,16 +99,18 @@ test.describe("Default space vs custom space access", () => {
     expect(ids).toContain(`${scope}/${agentName}`);
   });
 
-  test("Deactivating an agent stops it running there without hiding it", async ({
+  test("Deactivating an agent drops it from the index without hiding it from a reader", async ({
     request,
     apiClient,
     orgContext,
     orgOnlyClient,
   }) => {
-    // Listing and running are two different rules. The index follows the
-    // PLACEMENT (the activation shared the agent into this space, and a share
-    // is not revoked by a switch), so the row stays and says it is off; the
-    // launch routes follow the activation, so they refuse.
+    // Listing and reading are two different rules. The index answers "what runs
+    // here", so it follows the ACTIVATION and the row leaves it — the same rule
+    // the launch routes check, so the two can never disagree. READING follows
+    // the placement, which a switch does not touch (the activation shared the
+    // agent into this space, and a share is not revoked by a switch), so the
+    // detail, the model and the readiness all still answer 200.
     const scope = `@${orgContext.org.orgSlug}`;
     const agentName = `agent-deactivate-${Date.now()}`;
     await createAgent(apiClient, scope, agentName);
@@ -125,15 +127,14 @@ test.describe("Default space vs custom space access", () => {
     const listed = async () => {
       const res = await customClient.get("/agents");
       const body = await res.json();
-      return (body.data ?? []).find((a: { id: string }) => a.id === `${scope}/${agentName}`) as
-        { id: string; active: boolean } | undefined;
+      return (body.data ?? []).some((a: { id: string }) => a.id === `${scope}/${agentName}`);
     };
 
-    expect((await listed())?.active).toBe(true);
+    expect(await listed()).toBe(true);
 
     await deactivatePackageInSpace(orgOnlyClient, customSpace.id, scope, agentName);
 
-    expect((await listed())?.active).toBe(false);
+    expect(await listed()).toBe(false);
     // Reading is not running, and the switch does not touch the first: the
     // agent loads, its model reads back, and the readiness read REPORTS the
     // blockage inside a 200 instead of hiding the panel that explains it.
@@ -173,7 +174,7 @@ test.describe("Default space vs custom space access", () => {
     // And back on, through the same door: the settings the row carried are
     // still there because the row never went away.
     await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
-    expect((await listed())?.active).toBe(true);
+    expect(await listed()).toBe(true);
   });
 
   test("Agent detail accessible from the space that homes the agent", async ({

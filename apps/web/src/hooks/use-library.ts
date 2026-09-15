@@ -142,9 +142,10 @@ function applyActivation(
  * disagree.
  *
  * The SAME reasoning now applies to the activation itself wherever a detail
- * response carries it: an agent's own read answers it (`AgentDetail.active`,
- * `AgentListItem.active` on the index), so no agent surface reads this
- * projection any more — which is also what takes the `runner` blind spot above
+ * response carries it: an agent's own read answers it (`AgentDetail.active`),
+ * and the indexes no longer carry the question at all — they list the ACTIVE
+ * set, so a listed agent is a runnable one. No agent surface reads this
+ * projection any more, which is also what takes the `runner` blind spot above
  * off the launch controls for good. What is left is the families whose detail
  * carries no such field: a skill or an MCP server. Pass `enabled: false` from a
  * page that holds the answer already, so it never asks two sources one

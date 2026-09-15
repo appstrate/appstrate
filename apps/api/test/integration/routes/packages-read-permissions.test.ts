@@ -33,7 +33,12 @@ import { eq } from "drizzle-orm";
 import { packageShares, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedPackage,
   seedPackageShare,
@@ -41,6 +46,7 @@ import {
   seedSpacePackage,
   seedApiKey,
   seedPackageVersion,
+  seedSpace,
 } from "../../helpers/seed.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -62,10 +68,28 @@ const SKILL_BODY =
  * which would make the negative assertions below pass for the wrong reason.
  */
 async function publishSkill(ctx: TestContext, version = "0.1.0"): Promise<void> {
-  // Deliberately UNPLACED: the suite's visibility assertions turn on the
-  // caller's space not reaching this package, so its placement (home or share)
-  // is each test's own fixture and never the publisher's.
-  await seedPackage({ id: SKILL_ID, type: "skill", orgId: ctx.orgId, createdBy: ctx.user.id });
+  // Deliberately OUT OF REACH of the calling space: the suite's visibility
+  // assertions turn on that, so the placement each test wants (a share, a row)
+  // is its own fixture and never the publisher's.
+  //
+  // The home is a stranger's PERSONAL space, which is the only home an
+  // organization OWNER does not reach (§3.6) — every team space, private ones
+  // included, answers `admin` to them. A homeless package is not an option: an
+  // organization's package always has one (`packages_org_package_has_home`).
+  const stranger = await createTestUser();
+  const elsewhere = await seedSpace({
+    orgId: ctx.orgId,
+    name: "Stranger",
+    ownerUserId: stranger.id,
+    visibility: "private",
+  });
+  await seedPackage({
+    id: SKILL_ID,
+    type: "skill",
+    orgId: ctx.orgId,
+    createdBy: ctx.user.id,
+    homeSpaceId: elsewhere.id,
+  });
 
   const zip = zipArtifact({
     "manifest.json": new TextEncoder().encode(

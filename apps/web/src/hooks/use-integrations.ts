@@ -33,10 +33,15 @@ import { splitPackageRef } from "../lib/package-paths";
 type RawIntegrationSummary = NonNullable<
   paths["/api/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
-export type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
+type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
   // `/api/integrations` supports `?fields=` projection, so the spec marks these
   // optional; this hook never projects, so re-require what consumers read.
-  Required<Pick<RawIntegrationSummary, "id" | "orgId" | "source">> & {
+  // `active` is in that list because both management readers sort the space's
+  // placements on it — the agent editor's connection block tells an active
+  // dependency from a placed-but-off one, and the detail page drives the
+  // switch. Were the field to leave the response, an optional type would make
+  // both read `undefined` in silence instead of failing to compile.
+  Required<Pick<RawIntegrationSummary, "id" | "orgId" | "source" | "active">> & {
     manifest: IntegrationManifestView;
   };
 type RawIntegrationDetail =
@@ -89,10 +94,10 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
     predicate: (query) => {
       const path = query.queryKey[1];
       if (typeof path !== "string") return false;
-      // The integration package list is keyed `["packages","integrations",…]`
-      // and its `?active=true` variant is exactly what activation changes — so a
-      // row that just got activated has to stop being served from cache. Without
-      // this, activating left every "not active here" list still saying so.
+      // The integration index is keyed `["packages","integrations",…]` and lists
+      // the ACTIVE set, which is exactly what activation changes — so a row that
+      // just got switched on (or off) has to stop being served from cache.
+      // Without this, activating left every index still omitting it.
       if (query.queryKey[0] === "packages" && path === "integrations") return true;
       return (
         path.startsWith("/api/integrations") ||

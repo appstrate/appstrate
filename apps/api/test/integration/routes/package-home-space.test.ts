@@ -12,7 +12,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { auditEvents, packages, packageShares, spacePackages } from "@appstrate/db/schema";
+import { auditEvents, packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem, getDbRow } from "../../helpers/assertions.ts";
@@ -97,6 +97,7 @@ async function editSkill(headers: Record<string, string>) {
   });
 }
 
+/** `homeSpaceId` is typed nullable so the schema's refusal of `null` can be asked for. */
 const move = (headers: Record<string, string>, homeSpaceId: string | null) =>
   app.request(`/api/packages/${ID}`, {
     method: "PATCH",
@@ -196,6 +197,35 @@ async function librarySkillIds(headers: Record<string, string>): Promise<string[
   return body.packages.skill.map((pkg) => pkg.id);
 }
 
+/** One placement cell of a library row — where it comes from, and its state. */
+interface LibraryPlacement {
+  space_id: string;
+  via: "home" | "shared" | "system";
+  state: "active" | "inactive" | "none";
+}
+
+/**
+ * The library's placement cell for one package in the space the headers name.
+ * The library is the MANAGEMENT view: the one page that shows a package the
+ * index does not, and the one that carries the switch back on.
+ */
+async function libraryPlacement(
+  headers: Record<string, string>,
+  type: "skill" | "agent",
+  packageId: string,
+): Promise<LibraryPlacement | undefined> {
+  const spaceId = headers["X-Space-Id"]!;
+  const res = await app.request(`/api/spaces/${spaceId}/library`, {
+    headers: { Cookie: headers.Cookie!, "X-Org-Id": headers["X-Org-Id"]! },
+  });
+  expect(res.status, await res.clone().text()).toBe(200);
+  const body = (await res.json()) as {
+    packages: Record<string, { id: string; placements: LibraryPlacement[] }[]>;
+  };
+  const row = body.packages[type]?.find((pkg) => pkg.id === packageId);
+  return row?.placements.find((cell) => cell.space_id === spaceId);
+}
+
 describe("write authority follows the home", () => {
   it("lets the home's builder edit a package installed elsewhere too", async () => {
     const res = await editSkill(alpha);
@@ -287,40 +317,43 @@ describe("the home is a read grant", () => {
     expect((await editSkill(alpha)).status).toBe(200);
   });
 
-  it("lists it on its own type's index page at home", async () => {
-    // The per-type page is the fourth reader of the placement rule, and the one
-    // the SPA's Skills / Agents / MCP servers navigation is built on: a package
-    // homed here and installed nowhere used to vanish from it while staying
-    // editable — write authority without a way to reach the thing.
-    //
-    // `GET /api/agents` is that page for agents and answers the SAME rule — it
-    // read the INSTALLED set until the two were folded into one SQL builder, so
-    // an agent homed here and installed nowhere was editable from a page that
-    // did not list it.
+  it("keeps it OFF its own type's index page while the space does not run it", async () => {
+    // The per-type page answers "what can I launch here?", so a package the
+    // home holds but the space has not switched on is not on it — the home is
+    // a read grant, not an activation. What the home DOES buy is everywhere
+    // else: the detail, the file explorer and the library above.
+    expect(await skillIndexIds(alpha)).not.toContain(ID);
+    expect(await agentIndexIds(alpha)).not.toContain(AGENT);
+
+    // And the switch is what puts them there. Without this half the assertion
+    // above would pass on any refusal at all, the home grant included.
+    await seedSpacePackage(alphaId, ID);
+    await seedSpacePackage(alphaId, AGENT);
     expect(await skillIndexIds(alpha)).toContain(ID);
     expect(await agentIndexIds(alpha)).toContain(AGENT);
   });
 
-  it("says on the agents index that a placement is not an activation", async () => {
-    // The row is READ here and cannot RUN here: the launch gate is an ENABLED
-    // `space_packages` row, which this agent has in no space. Both facts travel
-    // on the row so a launcher greys its own control out rather than
-    // discovering the refusal on click.
-    const agentRow = async () => {
-      const res = await app.request("/api/agents", { headers: alpha });
-      expect(res.status, await res.clone().text()).toBe(200);
-      const body = (await res.json()) as { data: { id: string; active: boolean }[] };
-      return body.data.find((agent) => agent.id === AGENT);
-    };
-    expect((await agentRow())?.active).toBe(false);
-
-    await seedSpacePackage(alphaId, AGENT);
-    expect((await agentRow())?.active).toBe(true);
-
-    // And a placement switched OFF reads exactly like no placement at all —
-    // that is the whole of "deactivated means it does not run".
+  it("shows a switched-OFF package in the library, and never on the index", async () => {
+    // The two pages, on the one state that separates them (decision 31): the
+    // index renders what this space RUNS, the library what it HOLDS and in
+    // what state. A package switched off here is therefore absent from the
+    // first, `inactive` on the second — which is the page that carries the
+    // switch back on — and its detail opens from either.
     await seedSpacePackage(alphaId, AGENT, { enabled: false });
-    expect((await agentRow())?.active).toBe(false);
+
+    expect(await agentIndexIds(alpha)).not.toContain(AGENT);
+    expect(await libraryPlacement(alpha, "agent", AGENT)).toMatchObject({
+      via: "home",
+      state: "inactive",
+    });
+    const detail = await app.request(`/api/packages/agents/${AGENT}`, { headers: alpha });
+    expect(detail.status, await detail.clone().text()).toBe(200);
+    expect(((await detail.json()) as { active: boolean }).active).toBe(false);
+
+    // Switched back on from that page, it returns to the index.
+    await seedSpacePackage(alphaId, AGENT, { enabled: true });
+    expect(await agentIndexIds(alpha)).toContain(AGENT);
+    expect(await libraryPlacement(alpha, "agent", AGENT)).toMatchObject({ state: "active" });
   });
 
   it("opens nothing in a space that is neither the home nor a placement", async () => {
@@ -538,13 +571,6 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
     expect(await skillIndexIds(alpha)).toContain(ID);
   });
 
-  it("re-places them for the organization catalog too — a NULL home places nothing", async () => {
-    expect((await move(owner(), null)).status).toBe(200);
-    expect((await sharedSpaceIds()).sort()).toEqual([alphaId, betaId].sort());
-    expect((await detailOf(alpha)).status).toBe(200);
-    expect((await detailOf(beta)).status).toBe(200);
-  });
-
   it("requires write in the destination, not only in the current home", async () => {
     // Reads Beta, cannot author there — so the destination exists for them and
     // the refusal says so.
@@ -574,17 +600,39 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
     expect(await homeOf()).toBe(alphaId);
   });
 
-  it("reserves the organization catalog to owners and admins", async () => {
-    await expectProblem(await move(alpha, null), 403);
+  it("refuses `home_space_id: null` in the BODY — a package always has a home", async () => {
+    // There is no "move it nowhere": an organization's package is homed in one
+    // of its spaces, and one that belongs to no team is homed in the
+    // organization's DEFAULT space. The refusal is the SCHEMA's, before any
+    // authority is consulted, so it names the field rather than a permission —
+    // and it is the same 400 for an owner as for a builder.
+    await expectRejectedField(await move(owner(), null), "home_space_id");
+    await expectRejectedField(await move(alpha, null), "home_space_id");
+    expect(await homeOf()).toBe(alphaId);
+  });
+
+  it("puts a package that belongs to no team in the DEFAULT space, where its builders write it", async () => {
+    // Alpha IS this organization's default space, so the fixture already sits
+    // in the shape a teamless package has, and the point is WHO that makes an
+    // author:
+    //   - a builder of the default space writes it (it is not admin-only);
+    //   - a builder of another space does not (it is not everybody's);
+    //   - an owner writes it because they reach every team space, not through
+    //     an authority of their own.
+    const defaultSpace = await getDbRow(spaces, eq(spaces.id, alphaId));
+    expect(defaultSpace.isDefault).toBe(true);
     expect(await homeOf()).toBe(alphaId);
 
-    const res = await move(owner(), null);
-    expect(res.status, await res.clone().text()).toBe(200);
-    expect(await homeOf()).toBeNull();
-
-    // And now nobody but an owner or admin writes it.
-    await expectProblem(await editSkill(alpha), 403);
+    expect((await editSkill(alpha)).status).toBe(200);
+    await expectProblem(await editSkill(beta), 403);
     expect((await editSkill(owner())).status).toBe(200);
+
+    // And moving it INTO a team is the act that narrows it: the default's
+    // builder loses the write they had, which is what makes the home a real
+    // authority rather than a label.
+    expect((await move(owner(), betaId)).status).toBe(200);
+    await expectProblem(await editSkill(alpha), 403);
+    expect((await editSkill(beta)).status).toBe(200);
   });
 
   it("audits the permission its own two refusals asked for, and stays silent on the 404", async () => {
@@ -602,13 +650,12 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
     const denials: string[] = [];
     setPermissionDenialHandler((ctx: PermissionDenialContext) => void denials.push(ctx.required));
     try {
-      await expectProblem(await move(alpha, null), 403);
       await expectProblem(await move(readerHeaders, betaId), 403);
       await expectProblem(await move(alpha, hiddenId), 404);
     } finally {
       setPermissionDenialHandler(null);
     }
-    expect(denials).toEqual(["skills:write", "skills:write"]);
+    expect(denials).toEqual(["skills:write"]);
   });
 
   it("refuses a caller who does not govern the package at all", async () => {
@@ -703,28 +750,24 @@ describe("the home on the wire", () => {
     expect(await libraryHomeWire(beta)).toEqual({ home_space_id: null, home_writable: false });
   });
 
-  it("gives the owner the id and `true`, and answers `null`/`true` for the org catalogue", async () => {
+  it("gives the owner the id and `true` wherever the home is — they reach every team space", async () => {
     expect(await homeWire(owner())).toEqual({ home_space_id: alphaId, home_writable: true });
-    // A NULL home is the organization catalogue: the same `null` on the wire,
-    // but writable — which is exactly why `home_writable` exists rather than a
-    // client-side reading of the id.
-    //
-    // The offer into Alpha is what keeps the package READABLE there once the
-    // home stops placing it: a NULL home places it in no space at all, and the
-    // catalogue exception lives in the cross-space reader, not in the
-    // current-space gate this route goes through.
-    await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, ID));
-    await seedPackageShare(alphaId, ID);
-    expect(await homeWire(owner())).toEqual({ home_space_id: null, home_writable: true });
+    // Moving the home does not move the verdict for an owner: their reach is
+    // every team space, which is what replaced an authority of their own over
+    // homeless packages. Beta's builder keeps `null`/`false` — they read the
+    // package through the offer and never reach the space that homes it.
+    expect((await move(owner(), gammaId)).status).toBe(200);
+    expect(await homeWire(owner())).toEqual({ home_space_id: gammaId, home_writable: true });
     expect(await homeWire(beta)).toEqual({ home_space_id: null, home_writable: false });
   });
 
   it("answers `false` on a SYSTEM package, which is the write route's verdict", async () => {
     // `home_writable` is the mutation route's WHOLE rule, not only its home
     // half: a system package is refused there before the home is consulted, so
-    // an owner reading one must not be told they may write it. It answered
-    // `true` through the NULL-home branch (`managesOrgCatalog`), i.e. a button
-    // that 403s.
+    // an owner reading one must not be told they may write it. A system package
+    // is one of the two rows `packages_org_package_has_home` leaves homeless —
+    // the platform ships it into every space instead of housing it in one — so
+    // this is also where that exception is read on the wire.
     const SYS = "@system/wire-skill";
     await seedPackage({
       id: SYS,
@@ -756,6 +799,91 @@ describe("the home on the wire", () => {
       home_space_id: alphaId,
       home_writable: true,
     });
+  });
+});
+
+/**
+ * The rule as a CONSTRAINT, not only as a convention: no writer — route,
+ * service, script or hand-typed UPDATE — can leave an organization's package
+ * without a home (`packages_org_package_has_home`, `0067`).
+ *
+ * Asked at the table because that is where it is enforced. Every HTTP door
+ * above goes through code that could be changed to write a NULL again; this is
+ * the one assertion that would still be red if it were.
+ */
+describe("packages_org_package_has_home", () => {
+  /**
+   * The SQLSTATE a CHECK violation raises — `23514`, `check_violation`.
+   *
+   * Drizzle wraps the driver error in a `Failed query: …` Error and hangs the
+   * original off `cause`, so the code is read from there; asking the outer
+   * error alone reads `undefined` and would pass against any failure at all.
+   */
+  const checkViolation = async (fn: () => Promise<unknown>): Promise<string | undefined> => {
+    try {
+      await fn();
+    } catch (err) {
+      const driver = (err as { cause?: { code?: string }; code?: string }).cause ?? err;
+      return (driver as { code?: string }).code;
+    }
+    throw new Error("expected the write to be refused");
+  };
+
+  it("refuses an organization package with no home", async () => {
+    expect(
+      await checkViolation(() =>
+        db.insert(packages).values({
+          id: "@homes/homeless",
+          orgId: ctx.orgId,
+          type: "skill",
+          source: "local",
+          homeSpaceId: null,
+        }),
+      ),
+    ).toBe("23514");
+  });
+
+  it("refuses an UPDATE that takes the home away", async () => {
+    // The shape the constraint forbids the personal-space sweeper and the home
+    // move from writing: both re-home to the organization's default space.
+    expect(
+      await checkViolation(() =>
+        db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, ID)),
+      ),
+    ).toBe("23514");
+    expect(await homeOf()).toBe(alphaId);
+  });
+
+  it("allows the two rows it names: a system package and an inline shadow row", async () => {
+    // A SYSTEM package is a delivery, not a residency — the deployment ships it
+    // readable in every space, so no single space owns it.
+    const sys = await db
+      .insert(packages)
+      .values({
+        id: "@system/homeless-skill",
+        orgId: null,
+        type: "skill",
+        source: "system",
+        homeSpaceId: null,
+      })
+      .returning();
+    expect(sys[0]!.homeSpaceId).toBeNull();
+
+    // An EPHEMERAL row is an inline run's shadow manifest, unreachable from
+    // every package route; a home would only make its space undeletable
+    // (`ON DELETE RESTRICT`) until the compaction sweep removes it.
+    const shadow = await db
+      .insert(packages)
+      .values({
+        id: "@homes/shadow",
+        orgId: ctx.orgId,
+        type: "agent",
+        source: "local",
+        ephemeral: true,
+        homeSpaceId: null,
+      })
+      .returning();
+    expect(shadow[0]!.homeSpaceId).toBeNull();
   });
 });
 

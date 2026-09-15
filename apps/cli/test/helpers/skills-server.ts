@@ -99,8 +99,8 @@ export interface SkillFixture {
   source?: "local" | "system";
   /**
    * The skill is PLACED in the space but switched off there. The real list
-   * route drops it from `?active=true`, which is the only listing the sync
-   * reads — so a fixture marked this way must never reach the plan.
+   * route IS the active set, so it drops the skill from the only listing the
+   * sync reads — a fixture marked this way must never reach the plan.
    */
   inactive?: boolean;
   /** When true, `versions/latest` answers 404 (never published). */
@@ -240,14 +240,21 @@ export function createSkillServer(
     }
 
     if (path === "/api/packages/skills") {
-      // `?active=true` is the ACTIVE set, not the placed one — the narrowing
-      // the server applies, reproduced here so a sync that dropped the query
-      // parameter fails instead of quietly syncing switched-off skills.
-      const activeOnly = url.searchParams.get("active") === "true";
+      // The index IS the ACTIVE set, not the placed one — the narrowing the
+      // server applies, reproduced here unconditionally so a sync that read a
+      // wider listing fails instead of quietly syncing switched-off skills.
+      //
+      // The route takes no `active` filter. The real server ignores unknown
+      // query keys, so it would answer this same body either way; the stub is
+      // deliberately stricter and refuses, so a sync still sending the
+      // parameter turns red here instead of passing on a coincidence.
+      if (url.searchParams.has("active")) {
+        return json({ code: "bad_request", message: "Unknown query parameter: active" }, 400);
+      }
       return json({
         object: "list",
         data: prepared
-          .filter((p) => !(activeOnly && p.fixture.inactive))
+          .filter((p) => !p.fixture.inactive)
           .map((p) => ({
             id: p.fixture.id,
             name: p.name,

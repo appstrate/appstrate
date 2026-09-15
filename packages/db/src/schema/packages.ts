@@ -145,20 +145,28 @@ export const packages = pgTable(
     // `assertPackageMutationAccess` (`apps/api/src/lib/package-access.ts`).
     // Holding `<type>:write` in THIS space is what authorizes editing,
     // publishing, renaming and deleting the package; every other space it is
-    // placed in consumes it and never gains a say. NULL means the
-    // organization catalogue: owners and admins in session, nobody else
-    // (`managesOrgCatalog`). It is also the other PLACEMENT, and a READ grant
-    // with it — a draft nobody has been offered is still readable at home.
+    // placed in consumes it and never gains a say. It is also the other
+    // PLACEMENT, and a READ grant with it — a draft nobody has been offered is
+    // still readable at home.
+    //
+    // An ORGANIZATION package always has one: the space its author wrote it
+    // in, or the organization's DEFAULT space when it belongs to no team.
+    // `packages_org_package_has_home` below is that sentence as a constraint,
+    // and it names the only two rows allowed to be homeless: a SYSTEM package
+    // (`org_id IS NULL`), which the deployment ships readable in every space
+    // rather than housing in one, and an inline run's shadow row
+    // (`ephemeral`).
     //
     // Moving it moves a placement: every space still holding a
     // `space_packages` row needs the offer that now places it, written in the
     // same transaction (`reconcilePlacementsAfterRehome`).
     //
-    // `ON DELETE RESTRICT`: dropping a space that homes packages would
-    // silently promote them to the org catalogue, widening who may write them.
-    // `deleteSpace` therefore refuses with 409 `space_homes_packages` and names
-    // them, so moving them stays the caller's act. Inline shadow rows are left
-    // homeless for the same reason: one run must not wedge its space.
+    // `ON DELETE RESTRICT`: a space that homes packages cannot be dropped out
+    // from under them. `deleteSpace` therefore refuses with 409
+    // `space_homes_packages` and names them, so moving them stays the caller's
+    // act, and the personal-space sweeper re-homes them to the organization's
+    // default space before it deletes. Inline shadow rows are left homeless
+    // for the same reason inverted: one run must not wedge its space.
     homeSpaceId: text("home_space_id").references(() => spaces.id, { onDelete: "restrict" }),
     type: packageTypeEnum("type").notNull(),
     source: packageSourceEnum("source").notNull().default("local"),
@@ -201,6 +209,23 @@ export const packages = pgTable(
     check(
       "packages_draft_manifest_v0",
       sql`"draft_manifest" IS NULL OR ("draft_manifest" ->> 'schema_version') IS NULL OR ("draft_manifest" ->> 'schema_version') LIKE '0.%'`,
+    ),
+    // An organization's package is always homed in one of that organization's
+    // spaces (RBAC spec §6.9). Write authority is per HOME, so a homeless
+    // organization package would be a package nobody in the organization can
+    // author — the state `0014` exists to end, and the one this refuses to let
+    // any writer re-create.
+    //
+    // The two exceptions are named rather than tolerated. A SYSTEM package
+    // (`org_id IS NULL`) is a DELIVERY, not a residency: the deployment ships
+    // it readable in every space of every organization, so no single space
+    // owns it. An `ephemeral` row is an inline run's shadow manifest,
+    // unreachable from every package route; giving it a home would only make
+    // its space undeletable until the compaction sweep removes it
+    // (`ON DELETE RESTRICT`).
+    check(
+      "packages_org_package_has_home",
+      sql`${table.orgId} IS NULL OR ${table.ephemeral} OR ${table.homeSpaceId} IS NOT NULL`,
     ),
   ],
 );

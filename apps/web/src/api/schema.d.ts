@@ -214,7 +214,7 @@ export interface paths {
         };
         /**
          * List all agents
-         * @description Returns the agents READABLE from the space named by `X-Space-Id`, with running run counts — the placement rule: homed in that space, offered to it, or a system agent. Reading is not running: an agent placed here but switched off here carries `active: false` and the launch routes refuse it until `POST /api/spaces/{spaceId}/packages` activates it. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
+         * @description Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed or offered) and switched on. An agent placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.
          */
         get: operations["listAgents"];
         put?: never;
@@ -1384,7 +1384,7 @@ export interface paths {
         };
         /**
          * List available integrations
-         * @description List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current space. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.
+         * @description List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.
          */
         get: operations["listIntegrations"];
         put?: never;
@@ -1482,7 +1482,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get integration detail + per-auth status */
+        /**
+         * Get integration detail + per-auth status
+         * @description Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, offered there, or shipped with the deployment. An integration homed elsewhere and offered to nobody answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.
+         */
         get: operations["getIntegration"];
         put?: never;
         post?: never;
@@ -1779,7 +1782,7 @@ export interface paths {
         };
         /**
          * Organization library — the placement map (owners and admins)
-         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Organization owners and admins also see organization-catalogue packages (`home_space_id: null`) placed nowhere, with their read permissions. Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the caller can enter, and each package type also requires that type's read permission in the space. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — creating the offer that places it when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.
+         * @description Returns every package the organization can see (org-owned + system), grouped by type, each carrying its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). Members, guests and API keys cannot access this administrative endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the caller can enter, and each package type also requires that type's read permission in the space. Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` activates a package in a space — creating the offer that places it when the caller holds `<type>:share` in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.
          */
         get: operations["getLibrary"];
         put?: never;
@@ -2787,7 +2790,7 @@ export interface paths {
         };
         /**
          * List agent packages
-         * @description List the agent packages available to the current space (`X-Space-Id`): system packages, plus organization packages placed in this space. Organization packages that exist but are not placed here are NOT returned — for the organization-wide map of placements, use `GET /api/library`.
+         * @description List the agent packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed or offered) and switched on. A package placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listAgentPackages"];
         put?: never;
@@ -2816,13 +2819,13 @@ export interface paths {
         get: operations["getAgentPackage"];
         /**
          * Update a user agent
-         * @description Update manifest and content of a user agent with optimistic locking. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Update manifest and content of a user agent with optimistic locking. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         put: operations["updateAgent"];
         post?: never;
         /**
          * Delete a user agent
-         * @description Delete a user agent. Built-in agents cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Delete a user agent. Built-in agents cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteAgent"];
         options?: never;
@@ -2845,7 +2848,7 @@ export interface paths {
         put?: never;
         /**
          * Create an agent version from draft
-         * @description Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["createAgentVersion"];
         delete?: never;
@@ -2890,7 +2893,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an agent version
-         * @description Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteAgentVersion"];
         options?: never;
@@ -2909,7 +2912,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an agent version into the draft
-         * @description Restore a published version into the draft. Requires no runs in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Restore a published version into the draft. Requires no runs in progress. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["restoreAgentVersion"];
         delete?: never;
@@ -2987,7 +2990,7 @@ export interface paths {
         };
         /**
          * List integration packages
-         * @description List the integration packages available to the current space (`X-Space-Id`): system packages, plus organization packages placed in this space. Organization packages that exist but are not placed here are NOT returned — for the organization-wide map of placements, use `GET /api/library`.
+         * @description List the integration packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed or offered) and switched on. A package placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listIntegrationPackages"];
         put?: never;
@@ -3016,13 +3019,13 @@ export interface paths {
         get: operations["getIntegrationPackage"];
         /**
          * Update an integration package
-         * @description Update an integration package in the organization packages. Built-in integration packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Update an integration package in the organization packages. Built-in integration packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         put: operations["updateIntegrationPackage"];
         post?: never;
         /**
          * Delete an integration package
-         * @description Delete an integration package from the organization packages. Built-in integration packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Delete an integration package from the organization packages. Built-in integration packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteIntegrationPackage"];
         options?: never;
@@ -3045,7 +3048,7 @@ export interface paths {
         put?: never;
         /**
          * Create a version from draft
-         * @description Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["createIntegrationPackageVersion"];
         delete?: never;
@@ -3090,7 +3093,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an integration package version
-         * @description Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteIntegrationPackageVersion"];
         options?: never;
@@ -3109,7 +3112,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an integration package version into the draft
-         * @description Restore a previously published version into the integration package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Restore a previously published version into the integration package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["restoreIntegrationPackageVersion"];
         delete?: never;
@@ -3127,7 +3130,7 @@ export interface paths {
         };
         /**
          * List MCP-server packages
-         * @description List the MCP-server packages available to the current space (`X-Space-Id`): system packages, plus organization packages placed in this space. Organization packages that exist but are not placed here are NOT returned — for the organization-wide map of placements, use `GET /api/library`.
+         * @description List the MCP-server packages ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed or offered) and switched on. A package placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listMcpServerPackages"];
         put?: never;
@@ -3156,13 +3159,13 @@ export interface paths {
         get: operations["getMcpServerPackage"];
         /**
          * Update an MCP-server package
-         * @description Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         put: operations["updateMcpServerPackage"];
         post?: never;
         /**
          * Delete an MCP-server package
-         * @description Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteMcpServerPackage"];
         options?: never;
@@ -3185,7 +3188,7 @@ export interface paths {
         put?: never;
         /**
          * Create a version from draft
-         * @description Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["createMcpServerPackageVersion"];
         delete?: never;
@@ -3230,7 +3233,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an MCP-server package version
-         * @description Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteMcpServerPackageVersion"];
         options?: never;
@@ -3249,7 +3252,7 @@ export interface paths {
         put?: never;
         /**
          * Restore an MCP-server package version into the draft
-         * @description Restore a previously published version into the MCP-server package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Restore a previously published version into the MCP-server package draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["restoreMcpServerPackageVersion"];
         delete?: never;
@@ -3267,7 +3270,7 @@ export interface paths {
         };
         /**
          * List skills
-         * @description List the skills available to the current space (`X-Space-Id`): system packages, plus organization packages placed in this space. Organization packages that exist but are not placed here are NOT returned — for the organization-wide map of placements, use `GET /api/library`.
+         * @description List the skills ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system package, or one placed here (homed or offered) and switched on. A package placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it. For the organization-wide map of placements, use `GET /api/library`.
          */
         get: operations["listSkills"];
         put?: never;
@@ -3296,13 +3299,13 @@ export interface paths {
         get: operations["getSkill"];
         /**
          * Update a skill
-         * @description Update a skill in the organization packages. Built-in skills cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Update a skill in the organization packages. Built-in skills cannot be modified. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         put: operations["updateSkill"];
         post?: never;
         /**
          * Delete a skill
-         * @description Delete a skill from the organization packages. Built-in skills cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Delete a skill from the organization packages. Built-in skills cannot be deleted. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteSkill"];
         options?: never;
@@ -3325,7 +3328,7 @@ export interface paths {
         put?: never;
         /**
          * Create a version from draft
-         * @description Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["createSkillVersion"];
         delete?: never;
@@ -3370,7 +3373,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a skill version
-         * @description Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         delete: operations["deleteSkillVersion"];
         options?: never;
@@ -3389,7 +3392,7 @@ export interface paths {
         put?: never;
         /**
          * Restore a skill version into the draft
-         * @description Restore a previously published version into the skill draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. A `null` home is the organization catalog: owners and admins on a session, never an API key. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
+         * @description Restore a previously published version into the skill draft. Does not create a new version. **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.
          */
         post: operations["restoreSkillVersion"];
         delete?: never;
@@ -3413,7 +3416,7 @@ export interface paths {
         head?: never;
         /**
          * Move a package to another home space
-         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home (or be an organization owner/admin in session when the package has none) and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. Passing `null` hands the package to the organization catalog, which only owners and admins may then write — reserved to them for that reason. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.
+         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.
          */
         patch: operations["movePackageHome"];
         trace?: never;
@@ -4433,7 +4436,7 @@ export interface paths {
         put?: never;
         /**
          * Sweep an orphaned personal space now
-         * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either handed to the organization catalogue (`home_space_id = null`, when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).
+         * @description Run the offboarding routine on an orphaned personal space immediately, instead of waiting for the rest of the 30-day window: every package the space HOMES is either re-homed to the organization's default space (when another space holds it) or deleted (when it lived only there), and the space is then deleted with its runs, files and sessions. A live personal space that is not the caller's own answers **404**, never 409: confirming that an id is somebody's personal space is itself a disclosure. Requires the org-level `spaces:delete` (owner or admin); API keys are refused. Recorded in the audit log (`space.swept`).
          */
         post: operations["sweepPersonalSpace"];
         delete?: never;
@@ -4451,7 +4454,7 @@ export interface paths {
         };
         /**
          * One space's placements, and what the caller could still place there
-         * @description Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, offered here, or shipped with the platform, with `state` saying whether the space runs it — `none` is exactly a pending offer, taken up with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then creates the offer) and the organization catalogue for an owner or admin; for a PERSONAL destination, nothing beyond what is already placed — an offer into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.
+         * @description Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, offered here, or shipped with the platform, with `state` saying whether the space runs it — `none` is exactly a pending offer, taken up with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then creates the offer); for a PERSONAL destination, nothing beyond what is already placed — an offer into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.
          */
         get: operations["getSpaceLibrary"];
         put?: never;
@@ -4995,7 +4998,7 @@ export interface components {
             version_count?: number;
             /** @description Source package ID if forked */
             forked_from?: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
@@ -5005,7 +5008,7 @@ export interface components {
             has_unarchived_changes?: boolean;
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
             effective_timeout_seconds: number;
-            /** @description Whether the agent is ACTIVE in the space this detail was read from — the same rule as `AgentListItem.active`: the placement row's `enabled` when the space has one, the deployment's default when it has none. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. Always emitted. */
+            /** @description Whether the agent is ACTIVE in the space this detail was read from — the placement row's `enabled` where the package is placed here, the deployment's default where the space holds no row. Answered by the detail itself so a loaded page needs no second call. READING an agent never requires it to be active, which is why this endpoint answers 200 on `active: false` while `POST …/run`, `POST …/schedules` and `GET …/bundle` answer `404 agent_not_active_in_space`. The agents INDEX carries no such field — it lists the active set — so a page that must render an inactive agent reaches it from the space library. Always emitted. */
             active: boolean;
         };
         /** @description The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged. */
@@ -5036,8 +5039,6 @@ export interface components {
              */
             type: "agent" | "skill" | "mcp-server" | "integration";
             running_runs: number;
-            /** @description Whether the agent is ACTIVE in the space this listing was read from — the placement row's `enabled` when the space has one, the deployment's default (a system package) when it has none. The listing itself follows the READ rule — homed in this space, offered to it, or system — which a RUN does not: when this is `false` the launch routes answer `404 agent_not_active_in_space` here until somebody activates it through `POST /api/spaces/{spaceId}/packages`. Always emitted. */
-            active: boolean;
             dependencies: {
                 /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: {
@@ -5438,13 +5439,13 @@ export interface components {
             name: string;
             /** @description Description from the package draft manifest; empty string when not provided. */
             description: string;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
-            /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (the organization catalogue they administer, or a package whose home grants them `<type>:share`). */
+            /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
         }[];
         /** @description Normalized support facts from Appstrate's pinned LiteLLM catalog snapshot, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
@@ -5648,6 +5649,10 @@ export interface components {
             orgId?: string | null;
             name: string;
             description: string | null;
+            /** @description The manifest's `icon` (an Iconify id), `null` when it declares none. Read off the same rendered manifest as `name` and `description`, so an index page can draw its cards from this listing alone. */
+            icon: string | null;
+            /** @description The manifest's `keywords`, `[]` when it declares none — what an index page's search matches on beyond the name and the description. */
+            keywords: string[];
             /** @enum {string} */
             source: "system" | "local";
             created_by: string | null;
@@ -5658,7 +5663,7 @@ export interface components {
             auto_installed: boolean;
             /** @description Source package ID if forked */
             forked_from: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
@@ -5700,7 +5705,7 @@ export interface components {
             has_unarchived_changes?: boolean;
             /** @description Source package ID if forked */
             forked_from: string | null;
-            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: either the organization catalog (writable by organization owners and admins), or a space whose id is withheld — a colleague's personal space, for instance, which is readable through a placement but never nameable. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
+            /** @description Space (`spc_…`) whose `<type>:write` authorizes editing, publishing, renaming and deleting this package — emitted ONLY when the caller reaches that space. `null` means the home is not a space this caller can see: a colleague's personal space, for instance, which is readable through a placement but never nameable, or a system package, which the platform ships into every space instead of housing in one. Use `home_writable` rather than inferring authority from this field. Other spaces the package is placed in consume it and never gain write authority. */
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. */
             home_writable: boolean;
@@ -6345,7 +6350,7 @@ export interface components {
             object: "space_sweep";
             /** @description The personal space that was swept and deleted */
             space_id: string;
-            /** @description Packages this space homed that another space has placed: handed to the organization catalogue (`home_space_id = null`) rather than deleted */
+            /** @description Packages this space homed that another space has placed: re-homed to the organization's default space rather than deleted */
             rehomed_packages: number;
             /** @description Packages this space homed that no other space had placed: deleted */
             deleted_packages: number;
@@ -6719,8 +6724,6 @@ export interface components {
         PackageScope: string;
         /** @description Package name */
         PackageName: string;
-        /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
-        PackageActiveFilter: "true";
     };
     requestBodies: never;
     headers: {
@@ -7111,7 +7114,6 @@ export interface operations {
                      *           "version": "1.2.0",
                      *           "type": "agent",
                      *           "running_runs": 1,
-                     *           "active": true,
                      *           "dependencies": {
                      *             "skills": {},
                      *             "mcp_servers": {},
@@ -7134,7 +7136,6 @@ export interface operations {
                      *           "version": "2.0.0",
                      *           "type": "agent",
                      *           "running_runs": 0,
-                     *           "active": true,
                      *           "dependencies": {
                      *             "skills": {
                      *               "@appstrate/summarize": "^1.0.0"
@@ -15893,10 +15894,7 @@ export interface operations {
     };
     listAgentPackages: {
         parameters: {
-            query?: {
-                /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
-                active?: components["parameters"]["PackageActiveFilter"];
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -16604,10 +16602,7 @@ export interface operations {
     };
     listIntegrationPackages: {
         parameters: {
-            query?: {
-                /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
-                active?: components["parameters"]["PackageActiveFilter"];
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -17096,10 +17091,7 @@ export interface operations {
     };
     listMcpServerPackages: {
         parameters: {
-            query?: {
-                /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
-                active?: components["parameters"]["PackageActiveFilter"];
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -17567,10 +17559,7 @@ export interface operations {
     };
     listSkills: {
         parameters: {
-            query?: {
-                /** @description When `true`, narrows the list to packages ACTIVE in the current space, by the same rule the run gate applies: the placement row's `enabled` when the space has one, the deployment's default when it has none — a system package, or an integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row at all. No per-type exception: one rule, every package type. */
-                active?: components["parameters"]["PackageActiveFilter"];
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -17599,6 +17588,11 @@ export interface operations {
                      *           "id": "@acme/summarize",
                      *           "name": "Summarize",
                      *           "description": "Summarizes long text into key points",
+                     *           "icon": "lucide:file-text",
+                     *           "keywords": [
+                     *             "summary",
+                     *             "text"
+                     *           ],
                      *           "source": "local",
                      *           "version": "1.0.0",
                      *           "created_by": "usr_cm3abc123",
@@ -18106,8 +18100,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Destination space id (`spc_…`), or `null` for the organization catalog. */
-                    home_space_id: string | null;
+                    /** @description Destination space id (`spc_…`). Required and non-nullable — a package always has a home space. */
+                    home_space_id: string;
                 };
             };
         };
@@ -21779,7 +21773,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Runs are in progress in the space (`space_has_active_runs`) — the sweep deletes the space, whose cascade drops `runs`, so it refuses for the same reason `DELETE` does and before it has emptied anything —, the space is a team space (`space_not_personal`), or it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`). Somebody else's live personal space answers 404. */
+            /** @description Runs are in progress in the space (`space_has_active_runs`) — the sweep deletes the space, whose cascade drops `runs`, so it refuses for the same reason `DELETE` does and before it has emptied anything —, the space is a team space (`space_not_personal`), it is the caller's own personal space and they are still in the organization (`personal_space_not_orphaned`), or the organization has no default space to re-home the swept packages into (`organization_has_no_default_space`): a package the organization still runs elsewhere has to land somewhere, and the default space is where a package that belongs to no team lives. Give the organization a default space and re-run. Somebody else's live personal space answers 404. */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -34,8 +34,8 @@
  * package. `not_placed` answers exactly what a nonexistent id answers, byte
  * for byte: a space with no placement learns nothing here, not even that the
  * package exists — this route takes a package id straight from the caller, so
- * a distinguishable refusal would be an existence oracle over the whole
- * organization catalogue.
+ * a distinguishable refusal would be an existence oracle over every package
+ * the organization owns.
  *
  * `stage: "draft"` carries one more condition, and it is NOT asked here: write
  * authority over the package (`assertDraftSelectorAllowed`, 403

@@ -2,7 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { type LucideIcon, Layers } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
@@ -11,6 +11,7 @@ import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
+import { SpaceLibraryHint } from "../components/space-library-hint";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
 
@@ -26,15 +27,6 @@ export interface CardItem {
   unreadCount?: number;
   actions?: ReactNode;
   autoInstalled?: boolean;
-  /**
-   * Agent cards only: whether the agent is ACTIVE in the current space
-   * (`AgentListItem.active`). The index lists what this space READS — homed
-   * here, offered here, or system — while a run needs a placement switched on,
-   * so `false` greys the card's launch control out with the reason rather than
-   * letting the click come back a 404. `undefined` where the list does not
-   * carry the fact (non-agent cards), which reads as "runnable".
-   */
-  active?: boolean;
 }
 
 interface PackageTabProps {
@@ -116,7 +108,6 @@ export function PackageList() {
     runningRuns: f.running_runs,
     keywords: f.keywords,
     unreadCount: unreadCounts?.[f.id],
-    active: f.active,
   }));
 
   return (
@@ -132,7 +123,7 @@ export function PackageList() {
         isLoading={isLoading}
         error={error}
         emptyMessage={t("list.empty")}
-        emptyHint={<Trans t={t} i18nKey="list.emptyHint" components={{ 1: <code /> }} />}
+        emptyHint={<SpaceLibraryHint />}
         emptyIcon={Layers}
         extraActions={
           can("agents:write") ? (

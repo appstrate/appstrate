@@ -198,27 +198,26 @@ describe("CONFIGURING never activates — the row is the activation's, not the s
   });
 });
 
-describe("`?active=true` reads the same rule as the run gate", () => {
-  const listActiveSkills = async () => {
-    const res = await app.request("/api/packages/skills?active=true", {
-      headers: authHeaders(ctx),
-    });
+describe("the type index reads the same rule as the run gate", () => {
+  const listSkillIndex = async () => {
+    const res = await app.request("/api/packages/skills", { headers: authHeaders(ctx) });
     expect(res.status, await res.clone().text()).toBe(200);
     const body = (await res.json()) as { data: { id: string }[] };
     return body.data.map((row) => row.id);
   };
 
   it("lists a system package that has no row, and drops it once the space switches it off", async () => {
-    // The agent editor's picker reads this filter. It used to be its own third
-    // formulation — a row, enabled, no default branch — so it offered neither
-    // the system skills the space runs nor the system integrations readiness
-    // accepts, and the integrations route carried a per-type correction pass to
-    // patch that up. One rule, no correction.
-    expect(await listActiveSkills()).toContain(SYSTEM_SKILL);
+    // The index page and the agent editor's picker are the same listing, and it
+    // reads THE activation rule — `activeHereSql`, the one the run gate reads.
+    // A filter of its own here (a row, enabled, no default branch) offers
+    // neither the system skills the space runs nor the system integrations
+    // readiness accepts, and then a per-type correction pass has to patch that
+    // up route by route. One rule, no correction.
+    expect(await listSkillIndex()).toContain(SYSTEM_SKILL);
     expect((await deactivate(SYSTEM_SKILL)).status).toBe(204);
-    expect(await listActiveSkills()).not.toContain(SYSTEM_SKILL);
+    expect(await listSkillIndex()).not.toContain(SYSTEM_SKILL);
     expect((await activate(SYSTEM_SKILL)).status).toBe(201);
-    expect(await listActiveSkills()).toContain(SYSTEM_SKILL);
+    expect(await listSkillIndex()).toContain(SYSTEM_SKILL);
   });
 });
 

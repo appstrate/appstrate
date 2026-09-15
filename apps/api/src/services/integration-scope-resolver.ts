@@ -68,7 +68,7 @@ interface ScopeResolverInput {
 export async function computeRequiredScopes(
   input: ScopeResolverInput,
 ): Promise<ComputeRequiredScopesResult> {
-  const integration = await getIntegration(input.scope.orgId, input.integrationId);
+  const integration = await getIntegration(input.scope, input.integrationId);
   if (!integration) {
     return { required: [] };
   }

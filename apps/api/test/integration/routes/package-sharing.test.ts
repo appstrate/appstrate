@@ -191,18 +191,12 @@ const takeUpOffer = (headers: Headers, packageId: string, spaceId?: string) =>
     body: JSON.stringify({ packageId }),
   });
 
-/** Rows on the agents INDEX page — `GET /api/agents`, read from one space. */
-async function agentIndexRows(headers: Headers): Promise<{ id: string; active: boolean }[]> {
+/** Ids on the agents INDEX page — `GET /api/agents`, read from one space. */
+async function agentIndexIds(headers: Headers): Promise<string[]> {
   const res = await app.request("/api/agents", { headers });
   expect(res.status, await res.clone().text()).toBe(200);
-  return ((await res.json()) as { data: { id: string; active: boolean }[] }).data;
+  return ((await res.json()) as { data: { id: string }[] }).data.map((agent) => agent.id);
 }
-
-const agentIndexIds = async (headers: Headers) =>
-  (await agentIndexRows(headers)).map((agent) => agent.id);
-
-const agentIndexRow = async (headers: Headers, packageId: string) =>
-  (await agentIndexRows(headers)).find((agent) => agent.id === packageId);
 
 /** One placement cell of a library row. */
 interface LibraryPlacement {
@@ -611,20 +605,29 @@ describe("offered is not activated", () => {
     expect(detail.status, await detail.clone().text()).toBe(200);
   });
 
-  it("lists the offer on the recipient's agents index, and nowhere else", async () => {
-    // The index page reads the PLACEMENT rule, so an offer is on it before it
-    // is taken up — the recipient has to see the agent to decide. `active` is
-    // the second half: readable here, not runnable here yet. `teamMember`
-    // reads neither the home nor the offer and must not learn the id exists.
-    const listed = await agentIndexIds(recipient.headers());
-    expect(listed).toContain(AGENT);
-    const mine = await agentIndexRow(recipient.headers(), AGENT);
-    expect(mine?.active).toBe(false);
+  it("puts the offer in the recipient's LIBRARY, not on their agents index", async () => {
+    // An offer is something the recipient HOLDS, not something they can launch,
+    // so it belongs to the page that answers "what is placed here, and in what
+    // state" — the library, where `state: "none"` renders as a pending offer
+    // next to the button that takes it up. The index answers the other
+    // question and must not show a row whose launch control would 404.
+    // `teamMember` reads neither the home nor the offer and must not learn the
+    // id exists on either page.
+    expect(await agentIndexIds(recipient.headers())).not.toContain(AGENT);
+    expect(
+      placementIn(
+        (await library(recipient.headers())).packages.agent?.find((row) => row.id === AGENT),
+        recipient.personalSpaceId,
+      ),
+    ).toMatchObject({ via: "shared", state: "none" });
 
     expect(await agentIndexIds(teamMember.headers(teamId))).not.toContain(AGENT);
+    expect((await library(teamMember.headers(teamId))).packages.agent ?? []).toHaveLength(0);
 
+    // Taking it up is what puts it on the index — the positive control that
+    // separates "not yet activated" from "refused for some other reason".
     expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
-    expect((await agentIndexRow(recipient.headers(), AGENT))?.active).toBe(true);
+    expect(await agentIndexIds(recipient.headers())).toContain(AGENT);
   });
 
   it("refuses the run until the recipient activates it", async () => {
@@ -1256,12 +1259,21 @@ describe("sharing with a team space", () => {
     await expectProblem(await shareWithSpace(author.headers(homeId), AGENT, teamId), 404);
   });
 
-  it("lists it on the space's per-type index page", async () => {
+  it("reaches the space's per-type index page once the space takes it up", async () => {
     await shareWithSpace(owner(), AGENT, teamId);
-    const res = await app.request("/api/packages/agents", { headers: teamMember.headers(teamId) });
-    expect(res.status, await res.clone().text()).toBe(200);
-    const body = (await res.json()) as { data: { id: string }[] };
-    expect(body.data.map((entry) => entry.id)).toContain(AGENT);
+    const indexIds = async () => {
+      const res = await app.request("/api/packages/agents", {
+        headers: teamMember.headers(teamId),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      return ((await res.json()) as { data: { id: string }[] }).data.map((entry) => entry.id);
+    };
+
+    // The offer alone places the agent in the team space; it does not switch it
+    // on there, and the index is the set the space can launch.
+    expect(await indexIds()).not.toContain(AGENT);
+    expect((await takeUpOffer(owner(), AGENT, teamId)).status).toBe(201);
+    expect(await indexIds()).toContain(AGENT);
   });
 });
 
@@ -1323,26 +1335,25 @@ describe("nothing leaks about a personal space", () => {
   });
 });
 
-describe("a NULL-home package stays the organization's when it is shared", () => {
-  // The org-catalogue exception (`lib/package-access.ts` →
-  // `assertPackageIsReachable`) is about INSTALLATIONS, and only about them:
-  // offering a catalogue package to somebody must not take it away from the
-  // organization that owns it. Reading installations and shares as ONE set made
-  // one share turn the owner's own package into a 404 on every route that asks
-  // "may this caller see this id" — its versions, a fork of it, activating it.
+describe("sharing a package does not displace its HOME", () => {
+  // The regression: reading installations and shares as ONE set made a single
+  // share turn the author's own package into a 404 on every route that asks
+  // "may this caller see this id" — its versions, a fork of it, activating it
+  // somewhere else. The HOME is a placement of its own and a read grant with
+  // it (`placementGrantsRead`), so giving a package away adds an audience and
+  // takes nothing back.
   beforeEach(async () => {
-    // `SKILL` is homed in `homeId` and installed nowhere, so moving it to the
-    // catalogue leaves the share as its only placement — the exact shape.
-    await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, SKILL));
+    // `SKILL` is homed in `homeId` and installed nowhere, so the share is the
+    // only OTHER placement — the exact shape the regression needed.
     expect((await shareWithUser(owner(), SKILL, recipient.userId)).status).toBe(200);
   });
 
-  it("keeps its version list readable for the owner", async () => {
+  it("keeps its version list readable from the home", async () => {
     const res = await app.request(`/api/packages/skills/${SKILL}/versions`, { headers: owner() });
     expect(res.status, await res.clone().text()).toBe(200);
   });
 
-  it("keeps it installable into a team space by the owner", async () => {
+  it("keeps it installable into a team space from the home", async () => {
     const res = await app.request(`/api/spaces/${teamId}/packages`, {
       method: "POST",
       headers: { ...owner(), "Content-Type": "application/json" },
@@ -1378,9 +1389,7 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
    * never be forked WITHIN one organization at all. A system package is also
    * EXEMPT from the key, which is what these tests pin — the platform ships it
    * readable in every space of every organization, so there is no space that
-   * owns it for a setting about copying out of one to protect, and reading its
-   * NULL home as the organization catalogue turned the key into "only owners
-   * and admins may install the shipped catalogue".
+   * owns it for a setting about copying out of one to protect.
    *
    * The key's live effect is therefore on DOWNLOAD (asserted below on the
    * organization's own agent) and on a CROSS-organization fork, which needs two
@@ -1644,16 +1653,20 @@ describe("the table has no other reader", () => {
     const files = new TextDecoder().decode(proc.stdout).split("\n").filter(Boolean).sort();
     // The share ROUTES reach the table through `services/package-shares.ts`,
     // and every rehome writes its offers through
-    // `services/package-placement.ts`; these eight are every file that names
-    // it. The ones that read it DIRECTLY read it as PLACEMENT, never as
-    // permission to run: `package-placement.ts` states the rule in SQL,
+    // `services/package-placement.ts`; these are every file that names it. The
+    // ones that read it DIRECTLY read it as PLACEMENT, never as permission to
+    // run: `package-placement.ts` states the rule in SQL,
     // `package-activation.ts` conjoins that rule so a row without a placement
     // behind it counts for nothing, `package-library.ts` projects the share
-    // half per space (a listing), and the remaining three join it to ask the
-    // placement question of one package.
+    // half per space (a listing), and the rest join it to ask the placement
+    // question of one package. `integration-service.ts` joins it for that
+    // reason and no other: the Integrations page's own two routes narrow on
+    // `placementReadFilter`, which needs this LEFT JOIN or an offered
+    // integration drops out of its own page.
     expect(files).toEqual([
       "apps/api/src/lib/package-access.ts",
       "apps/api/src/services/integration-connections.ts",
+      "apps/api/src/services/integration-service.ts",
       "apps/api/src/services/package-activation.ts",
       "apps/api/src/services/package-items/crud.ts",
       "apps/api/src/services/package-library.ts",

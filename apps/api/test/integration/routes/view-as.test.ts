@@ -583,16 +583,20 @@ describe("view as role", () => {
       expect((await remove()).status).toBe(204);
     });
 
-    it("answers the package catalog as a member would, not as the org catalog admin", async () => {
-      // Installed in no space: only someone who manages the ORG catalog sees it.
-      await seedAgent({ id: "@view-as/uninstalled", orgId: owner.orgId });
+    it("answers the space library as a member would, not with the owner's reach", async () => {
+      // Homed in a CLOSED space with no membership row, and placed nowhere
+      // else. The default space's library lists it as a CANDIDATE — something
+      // the caller could put here in one click — only for a caller who holds
+      // `agents:share` in that home. The owner does, by reaching every team
+      // space; a previewed `member` does not reach a closed space at all, even
+      // as `preset:admin` in the space they are browsing.
+      const closed = await space("Elsewhere", "closed");
+      await seedAgent({ id: "@view-as/elsewhere", orgId: owner.orgId, homeSpaceId: closed.id });
       const library = (view?: string) =>
         libraryAgentIds(orgOnlyHeaders(owner, viewHeader(view)), owner.defaultSpaceId);
 
-      expect(await library()).toContain("@view-as/uninstalled");
-      expect(await library(persona("member", "preset:admin"))).not.toContain(
-        "@view-as/uninstalled",
-      );
+      expect(await library()).toContain("@view-as/elsewhere");
+      expect(await library(persona("member", "preset:admin"))).not.toContain("@view-as/elsewhere");
     });
   });
 
@@ -841,9 +845,6 @@ describe("view as role", () => {
       return { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId };
     }
 
-    const libraryOverLoopback = (orgRole: string, viewAs?: unknown) =>
-      libraryAgentIds(loopbackHeaders(orgRole, viewAs), owner.defaultSpaceId);
-
     it("reaches a closed space the persona is a member of, and only with the claim", async () => {
       // A CLOSED space reaches nobody without a row, so what the hop sees there
       // depends on the persona's overlay and on nothing else.
@@ -883,11 +884,21 @@ describe("view as role", () => {
       expect(response.headers.get(ACTIVE)).toBeNull();
     });
 
-    it("hides the org catalogue a `member` does not manage", async () => {
-      // Installed in no space: only someone who manages the ORG catalog sees it.
-      await seedAgent({ id: "@view-as/uninstalled", orgId: owner.orgId });
-      expect(await libraryOverLoopback("owner")).toContain("@view-as/uninstalled");
-      expect(await libraryOverLoopback("member")).not.toContain("@view-as/uninstalled");
+    it("refuses the ORGANIZATION map to a `member`, and serves it to an owner", async () => {
+      // `GET /api/library` spans every space of the organization, so it is
+      // owner/admin-only — a PAGE gate, not an authority over any package on
+      // it. What this pins is that the org role survives the hop: the same
+      // identity, the same scope, two different verdicts.
+      await seedAgent({ id: "@view-as/mapped", orgId: owner.orgId });
+      const map = async (orgRole: string) =>
+        app.request("/api/library", { headers: loopbackHeaders(orgRole) });
+
+      const served = await map("owner");
+      expect(served.status).toBe(200);
+      const body = (await served.json()) as { packages: { agent: Array<{ id: string }> } };
+      expect(body.packages.agent.map((pkg) => pkg.id)).toContain("@view-as/mapped");
+
+      expect((await map("member")).status).toBe(403);
     });
   });
 

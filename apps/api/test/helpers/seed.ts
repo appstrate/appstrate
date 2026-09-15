@@ -29,8 +29,9 @@ import {
   packageDistTags,
   spaceMembers,
   spaceRoles,
+  user as userTable,
 } from "@appstrate/db/schema";
-import { eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
+import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { mcpServerManifest } from "./integration-manifests.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -43,12 +44,37 @@ type PackageInsert = Partial<InferInsertModel<typeof packages>> & {
   orgId: string | null;
 };
 
+/**
+ * An organization's package is always homed in one of its spaces
+ * (`packages_org_package_has_home`), and the home of one that belongs to no
+ * team is the organization's DEFAULT space — so a fixture that names no home
+ * gets that one, exactly as the platform would. Passing `homeSpaceId`
+ * explicitly still wins, including `null` for the two rows allowed to be
+ * homeless: a system package (`orgId: null`) and an inline run's shadow row
+ * (`ephemeral: true`).
+ *
+ * Resolved per call rather than cached: `truncateAll` runs between tests, so a
+ * remembered id would point at a space that no longer exists.
+ */
+async function defaultSpaceIdOf(orgId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(and(eq(spaces.orgId, orgId), eq(spaces.isDefault, true)))
+    .limit(1);
+  return row?.id ?? null;
+}
+
 export async function seedPackage(
   overrides: PackageInsert,
 ): Promise<InferSelectModel<typeof packages>> {
   const orgSlug = overrides.id?.split("/")[0]?.replace("@", "") ?? "testorg";
   const name = overrides.id?.split("/")[1] ?? `agent-${crypto.randomUUID().slice(0, 8)}`;
   const id = overrides.id ?? `@${orgSlug}/${name}`;
+  const homeSpaceId =
+    "homeSpaceId" in overrides || overrides.orgId === null || overrides.ephemeral === true
+      ? (overrides.homeSpaceId ?? null)
+      : await defaultSpaceIdOf(overrides.orgId);
 
   const [pkg] = await db
     .insert(packages)
@@ -64,6 +90,7 @@ export async function seedPackage(
       },
       draftContent: "Test prompt content",
       ...overrides,
+      homeSpaceId,
     })
     .returning();
   return pkg!;
@@ -308,6 +335,32 @@ export async function seedSpace(overrides: SpaceInsert): Promise<InferSelectMode
     })
     .returning();
   return space!;
+}
+
+/**
+ * A space of `orgId` that NOBODY else in the organization reaches: a stranger's
+ * PERSONAL space (RBAC spec §3.6). Returns its id.
+ *
+ * This is the home to give a package a fixture means to keep OUT of the calling
+ * space's reach. A homeless organization package is not an option — every one
+ * has a home (`packages_org_package_has_home`) — and a private TEAM space is
+ * not one either: an organization owner or admin holds `admin` in every team
+ * space, private included, so only a personal space is genuinely unreachable.
+ *
+ * The owner is a bare `user` row, not a signed-in test user: nothing ever
+ * authenticates as them, and a session would only slow the fixture down.
+ */
+export async function seedUnreachableSpace(orgId: string, name = "Out of reach"): Promise<string> {
+  const ownerUserId = crypto.randomUUID();
+  await db.insert(userTable).values({
+    id: ownerUserId,
+    name: `Stranger ${ownerUserId.slice(0, 8)}`,
+    email: `stranger-${ownerUserId}@test.com`,
+    emailVerified: false,
+    realm: "platform",
+  });
+  const space = await seedSpace({ orgId, name, ownerUserId, visibility: "private" });
+  return space.id;
 }
 
 // ─── Space roles (custom bundles) ─────────────────────────

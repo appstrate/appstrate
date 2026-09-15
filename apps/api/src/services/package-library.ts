@@ -16,7 +16,6 @@ import {
   homeWireForCaller,
   packageAccessSpaces,
   packagePermission,
-  managesOrgCatalog,
 } from "../lib/package-access.ts";
 import { isActiveWithoutRow } from "./package-activation.ts";
 import type { PackageType } from "@appstrate/core/validation";
@@ -83,11 +82,10 @@ interface LibraryPackage {
  * `GET /api/spaces/{id}/library` narrows the placements to the requested space,
  * which is what makes it a space's own page rather than an organization map.
  * A package with NO placement in that space is still listed there when the
- * caller could PLACE it — the organization catalogue they administer, a system
- * package, or a package whose home grants them `<type>:share` — because
- * `POST /api/spaces/{id}/packages` would create the offer along with the
- * activation. Never into a PERSONAL destination: an offer into somebody's own
- * space is somebody else's act.
+ * caller could PLACE it — a system package, or a package whose home grants
+ * them `<type>:share` — because `POST /api/spaces/{id}/packages` would create
+ * the offer along with the activation. Never into a PERSONAL destination: an
+ * offer into somebody's own space is somebody else's act.
  */
 export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgId = c.get("orgId");
@@ -99,7 +97,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgSpaces = visibleSpaces
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault))
     .map(({ id, name, isDefault }) => ({ id, name, isDefault }));
-  const orgCatalogAdmin = !target?.ownerUserId && managesOrgCatalog(c);
   // A PERSONAL space is its owner's, and an integration placed there runs on
   // their credentials — so the deployment's own integrations, which every team
   // space gets by construction, are not proposed in one. Nobody puts an
@@ -217,7 +214,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     const type = row.type as PackageType;
     const readable = readableSpaceIds.get(type);
     if (!readable?.size) continue;
-    const home = homeWireForCaller(c, row, accessible);
+    const home = homeWireForCaller(row, accessible);
     const offeredIn = offers.get(row.id);
     const rowsBySpace = placementRows.get(row.id);
 
@@ -258,19 +255,17 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     }
     placements.sort((a, b) => a.space_id.localeCompare(b.space_id));
 
-    // A package with no placement the caller reads is still listed in two
-    // cases. In the SPACE form it is a candidate the caller could put there in
+    // A package with no placement the caller reads is listed in ONE case, and
+    // only in the SPACE form: it is a candidate the caller could put there in
     // one click — a package whose home grants them `<type>:share`, since
     // `POST /api/spaces/{id}/packages` creates the offer with the activation —
     // and never for a PERSONAL destination, where an offer is somebody else's
-    // act. In BOTH forms an administrator keeps the organization catalogue
-    // (`home_space_id IS NULL`) in view: it is placed nowhere by definition,
-    // and dropping it would empty the very page that moves it into a space.
-    if (placements.length === 0) {
-      const placeable = !!spaceId && !target?.ownerUserId && home.home_shareable;
-      const orgCatalogEntry = row.homeSpaceId === null && orgCatalogAdmin;
-      if (!placeable && !orgCatalogEntry) continue;
-    }
+    // act. Nothing else earns a row: every package of the organization is
+    // homed in one of its spaces (`packages_org_package_has_home`), so a
+    // package with no placement here is one placed in spaces this caller does
+    // not read, and the ORGANIZATION map is the page that shows it.
+    if (placements.length === 0 && !(!!spaceId && !target?.ownerUserId && home.home_shareable))
+      continue;
 
     const m = asRecord(row.draftManifest);
     grouped[row.type]?.push({

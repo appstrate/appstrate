@@ -164,8 +164,7 @@
   "packages.type.mcp-servers": "Serveurs MCP",
   "packages.type.integration": "intégration",
   "packages.type.integrations": "Intégrations",
-  "packages.emptyItems": "Aucun(e) {{type}} dans les packages.",
-  "packages.emptyItemsHint": "Uploadez un fichier AFPS contenant un(e) {{type}}",
+  "packages.emptyItems": "Aucun {{type}} actif dans cet espace.",
   "packages.deleteConfirm": "Supprimer définitivement {{type}} \"{{name}}\" de l'organisation ? Il sera retiré de tous les espaces.",
   "packages.deactivate": "Désactiver ici",
   "packages.deactivateConfirm": "Désactiver « {{name}} » dans cet espace ? Ses réglages sont conservés et vous pourrez le réactiver quand vous voudrez.",
@@ -829,12 +828,9 @@
   "webhooks.daysAgo": "Il y a {{count}}j",
   "webhooks.eventsRequired": "Veuillez sélectionner au moins un événement.",
   "integrations.title": "Intégrations",
-  "integrations.subtitle": "Catalogue des intégrations AFPS — connecter des services tiers à vos agents.",
+  "integrations.subtitle": "Les intégrations actives dans cet espace — connecter des services tiers à vos agents.",
   "integrations.create": "Nouvelle intégration",
-  "integrations.tabs.active": "Activées",
-  "integrations.tabs.all": "Toutes",
-  "integrations.empty.active": "Aucune intégration activée. Activez-en une depuis l'onglet « Toutes ».",
-  "integrations.empty.all": "Aucune intégration n'est disponible dans cette organisation.",
+  "integrations.empty": "Aucune intégration active dans cet espace.",
   "integrations.search.placeholder": "Rechercher une intégration…",
   "integrations.badge.active": "Activée",
   "integrations.badge.inactive": "Non activée",
@@ -1119,6 +1115,6 @@
   "spaces.personal.convertConfirm": "Convertir cet espace personnel en espace d'équipe ? Son ancien propriétaire a quitté l'organisation et n'y regagne rien : l'espace restera privé et son contenu deviendra lisible et modifiable par les propriétaires et administrateurs de l'organisation.",
   "spaces.personal.converted": "Espace converti en espace d'équipe.",
   "spaces.personal.sweep": "Supprimer maintenant",
-  "spaces.personal.sweepConfirm": "Supprimer définitivement cet espace et tout ce qu'il contient ? Les packages qu'il héberge et qui sont placés ailleurs passent au catalogue de l'organisation ; les autres sont supprimés.",
-  "spaces.personal.swept": "Espace supprimé ({{rehomed}} package(s) rendu(s) au catalogue, {{deleted}} supprimé(s))."
+  "spaces.personal.sweepConfirm": "Supprimer définitivement cet espace et tout ce qu'il contient ? Les packages qu'il héberge et qui sont placés ailleurs passent dans l'espace par défaut de l'organisation ; les autres sont supprimés.",
+  "spaces.personal.swept": "Espace supprimé ({{rehomed}} package(s) rendu(s) à l'espace par défaut de l'organisation, {{deleted}} supprimé(s))."
 }

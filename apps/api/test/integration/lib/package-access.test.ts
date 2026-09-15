@@ -15,7 +15,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { Context } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { ApiError } from "@appstrate/core/api-errors";
 import { packages, spacePackages } from "@appstrate/db/schema";
 import {
@@ -33,7 +33,7 @@ import { seedSpacePackage, seedPackage, seedPackageShare, seedSpace } from "../.
 import { packageShares } from "@appstrate/db/schema";
 import { listOrgItems } from "../../../src/services/package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
-import { initSystemIntegrations } from "../../../src/services/integration-client-registry.ts";
+import { placementReadFilter } from "../../../src/services/package-placement.ts";
 
 type AccessibleSpaces = Awaited<ReturnType<typeof packageAccessSpaces>>;
 
@@ -59,8 +59,9 @@ function space(id: string, permissions: string[]) {
 }
 
 /**
- * The caller. `orgRole` + `authMethod` decide `managesOrgCatalog`; `permissions`
- * is the coarse guard the route pipeline would have set for the current space.
+ * The caller. `permissions` is the coarse guard the route pipeline would have
+ * set for the current space; `orgRole` and `authMethod` shape the reach
+ * `packageAccessSpaces` would have resolved, which is what the home rule reads.
  */
 function caller(opts: {
   orgRole: "owner" | "admin" | "member" | "guest";
@@ -91,11 +92,6 @@ async function refusal(promise: Promise<unknown>): Promise<ApiError> {
 
 beforeEach(async () => {
   await truncateAll();
-  // `activeHereSql` reads the system-integration registry — the deployment's
-  // list of OFFERED integrations is half of the "active without a row" default
-  // — and the registry fails fast when boot never populated it. This suite
-  // calls the services directly, so it does boot's job for them.
-  initSystemIntegrations([]);
   ctx = await createTestContext({ orgSlug: "home" });
   homeId = ctx.defaultSpaceId;
   otherId = (await seedSpace({ orgId: ctx.orgId, name: "Other", visibility: "closed" })).id;
@@ -154,41 +150,37 @@ describe("assertPackageMutationAccess", () => {
     expect(refused.status).toBe(404);
   });
 
-  it("reserves a package with no home to owners and admins on a session", async () => {
-    await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, SKILL));
-    // OFFERED where the member reads, so the refusal below is about authority
-    // and not about reach: a NULL-home package they cannot see would be a 404.
-    await seedPackageShare(homeId, SKILL);
+  it("answers the HOME's permission set and nothing else, whatever the org role", async () => {
+    // There is no second authority beside the home any more: an organization's
+    // package always has one (`packages_org_package_has_home`), and an admin
+    // governs it because `packageAccessSpaces` hands them every team space —
+    // which is the `accessible` argument, not a branch in the rule. So the
+    // verdict follows the SPACE LIST, and an admin whose list withholds the
+    // permission is refused exactly like a member.
     await seedSpacePackage(homeId, SKILL);
-    const accessible: AccessibleSpaces = [space(homeId, BUILDER_SKILLS)];
+    // READ but not write: the refusal has to be the AUTHORITY one (403), not
+    // the unreachable-id one (404) a space that reads nothing would produce.
+    const without: AccessibleSpaces = [space(homeId, ["skills:read"])];
+    const with_: AccessibleSpaces = [space(homeId, BUILDER_SKILLS)];
 
-    const refused = await refusal(
-      assertPackageMutationAccess(
-        caller({ orgRole: "member", permissions: BUILDER_SKILLS }),
+    for (const orgRole of ["member", "admin", "owner"] as const) {
+      const refused = await refusal(
+        assertPackageMutationAccess(
+          caller({ orgRole, permissions: BUILDER_SKILLS }),
+          SKILL,
+          "write",
+          without,
+        ),
+      );
+      expect(refused.status, `${orgRole} with no skills:write in the home`).toBe(403);
+
+      await assertPackageMutationAccess(
+        caller({ orgRole, permissions: BUILDER_SKILLS }),
         SKILL,
         "write",
-        accessible,
-      ),
-    );
-    expect(refused.status).toBe(403);
-
-    await assertPackageMutationAccess(
-      caller({ orgRole: "admin", permissions: BUILDER_SKILLS }),
-      SKILL,
-      "write",
-      accessible,
-    );
-
-    // Never an API key: it is pinned to one space and the catalog is org-wide.
-    const keyRefused = await refusal(
-      assertPackageMutationAccess(
-        caller({ orgRole: "owner", permissions: BUILDER_SKILLS, authMethod: "api_key" }),
-        SKILL,
-        "write",
-        accessible,
-      ),
-    );
-    expect(keyRefused.status).toBe(403);
+        with_,
+      );
+    }
   });
 
   it("refuses when the HOME withholds the permission, whatever the current space grants", async () => {
@@ -268,43 +260,76 @@ describe("placementGrantsRead", () => {
 
   it("refuses when neither the home nor any placement is readable", () => {
     expect(placementGrantsRead({ homeSpaceId: "spc_z" }, ["spc_y"], readable)).toBe(false);
+    // A null home is a SYSTEM package or an inline shadow row — the two rows
+    // `packages_org_package_has_home` leaves homeless. Neither is placed by
+    // this rule: the system escape lives in its callers, and a shadow row is
+    // reachable from no package route at all.
     expect(placementGrantsRead({ homeSpaceId: null }, [], readable)).toBe(false);
   });
 });
 
-describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirror", () => {
+describe("placementGrantsRead ⇄ placementReadFilter — the TS rule and its SQL mirror", () => {
   /**
    * The read rule has two implementations by necessity: `placementGrantsRead`
-   * in TypeScript, for the readers that already hold the rows, and the
-   * `installFilter` disjunction inside `listOrgItems` (`package-items/crud.ts`),
-   * because the per-type index page cannot load the organization's catalogue to
-   * filter it in memory. Nothing makes them agree except this test, and a
-   * THIRD disjunct added to one and not the other drifts silently: a package
-   * would be readable on its detail and absent from the page a reader would go
-   * looking for it on, or the reverse.
+   * in TypeScript, for the readers that already hold the rows, and
+   * `placementReadFilter` in SQL (`services/package-placement.ts`), for the
+   * readers that cannot load the organization's catalogue to filter it in
+   * memory. Nothing makes them agree except this test, and a THIRD disjunct
+   * added to one and not the other drifts silently: a package would be
+   * readable on its detail and absent from the space-package listing, the
+   * library or the run gate, or the reverse.
+   *
+   * The SQL side is exercised as the FRAGMENT rather than through an index
+   * page, because no index page states it alone any more: the per-type
+   * listings render what a space can LAUNCH (`activeHereSql`), which conjoins
+   * this filter and then asks the space's switch on top — that composition is
+   * `package-activation-parity.test.ts`'s subject. The filter's own readers —
+   * the three space-package reads, the integration activation resolution and
+   * `activeHereSql` itself — all hand it the same two LEFT JOINs this query
+   * does, so pinning it here pins them.
    *
    * The rule has exactly TWO disjuncts — homed here, shared here. The
-   * INSTALLATION is deliberately a fixture dimension of its own below rather
-   * than a third: it must move neither reader, which is what decision 1 of
-   * `docs/plans/package-placement-unification.md` removed and what a silent
+   * `space_packages` ROW is deliberately a fixture dimension of its own below
+   * rather than a third: it must move neither reader, which is what decision 1
+   * of `docs/plans/package-placement-unification.md` removed and what a silent
    * re-addition would look like.
    */
+
+  /** Does the SQL fragment read the package as PLACED in `spaceId`? */
+  async function placedInSql(spaceId: string, packageId: string): Promise<boolean> {
+    const rows = await db
+      .select({ id: packages.id })
+      .from(packages)
+      .leftJoin(
+        spacePackages,
+        and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
+      )
+      .leftJoin(
+        packageShares,
+        and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
+      )
+      .where(and(eq(packages.id, packageId), placementReadFilter(spaceId)));
+    return rows.length > 0;
+  }
   const placements = {
     "with a row only": { row: true, share: false, home: false },
     "shared only": { row: false, share: true, home: false },
     "shared and with a row": { row: true, share: true, home: false },
     "homed only": { row: false, share: false, home: true },
-    "placed nowhere": { row: false, share: false, home: false },
+    "placed in neither way here": { row: false, share: false, home: false },
   } as const;
 
   for (const [label, placement] of Object.entries(placements)) {
     it(`agrees on a package ${label}`, async () => {
       // `otherId` is the space under test. The fixture homes the package in
-      // `homeId`, so "homed only" moves it here and the other three take it
-      // away from every space this caller looks at.
+      // `homeId`, so "homed only" moves it here and the rest leave it at
+      // `homeId` — a space the caller's readable set below does not contain,
+      // which is what "not homed here" means. It is never NULL: an
+      // organization's package always has a home
+      // (`packages_org_package_has_home`).
       await db
         .update(packages)
-        .set({ homeSpaceId: placement.home ? otherId : null })
+        .set({ homeSpaceId: placement.home ? otherId : homeId })
         .where(eq(packages.id, SKILL));
       if (placement.row) await seedSpacePackage(otherId, SKILL);
       if (placement.share) {
@@ -318,7 +343,7 @@ describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirro
       // The TS reader, from the same facts the SQL sees.
       expect(
         placementGrantsRead(
-          { homeSpaceId: placement.home ? otherId : null },
+          { homeSpaceId: placement.home ? otherId : homeId },
           placement.share ? [otherId] : [],
           new Set([otherId]),
         ),
@@ -326,26 +351,31 @@ describe("placementGrantsRead ⇄ listOrgItems — the TS rule and its SQL mirro
       ).toBe(expected);
 
       // …and the SQL reader, over the rows themselves.
-      const listed = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId);
-      expect(
-        listed.map((item) => item.id).includes(SKILL),
-        `listOrgItems on a package ${label}`,
-      ).toBe(expected);
+      expect(await placedInSql(otherId, SKILL), `placementReadFilter on a package ${label}`).toBe(
+        expected,
+      );
     });
   }
 
-  it("keeps `activeOnly` on the ACTIVATION rule — neither a home nor an offer is an instance", async () => {
-    // The one place the two rules deliberately DIVERGE, so it is pinned rather
-    // than left to be discovered: the integration picker asks for usable
-    // instances, and a package merely homed or offered here is not one. For a
-    // local package that means a row saying `enabled`; a system one is on by
-    // the deployment's default, which `space-package-door-semantics` covers.
+  it("is NOT what the type index page renders — that is the ACTIVE set", async () => {
+    // The two rules deliberately DIVERGE, and the divergence is the whole of
+    // decision 31: a page that says what this space can LAUNCH must not list a
+    // package it merely holds. Homed here AND offered here — the placement
+    // rule's strongest hand — and still absent from the index, because no row
+    // switches it on. A system package is on by the deployment's default
+    // instead, which `space-package-door-semantics` covers.
     await db.update(packages).set({ homeSpaceId: otherId }).where(eq(packages.id, SKILL));
     await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
-    const active = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId, {
-      activeOnly: true,
-    });
-    expect(active.map((item) => item.id)).not.toContain(SKILL);
+    expect(await placedInSql(otherId, SKILL)).toBe(true);
+
+    const index = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId);
+    expect(index.map((item) => item.id)).not.toContain(SKILL);
+
+    // And the switch is what puts it there — the positive control without
+    // which the assertion above would pass on any refusal at all.
+    await seedSpacePackage(otherId, SKILL);
+    const afterActivation = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId);
+    expect(afterActivation.map((item) => item.id)).toContain(SKILL);
   });
 });
 
@@ -412,28 +442,29 @@ describe("assertPackageShareAccess", () => {
     expect(refused.status).toBe(404);
   });
 
-  it("refuses an API key even when its space list carries `share`", async () => {
-    // Belt and braces: `share` is absent from the API-key allowlist so a key
-    // can never carry it, and a NULL-home package additionally answers to
-    // `managesOrgCatalog`, which refuses key auth outright.
-    await db.update(packages).set({ homeSpaceId: null }).where(eq(packages.id, SKILL));
-    // Offered where the key looks, so the refusal is the authority one (403)
-    // and not the unreachable-id one (404).
-    await seedPackageShare(homeId, SKILL);
+  it("holds an API key to the same home rule as anybody else", async () => {
+    // `share` is absent from the API-key allowlist, so `validateScopes` refuses
+    // it at mint time and a key never reaches this with the permission. The
+    // fixture hands it one anyway — a key whose space list carries `share` in
+    // the home — to pin that the rule itself has no key-specific branch: it
+    // answers the home's permission set, and a key that somehow held the
+    // permission would be answered like any other principal.
     await seedSpacePackage(homeId, SKILL);
-    const accessible: AccessibleSpaces = [space(homeId, [...BUILDER_SKILLS, "skills:share"])];
+    const key = () =>
+      caller({
+        orgRole: "owner",
+        permissions: [...BUILDER_SKILLS, "skills:share"],
+        authMethod: "api_key",
+      });
+
     const refused = await refusal(
-      assertPackageShareAccess(
-        caller({
-          orgRole: "owner",
-          permissions: [...BUILDER_SKILLS, "skills:share"],
-          authMethod: "api_key",
-        }),
-        SKILL,
-        accessible,
-      ),
+      assertPackageShareAccess(key(), SKILL, [space(homeId, BUILDER_SKILLS)]),
     );
     expect(refused.status).toBe(403);
+
+    await assertPackageShareAccess(key(), SKILL, [
+      space(homeId, [...BUILDER_SKILLS, "skills:share"]),
+    ]);
   });
 });
 

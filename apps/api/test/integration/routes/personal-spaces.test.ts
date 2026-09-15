@@ -993,7 +993,7 @@ describe("personal spaces — offboarding", () => {
     expect(await personalSpaceRowsOf(owner.orgId, member.user.id)).toHaveLength(1);
   });
 
-  it("sweeps a space past the window: home cleared, private package deleted, space gone", async () => {
+  it("sweeps a space past the window: home re-set, private package deleted, space gone", async () => {
     const otherSpace = await seedSpace({ orgId: owner.orgId, name: "Team" });
     for (const id of [HOMED, SHARED]) {
       await seedPackage({
@@ -1017,9 +1017,11 @@ describe("personal spaces — offboarding", () => {
     const result = await sweepOrphanedPersonalSpaces();
     expect(result).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
 
-    // Installed elsewhere → the organization catalogue, not deleted: somebody
-    // is running it, so it was never private.
-    expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBeNull();
+    // Installed elsewhere → re-homed to the organization's default space, not
+    // deleted: somebody is running it, so it was never private.
+    expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
+      owner.defaultSpaceId,
+    );
     // Lived only there → deleted with the person who wrote it.
     expect(await db.select().from(packages).where(eq(packages.id, HOMED))).toHaveLength(0);
     expect(await db.select().from(spaces).where(eq(spaces.id, personalId))).toHaveLength(0);
@@ -1053,10 +1055,15 @@ describe("personal spaces — offboarding", () => {
     await ageOrphan(personalId);
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
 
-    // Re-homed to the organization catalogue…
-    expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBeNull();
+    // Re-homed to the organization's DEFAULT space: the home of a package that
+    // belongs to no team, and the authority for an author who has left.
+    expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
+      owner.defaultSpaceId,
+    );
     // …and placed in the space that runs it, by nobody in particular: the home
-    // was the placement until this sweep, so no person offered it.
+    // was the placement until this sweep, so no person offered it. The default
+    // space gets NO offer — it HOMES the package now, and a package is not
+    // offered to the space it lives in.
     const offers = await db
       .select({ spaceId: packageShares.spaceId, sharedBy: packageShares.sharedBy })
       .from(packageShares)
@@ -1074,12 +1081,47 @@ describe("personal spaces — offboarding", () => {
     expect(await agentExecutionBlock({ orgId: owner.orgId, spaceId: team.id }, SHARED)).toBeNull();
   });
 
+  it("drops the DEFAULT space's own offer when it re-homes there", async () => {
+    // The mirror image of the offer it writes. Before the sweep the default
+    // space was just another space running the package, so it held an offer of
+    // its own; afterwards it HOMES the package, and a package is not offered to
+    // the space it lives in (`share_target_is_home` says the same thing on the
+    // HTTP door). Left behind, that row would show the organization's own
+    // package as "shared with us" on the very page that owns it.
+    const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
+    await seedPackage({
+      id: SHARED,
+      orgId: owner.orgId,
+      type: "agent",
+      homeSpaceId: personalId,
+      draftManifest: { name: SHARED, version: "0.1.0", type: "agent" },
+      draftContent: "prompt",
+    });
+    for (const spaceId of [team.id, owner.defaultSpaceId]) {
+      await seedPackageShare(spaceId, SHARED);
+      await seedSpacePackage(spaceId, SHARED, { enabled: true });
+    }
+
+    await removeMember(owner.orgId, member.user.id);
+    await ageOrphan(personalId);
+    expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
+
+    expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
+      owner.defaultSpaceId,
+    );
+    const offers = await db
+      .select({ spaceId: packageShares.spaceId })
+      .from(packageShares)
+      .where(eq(packageShares.packageId, SHARED));
+    expect(offers).toEqual([{ spaceId: team.id }]);
+  });
+
   it("deletes a package that only an OFFER reached — nothing runs on an offer", async () => {
     // The other branch, stated so it is a decision rather than an oversight:
     // "taken up elsewhere" means a `space_packages` row elsewhere. A space
     // that was merely SHOWN the package never ran it, and keeping a departed
-    // author's draft alive on that basis would hand the organization catalogue
-    // a package nobody asked for. The offer goes with it, by cascade.
+    // author's draft alive on that basis would hand the organization's default
+    // space a package nobody asked for. The offer goes with it, by cascade.
     const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
     await seedPackage({
       id: HOMED,

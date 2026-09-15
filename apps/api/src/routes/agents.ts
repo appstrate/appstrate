@@ -19,7 +19,7 @@ import { validateAgainstSchema } from "../services/schema.ts";
 import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import {
-  listReadablePackages,
+  listActivePackages,
   updateSpacePackage,
   getSpacePackageSettings,
 } from "../services/space-packages.ts";
@@ -196,11 +196,14 @@ export function createAgentsRouter() {
     const scope = getSpaceScope(c);
     const summaryOnly = agentReadIsSummary(c);
 
-    // Single query: the placement rule (homed here ∨ offered here ∨ system) via
-    // LEFT JOIN — what this space READS. Running is a second question, answered
-    // per row by `active`.
+    // Single query: the activation rule (`activeHereSql` — placed here AND
+    // switched on, or a system agent with no row) via LEFT JOIN. This page
+    // answers "what can I launch here?", so every row on it is launchable;
+    // an agent merely placed here, offered or switched off, lives on the
+    // space library instead (`GET /api/spaces/{spaceId}/library`), which
+    // carries its origin, its state and the switch.
     const [rows, runningCounts] = await Promise.all([
-      listReadablePackages(scope, "agent"),
+      listActivePackages(scope, "agent"),
       getRunningRunCounts(scope, runVisibilityFilter(c)),
     ]);
 
@@ -229,11 +232,6 @@ export function createAgentsRouter() {
           integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },
         running_runs: runningCounts[row.id] ?? 0,
-        // Readable here is not runnable here: an agent placed in this space but
-        // switched off is listed and refused a run. Saying so on the row is
-        // what lets a launcher grey its own control out instead of discovering
-        // the refusal on click.
-        active: row.active,
         source: row.source ?? "local",
         // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
         // list output is directly usable as `{scope}` path-param input — one
@@ -736,7 +734,7 @@ export function createAgentsRouter() {
       const orgRole = callerOrgRole(c, orgId);
       const accessible = await packageAccessSpaces(c, orgId, orgRole);
       const root = await assertCatalogPackageAccess(c, packageId, accessible);
-      await assertPackageCopyAllowed(c, root, { orgId, orgRole, accessible });
+      await assertPackageCopyAllowed(c, root, { orgId, accessible });
       // An EXPORTED draft is a draft run with the bytes handed over as well:
       // the archive carries the unpublished manifest and prompt, and `--local`
       // executes them on the caller's machine. Refusing `?version=draft` on the

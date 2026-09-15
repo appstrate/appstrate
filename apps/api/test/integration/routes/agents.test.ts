@@ -21,6 +21,7 @@ import {
   seedRun,
   seedSpace,
   seedSpaceMember,
+  seedUnreachableSpace,
 } from "../../helpers/seed.ts";
 import {
   getSystemModels,
@@ -179,9 +180,15 @@ describe("Agents API", () => {
     });
 
     it("returns 404 from default space when agent is not installed (no bypass)", async () => {
-      await seedAgent({ id: "@myorg/default-hidden", orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: "@myorg/default-hidden",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        homeSpaceId: await seedUnreachableSpace(ctx.orgId),
+      });
 
-      // Agent is in the org catalog but NOT installed in the default space
+      // The organization owns the agent, but it is placed nowhere this space
+      // reaches
       const res = await app.request("/api/packages/agents/@myorg/default-hidden", {
         headers: authHeaders(ctx),
       });
@@ -783,13 +790,14 @@ describe("Agents API", () => {
     });
 
     it("keeps the OPAQUE code when the org has the package but this space holds no placement", async () => {
-      // Seeded at the org level with no home and no offer here: the space is
-      // told nothing. Naming "exists but is not placed here" would hand any
-      // member an existence oracle over every id in the organization.
+      // Homed out of reach and offered nowhere here: the space is told
+      // nothing. Naming "exists but is not placed here" would hand any member
+      // an existence oracle over every id in the organization.
       await seedAgent({
         id: "@myorg/inactive-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
+        homeSpaceId: await seedUnreachableSpace(ctx.orgId),
       });
 
       const res = await app.request("/api/agents/@myorg/inactive-agent/bundle", {

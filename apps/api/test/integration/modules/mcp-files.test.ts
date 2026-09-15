@@ -549,7 +549,15 @@ describe("mcp file-backed package workflow", () => {
 
   it("hides private catalog conflicts and rejects importing a package confined to another space", async () => {
     const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
-    await seedPackage({ id: "@mcppkgdoc/file-server", orgId: ctx.orgId, type: "mcp-server" });
+    // HOMED in the private space, which is what confines it: the home is a
+    // placement, so a package homed where the caller cannot look is a package
+    // they cannot reach.
+    await seedPackage({
+      id: "@mcppkgdoc/file-server",
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      homeSpaceId: hidden.id,
+    });
     await seedSpacePackage(hidden.id, "@mcppkgdoc/file-server");
     const runId = await seedRun(scope);
     const docId = await publishDoc(
@@ -586,14 +594,20 @@ describe("mcp file-backed package workflow", () => {
     // answer for every caller and `root_active` was permanently `false`
     // here. One act, two behaviours — decided by which door asked.
     //
-    // The fixture puts the root in the ORGANIZATION CATALOGUE (`home_space_id
-    // IS NULL`) and nowhere else, which is the reachable half of that rule: a
-    // session owner governs the catalogue, so they hold both the `write` that
-    // gets them past `authorizeBundlePackages` and the `share` that decides
-    // this. An API key never governs the catalogue, which is why this case is
-    // driven by a session.
+    // The fixture homes the root in ANOTHER team space of the organization and
+    // places it nowhere else, which is the reachable half of that rule: a
+    // session owner reaches every team space, so they hold both the `write`
+    // that gets them past `authorizeBundlePackages` and the `share` that
+    // decides this, in the home. An API key is pinned to one space and never
+    // carries `share` at all, which is why this case is driven by a session.
     const packageId = "@mcppkgdoc/file-server";
-    await seedPackage({ id: packageId, orgId: ctx.orgId, type: "mcp-server", homeSpaceId: null });
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedPackage({
+      id: packageId,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      homeSpaceId: elsewhere.id,
+    });
 
     const runId = await seedRun(scope);
     const docId = await publishDoc(

@@ -20,10 +20,10 @@ export async function postInstallPackage(params: {
   zipBuffer: Buffer;
   /**
    * Home space for a row this call has to CREATE (a skill the bundle brought
-   * along). An existing package keeps the home it already has — an install
-   * never moves a package.
+   * along) — the importing space, which owns what it imports. An existing
+   * package keeps the home it already has: an install never moves a package.
    */
-  homeSpaceId: string | null;
+  homeSpaceId: string;
   /** Preserve the caller's creation intent: a concurrent insertion must conflict. */
   create: boolean;
   draftManifest?: Record<string, unknown>;

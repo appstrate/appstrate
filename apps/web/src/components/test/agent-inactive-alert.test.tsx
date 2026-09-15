@@ -7,9 +7,11 @@
  * is not running it, so every read route answers 200 and only the execution
  * doors refuse — and the server reports the blockage on the readiness read
  * (`agent_not_active`, 200) rather than 404-ing the panel that would have
- * displayed it. This banner is that display. Two halves are worth pinning: it
- * names the blockage to everyone, and it offers the switch only to a caller the
- * activation route would actually accept (`maySetPackageActive`: the type's
+ * displayed it. This banner is that display: ONE line of state and a switch,
+ * because the reader arrived from the space library or from a kept link, both
+ * of which already say the package is off here. Two halves are worth pinning:
+ * it states the blockage to everyone, and it offers the switch only to a caller
+ * the activation route would actually accept (`maySetPackageActive`: the type's
  * grant in THIS space, or owning it — RBAC spec §3.6, where a guest holds
  * `operator` in their own space and `operator` carries no `agents:configure`).
  */
@@ -80,7 +82,7 @@ function renderAlert(space: ReturnType<typeof spaceRow>): string {
 
 /** The activation control, by the label it carries. */
 function hasActivateButton(html: string): boolean {
-  const label = i18n.t("packages.activate", { ns: "settings" });
+  const label = i18n.t("detail.activate", { ns: "agents" });
   return html
     .split("<button")
     .slice(1)
@@ -88,10 +90,9 @@ function hasActivateButton(html: string): boolean {
 }
 
 describe("the switched-off banner", () => {
-  it("names the blockage and offers the switch to a caller who may flip it", () => {
+  it("states the blockage and offers the switch to a caller who may flip it", () => {
     const html = renderAlert(spaceRow({ permissions: ["agents:configure"] }));
-    expect(html).toContain(i18n.t("detail.notActiveHere", { ns: "agents" }));
-    expect(html).toContain(i18n.t("detail.notActiveHereHint", { ns: "agents" }));
+    expect(html).toContain(i18n.t("detail.deactivatedHere", { ns: "agents" }));
     expect(hasActivateButton(html)).toBe(true);
   });
 
@@ -108,7 +109,7 @@ describe("the switched-off banner", () => {
     // else: the sentence stays, the cure goes — naming a remedy the route
     // would refuse is worse than naming none.
     const html = renderAlert(spaceRow({ permissions: ["agents:read"] }));
-    expect(html).toContain(i18n.t("detail.notActiveHere", { ns: "agents" }));
+    expect(html).toContain(i18n.t("detail.deactivatedHere", { ns: "agents" }));
     expect(hasActivateButton(html)).toBe(false);
   });
 });

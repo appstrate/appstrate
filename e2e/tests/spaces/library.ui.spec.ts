@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The organization catalog as a MAP of placements, driven from the browser
+ * The organization library as a MAP of placements, driven from the browser
  * (RBAC spec §6.8).
  *
  * `/library` renders the three axes the model has — home, share, activation —
@@ -193,11 +193,18 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
 });
 
 /**
- * The page that repairs a switched-off agent is the page that must open.
+ * The page that repairs a switched-off agent is the page that must open — and
+ * the two lists that must disagree about it.
  *
- * Deactivating is reversible and ordinary, so its state has to stay legible:
- * every READ and CONFIGURE route answers 200 for an agent placed here and
- * switched off (only run, rerun, schedule creation and bundle refuse it with
+ * Deactivating is reversible and ordinary, so it has to be legible in exactly
+ * one place. The INDEX answers "what can I run here", so a switched-off agent
+ * leaves it entirely: no greyed card, no badge, nothing to misread. The space
+ * LIBRARY answers "what is placed here, and in what state", so the same agent
+ * is still a row there, marked off, with its switch (RBAC spec §6.8/§6.9).
+ *
+ * The detail page has to stay reachable through all of it: every READ and
+ * CONFIGURE route answers 200 for an agent placed here and switched off (only
+ * run, rerun, schedule creation and bundle refuse it with
  * `404 agent_not_active_in_space`), and the readiness read reports the blockage
  * as an error inside a 200 rather than 404-ing the panel meant to show it. That
  * matters because the SPA's client THROWS on any non-2xx: one 404 on
@@ -205,7 +212,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
  * model editor and the connections panel — on exactly the screen that carries
  * the switch back on.
  */
-test("a switched-off agent is still read, configured and switched back on from its page", async ({
+test("a switched-off agent leaves the index, stays in the library, and is switched back on from its page", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -233,10 +240,33 @@ test("a switched-off agent is still read, configured and switched back on from i
   );
   expect(off.status(), await off.text()).toBe(204);
 
+  // ── Still in the library, off the index ──
+  // Two questions, two pages. The library is the placement map, so the row is
+  // there, marked off, with its switch; the index is the ACTIVE set, so the
+  // card is gone — not greyed, gone.
+  await page.goto("/space/packages");
+  const libraryRow = page.getByRole("row").filter({ hasText: `Test Agent ${name}` });
+  await expect(libraryRow).toBeVisible();
+  await expect(libraryRow.getByText(/^(Désactivé|Inactive)$/)).toBeVisible();
+  await expect(libraryRow.getByRole("checkbox")).not.toBeChecked();
+
+  // Waited on the LIST response, not on a heading: an absence asserted while
+  // the page is still loading passes for the wrong reason.
+  const indexRead = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" && new URL(response.url()).pathname === "/api/agents",
+  );
+  await page.goto("/agents");
+  expect((await indexRead).status()).toBe(200);
+  await expect(page.getByText(`Test Agent ${name}`, { exact: true })).toHaveCount(0);
+
   // ── The detail page opens, and its two reads answer 200 ──
   // One page, one source: the agent's own detail carries `active`, so the page
   // must not also project the space library to learn the same fact. Recorded
-  // across the whole load, and asserted before anything is clicked.
+  // across the whole load, and asserted before anything is clicked — which is
+  // why the library page is visited ABOVE the index and not here: a full
+  // navigation sits between it and this listener, so no refetch it left in
+  // flight can be counted against the page under test.
   const libraryReads: string[] = [];
   page.on("request", (request) => {
     if (/\/api\/spaces\/[^/]+\/library/.test(request.url())) libraryReads.push(request.url());
@@ -255,8 +285,9 @@ test("a switched-off agent is still read, configured and switched back on from i
     200,
   );
 
-  // It says why the launcher is dead, and offers the cure next to the cause.
-  const banner = page.getByText(/Agent inactif dans cet espace|Agent not active in this space/);
+  // One line of state, and the cure beside it — nothing to justify, since the
+  // reader got here from the library or from a link they kept.
+  const banner = page.getByText(/Désactivé dans cet espace|Switched off in this space/);
   await expect(banner).toBeVisible();
   expect(libraryReads, "the agent page answers activation from its own detail").toEqual([]);
 
@@ -279,10 +310,12 @@ test("a switched-off agent is still read, configured and switched back on from i
       response.request().method() === "POST" &&
       response.url().endsWith(`/spaces/${browserCtx.org.defaultSpaceId}/packages`),
   );
-  await page
-    .getByRole("button", { name: /Activer dans cet espace|Activate in this space/ })
-    .click();
+  await page.getByRole("button", { name: /^(Activer|Activate)$/ }).click();
   // 201: this call is what turned it on.
   expect((await activated).status()).toBe(201);
   await expect(banner).toHaveCount(0);
+
+  // And the index takes it back, on the same rule that dropped it.
+  await page.goto("/agents");
+  await expect(page.getByText(`Test Agent ${name}`, { exact: true }).first()).toBeVisible();
 });

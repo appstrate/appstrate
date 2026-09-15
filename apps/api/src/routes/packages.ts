@@ -17,14 +17,12 @@ import {
   activatePackage,
   activatePackageWithin,
   assertMcpServerActivatable,
-  type PackageActivation,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
 import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
 import { createPackageShareNotification } from "../services/state/notifications.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import { callerOrgRole } from "../lib/view-as.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { unzipPackageArchive } from "../services/package-archive.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -86,7 +84,6 @@ import {
   holdsPackageShareAuthority,
   homeWireForCaller,
   isPackageReadableInSpace,
-  managesOrgCatalog,
   packageAccessSpaces,
   packagePermission,
   requireAgentRead,
@@ -348,9 +345,12 @@ export const createVersionBodySchema = z.object({ version: z.string().min(1).opt
 /**
  * Body of `PATCH /api/packages/{scope}/{name}` — the package's home space,
  * i.e. the space whose `<type>:write` governs it (`packages.home_space_id`).
- * `null` hands it to the organization catalog, which only owners and admins
- * may then write. `.strict()` so this route can never be mistaken for the
- * draft editor: the draft is `PUT`, with its optimistic lock.
+ * REQUIRED and non-nullable: an organization's package is always homed in one
+ * of its spaces (`packages_org_package_has_home`), so there is no "move it
+ * nowhere" to express — a package that belongs to no team is homed in the
+ * organization's DEFAULT space like any other. `.strict()` so this route can
+ * never be mistaken for the draft editor: the draft is `PUT`, with its
+ * optimistic lock.
  *
  * The id is SHAPE-CHECKED, like every other space id arriving in a body
  * (`lib/space-role-assignment.ts`): a retired `app_` spelling resolves to no
@@ -359,12 +359,9 @@ export const createVersionBodySchema = z.object({ version: z.string().min(1).opt
  */
 export const packageHomeSpaceSchema = z
   .object({
-    home_space_id: z
-      .string()
-      .refine(isSpaceId, {
-        message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
-      })
-      .nullable(),
+    home_space_id: z.string().refine(isSpaceId, {
+      message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
+    }),
   })
   .strict();
 
@@ -605,15 +602,19 @@ function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
-    // `?active=true` narrows to packages active in this space (agent-editor
-    // integration picker), through the ONE activation rule
-    // (`services/package-activation.ts`, applied in SQL by `listOrgItems`):
-    // the placement row when there is one, the deployment's default when there
-    // is not. That is the same rule the integration resolver states, the
-    // env-backed system integrations active without a row included, so no type
-    // needs a correction pass behind this listing.
-    const wantActive = c.req.query("active") === "true";
-    const items = await listOrgItems(orgId, rcfg.cfg, spaceId, { activeOnly: wantActive });
+    // The ACTIVE set of this space, and only it — the index page answers "what
+    // can I launch here?". The ONE activation rule decides
+    // (`services/package-activation.ts`, applied in SQL by `listOrgItems`): the
+    // placement row when there is one and the package is placed here, the
+    // deployment's default when there is not. That is the same rule the
+    // integration resolver, the run gate and the caller-context hints state,
+    // the env-backed system integrations active without a row included, so no
+    // type needs a correction pass behind this listing.
+    //
+    // What is merely PLACED here — a pending offer, a package switched off —
+    // belongs to the space library (`GET /api/spaces/{spaceId}/library`), which
+    // carries the per-placement state and the switch that repairs it.
+    const items = await listOrgItems(orgId, rcfg.cfg, spaceId);
     const enriched = await enrichWithCreatorNames(items);
     // `home_space_id` / `home_writable` are computed HERE, not in
     // `listOrgItems`: both depend on the caller's reach (RBAC spec §6.9), which
@@ -624,7 +625,6 @@ function makeListHandler(rcfg: PackageRouteConfig) {
         enriched.map(({ homeSpaceId, ...item }) => ({
           ...item,
           ...homeWireForCaller(
-            c,
             { type: rcfg.cfg.type, source: item.source, homeSpaceId },
             accessible,
           ),
@@ -946,7 +946,7 @@ async function buildPackageDetailDto(
     ...rest,
     ...published,
     definition,
-    ...homeWireForCaller(c, { type: rcfg.cfg.type, source: item.source, homeSpaceId }, accessible),
+    ...homeWireForCaller({ type: rcfg.cfg.type, source: item.source, homeSpaceId }, accessible),
     version_count: versionCount,
     // Authoring metadata, never projected: it compares the DRAFT against the
     // latest version, and that answer does not change with the definition the
@@ -1929,26 +1929,15 @@ export function createPackagesRouter() {
     const body = await readJsonBody(c, packageHomeSpaceSchema);
     const target = body.home_space_id;
 
-    if (target === null) {
-      // Handing a package to the organization catalog widens who may write it
-      // to every owner and admin — their own decision to make, nobody else's.
-      if (!managesOrgCatalog(c)) {
-        reportPermissionDenial(c, packagePermission(pkg.type, "write"));
-        throw forbidden(
-          "Moving a package to the organization catalog requires owner or admin authority.",
-        );
-      }
-    } else {
-      const destination = accessible.find((space) => space.id === target);
-      // A space the caller cannot reach must not be confirmed to exist — and the
-      // 404 stays silent, since naming the permission would confirm it.
-      if (!destination) throw notFound(`Space '${target}' not found`);
-      if (!destination.permissions.has(packagePermission(pkg.type, "write"))) {
-        reportPermissionDenial(c, packagePermission(pkg.type, "write"));
-        throw forbidden(
-          `Moving '${packageId}' into that space requires '${packagePermission(pkg.type, "write")}' there.`,
-        );
-      }
+    const destination = accessible.find((space) => space.id === target);
+    // A space the caller cannot reach must not be confirmed to exist — and the
+    // 404 stays silent, since naming the permission would confirm it.
+    if (!destination) throw notFound(`Space '${target}' not found`);
+    if (!destination.permissions.has(packagePermission(pkg.type, "write"))) {
+      reportPermissionDenial(c, packagePermission(pkg.type, "write"));
+      throw forbidden(
+        `Moving '${packageId}' into that space requires '${packagePermission(pkg.type, "write")}' there.`,
+      );
     }
 
     if (target !== pkg.homeSpaceId) {
@@ -1967,9 +1956,8 @@ export function createPackagesRouter() {
       // activation by the door; the move must not be the way in. Run outside
       // the transaction, exactly as `activatePackage` runs it, because it reads
       // object storage — a 422 here fails the whole move, which is the point.
-      if (target !== null) await assertMcpServerActivatable({ orgId, spaceId: target }, packageId);
+      await assertMcpServerActivatable({ orgId, spaceId: target }, packageId);
       const activation = await db.transaction(async (tx) => {
-        let activated: PackageActivation | null = null;
         await tx
           .update(packages)
           .set({ homeSpaceId: target })
@@ -1979,21 +1967,17 @@ export function createPackagesRouter() {
           orgId,
           newHomeSpaceId: target,
         });
-        if (target !== null) {
-          // The new home ACTIVATES it, exactly as creation does: a package
-          // lives where it is written, and arriving in a space that cannot run
-          // it would make the move a two-step act with no second button on the
-          // page that performed it. Through the activation door itself, in THIS
-          // transaction, so `space_packages` keeps a single writer and the act
-          // is audited like any other activation. `keepExistingDecision`: a
-          // space that deliberately switched the package off keeps that
-          // decision, because the move is about authority, not about what this
-          // space runs.
-          activated = await activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
-            keepExistingDecision: true,
-          });
-        }
-        return activated;
+        // The new home ACTIVATES it, exactly as creation does: a package lives
+        // where it is written, and arriving in a space that cannot run it
+        // would make the move a two-step act with no second button on the page
+        // that performed it. Through the activation door itself, in THIS
+        // transaction, so `space_packages` keeps a single writer and the act is
+        // audited like any other activation. `keepExistingDecision`: a space
+        // that deliberately switched the package off keeps that decision,
+        // because the move is about authority, not about what this space runs.
+        return activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
+          keepExistingDecision: true,
+        });
       });
       await recordAuditFromContext(c, {
         action: "package.home_space_changed",
@@ -2007,7 +1991,7 @@ export function createPackagesRouter() {
       // the move, not a click on a switch that nobody pressed. A destination
       // that kept an `enabled = false` row changed nothing and is audited as
       // nothing.
-      if (activation && activation.placement.enabled && !activation.wasActive) {
+      if (activation.placement.enabled && !activation.wasActive) {
         await recordAuditFromContext(c, {
           action: "package.activated",
           resourceType: "package",
@@ -2841,15 +2825,10 @@ export function createPackagesRouter() {
     // Skills and system packages are exempt inside the helper: the CLI's
     // skills sync is this route's other consumer and its copies are local by
     // design, and a shipped system package has no owning space to protect.
-    const orgRole = callerOrgRole(c, orgId);
     await assertPackageCopyAllowed(
       c,
       { ...pkg, type: pkg.type as PackageType },
-      {
-        orgId,
-        orgRole,
-        accessible: await packageAccessSpaces(c, orgId, orgRole),
-      },
+      { orgId, accessible: await packageAccessSpaces(c, orgId) },
     );
 
     const ver = await getVersionForDownload(packageId, versionSpec);

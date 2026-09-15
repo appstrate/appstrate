@@ -293,7 +293,6 @@ export async function buildAgentDetailDto(
     // still needs to know it may not edit, and an absent `home_writable` would
     // read as "not answered yet" rather than "no".
     ...homeWireForCaller(
-      c,
       { type: "agent", source: agent.source, homeSpaceId: rawItem?.homeSpaceId ?? null },
       accessible,
     ),

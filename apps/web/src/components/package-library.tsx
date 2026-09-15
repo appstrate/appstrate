@@ -9,7 +9,7 @@
  * rather than created and destroyed. So there are three axes and no fourth, and
  * both views below render the same `placements` array:
  *
- *   - the ORGANIZATION catalog (`GET /api/library`, owners and admins) is the
+ *   - the ORGANIZATION library (`GET /api/library`, owners and admins) is the
  *     map: per package, its home, who it is shared with, and where it is on.
  *     Every cell is actionable, because the administrator who reads it is the
  *     one who decides. Switching on a space the package is not placed in shares
@@ -257,7 +257,7 @@ function ActivationCheckbox({
   );
 }
 
-// ─── Organization catalog: the placement map ────────────────────────────────
+// ─── Organization library: the placement map ────────────────────────────────
 
 export function PackageLibrary({ data, title }: { data: LibraryData; title: string }) {
   return (
@@ -528,7 +528,7 @@ function SpacePlacements({
                           : // No placement at all, and not a system package: the
                             // route lists it here because this caller could put
                             // it here in one click (they administer the
-                            // organization catalogue, or hold `share` in its
+                            // organization's packages, or hold `share` in its
                             // home). It is a candidate, not an inhabitant.
                             t("library.origin.notPlaced")}
                   </span>

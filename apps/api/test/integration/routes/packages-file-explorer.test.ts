@@ -581,7 +581,24 @@ describe("package file explorer", () => {
 
     it("404s a package that is not placed in this space", async () => {
       const id = "@fexp/uninstalled";
-      await seedPackage({ id, orgId: ctx.orgId, type: "agent", draftContent: "hi" });
+      // Homed in a stranger's PERSONAL space — the only home an organization
+      // owner does not reach (§3.6), and therefore the only way to express
+      // "not placed here" now that every organization package has a home
+      // (`packages_org_package_has_home`).
+      const stranger = await createTestUser();
+      const elsewhere = await seedSpace({
+        orgId: ctx.orgId,
+        name: "Stranger",
+        ownerUserId: stranger.id,
+        visibility: "private",
+      });
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "agent",
+        draftContent: "hi",
+        homeSpaceId: elsewhere.id,
+      });
 
       const { res } = await listFiles(ctx, id);
       expect(res.status).toBe(404);

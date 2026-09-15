@@ -4,7 +4,7 @@
  * ONE definition of "active here", stated twice — and the two must agree.
  *
  * `services/package-activation.ts` carries the rule in SQL (`activeHereSql`,
- * consumed by the run gate, the hint listings, the `?active=true` filter and
+ * consumed by the run gate, the hint listings, the per-type index pages and
  * the agents index) and in memory (`isActiveHere`, consumed by the two
  * activation doors, the integration resolver and the library's `state`). A
  * drift between them is not a cosmetic bug: it is a package the library shows

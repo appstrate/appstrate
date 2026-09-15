@@ -10,7 +10,7 @@
 
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
+import { packages, packageShares, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
@@ -18,6 +18,8 @@ import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
+import type { SpaceScope } from "../lib/scope.ts";
+import { placementReadFilter } from "./package-placement.ts";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
@@ -73,10 +75,11 @@ export type IntegrationManifestCache = Map<string, Promise<IntegrationManifestLo
  * graph — see {@link IntegrationManifestCache}. Omitting it preserves the
  * uncached behaviour exactly.
  *
- * Org-scoped reads (marketplace listing/detail) keep their own SELECT in
- * `getIntegration` / `listIntegrations` because they pull additional columns
- * (`orgId`, `source`) under an org+system filter — a single shared helper
- * would force a redundant second roundtrip or leak its SELECT shape.
+ * The SPACE-scoped reads (the Integrations page's listing and detail) keep
+ * their own SELECT in `getIntegration` / `listIntegrations` because they pull
+ * additional columns (`orgId`, `source`) under the org+system filter AND the
+ * placement conjunct — a single shared helper would force a redundant second
+ * roundtrip or leak its SELECT shape.
  */
 export async function fetchIntegrationManifest(
   packageId: string,
@@ -562,13 +565,26 @@ function asIntegrationManifest(raw: unknown): IntegrationManifest | null {
 }
 
 /**
- * Fetch a single integration by id, restricted to packages visible to
- * the org (own packages + system packages). Returns `null` when absent
- * or when the row has been corrupted enough to fail manifest parsing —
- * the caller should treat both as `404` for UX consistency.
+ * Fetch a single integration by id, PLACED in the caller's space — homed
+ * there, offered there, or shipped with the deployment. Returns `null` when
+ * absent, out of placement, or when the row has been corrupted enough to fail
+ * manifest parsing — the caller should treat all three as `404` for UX
+ * consistency.
+ *
+ * The placement conjunct is {@link placementReadFilter}, the same rule
+ * `GET /api/packages/integrations/{id}` and the space library read, stated
+ * once in `services/package-placement.ts` rather than a third time here. It is
+ * what keeps an integration homed in somebody else's PERSONAL space out of
+ * this answer: RBAC spec §3.6 says owners and admins neither read nor write a
+ * personal space, and an org-wide read of the manifest — its name, its
+ * description, its `authorized_uris` — is a read.
+ *
+ * Space-scoped, so it is NOT the function that resolves a DECLARED dependency:
+ * an agent's `dependencies` resolve against the organization's catalogue
+ * org-wide (§6.9), which is {@link getOrgWideIntegrationManifest}.
  */
 export async function getIntegration(
-  orgId: string,
+  scope: SpaceScope,
   packageId: string,
 ): Promise<IntegrationSummary | null> {
   const [row] = await db
@@ -579,10 +595,17 @@ export async function getIntegration(
       draftManifest: packages.draftManifest,
     })
     .from(packages)
+    // `placementReadFilter` reads the share half off this LEFT JOIN; without
+    // it every offered integration would silently drop out of the answer.
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, scope.spaceId)),
+    )
     .where(
       and(
-        orgOrSystemFilter(orgId),
+        orgOrSystemFilter(scope.orgId),
         notEphemeralFilter(),
+        placementReadFilter(scope.spaceId),
         eq(packages.id, packageId),
         eq(packages.type, "integration"),
       ),
@@ -603,6 +626,42 @@ export async function getIntegration(
     orgId: row.orgId,
     source: row.source as "local" | "system",
   };
+}
+
+/**
+ * Read the DRAFT manifest of an integration the ORGANIZATION can resolve —
+ * org-wide, with no placement conjunct, on purpose.
+ *
+ * This is the catalogue side of RBAC spec §6.9: a manifest's declared
+ * dependencies resolve against the organization's catalogue, not against what
+ * the current space happens to be placed in, and the run resolves them exactly
+ * that way (`resolveRunIntegrationVersions` → `resolvePublishedManifest`,
+ * `orgId` and nothing else). A validator narrower than the runtime it gates
+ * would wave through selections the spawn then refuses, so this deliberately
+ * asks the wider question that {@link getIntegration} refuses to ask.
+ *
+ * Returns `null` when the id names no integration of this organization, or
+ * when its manifest does not parse — both mean "nothing to judge against" to
+ * the one caller (`services/integration-scope-validation.ts`).
+ */
+export async function getOrgWideIntegrationManifest(
+  orgId: string,
+  packageId: string,
+): Promise<IntegrationManifest | null> {
+  const [row] = await db
+    .select({ draftManifest: packages.draftManifest })
+    .from(packages)
+    .where(
+      and(
+        orgOrSystemFilter(orgId),
+        notEphemeralFilter(),
+        eq(packages.id, packageId),
+        eq(packages.type, "integration"),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  return asIntegrationManifest(row.draftManifest);
 }
 
 /**
@@ -710,11 +769,20 @@ export async function fetchIntegrationPromptDocs(
 }
 
 /**
- * List every integration accessible to the org. Manifests that fail
- * validation are skipped (with a structured warning) rather than
- * aborting the whole query — one broken row shouldn't hide the rest.
+ * List every integration PLACED in the caller's space — homed there, offered
+ * there, or shipped with the deployment. Manifests that fail validation are
+ * skipped (with a structured warning) rather than aborting the whole query —
+ * one broken row shouldn't hide the rest.
+ *
+ * Placement, not activation: an offer the space has not taken up and a package
+ * switched off are both still placed, and this listing decorates each row with
+ * its own `active` flag afterwards. The conjunct is {@link
+ * placementReadFilter} — the same rule the per-type index and the space
+ * library read — so an integration homed in a PERSONAL space of somebody else
+ * never reaches the response, whatever the caller's organization role
+ * (RBAC spec §3.6).
  */
-export async function listIntegrations(orgId: string): Promise<IntegrationSummary[]> {
+export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSummary[]> {
   const rows = await db
     .select({
       id: packages.id,
@@ -723,7 +791,19 @@ export async function listIntegrations(orgId: string): Promise<IntegrationSummar
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .where(and(orgOrSystemFilter(orgId), notEphemeralFilter(), eq(packages.type, "integration")));
+    // Expected by `placementReadFilter` — see `getIntegration`.
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, scope.spaceId)),
+    )
+    .where(
+      and(
+        orgOrSystemFilter(scope.orgId),
+        notEphemeralFilter(),
+        placementReadFilter(scope.spaceId),
+        eq(packages.type, "integration"),
+      ),
+    );
 
   const out: IntegrationSummary[] = [];
   for (const row of rows) {

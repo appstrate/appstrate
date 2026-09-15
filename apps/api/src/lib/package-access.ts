@@ -16,7 +16,6 @@ import { hasPackageAccess } from "../services/space-packages.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
-import type { OrgRole } from "@appstrate/core/permissions";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
@@ -180,20 +179,6 @@ export async function packageAccessSpaces(
 }
 
 /**
- * Org-catalogue authority: a session-borne owner or admin, never an API key.
- *
- * It answers for `home_space_id IS NULL` and for nothing else. A package homed
- * in a space — a PERSONAL space included — is governed by that space's
- * `<type>:write`, so this must never be consulted as a fallback for one: it
- * would hand an admin the drafts in a member's personal space, which is the one
- * thing §3.6 refuses. Both readers (`holdsHomeAuthority`,
- * `assertPackageIsReachable`) therefore test the NULL home first.
- */
-export function managesOrgCatalog(c: Context<AppEnv>, orgRole: OrgRole = callerOrgRole(c)) {
-  return c.get("authMethod") !== "api_key" && (orgRole === "owner" || orgRole === "admin");
-}
-
-/**
  * Does a package's PLACEMENT grant read from these spaces?
  *
  * One rule, one place (RBAC spec §6.9, §6.10): a package is readable where it
@@ -333,14 +318,14 @@ export async function assertCatalogPackageAccess(
   c: Context<AppEnv>,
   packageId: string,
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
-  source = { orgId: c.get("orgId"), orgRole: callerOrgRole(c, c.get("orgId")) },
+  sourceOrgId: string = c.get("orgId"),
 ) {
   const [pkg, accessible, sharedIn] = await Promise.all([
-    loadPackageRow(packageId, source.orgId),
+    loadPackageRow(packageId, sourceOrgId),
     resolvedSpaces ?? packageAccessSpaces(c),
-    loadPackageShares(packageId, source.orgId),
+    loadPackageShares(packageId, sourceOrgId),
   ]);
-  assertPackageIsReachable(c, packageId, pkg, sharedIn, accessible, source.orgRole);
+  assertPackageIsReachable(packageId, pkg, sharedIn, accessible);
   return pkg;
 }
 
@@ -396,14 +381,23 @@ async function loadPackageShares(packageId: string, orgId: string): Promise<stri
   return shared.map((row) => row.spaceId);
 }
 
-/** 404 unless the caller may know this id exists — {@link placementGrantsRead} + `<type>:read`. */
+/**
+ * 404 unless the caller may know this id exists — {@link placementGrantsRead}
+ * + `<type>:read`.
+ *
+ * PLACEMENT is the whole rule, with no exception beside it. A package of the
+ * organization is always homed in one of its spaces
+ * (`packages_org_package_has_home`), so reaching it means reaching that space
+ * or one the package was offered to; an owner or admin gets there because they
+ * reach every team space, not through an authority of their own. That is what
+ * keeps a draft sitting switched off in a member's PERSONAL space out of an
+ * admin's reach, which is the one thing §3.6 refuses.
+ */
 function assertPackageIsReachable(
-  c: Context<AppEnv>,
   packageId: string,
   pkg: PackageAccessRow,
   sharedIn: readonly string[],
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
-  orgRole: OrgRole,
 ): void {
   const opens = packageReadPermissions(pkg.type);
   const permitted = accessible.filter((space) =>
@@ -412,19 +406,7 @@ function assertPackageIsReachable(
   const readable = new Set(permitted.map((space) => space.id));
   if (
     permitted.length === 0 ||
-    (pkg.source !== "system" &&
-      !placementGrantsRead(pkg, sharedIn, readable) &&
-      // The org-catalogue exception is for a package with NO home. One homed in
-      // a space is reachable through that space or not at all — otherwise an
-      // admin would read a draft that lives, switched off, in a member's
-      // personal space (§3.6).
-      //
-      // The NULL home is the WHOLE condition: a package the organization owns
-      // stays the organization's however it is placed. Narrowing the exception
-      // to "placed nowhere" would turn a single offer into a 404 on the owner's
-      // own versions, fork and placement — a package the organization
-      // administers does not stop being theirs because somebody was given it.
-      !(pkg.homeSpaceId === null && managesOrgCatalog(c, orgRole)))
+    (pkg.source !== "system" && !placementGrantsRead(pkg, sharedIn, readable))
   ) {
     throw notFound(`Package '${packageId}' not found`);
   }
@@ -434,8 +416,10 @@ function assertPackageIsReachable(
  * Write authority is the package's HOME (`packages.home_space_id`) and nothing
  * else — not the space the caller happens to be in, not the set of spaces it is
  * placed in: those consume the package and have no say over its draft,
- * versions or identity. A NULL home is the organization catalogue — owners and
- * admins in session, which is what {@link managesOrgCatalog} means.
+ * versions or identity. There is no second authority beside it: an
+ * organization's package always has a home (`packages_org_package_has_home`),
+ * and an owner or admin governs one because they reach every team space, the
+ * organization's DEFAULT space included.
  *
  * There is deliberately no permission check against the CURRENT space. The home
  * lookup goes through `packageAccessSpaces` → `effectiveInSpace`, so it already
@@ -473,7 +457,7 @@ export async function assertPackageMutationAccess(
  *
  * `false`, never a throw, for every refusal the assert would spell out: a
  * package the org cannot see, a system package (nobody writes those), a home
- * the caller does not govern, a NULL home outside org-catalogue authority.
+ * the caller does not govern.
  *
  * Module-local on purpose. Every caller outside this file reaches it through
  * one of the three wordings below — {@link assertDraftSelectorAllowed},
@@ -491,7 +475,7 @@ async function holdsPackageWriteAuthority(
   if (!pkg) return false;
   if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
   const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
-  return holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "write"));
+  return holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "write"));
 }
 
 /**
@@ -512,7 +496,7 @@ export async function holdsPackageShareAuthority(
   if (!pkg) return false;
   if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
   const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
-  return holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "share"));
+  return holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "share"));
 }
 
 /**
@@ -636,8 +620,7 @@ export function draftNotWritable(packageId: string): ApiError {
 /**
  * Authority to change a package's AUDIENCE — `<type>:share` in its home space
  * (RBAC spec §6.10). The same rule, the same reader and the same 404/403 split
- * as a mutation: the home decides, an unreachable id stays a 404, and a NULL
- * home is the organization catalogue.
+ * as a mutation: the home decides, and an unreachable id stays a 404.
  *
  * It is a THIRD verb rather than a reuse of `write`, because an organization
  * may want Notion's split — authors who edit but do not distribute — and it
@@ -678,26 +661,15 @@ async function assertHomeAuthority(
     );
   }
   const permission = packagePermission(pkg.type, action);
-  if (holdsHomeAuthority(c, pkg, accessible, permission)) return pkg;
+  if (holdsHomeAuthority(pkg, accessible, permission)) return pkg;
   // Refused. Whether the caller may even KNOW this id exists is the read
   // question, answered by the one predicate that answers it — an unreachable
   // package stays a 404 rather than becoming an existence oracle. Only this
   // path pays for the placements.
-  assertPackageIsReachable(
-    c,
-    packageId,
-    pkg,
-    await loadPackageShares(packageId, orgId),
-    accessible,
-    callerOrgRole(c, orgId),
-  );
+  assertPackageIsReachable(packageId, pkg, await loadPackageShares(packageId, orgId), accessible);
   reportPermissionDenial(c, permission);
   const verb = action === "share" ? "Sharing" : "Modifying";
-  throw forbidden(
-    pkg.homeSpaceId === null
-      ? `${verb} '${packageId}' requires organization owner or admin authority — it belongs to the organization catalog.`
-      : `${verb} '${packageId}' requires '${permission}' in its home space.`,
-  );
+  throw forbidden(`${verb} '${packageId}' requires '${permission}' in its home space.`);
 }
 
 /**
@@ -710,9 +682,8 @@ async function assertHomeAuthority(
  * a member's PERSONAL space is legitimately readable by everyone it is
  * placed for, and emitting its home would hand each of them the id of a
  * space §3.6 says does not exist for them. `null` therefore means "not a space
- * you can see" — the organization catalogue and a withheld home both — and
- * nothing downstream needs to tell those apart: what a reader actually wants to
- * know is whether they may WRITE, which is the second field.
+ * you can see", and nothing downstream needs more than that: what a reader
+ * actually wants to know is whether they may WRITE, which is the second field.
  *
  * `home_writable` is that answer, and it is `assertPackageMutationAccess`'s
  * WHOLE rule, not just its home half: a SYSTEM package is refused there before
@@ -732,7 +703,6 @@ async function assertHomeAuthority(
  * the route refuses it before the home is consulted.
  */
 export function homeWireForCaller(
-  c: Context<AppEnv>,
   pkg: { type: PackageType; source: string; homeSpaceId: string | null },
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): { home_space_id: string | null; home_writable: boolean; home_shareable: boolean } {
@@ -742,9 +712,9 @@ export function homeWireForCaller(
   return {
     home_space_id: reached ? pkg.homeSpaceId : null,
     home_writable:
-      !system && holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "write")),
+      !system && holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "write")),
     home_shareable:
-      !system && holdsHomeAuthority(c, pkg, accessible, packagePermission(pkg.type, "share")),
+      !system && holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "share")),
   };
 }
 
@@ -779,7 +749,7 @@ export async function homeWritableForPackages(
     })
     .from(packages)
     .where(and(inArray(packages.id, ids), orgOrSystemFilter(c.get("orgId")), notEphemeralFilter()));
-  return new Map(rows.map((row) => [row.id, homeWireForCaller(c, row, accessible).home_writable]));
+  return new Map(rows.map((row) => [row.id, homeWireForCaller(row, accessible).home_writable]));
 }
 
 /**
@@ -793,19 +763,23 @@ function isSystemPackageRow(pkg: { source: string }): boolean {
 }
 
 /**
- * `<type>:<action>` in the home space, or org-catalog authority when it has
- * none. `orgRole` is the caller's standing in the organization that OWNS the
- * package, which is the caller's own org everywhere except the cross-org fork
- * reader — there it is their membership role in the source org.
+ * `<type>:<action>` in the home space — the whole rule, with nothing beside it.
+ *
+ * `accessible` is already the caller's standing in the organization that OWNS
+ * the package: their own org everywhere except the cross-org fork reader,
+ * which resolves the source org's spaces under their membership role there.
+ *
+ * `homeSpaceId` is typed nullable because the COLUMN is, and the two rows that
+ * carry a NULL there — a system package, an inline run's shadow row
+ * (`packages_org_package_has_home`) — are refused by every caller of this
+ * function before it is reached. A NULL that got here anyway matches no
+ * accessible space and answers `false`, which is the safe half.
  */
 function holdsHomeAuthority(
-  c: Context<AppEnv>,
   pkg: { homeSpaceId: string | null },
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
   permission: Permission,
-  orgRole: OrgRole = callerOrgRole(c),
 ): boolean {
-  if (pkg.homeSpaceId === null) return managesOrgCatalog(c, orgRole);
   const home = accessible.find((space) => space.id === pkg.homeSpaceId);
   return home?.permissions.has(permission) ?? false;
 }
@@ -830,10 +804,9 @@ function holdsHomeAuthority(
  * SYSTEM packages are exempt too, and they are the reason the exemption is
  * stated here rather than left to the home rule: the platform ships them
  * readable in every space of every organization, so there is no "space that
- * owns them" for a setting about copying OUT of one to protect. Their home is
- * `NULL`, which the home rule reads as the organization catalogue — that turned
- * the key into "only owners and admins may activate the shipped catalogue", a
- * refusal about somebody else's content that this setting never meant to make.
+ * owns them" for a setting about copying OUT of one to protect. Exempting them
+ * here is what keeps the key from making a refusal about somebody else's
+ * content, which this setting never meant to make.
  *
  * The setting is read UNCACHED for the same reason the SSO gate is: a security
  * gate must not answer from a TTL. `c.get("orgSettings")` is the row the
@@ -844,20 +817,20 @@ export async function assertPackageCopyAllowed(
   pkg: { id: string; type: PackageType; source: string; homeSpaceId: string | null },
   source: {
     orgId: string;
-    orgRole: OrgRole;
     accessible: Awaited<ReturnType<typeof packageAccessSpaces>>;
   },
 ): Promise<void> {
   if (pkg.type === "skill" || isSystemPackageRow(pkg)) return;
-  // The SOURCE organization's setting and the caller's standing THERE — a fork
-  // may cross organizations, and it is the source's content being protected.
+  // The SOURCE organization's setting, and the spaces the caller reaches THERE
+  // — a fork may cross organizations, and it is the source's content being
+  // protected.
   const settings =
     source.orgId === c.get("orgId")
       ? (c.get("orgSettings") ?? (await getOrgSettings(source.orgId)))
       : await getOrgSettings(source.orgId);
   if (settings.restrict_package_copy !== true) return;
   const permission = packagePermission(pkg.type, "share");
-  if (holdsHomeAuthority(c, pkg, source.accessible, permission, source.orgRole)) return;
+  if (holdsHomeAuthority(pkg, source.accessible, permission)) return;
   reportPermissionDenial(c, permission);
   throw new ApiError({
     status: 403,
@@ -882,7 +855,7 @@ export async function assertForkSourceAccess(c: Context<AppEnv>, packageId: stri
     const orgRole = callerOrgRole(c, orgId);
     const accessible = await packageAccessSpaces(c, orgId, orgRole);
     const source = await assertCatalogPackageAccess(c, packageId, accessible);
-    await assertPackageCopyAllowed(c, source, { orgId, orgRole, accessible });
+    await assertPackageCopyAllowed(c, source, { orgId, accessible });
     return source;
   }
   if (c.get("authMethod") !== "session" && !c.get("deferOrgResolution")) {
@@ -891,15 +864,8 @@ export async function assertForkSourceAccess(c: Context<AppEnv>, packageId: stri
   const membership = await getOrgMember(pkg.orgId, c.get("user").id);
   if (!membership) throw notFound(`Package '${packageId}' not found`);
   const accessible = await packageAccessSpaces(c, pkg.orgId, membership.role);
-  const source = await assertCatalogPackageAccess(c, packageId, accessible, {
-    orgId: pkg.orgId,
-    orgRole: membership.role,
-  });
-  await assertPackageCopyAllowed(c, source, {
-    orgId: pkg.orgId,
-    orgRole: membership.role,
-    accessible,
-  });
+  const source = await assertCatalogPackageAccess(c, packageId, accessible, pkg.orgId);
+  await assertPackageCopyAllowed(c, source, { orgId: pkg.orgId, accessible });
   return source;
 }
 

@@ -865,10 +865,10 @@ describe("Packages API", () => {
   });
 
   // ═══════════════════════════════════════════════
-  // GET /api/packages/integrations?active=true — agent-editor picker
+  // GET /api/packages/integrations — the index, i.e. the ACTIVE set
   // ═══════════════════════════════════════════════
 
-  describe("GET /api/packages/integrations?active=true (agent-editor picker)", () => {
+  describe("GET /api/packages/integrations (the active set)", () => {
     const ENV_SYSTEM = "@pkgorg/gmail"; // env SYSTEM integration, no install row
     const PLAIN = "@pkgorg/clickup"; // org integration, not installed
     const INSTALLED = "@pkgorg/notion"; // org integration, installed + enabled
@@ -913,7 +913,7 @@ describe("Packages API", () => {
     });
 
     async function activeIds(): Promise<Set<string>> {
-      const res = await app.request("/api/packages/integrations?active=true", {
+      const res = await app.request("/api/packages/integrations", {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);

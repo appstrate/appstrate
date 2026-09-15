@@ -122,7 +122,7 @@ async function loadManifestOrThrow(
   scope: SpaceScope,
   packageId: string,
 ): Promise<IntegrationManifest> {
-  const summary = await getIntegration(scope.orgId, packageId);
+  const summary = await getIntegration(scope, packageId);
   if (!summary) {
     throw notFound(`Integration '${packageId}' not found in this organization`);
   }

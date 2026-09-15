@@ -3,12 +3,12 @@
 -- Run BETWEEN the drizzle batch carrying
 -- `packages/db/drizzle/0063_packages_home_space.sql` and bringing the new
 -- version up — the shape `0008` uses, for the same reason. That migration adds
--- `packages.home_space_id` and leaves it NULL on every row, and NULL means
--- "organization catalogue: owners and admins only": a builder who authored an
--- agent can no longer edit it and an API key can no longer touch any package
--- at all until this script has run. So this is not optional cleanup, it is the
--- second half of the change, and nothing should be serving traffic while the
--- two halves are apart:
+-- `packages.home_space_id` and leaves it NULL on every row, and a homeless
+-- organization package is a package NOBODY can write: authority is the home
+-- space and nothing else, so a builder who authored an agent can no longer
+-- edit it and an API key can no longer touch any package at all until this
+-- script has run. So this is not optional cleanup, it is the second half of the
+-- change, and nothing should be serving traffic while the two halves are apart:
 --
 --   stop the platform → run migrations only → run THIS script → bring the new
 --   version up.
@@ -19,10 +19,14 @@
 --                                       first space to install it is where it
 --                                       was authored (packages auto-install in
 --                                       their creating space);
---   * installed nowhere               → left NULL, the organization catalogue,
---                                       which is already admin-only today.
+--   * installed nowhere               → the organization's DEFAULT space, which
+--                                       is the home of the packages that belong
+--                                       to no team. Owners and admins reach it
+--                                       like any other space, and a builder of
+--                                       the default gains the write.
 -- System packages (`org_id IS NULL`) and inline shadow rows (`ephemeral`) are
--- excluded: neither is writable through the package routes at all.
+-- excluded: neither is writable through the package routes at all, and they are
+-- the two exceptions `packages_org_package_has_home` names.
 --
 -- SEVERAL INSTALLATIONS IS THE CASE THAT NEEDS A HUMAN. "Oldest install" is a
 -- good guess, not a fact — a package installed into five spaces on the same
@@ -32,19 +36,20 @@
 -- afterwards: `PATCH /api/packages/{scope}/{name} {"home_space_id": …}` moves a
 -- package, and an owner or admin can always run it.
 --
--- Idempotent: the WHERE is exactly `home_space_id IS NULL`, the condition it
--- removes, so a second run matches zero rows — including for a package an
--- operator has since moved by hand, which it will not move back. One
--- transaction, fenced.
+-- Idempotent: every WHERE is exactly `home_space_id IS NULL`, the condition
+-- this removes, so a second run matches zero rows — including for a package an
+-- operator has since moved by hand, which it will not move back. The closing
+-- `VALIDATE CONSTRAINT` is idempotent in its own right (validating an already
+-- validated constraint is a no-op). One transaction, fenced.
 --
 -- Rows: UNMEASURED — no production dump was rehearsed against this file. The
 -- script prints the NULL-home count before and after and the ambiguous list in
--- between; "after" is the number of packages installed nowhere, which is
--- allowed to be non-zero.
+-- between; "after" MUST be 0, and the `VALIDATE CONSTRAINT` that follows aborts
+-- the whole transaction if it is not.
 --
--- Pre-flight, on the replica (`ssh appstrate`): run the "before" query and the
--- ambiguity query below read-only, and review the multi-install list with the
--- packages' authors.
+-- Pre-flight, on the replica (`ssh appstrate`): run the "before" query, the
+-- ambiguity query and the missing-default query below read-only, and review the
+-- multi-install list with the packages' authors.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -81,7 +86,23 @@ GROUP BY p.id, p.org_id
 HAVING count(*) > 1
 ORDER BY p.id;
 
--- ═══ WRITE — oldest installation in the package's own organization ═══
+-- ═══ REVIEW — organizations this script cannot finish: no default space ═══
+-- MUST be empty. The third case below has nowhere to put these rows, the
+-- closing VALIDATE would then abort the transaction, and the fix is an
+-- operator's: give the organization a default space (`spaces.is_default`) and
+-- re-run. Every organization provisioned by the platform has one.
+SELECT p.org_id, count(*) AS homeless_packages
+FROM packages p
+WHERE p.org_id IS NOT NULL
+  AND p.ephemeral = false
+  AND p.home_space_id IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM spaces s WHERE s.org_id = p.org_id AND s.is_default
+  )
+GROUP BY p.org_id
+ORDER BY p.org_id;
+
+-- ═══ WRITE (1/2) — oldest installation in the package's own organization ═══
 UPDATE packages p
 SET home_space_id = chosen.space_id
 FROM (
@@ -98,17 +119,40 @@ WHERE p.id = chosen.package_id
   AND p.ephemeral = false
   AND p.home_space_id IS NULL;
 
--- ═══ VERIFY (after) — the remainder must be exactly the never-installed ones ═══
-SELECT
-  count(*) AS no_home_after,
-  count(*) FILTER (
-    WHERE NOT EXISTS (
-      SELECT 1 FROM space_packages sp
-      JOIN spaces s ON s.id = sp.space_id
-      WHERE sp.package_id = p.id AND s.org_id = p.org_id
-    )
-  ) AS no_home_and_installed_nowhere
+-- ═══ WRITE (2/2) — installed nowhere → the organization's default space ═══
+UPDATE packages p
+SET home_space_id = d.id
+FROM spaces d
+WHERE d.org_id = p.org_id
+  AND d.is_default
+  AND p.org_id IS NOT NULL
+  AND p.ephemeral = false
+  AND p.home_space_id IS NULL;
+
+-- ═══ VERIFY (after) — MUST print 0 ═══
+SELECT count(*) AS no_home_after
 FROM packages p
 WHERE p.org_id IS NOT NULL AND p.ephemeral = false AND p.home_space_id IS NULL;
+
+-- ═══ TAKE THE OTHER HALF OF THE CONSTRAINT ═══
+-- `0067_packages_org_home_required.sql` adds `packages_org_package_has_home`
+-- NOT VALID: it has governed every INSERT and UPDATE since the drizzle batch,
+-- but the rows that predate it were never checked — they could not be, since
+-- this script is what fixes them. Validating here closes that half, under a
+-- SHARE UPDATE EXCLUSIVE lock rather than the ACCESS EXCLUSIVE a validating
+-- ADD CONSTRAINT would have taken. On a fresh database there is nothing to
+-- validate and this is a no-op; if "after" above was not 0 it aborts the whole
+-- transaction, which is the outcome to want.
+--
+-- The 60s ceiling above is for the backfill statements, whose cost is bounded
+-- by the homeless rows. This one is not: it is a full scan of `packages`, whose
+-- volume here is UNMEASURED (see the header), and it runs ONCE. Under the
+-- ceiling, a table large enough to need more than a minute would abort the
+-- WHOLE transaction — backfill included, mid-window, on a `statement_timeout`
+-- error that does not say which statement raised it. `SET LOCAL` because this
+-- file is a single transaction: the lift ends at COMMIT, two lines down, and
+-- reaches no statement but the VALIDATE.
+SET LOCAL statement_timeout = 0;
+ALTER TABLE packages VALIDATE CONSTRAINT packages_org_package_has_home;
 
 COMMIT;

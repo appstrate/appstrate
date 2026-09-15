@@ -223,6 +223,10 @@ describe("detectBundleConflicts", () => {
       .values({
         id: packageId,
         orgId: ctxOwner.orgId,
+        // Its owner's default space: an organization's package always has a
+        // home (`packages_org_package_has_home`), and which one it is says
+        // nothing here — the conflict is the ORG boundary.
+        homeSpaceId: ctxOwner.defaultSpaceId,
         type: "agent",
         source: "local",
         draftManifest: { name: packageId, type: "agent", version: "1.0.0" },

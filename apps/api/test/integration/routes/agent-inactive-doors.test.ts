@@ -33,7 +33,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedSpacePackage } from "../../helpers/seed.ts";
+import { seedAgent, seedSpacePackage, seedUnreachableSpace } from "../../helpers/seed.ts";
 import { isActiveAgentGate, isAgentLookup } from "../../../src/middleware/guards.ts";
 
 const app = getTestApp();
@@ -139,9 +139,13 @@ beforeEach(async () => {
   ctx = await createTestContext();
   await seedAgent({ id: OFF, orgId: ctx.orgId, homeSpaceId: ctx.defaultSpaceId });
   await seedSpacePackage(ctx.defaultSpaceId, OFF, { enabled: false });
-  // No home here and no offer: the placement rule closes it, so this space is
-  // told nothing at all.
-  await seedAgent({ id: UNPLACED, orgId: ctx.orgId });
+  // Homed in a space nobody here reaches and offered nowhere: the placement
+  // rule closes it, so this space is told nothing at all.
+  await seedAgent({
+    id: UNPLACED,
+    orgId: ctx.orgId,
+    homeSpaceId: await seedUnreachableSpace(ctx.orgId),
+  });
 });
 
 describe("a placed-but-switched-off agent", () => {
@@ -208,14 +212,26 @@ describe("a placed-but-switched-off agent", () => {
     });
   });
 
-  it("reports the switch on its detail and on the index, so a client can grey the button", async () => {
+  it("reports the switch on its detail, and drops the agent from the index", async () => {
+    // The detail is the page that CARRIES the switch, so it answers 200 and
+    // says `active: false` — 404ing it would break the page that repairs the
+    // state. The index answers the other question, "what can I launch here?",
+    // so a switched-off agent is simply not on it: there is no greyed-out row
+    // to explain, and the library is where the state and its switch live.
     const detail = await app.request(`/api/packages/agents/${OFF}`, { headers: headers() });
     expect(detail.status, await detail.clone().text()).toBe(200);
     expect(((await detail.json()) as { active: boolean }).active).toBe(false);
 
-    const index = await app.request("/api/agents", { headers: headers() });
-    const body = (await index.json()) as { data: { id: string; active: boolean }[] };
-    expect(body.data.find((row) => row.id === OFF)?.active).toBe(false);
+    const indexIds = async () => {
+      const index = await app.request("/api/agents", { headers: headers() });
+      expect(index.status, await index.clone().text()).toBe(200);
+      return ((await index.json()) as { data: { id: string }[] }).data.map((row) => row.id);
+    };
+    expect(await indexIds()).not.toContain(OFF);
+
+    // Positive control: the same agent, same fixture, switched back on.
+    await seedSpacePackage(ctx.defaultSpaceId, OFF, { enabled: true });
+    expect(await indexIds()).toContain(OFF);
   });
 
   it("reports the switch as a BLOCKING readiness error, with a 200", async () => {

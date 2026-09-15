@@ -116,7 +116,7 @@ function readCheckboxes(html: string) {
   }));
 }
 
-/** Seed both queries the organization catalog reads, then render it. */
+/** Seed both queries the organization library reads, then render it. */
 function renderOrgLibrary(spaces: Space[] | undefined, pkg: LibraryPackageItem): string {
   const qc = new QueryClient();
   // Zustand's server snapshot has no selected org; seed that real query key.
@@ -171,7 +171,7 @@ function renderSpaceLibrary(target: Space, pkg: LibraryPackageItem): string {
   });
 }
 
-describe("the organization catalog", () => {
+describe("the organization library", () => {
   it("names the home space and the spaces the package is shared into", () => {
     const html = renderOrgLibrary(
       [space("spc_home", ["agents:configure"]), space("spc_guest", ["agents:configure"])],
@@ -399,7 +399,7 @@ describe("one space's view", () => {
 
   it("names a candidate the caller could place here as exactly that", () => {
     // The route lists a package with NO placement here when this caller could
-    // put it here in one click — the organization catalogue they administer, or
+    // put it here in one click — the organization's packages they administer, or
     // a package whose home grants them `share`. Calling that "Système" (the
     // other way a row can have no placement) would name the wrong reason.
     const html = renderSpaceLibrary(

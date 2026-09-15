@@ -174,16 +174,4 @@ export const parameters = {
     description: "Package name",
     schema: { type: "string" },
   },
-  PackageActiveFilter: {
-    name: "active",
-    in: "query" as const,
-    required: false,
-    description:
-      "When `true`, narrows the list to packages ACTIVE in the current space, by the " +
-      "same rule the run gate applies: the placement row's `enabled` when the space has " +
-      "one, the deployment's default when it has none — a system package, or an " +
-      "integration named by `SYSTEM_INTEGRATIONS`, both of which stay listed with no row " +
-      "at all. No per-type exception: one rule, every package type.",
-    schema: { type: "string", enum: ["true"] as const },
-  },
 } as const;

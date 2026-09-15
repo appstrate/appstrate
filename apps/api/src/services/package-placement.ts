@@ -81,8 +81,8 @@ export function placementReadFilter(spaceId: string) {
  * a paragraph inside the first: `PATCH /api/packages/{scope}/{name}` moves a
  * home deliberately, and `emptyAndDeletePersonalSpace`
  * (`services/spaces.ts`) moves one because the author left — a package still
- * running elsewhere is re-homed to the organization catalogue. The second
- * produced orphans for as long as it did not share this code.
+ * running elsewhere is re-homed to the organization's DEFAULT space. The
+ * second produced orphans for as long as it did not share this code.
  *
  * Runs INSIDE the caller's transaction, always: the move and the placements it
  * invalidates commit together or not at all. Call it AFTER the
@@ -91,7 +91,7 @@ export function placementReadFilter(spaceId: string) {
  */
 export async function reconcilePlacementsAfterRehome(
   tx: DbOrTx,
-  params: { packageId: string; orgId: string; newHomeSpaceId: string | null },
+  params: { packageId: string; orgId: string; newHomeSpaceId: string },
 ): Promise<void> {
   const { packageId, orgId, newHomeSpaceId } = params;
 
@@ -106,7 +106,7 @@ export async function reconcilePlacementsAfterRehome(
       and(
         eq(spacePackages.packageId, packageId),
         eq(spaces.orgId, orgId),
-        newHomeSpaceId === null ? undefined : ne(spacePackages.spaceId, newHomeSpaceId),
+        ne(spacePackages.spaceId, newHomeSpaceId),
       ),
     );
 
@@ -117,11 +117,7 @@ export async function reconcilePlacementsAfterRehome(
       .onConflictDoNothing();
   }
 
-  if (newHomeSpaceId !== null) {
-    await tx
-      .delete(packageShares)
-      .where(
-        and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, newHomeSpaceId)),
-      );
-  }
+  await tx
+    .delete(packageShares)
+    .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, newHomeSpaceId)));
 }

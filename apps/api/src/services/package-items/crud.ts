@@ -19,7 +19,6 @@ import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { activeHereSql } from "../package-activation.ts";
-import { placementReadFilter } from "../package-placement.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -148,11 +147,15 @@ export interface CreateItemInput {
   createdBy?: string;
   /**
    * The space whose `<type>:write` will govern this package
-   * (`packages.home_space_id`). Every caller that runs inside a space context
-   * passes it; `null` is the organization catalogue, writable by owners and
-   * admins only — the shape an org-level import with no space has.
+   * (`packages.home_space_id`). REQUIRED: every organization package has a
+   * home (`packages_org_package_has_home`), and every door that creates one
+   * runs inside a space context — the authoring routes, the ZIP and bundle
+   * imports, the fork, the new organization's demo agent. A per-org MCP bearer
+   * token reaches those routes through the in-process re-entry, which resolves
+   * the organization's DEFAULT space (`requireSpaceContext`), so even the
+   * space-less-looking caller arrives with one.
    */
-  homeSpaceId: string | null;
+  homeSpaceId: string;
 }
 
 /**
@@ -245,24 +248,24 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
-/** List items of a type readable from a space — the placement rule, per type. */
-export async function listOrgItems(
-  orgId: string,
-  cfg: PackageTypeConfig,
-  spaceId: string,
-  opts?: { activeOnly?: boolean },
-) {
-  // Default: the catalogue view — {@link placementReadFilter}, the placement
-  // rule this page is a reader of. `activeOnly` NARROWS it, and narrows is the
-  // exact word: {@link activeHereSql} conjoins the same placement filter and
-  // then asks the space's switch on top, so every row it returns is one this
-  // view would have returned anyway. That is the one definition the run gate,
-  // the hints and the library all read, so the agent editor's integration
-  // picker offers exactly the set readiness will accept. NOT a formulation of
-  // its own: a bare row-and-enabled predicate hides every system package the
-  // space runs without a row, and then the integrations listing needs a
-  // correction pass to put them back.
-  const placementFilter = opts?.activeOnly ? activeHereSql(spaceId) : placementReadFilter(spaceId);
+/** List the items of a type this space RUNS — the activation rule, per type. */
+export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceId: string) {
+  // The index page of a type answers ONE question — "what can I launch here?"
+  // — so it renders the ACTIVE set and nothing else ({@link activeHereSql}:
+  // the placement row's verdict where the package is placed, the deployment's
+  // default where there is no row). "What is PLACED here, and in what state?"
+  // is the other question, and it has its own page: the space library
+  // (`GET /api/spaces/{id}/library`), which is where an offer is taken up and
+  // a switched-off package is switched back on.
+  //
+  // One rule rather than two views of the same list: the caller-context hints
+  // the model is given, the run gate and this page agree by construction, so
+  // the editor's integration picker cannot offer what a run would refuse, and
+  // a page cannot show a launch control that 404s on click. NOT a bare
+  // row-and-enabled predicate: that hides every system package the space runs
+  // without a row, and then the integrations listing needs a correction pass
+  // to put them back.
+  //
   // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
   // projected: the list mapper never reads it, and it is by far the largest
   // column on the row.
@@ -295,7 +298,7 @@ export async function listOrgItems(
         orgOrSystemFilter(orgId),
         eq(packages.type, cfg.type),
         notEphemeralFilter(),
-        placementFilter,
+        activeHereSql(spaceId),
       ),
     )
     .orderBy(
@@ -314,6 +317,17 @@ export async function listOrgItems(
       orgId: row.orgId,
       name: getPackageDisplayName(row),
       description: m.description ?? null,
+      // The two fields an INDEX page needs that a name and a description do not
+      // give it: the icon it draws each card with, and the keywords its search
+      // box matches on. Read off the SAME rendered manifest as `name` and
+      // `description` (`getPackageDisplayName` reads `display_name` from this
+      // very column), so a page has no reason to fetch a second, wider route to
+      // draw its own list — which is exactly how the Integrations page ended up
+      // reading a listing that obeyed no placement rule.
+      icon: typeof m.icon === "string" ? m.icon : null,
+      keywords: Array.isArray(m.keywords)
+        ? m.keywords.filter((k): k is string => typeof k === "string")
+        : [],
       source: row.source ?? "local",
       created_by: row.createdBy,
       createdAt: toISORequired(row.createdAt),

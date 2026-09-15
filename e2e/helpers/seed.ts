@@ -229,6 +229,55 @@ export async function createAgentWithInputSchema(
   return res.json();
 }
 
+// ─── Integrations (Packages) ────────────────────
+
+/**
+ * Create an integration whose manifest carries the three fields the index
+ * renders: `icon`, `display_name`/`description`, and `keywords`. AFPS makes
+ * `source` and `auths` required on an integration, so both are declared —
+ * neither is exercised here, the point is a package the index can show.
+ */
+export async function createIntegration(
+  client: ApiClient,
+  scope: string,
+  name: string,
+  overrides: { keywords?: string[]; icon?: string; description?: string } = {},
+): Promise<{ id: string }> {
+  const manifest = {
+    schema_version: "0.1",
+    name: `${scope}/${name}`,
+    display_name: `Test Integration ${name}`,
+    version: "0.1.0",
+    type: "integration",
+    description: overrides.description ?? `E2E test integration ${name}`,
+    keywords: overrides.keywords ?? [],
+    icon: overrides.icon ?? "logos:slack-icon",
+    source: { kind: "local", server: { name: `${scope}/${name}`, version: "^0.1.0" } },
+    auths: {
+      api: {
+        type: "api_key",
+        authorized_uris: ["https://example.invalid/**"],
+        credentials: { schema: { type: "object", properties: { api_key: { type: "string" } } } },
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.api_key}",
+          },
+        },
+      },
+    },
+  };
+
+  const res = await client.post("/packages/integrations", { manifest });
+
+  if (res.status() !== 201 && res.status() !== 200) {
+    throw new Error(`Create integration failed (${res.status()}): ${await res.text()}`);
+  }
+  return res.json();
+}
+
 // ─── Webhooks ───────────────────────────────────
 
 export async function createWebhook(

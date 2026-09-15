@@ -54,8 +54,8 @@ export function useCanManageOrgCatalog(): boolean {
  * Display name of a package's home space, or `null` when there is none to show.
  *
  * `home_space_id` is already `null` whenever the caller does not reach the home
- * (the server withholds the id — RBAC spec §6.9), so this covers both the
- * organization catalog and a home that belongs to somebody else. There is no
+ * (the server withholds the id — RBAC spec §6.9), so this covers both a package
+ * with no home at all and a home that belongs to somebody else. There is no
  * companion "can I write it" hook: that answer is `home_writable` on the
  * package's own read, computed server-side.
  */

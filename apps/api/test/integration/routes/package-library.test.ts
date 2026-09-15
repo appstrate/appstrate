@@ -40,8 +40,8 @@ import {
 const app = getTestApp();
 
 const AGENT = "@lib/worker";
-/** A package the organization owns and no space homes — the org catalogue. */
-const CATALOGUE = "@lib/catalogue";
+/** A package of the organization that belongs to no team: homed in the DEFAULT space. */
+const TEAMLESS = "@lib/teamless";
 const SYSTEM_SKILL = "@appstrate/system-skill";
 
 interface Placement {
@@ -163,20 +163,28 @@ describe("GET /api/library — the organization map", () => {
     ]);
   });
 
-  it("lists an organization-catalogue package placed nowhere, for an administrator", async () => {
+  it("lists a package that belongs to no team by its placement in the DEFAULT space", async () => {
+    // There is no such thing as a package "placed nowhere" to give a row of
+    // its own any more: an organization's
+    // package is homed in one of its spaces, and one that belongs to no team is
+    // homed in the default. So it is listed the way every other package is —
+    // through its placements — and its home is a space with an id, writable by
+    // that space's builders rather than by administrators alone.
     await seedPackage({
-      id: CATALOGUE,
+      id: TEAMLESS,
       orgId: ctx.orgId,
       type: "skill",
-      homeSpaceId: null,
-      draftManifest: { name: CATALOGUE, version: "0.1.0", type: "skill" },
+      homeSpaceId: alphaId,
+      draftManifest: { name: TEAMLESS, version: "0.1.0", type: "skill" },
     });
-    const row = rowOf(await orgLibrary(owner(alphaId)), "skill", CATALOGUE);
+    const row = rowOf(await orgLibrary(owner(alphaId)), "skill", TEAMLESS);
     expect(row).toBeDefined();
-    // Nowhere placed, so nothing to say about any space: an EMPTY array, not a
-    // row that disappears. `home_space_id: null` IS the organization catalogue.
-    expect(row!.placements).toEqual([]);
-    expect(row!.home_space_id).toBeNull();
+    expect(row!.home_space_id).toBe(alphaId);
+    // Homed, never switched on: `via: "home"`, `state: "none"` — the same two
+    // axes as any other row.
+    expect(row!.placements).toEqual([
+      { space_id: alphaId, via: "home", state: "none", shared_by: null },
+    ]);
   });
 
   it("is refused to a member, a guest and an API key", async () => {

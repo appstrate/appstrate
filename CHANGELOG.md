@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **The per-type package index carries `icon` and `keywords`.** Both are read
+  off the same rendered manifest as `name` and `description`, so an index page
+  draws its cards and runs its search from that listing alone — which is what
+  lets the Integrations page read the index every other type reads instead of a
+  wider route of its own. Additive on `GET /api/packages/{skills,mcp-servers,integrations}`.
+
 - **A package now lives in ONE space and reaches every other one through a
   SHARE.** `package_shares` (migration **0065**, a brand-new table with no
   backfill) says a package is OFFERED to a space; `space_packages` says it is
@@ -169,15 +175,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and `isActiveHere(pkg, row, placed)` for the callers already holding the
   rows), with a table-driven test walking every (type × source × placed × row)
   cell so the twins cannot drift, and every reader asks it: the run gate, the
-  caller-context hints, `AgentListItem.active`, the library's `state`, the
-  `?active=true` narrowing of a type index, the three reads of a space's own
-  placement rows and the integration readiness. The placement conjunct rides on
+  caller-context hints, `AgentDetail.active`, the library's `state`, the type
+  INDEX pages, the three reads of a space's own placement rows and the
+  integration readiness. The placement conjunct rides on
   the ROW branch alone, because the default only ever switches on packages the
   deployment ships and those are placed everywhere by construction, while a row
   is a decision a space made about a package it may since have LOST. So an
   ORPHAN row — no home, no share, the residue `scripts/migration/0016` repairs —
   is active NOWHERE: it is absent from the caller context handed to the model
-  and from `?active=true`, the run gate and the scheduler tick refuse it, and
+  and from every type index, the run gate and the scheduler tick refuse it, and
   the space-package listing, detail and resolved run-config read it as no row at
   all rather than handing back the draft manifest of a package the space no
   longer holds. The run gate also carries the organization boundary inside its
@@ -205,8 +211,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   space holds and has switched off, and the byte-identical body of a nonexistent
   id for one no placement holds. That route takes a package id straight from the
   request rather than from a path a placement guard has already narrowed, so two
-  distinguishable refusals would make it an existence oracle over the whole
-  organization catalogue; the `403 draft_not_writable` of `stage: "draft"` is
+  distinguishable refusals would make it an existence oracle over every package
+  the organization owns; the `403 draft_not_writable` of `stage: "draft"` is
   asserted after that verdict for the same reason. An agent this space cannot
   read at all gets the opaque `404 agent_not_found` on the other three, so the
   status is 404 either way and a space holding no placement still learns
@@ -222,13 +228,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and the organization's LLM budget. Reading is untouched, deliberately and
   everywhere: every route that says what an agent IS, or how this space has
   configured it, answers 200 with the switch off, and the verdict travels in the
-  payload instead — `AgentListItem.active` on the index, `AgentDetail.active` on
-  the detail — which is what lets the SPA grey the launcher with the reason and
-  offer **Activer dans cet espace** beside it instead of letting the call fail.
+  payload instead — `AgentDetail.active` on the detail, since the index lists the
+  ACTIVE set and would answer `true` on every row — which is what lets the SPA
+  open a switched-off agent from the library and offer **Activer dans cet
+  espace** on its own page instead of letting a call fail.
 
 - **`AgentDetail.active` — the detail answers the execution question itself.**
-  Required, the same rule as `AgentListItem.active`, resolved inside the reads
-  the handler already performs. A page that has loaded the agent needs no second
+  Required, the same rule the index filters on, resolved inside the reads the
+  handler already performs. A page that has loaded the agent needs no second
   call to learn whether the space runs it, and the page that repairs a
   switched-off agent is exactly the one that must not have to ask twice. The
   readiness answers it too, as data rather than as a status: `GET /api/agents/{scope}/{name}/connection-readiness`
@@ -271,16 +278,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `reconcilePlacementsAfterRehome` is the single function behind every rewrite of
   `packages.home_space_id`, and its second caller is the personal-space sweeper:
   when an orphaned member's space is emptied, a package another space still runs
-  is re-homed to the organization catalogue AND offered to each of those spaces,
-  in the sweep's own transaction. Sharing the reconciliation matters most on that
+  is re-homed to the organization's DEFAULT space AND offered to each of those
+  spaces, in the sweep's own transaction. The default space needs no offer — it
+  is the home now — and the package, its draft included, becomes readable there,
+  which is what "a package of the organization that belongs to no team" means. Sharing the reconciliation matters most on that
   path precisely because it acts on nobody's request: without it the sweep is the
   one thing in the platform that MAKES the placement rows everything else refuses
   to honour, and a team space keeps running a departed author's agent while
   losing it from every page and failing its cron each tick. A package only ever
   OFFERED elsewhere, with no space running it, is still DELETED with its author's
   space: nothing runs on an offer, and keeping a dead author's draft alive
-  because somebody was once shown its name would hand the organization catalogue
-  a package no one asked for. **No live code path creates an orphan placement
+  because somebody was once shown its name would hand the default space a
+  package no one asked for. **No live code path creates an orphan placement
   now**; `scripts/migration/0016` repairs the inherited ones.
 
   Re-importing a bundle whose root is homed elsewhere follows the
@@ -361,8 +370,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   placed elsewhere is writable by nobody, which is the intended state —
   converting the space ends it early. After 30 days the new hourly
   `personal-space-sweeper` worker empties it — a package it homes moves to the
-  organization catalogue when another space holds a placement for it, and is
-  deleted when it lived only there — and deletes the space with its runs, files and
+  organization's default space when another space holds a placement for it, and
+  is deleted when it lived only there — and deletes the space with its runs, files and
   sessions. `GET /api/spaces` items carry `personal`, the switcher pins
   "Mon espace" above the team spaces, a personal space's settings hide the
   Members tab and lock the visibility and default-role controls, and the
@@ -394,16 +403,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A package now has a home space, and it alone decides who may write it.**
   `packages.home_space_id` names the space whose `<type>:write` authorizes
   editing, publishing, restoring, renaming and deleting a package; the other
-  spaces it is installed in consume it and get no say. `NULL` means the
-  organization catalogue — owners and admins on a session. The home is asked, and
+  spaces it is installed in consume it and get no say. A package of the
+  organization ALWAYS has one — the CHECK `packages_org_package_has_home`
+  (migration **0067**) states it in the database rather than leaving it to every
+  writer's memory — and the organization's DEFAULT space is the home of the
+  packages that belong to no team: owners and admins reached it already, and a
+  builder of the default space gains the write, which is what a default space is
+  for. The only rows with no home are the two the constraint names: a SYSTEM
+  package (`org_id IS NULL` — a delivery, not a placement) and an inline run's
+  `ephemeral` shadow row, which no package route can reach and which a home
+  would make blocking for its space's deletion. The home is asked, and
   nothing else: the mutation routes no longer also require the permission in the
   space the request comes from, so an author edits their own package while
   browsing a space where they only read. The routes acting on the _placement_
   — activate, deactivate, configure, per-space settings — keep their current-space
   guard, because that is what they are about. The home is set from the space a
-  package is created, imported or forked in, is exposed as `home_space_id` on
-  package reads and on `GET /api/library`, and is moved by the new
-  `PATCH /api/packages/{scope}/{name}`, which requires that permission in both
+  package is created, imported or forked in — every such path resolves one, an
+  org-level MCP bearer landing on the default space — is exposed as
+  `home_space_id` on package reads and on `GET /api/library`, and is moved by the
+  new `PATCH /api/packages/{scope}/{name}`, whose `home_space_id` is a REQUIRED
+  space id (`null` is a 400) and which requires that permission in both
   the old and the new home (an unreachable destination answers 404). It is a
   read grant too, everywhere: the home is one of the two placements that make a
   package readable (the other is a SHARE), so a draft nobody has been offered —
@@ -417,16 +436,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   409 `space_homes_packages` and names them, so moving them stays the caller's
   act — the package page's actions menu carries a **Move to a space…** dialog for
   exactly that, listing the spaces where the caller may author this type.
-  Migration **0063** adds the column and is shape-only: every existing row
-  starts with no home and is therefore admin-only until the operator runs
-  `scripts/migration/0014-packages-home-space-backfill.sql`, which belongs
+  Migration **0063** adds the column and **0067** adds the CHECK as `NOT VALID`,
+  so it governs every write from the moment it applies while the inherited rows
+  are still unbacked: every existing row starts with no home and is therefore
+  admin-only until the operator runs
+  `scripts/migration/0014-packages-home-space-backfill.sql`, which gives every
+  package a home — one installation, the oldest of several, or the default space
+  for one installed nowhere — and ends by validating the constraint. It belongs
   between the migrations and bringing the new version up — stop, migrate,
-  run 0014, start — so nothing serves traffic while non-owner authors and API
-  keys are locked out. Rolling 0063 back is safe before 0014 and needs an
-  `UPDATE packages SET home_space_id = NULL` first afterwards, because the
-  column's `ON DELETE RESTRICT` then refuses to delete a space that homes a
-  package and an older build has no route that clears a home. The combined
-  runbook for 0063-0065 and both scripts is `scripts/migration/README.md` →
+  run 0014 then 0016, start — so nothing serves traffic while non-owner authors
+  and API keys are locked out. Rolling 0063 back is safe before 0014; afterwards
+  it needs `ALTER TABLE packages DROP CONSTRAINT packages_org_package_has_home`
+  and then `UPDATE packages SET home_space_id = NULL`, in that order, because the
+  column's `ON DELETE RESTRICT` refuses to delete a space that homes a package
+  and an older build has no route that clears a home. The combined
+  runbook for 0063-0067 and the scripts is `scripts/migration/README.md` →
   "Personal spaces & sharing rollout".
 
 - **One file editor for agents, skills, integrations and MCP servers.** The
@@ -639,8 +663,9 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   The detail route already refused it; the two now speak with one voice.
 
 - **BREAKING (CLI): `appstrate skills sync` reads the ACTIVE skills of a space,
-  not merely the placed ones.** The plan calls
-  `/api/packages/skills?active=true`, so a skill switched off in a space is not
+  not merely the placed ones.** The plan reads
+  `/api/packages/skills`, which IS that active set, so a skill switched off in a
+  space is not
   written into the Claude Code plugin, `~/.claude/skills/` or `~/.agents/skills/`
   from it — which is what the switch means everywhere else: activation governs
   what a space OFFERS. Switching one back on brings it back at the next sync,
@@ -691,8 +716,8 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 organization's catalog`. A declared dependency travels in the bundle of the
   agent that declares it, so it resolves org-wide; what a space's ACTIVATION
   governs is what that space OFFERS — the caller-context hints, the integration
-  credentials a run may reach, the `?active=true` picker. The wording it
-  replaces asserted a per-space check the resolver does not perform.
+  credentials a run may reach, the type index pages. The wording it replaces
+  asserted a per-space check the resolver does not perform.
 
 - **The AFPS §7.7 warnings are named for when they happen: `import-time`.**
   `services/integration-import-warnings.ts` and
@@ -701,23 +726,24 @@ organization's catalog`. A declared dependency travels in the bundle of the
   import-time — the moment those checks actually run. Nothing about placing a
   package produces them.
 
-- **BREAKING (API): `GET /api/agents` lists what the placement rule reads
-  (home ∨ shared) and says per row whether the space RUNS it —
-  `AgentListItem.active` replaces `installed`.** The skills, integrations and
-  mcp-servers index already asked the placement question while the agents index
-  asked a narrower one, so an agent homed in a space and running in none was
-  editable from a page that did not list it, and an agent merely offered to a
-  recipient was invisible until they had taken the offer up. One SQL builder
-  (`placementReadFilter`) answers for both index pages, beside the in-memory
-  `placementGrantsRead` it mirrors, and the agents listing is named for what it
-  returns (`listReadablePackages`). Reading is not running: `active` answers the ONE
-  activation rule — the placement row wins, the deployment's default decides
-  where there is none — the same expression the run gate and the caller-context
-  hints the chat and `get_me` serve read, so the SPA greys the
-  card's launch control out with that reason instead of letting the click come
-  back a 404, and badges an inactive package rather than hiding it. An agent's
-  detail page carries the matching **Activer dans cet espace** action, the same
-  `POST /api/spaces/{spaceId}/packages` door the library calls.
+- **BREAKING (API): an index lists what the space can LAUNCH — the ACTIVE set,
+  and nothing else.** `GET /api/agents` and
+  `GET /api/packages/{agents|skills|mcp-servers|integrations}` read one rule,
+  `activeHereSql(spaceId)`: placed here and switched on, or shipped here with no
+  row saying otherwise. It is the same expression the run gate and the
+  caller-context hints the chat and `get_me` serve read, so a page cannot offer
+  a control the doors would refuse, and a launcher is never rendered greyed. Two
+  questions, two pages: what is PLACED here and in what state is **Packages de
+  cet espace** — the library — which carries the origin, `Proposé` / `Désactivé`
+  / `Actif`, and one switch per row. Taking up an offer, switching a package
+  back on and switching a shipped integration on all happen there; the index
+  never shows a pending offer or a switched-off row, and its empty state names
+  the library. A switched-off package is still fully reachable: its detail
+  answers 200, opens from the library or from its URL, stays editable by
+  whoever holds its home's `write`, and carries a one-line **Désactivé dans cet
+  espace** banner with an **Activer** button. `GET /api/agents` is served by
+  `listActivePackages` — named for what it returns — and `listOrgItems` answers
+  for the other three types from the same predicate.
 
 - **BREAKING: every read of a package answers with ONE definition.** The file
   explorer — `GET /api/packages/{scope}/{name}/files` and `…/files/content` —
@@ -1686,6 +1712,22 @@ skills sync is running` and kept the stale plugin. The lock is now
 
 ### Removed
 
+- **BREAKING (API): the `?active=true` query parameter is gone from
+  `GET /api/packages/{agents|skills|mcp-servers|integrations}`.** An index IS the
+  active set now, so the parameter said nothing the bare URL does not: it is no
+  longer declared in OpenAPI and no longer read by the route, and a caller still
+  sending it receives exactly the body it receives without it. What used to be
+  the wider listing — everything placed here, switched on or not, plus the offers
+  nobody has taken up — is the space's LIBRARY, `GET /api/spaces/{id}/library`,
+  which answers with `placements[]` and a `state` per space.
+
+- **The Integrations page's Actives / Installed tabs are gone**, with their
+  `integrations.tabs.*` and `integrations.empty.all` strings. The page is an
+  index, so it lists the integrations the space can use; the "Installed" tab was
+  a second, poorer copy of **Packages de cet espace**, which carries the origin,
+  `Proposé` / `Désactivé` / `Actif` and the switch that changes it. The empty
+  state of each index names that page instead.
+
 - **The SPA's `not_installed_or_invalid_manifest` mapping is gone.** It rendered
   a message for an error code the platform has never emitted, so the branch was
   unreachable and the string it showed described a state no response could
@@ -2054,6 +2096,27 @@ skills sync is running` and kept the stale plugin. The lock is now
   the list itself.
 
 ### Security
+
+- **`GET /api/integrations` and its detail obey PLACEMENT, so an integration
+  homed in somebody's personal space stops being org-wide readable.** Both
+  routes filtered on "does this organization own the row?" and on nothing else:
+  no home, no share, no space at all entered the query. An integration drafted
+  in a member's PERSONAL space and offered to nobody therefore came back in
+  full — its name, its description, its `auths` with their `authorized_uris`,
+  its tool catalog — to every caller holding `integrations:read`, organization
+  owners and admins included, while `GET /api/packages/integrations` omitted
+  that very row and its detail answered 404 for the same caller. The Integrations
+  page hid it by filtering `active` in the browser, which is not a boundary: the
+  HTTP response carried it, so a network tab, an API key, the CLI or `curl` read
+  it whole. RBAC spec §3.6 states the rule the routes were missing — owners and
+  admins neither read nor write a personal space, and the home is the only
+  authority there is. Both now conjoin `placementReadFilter`, the SAME rule the
+  per-type index and the space library read, rather than a third formulation of
+  it: an integration is listed and readable when the current space HOMES it, was
+  OFFERED it, or when the deployment ships it. Placement is not activation — an
+  offer not taken up and an integration switched off both stay listed, with
+  `active: false`. Resolving a DECLARED dependency stays org-wide (§6.9), where
+  the run resolves it, through a reader that says so by name.
 
 - **A forwarded chain shorter than `TRUST_PROXY` no longer picks the client's
   own address.** `lib/client-ip.ts` reads `X-Forwarded-For` from the RIGHT,

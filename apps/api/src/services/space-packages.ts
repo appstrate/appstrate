@@ -214,7 +214,7 @@ async function loadPlaceablePackage(tx: Tx, scope: SpaceScope, packageId: string
     .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
     .limit(1)
     .for("share");
-  if (!pkg) throw notFound(`Package '${packageId}' not found in organization catalog`);
+  if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);
   return pkg;
 }
 
@@ -364,7 +364,7 @@ export async function activatePackageWithin(
   let shared = false;
   if (!placedBefore) {
     if (opts?.shareBy === undefined) {
-      throw notFound(`Package '${packageId}' not found in organization catalog`);
+      throw notFound(`Package '${packageId}' not found in this organization`);
     }
     const offer = await tx
       .insert(packageShares)
@@ -605,22 +605,8 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Readable / active packages in a space (single query each)
+// Active packages in a space (single query)
 // ---------------------------------------------------------------------------
-
-/**
- * WHERE for "readable from this space, of this `type`" — the placement rule
- * ({@link placementReadFilter}), org-or-system owned, never an ephemeral
- * shadow. Expects `packageShares` LEFT JOINed on (package, this space).
- */
-function readablePackagesFilter(scope: SpaceScope, type: PackageType) {
-  return and(
-    eq(packages.type, type),
-    orgOrSystemFilter(scope.orgId),
-    notEphemeralFilter(),
-    placementReadFilter(scope.spaceId),
-  );
-}
 
 /**
  * WHERE for "ACTIVE in this space, of this `type`" — {@link activeHereSql}:
@@ -629,13 +615,10 @@ function readablePackagesFilter(scope: SpaceScope, type: PackageType) {
  * an ephemeral shadow. Expects BOTH of {@link activeHereSql}'s joins —
  * `spacePackages` and `packageShares`, each on (package, this space).
  *
- * Deliberately NOT the placement rule above. Reading and running are two
- * questions (RBAC spec §6.9): an agent homed here but switched off is listed
- * here and still refused a run, because it would run with THIS space's
- * credentials and the space said no. The predicate itself is
- * {@link activeHereSql}, shared with {@link hasPackageAccess} and with the
- * library's projection, and it feeds the caller-context hints — i.e. what the
- * model is told it may invoke.
+ * The predicate is {@link activeHereSql}, shared with {@link hasPackageAccess},
+ * with the library's projection and with the index listings, so what an index
+ * page shows, what the caller-context hints tell the model it may invoke, and
+ * what the run gate lets through are one set rather than three.
  */
 function activePackagesFilter(scope: SpaceScope, type: PackageType) {
   return and(
@@ -662,16 +645,20 @@ function packageListingOrder() {
 }
 
 /**
- * List every package of one `type` READABLE from a space — the placement rule
- * (`placementReadFilter`), so the index page of a type shows what the detail
- * page, the file explorer and the library already open: homed here, offered
- * here, or system.
+ * List every package of one `type` this space RUNS — {@link
+ * activePackagesFilter}, so `GET /api/agents` is the agents index page in the
+ * sense every other index page has: what can be launched from here.
  *
- * Single query via LEFT JOIN — no N+1. The `space_packages` join answers a
- * different question and is projected, not filtered on: `active` says whether
- * this space may RUN the package, which a placement alone does not grant.
+ * A package merely PLACED here — a pending offer, or one switched off — is not
+ * on it. That state is the space library's subject
+ * (`GET /api/spaces/{id}/library`, `services/package-library.ts`): the library
+ * names each placement's origin and state and carries the switch, so a package
+ * that is off is reached, and repaired, from the one page built to show it.
+ * Its detail page stays open either way — an author edits an agent nobody runs.
+ *
+ * Single query via LEFT JOIN — no N+1.
  */
-export async function listReadablePackages(scope: SpaceScope, type: PackageType) {
+export async function listActivePackages(scope: SpaceScope, type: PackageType) {
   return db
     .select({
       id: packages.id,
@@ -679,13 +666,6 @@ export async function listReadablePackages(scope: SpaceScope, type: PackageType)
       draftManifest: packages.draftManifest,
       draftContent: packages.draftContent,
       source: packages.source,
-      // Whether the package is ACTIVE here — the placement row's `enabled` when
-      // the space has one, the deployment's default when it has none. The run
-      // routes gate on exactly this ({@link hasPackageAccess}), so a client
-      // that renders a launch control per row can say why it is dead instead of
-      // round-tripping to a 404. Not the same question as the WHERE above:
-      // this listing is what a space READS.
-      active: sql<boolean>`${activeHereSql(scope.spaceId)}`,
       // `latest` dist-tag version id — non-null iff the package has a published
       // version. Lets callers tell published agents from draft-only ones without
       // an N+1 (a draft-only agent must be run with `version=draft`).
@@ -704,7 +684,7 @@ export async function listReadablePackages(scope: SpaceScope, type: PackageType)
       packageDistTags,
       and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
     )
-    .where(readablePackagesFilter(scope, type))
+    .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder());
 }
 
@@ -796,7 +776,7 @@ async function listActivePackageHints<T extends PackageHint>(
       homeSpaceId: packages.homeSpaceId,
       draftManifest: packages.draftManifest,
       // `latest` dist-tag version id — non-null iff the package has a
-      // published version (see `listReadablePackages`).
+      // published version (see `listActivePackages`).
       latestVersionId: packageDistTags.versionId,
       total: sql<number>`count(*) over ()`.mapWith(Number),
     })
@@ -1195,7 +1175,7 @@ export async function updateSpacePackage(
       .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
       .limit(1);
     if (!pkg) {
-      throw notFound(`Package '${packageId}' not found in organization catalog`);
+      throw notFound(`Package '${packageId}' not found in this organization`);
     }
 
     if (opts?.requirePlacement) {

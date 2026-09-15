@@ -429,7 +429,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current space. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -515,6 +515,8 @@ export const integrationsPaths = {
       operationId: "getIntegration",
       tags: ["Integrations"],
       summary: "Get integration detail + per-auth status",
+      description:
+        "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, offered there, or shipped with the deployment. An integration homed elsewhere and offered to nobody answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

@@ -146,9 +146,9 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
    `to_fold_before`. A non-zero `unparseable_metadata` is a manual read of those
    rows, not a failure.
 
-## Personal spaces & sharing rollout (drizzle `0063` + `0064` + `0065` + `0066`, scripts `0014` + `0016` + `0015`)
+## Personal spaces & sharing rollout (drizzle `0063` + `0064` + `0065` + `0066` + `0067`, scripts `0014` + `0016` + `0015`)
 
-ONE release, and the four migrations apply as a single boot batch. Three
+ONE release, and the five migrations apply as a single boot batch. Three
 scripts, and they do not all sit on the same side of the window: `0014` and then
 `0016` run **inside** it, in that order, and neither is optional; `0015` runs
 **after** the release is validated and is optional forever. Nothing here needs a
@@ -182,16 +182,25 @@ Synthetic rehearsal (2026-09-11): `personal-spaces-backfill.test.ts` executes bo
 
 ### 2. Pre-flight — which packages `0014` has to guess about
 
-`0063` adds `packages.home_space_id` NULL on every row, and NULL means "the
-organization catalogue: owners and admins on a session". Between the migration
-and `0014` every non-owner author and **every API key** is locked out of its own
-packages, which is why step 5 stops traffic. `0014` then picks a home per
+`0063` adds `packages.home_space_id` NULL on every row, and `0067` adds the CHECK
+`packages_org_package_has_home` as `NOT VALID`: from the moment it applies, every
+WRITE has to give an organization package a home, while the rows already in the
+table still have none. Between the migrations and `0014` no organization package
+has a home, so every non-owner author and **every API key** is locked out of its
+own packages — which is why step 5 stops traffic. `0014` then picks a home per
 package: one installation → that space, several → the OLDEST `installed_at`,
-none → left NULL.
+none → the organization's DEFAULT space (`spaces.is_default`). Its last statement
+validates the constraint.
+
+A package nobody installed therefore lands on the default space rather than
+staying homeless. That is the rule, not a fallback: a package of the organization
+that belongs to no team is the organization's, and the default space is where the
+organization's own packages live. Owners and admins reached it already; a builder
+of the default space gains the write, which is what a default space is for.
 
 Only the "several" case is a guess. Count them on the replica (`ssh appstrate`).
-The column does not exist yet there, so these run WITHOUT `0014`'s
-`home_space_id IS NULL` clause — before the migration every row qualifies:
+The column does not exist yet there, so these run WITHOUT `0014`'s own "has no
+home yet" clause — before the migration every row qualifies:
 
 ```sql
 SELECT
@@ -232,6 +241,26 @@ ORDER BY p.id;
 instead of `COMMIT` if a row looks wrong. Whatever it picks stays correctable
 afterwards with `PATCH /api/packages/{scope}/{name} {"home_space_id": …}`.
 
+`0014` prints a SECOND review block right after it — the organizations that own
+a package and have **no default space**. It must be empty. The third case has
+nowhere to put those rows, so the closing `VALIDATE CONSTRAINT` would abort the
+whole transaction; the fix is an operator's, not the script's: give the
+organization a default space (`spaces.is_default`) and re-run. Every
+organization the platform provisioned has one, so a non-empty block means a
+hand-made org. Count it on the replica the same way:
+
+```sql
+SELECT p.org_id, count(*) AS homeless_packages
+FROM packages p
+WHERE p.org_id IS NOT NULL
+  AND p.ephemeral = false
+  AND NOT EXISTS (
+    SELECT 1 FROM spaces s WHERE s.org_id = p.org_id AND s.is_default
+  )
+GROUP BY p.org_id
+ORDER BY p.org_id;
+```
+
 ### 3. Pre-flight — what the two `RESTRICT`s make undeletable
 
 `0063` and `0064` each add an `ON DELETE RESTRICT` edge, and both are deliberate
@@ -241,8 +270,11 @@ refusals rather than cascades. Know what they will refuse:
   package cannot be deleted: the API answers `409 space_homes_packages` and
   names the packages, and a hand-written `DELETE FROM spaces` raises `23503`.
   Move them first (`PATCH /api/packages/{scope}/{name}`). Any automation of
-  yours that deletes spaces has to move homes first from now on. What will
-  become undeletable, run AFTER `0014`:
+  yours that deletes spaces has to move homes first from now on. Note that
+  `0014` homes every package installed nowhere on the organization's DEFAULT
+  space, so that space appears in the list below for every organization that had
+  one such package — which changes nothing operationally, since
+  `DELETE /api/spaces/{id}` already refuses a default space outright. What will become undeletable, run AFTER `0014`:
 
   ```sql
   SELECT home_space_id AS space_id, count(*) AS homed_packages
@@ -281,7 +313,7 @@ outside their home have no share placing them:
 
 ```sh
 # stop the platform
-# apply pending Drizzle migrations ONLY: 0063 + 0064 + 0065 + 0066, one boot batch
+# apply pending Drizzle migrations ONLY: 0063 + 0064 + 0065 + 0066 + 0067, one boot batch
 docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
   -f - < scripts/migration/0014-packages-home-space-backfill.sql
 docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
@@ -290,15 +322,26 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
 ```
 
 `0014` prints `no_home_before` split four ways, the ambiguous list, and
-`no_home_after` — which must equal `no_home_and_installed_nowhere`, i.e. the
-only packages left without a home are the ones installed nowhere.
+`no_home_after` — **which must be 0**: every organization package now has a home,
+the ones installed nowhere included, since those went to the default space. Its
+last statement is
+`ALTER TABLE packages VALIDATE CONSTRAINT packages_org_package_has_home`, which
+turns `0067`'s `NOT VALID` into a checked invariant; it raises `23514` instead of
+committing if a row was missed, and on a fresh database it has nothing to walk
+and is a healthy no-op. That statement runs under `SET LOCAL statement_timeout =
+0` — it is a full scan of `packages` on an unmeasured table, and the file's 60s
+ceiling would have aborted the whole transaction, backfill included, on a
+timeout error that names no statement. Both halves stay replayable as they are.
+The order is unchanged: migrations, then `0014`, then `0016`.
 
 `0016` prints `installed_outside_home_before` and `without_share_before`, then
 `without_share_after` — **which must be 0**. The order is load-bearing: it
-compares each installation against `packages.home_space_id`, so running it
-before `0014` would read every home as NULL and write a share for every
-installation in the database. Both files are idempotent; a second run of either
-inserts nothing.
+compares each installation against `packages.home_space_id`, and against a NULL
+home that comparison is NULL, so a run before `0014` would match nothing, write
+nothing, and print `0` twice — green, and useless. It therefore opens with a
+guard that counts the organization packages still without a home and raises
+`0016 requires 0014 first` rather than let that happen. Both files are
+idempotent; a second run of either inserts nothing.
 
 ### 6. Validate lot 0 — the home rule and the placement rule
 
@@ -323,9 +366,29 @@ inserts nothing.
   package no placement holds in the calling space, and answers
   `package_not_active_in_space` only for one the space holds and has switched
   off — compare those two bodies field by field as well.
+- **Every organization package has a home**, the system and ephemeral rows
+  apart — the invariant `0067` enforces and `0014` validated:
+
+  ```sql
+  SELECT count(*) AS packages_without_home
+  FROM packages
+  WHERE org_id IS NOT NULL AND NOT ephemeral AND home_space_id IS NULL;
+  ```
+
+  It must print **0**, and it cannot become anything else afterwards: a write
+  that tried raises `23514`. A non-zero here means `0014` did not run or did not
+  commit — go back to step 5 rather than patching rows by hand.
+
+  **This count is THE signal, not `pg_constraint.convalidated`.** That flag says
+  only whether somebody ran a `VALIDATE`: a freshly installed deployment has
+  never run `0014`, so it reads `false` there for ever while the constraint
+  governs every write exactly as it does on a migrated one. Reading it across a
+  fleet compares installation histories, not states.
+
 - A SYSTEM package can be switched off in a space and stays off: `DELETE`
-  answers 204 and writes the row, `GET /api/agents` reads `active: false`, and
-  the next `POST` switches it back on.
+  answers 204 and writes the row, the space's library reads the row as
+  **Désactivé**, `GET /api/agents` stops listing it, and the next `POST`
+  switches it back on.
 - An integration is activated through the same pair of doors as every other
   type, and `PUT /api/spaces/{id}/packages/{scope}/{name}` accepts `modelId`,
   `proxyId` and `generationConfig` and nothing else — any other field is a 400.
@@ -336,7 +399,11 @@ inserts nothing.
   (`grep` for it; the message is gone).
 - `DELETE /api/spaces/{id}` on a space that homes a package answers
   `409 space_homes_packages` and lists their ids.
-- An API key can write a package again — the one whose home is its own space.
+- An API key can write a package again — the one whose home is its own space. A
+  builder of the default space, AND an API key pinned to the default space
+  carrying `<type>:write`, both write the packages homed at the default: that is
+  what the default space is for, and it is the population the previous rule
+  excluded by name.
 
 ### 7. Validate lot 1 — personal spaces
 
@@ -350,35 +417,45 @@ inserts nothing.
 - Removing a member stamps `spaces.orphaned_at` and the organization's Spaces
   page lists the orphan with **Convert** / **Sweep now**.
 - **Sweep now** on an orphaned space that homes a package a TEAM space is
-  running re-homes it to the organization catalogue (`home_space_id IS NULL`)
-  **and writes the offer that keeps that team space placed**: `GET …/shares`
+  running re-homes it to the organization's **default space** and
+  **writes the offer that keeps that team space placed**: `GET …/shares`
   lists the team space with no author, the team's index, detail, run and
   schedules keep working, and re-running `0016`'s own `without_share_after`
   query (the `-- VERIFY (after)` block at the foot of the file) still prints
-  **0**. A package the orphaned space homed that NO other space was running is
-  deleted, an outstanding offer included.
+  **0**. The default space gets no offer — it is the home now — and the package,
+  its draft included, becomes readable there, which is what "a package of the
+  organization that belongs to no team" means. A package the orphaned space
+  homed that NO other space was running is deleted, an outstanding offer
+  included.
 - A package shared with a member shows up on THEIR space's library page as a
   placement with `via: "shared"` and `state: "none"` — a **Proposé** row with its
   own switch — and `POST /api/spaces/{personal}/packages` activates it with no
   activation grant at all: ownership is the authorization. Both library shapes
   answer with `placements` and nothing beside it.
-- A `viewer` in a space where an agent is placed but switched OFF cannot run it:
-  `GET /api/agents` shows the row with `active: false`, and the THREE execution
-  doors — `POST /api/agents/{scope}/{name}/run` (a rerun is the same route),
-  `POST …/schedules` and `GET …/bundle` — answer
+- A `viewer` in a space where an agent is placed but switched OFF cannot run it.
+  `GET /api/agents` does not list it — an index is the ACTIVE set — while
+  **Packages de cet espace** shows it as **Désactivé** with its switch, and the
+  THREE execution doors — `POST /api/agents/{scope}/{name}/run` (a rerun is the
+  same route), `POST …/schedules` and `GET …/bundle` — answer
   **404 `agent_not_active_in_space`**, naming the space and
   `POST /api/spaces/{id}/packages`.
 - That same agent READS normally, which is what makes it repairable. Its detail
   answers **200** with `active: false`, and so do `GET …/model`, `/proxy`,
-  `/persistence`, `/runs`, `/schedules` and the writes beside them. Open the
-  page in the SPA: it opens without an error, carries the **Agent inactif dans
-  cet espace** banner, greys the launcher with that reason, and offers
-  **Activer dans cet espace** — one click, and the three doors open. The library
-  shows the same row as **Désactivé**, and an offer nobody has taken up as
-  **Proposé**. `GET …/connection-readiness` answers **200**
+  `/persistence`, `/runs`, `/schedules` and the writes beside them. Open it in
+  the SPA from the library row (or from its URL directly): the page opens
+  without an error, carries the one-line **Désactivé dans cet espace** banner
+  with an **Activer** button, and one click reopens the three doors. An offer
+  nobody has taken up reads **Proposé** on that same library page and appears on
+  no index. `GET …/connection-readiness` answers **200**
   too, with `blocks_run: true` and an `errors[0]` whose `field` is `agent` and
   whose `code` is `agent_not_active` — a 404 there would blank the panel that
   explains the refusal.
+- **The index lists what the space can LAUNCH; the library lists what is
+  PLACED.** Switch an agent off and it leaves the **Agents** page and the run
+  and schedule pickers on the spot, and stays on **Packages de cet espace**;
+  switch it back on there and it returns to the index. The **Intégrations** page
+  has no Actives / Toutes tabs — the library is the other half — and an empty
+  index names the library rather than pretending the space holds nothing.
 - `appstrate skills sync` writes only the skills a space has ACTIVE. Switch a
   skill off in a space, sync again, and its directory disappears from the target;
   switch it back on and the next sync restores it.
@@ -404,13 +481,14 @@ shares a package to them. Idempotent; a second run inserts zero rows and
 
 Per file, and they do not agree:
 
-| File   | Before its script                            | After its script                                                                                                                                                                                                                                                                    |
-| ------ | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0063` | Safe. An older build never reads the column. | Serviceable — the old build still ignores the column — but `DELETE FROM spaces` now raises `23503` on a space that homes a package, and the old build has no route that clears a home. Run `UPDATE packages SET home_space_id = NULL` FIRST, before any space deletion.             |
-| `0064` | **Already one-way.**                         | Same. `0015` changes only HOW MANY personal spaces exist, never whether any do.                                                                                                                                                                                                     |
-| `0065` | Safe.                                        | Safe — no script. An older build never reads `package_shares`; the rows left behind are inert.                                                                                                                                                                                      |
-| `0066` | **One-way.**                                 | Same. It DROPs `space_packages.version_id`, which a previous build reads at launch, on the detail page and in the export, and writes through the space-package configuration route. Whatever the column held is discarded with it. Restore the coordinated backup, or roll forward. |
-| `0016` | n/a — it is a script, not a migration.       | Additive and inert for an older build: the extra `package_shares` rows are invisible to a build from before `0065` and read as ordinary offers by any build after it. Leaving them in place costs nothing, so there is nothing to undo.                                             |
+| File   | Before its script                                                                                                                                                                                   | After its script                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0063` | Safe. An older build never reads the column.                                                                                                                                                        | Serviceable — the old build still ignores the column — but `DELETE FROM spaces` now raises `23503` on a space that homes a package, and the old build has no route that clears a home. Clearing the homes means dropping `0067`'s CHECK first — `ALTER TABLE packages DROP CONSTRAINT packages_org_package_has_home;` then `UPDATE packages SET home_space_id = NULL`, in that order and before any space deletion. The reverse order raises `23514`. |
+| `0064` | **Already one-way.**                                                                                                                                                                                | Same. `0015` changes only HOW MANY personal spaces exist, never whether any do.                                                                                                                                                                                                                                                                                                                                                                       |
+| `0065` | Safe.                                                                                                                                                                                               | Safe — no script. An older build never reads `package_shares`; the rows left behind are inert.                                                                                                                                                                                                                                                                                                                                                        |
+| `0066` | **One-way.**                                                                                                                                                                                        | Same. It DROPs `space_packages.version_id`, which a previous build reads at launch, on the detail page and in the export, and writes through the space-package configuration route. Whatever the column held is discarded with it. Restore the coordinated backup, or roll forward.                                                                                                                                                                   |
+| `0067` | **Roll it back with the build.** The CHECK governs every write from the moment it applies, and an older build still creates organization packages with no home — each such `INSERT` raises `23514`. | Same. `ALTER TABLE packages DROP CONSTRAINT packages_org_package_has_home;` is the whole rollback and rewrites no row; `0014`'s `VALIDATE CONSTRAINT` leaves nothing else behind.                                                                                                                                                                                                                                                                     |
+| `0016` | n/a — it is a script, not a migration.                                                                                                                                                              | Additive and inert for an older build: the extra `package_shares` rows are invisible to a build from before `0065` and read as ordinary offers by any build after it. Leaving them in place costs nothing, so there is nothing to undo.                                                                                                                                                                                                               |
 
 `0064` is one-way from the **first boot of the new build**, not from `0015`:
 `provisionMember` creates a personal space at every membership door and

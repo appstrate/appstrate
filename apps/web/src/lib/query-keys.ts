@@ -102,8 +102,7 @@ export const packageKeys = {
   family: (path: string) => ["packages", path] as const,
   /** Org-scoped family prefix (`["packages","agents",orgId]`). */
   familyInOrg: (path: string, orgId: Id) => ["packages", path, orgId] as const,
-  list: (path: string, orgId: Id, spaceId: Id, filter: string) =>
-    ["packages", path, orgId, spaceId, filter] as const,
+  list: (path: string, orgId: Id, spaceId: Id) => ["packages", path, orgId, spaceId] as const,
   detail: (path: string, orgId: Id, spaceId: Id, id: string, version: string | null = null) =>
     ["packages", path, orgId, spaceId, id, version] as const,
 };
