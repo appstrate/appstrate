@@ -30,8 +30,11 @@ export function PackageToolCatalog({
   title,
   actions,
   rowActions,
+  showBasis = true,
 }: {
   title?: string;
+  /** Off where the section heading already says where the list comes from. */
+  showBasis?: boolean;
   /** The list's one "Actions" menu, when the catalog is edited where it is read. */
   actions?: ReactNode;
   /** A row's "…" menu, likewise. */
@@ -232,7 +235,8 @@ export function PackageToolCatalog({
           }
         />
       ) : (
-        inventory && (
+        inventory &&
+        showBasis && (
           <p
             className="text-muted-foreground text-sm leading-relaxed"
             data-testid="tool-inventory-basis"

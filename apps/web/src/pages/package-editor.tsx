@@ -821,6 +821,7 @@ function IntegrationEditorInner({
           <IntegrationToolsSection
             inspection={toolInspection}
             edit={{ manifest: state.manifest, onChange: onManifestChange }}
+            showBasis={false}
           />
         ) : (
           <ToolsPolicySection

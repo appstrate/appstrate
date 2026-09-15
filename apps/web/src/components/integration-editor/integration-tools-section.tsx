@@ -49,10 +49,13 @@ export function IntegrationToolsSection({
   inspection,
   allowUndeclaredTools,
   edit,
+  showBasis = true,
 }: {
   inspection?: IntegrationToolInspection;
   /** Read-only: whether the saved package lets agents call undeclared tools. */
   allowUndeclaredTools?: boolean;
+  /** Off under the Outils heading, whose description says where the list comes from. */
+  showBasis?: boolean;
   /** The draft manifest, when the reader may change the package. */
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
 }) {
@@ -106,6 +109,7 @@ export function IntegrationToolsSection({
       <PackageToolCatalog
         tools={[]}
         inspection={{ basis: inspection?.basis ?? "manifest", entries }}
+        showBasis={showBasis}
         actions={
           edit && (
             <PageActionsMenu>

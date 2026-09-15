@@ -865,6 +865,7 @@ function IntegrationSettings({
           <IntegrationToolsSection
             inspection={detail.tool_catalog_inspection}
             allowUndeclaredTools={detail.allow_undeclared_tools}
+            showBasis={false}
           />
         </div>
       ) : !detail.active ? (

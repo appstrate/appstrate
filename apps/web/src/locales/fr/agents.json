@@ -845,7 +845,7 @@
   "integrationEditor.description.general": "Le nom, la description et l’identité de l’intégration.",
   "integrationEditor.description.source": "Comment l’intégration joint son service : l’API directement, un serveur MCP distant, ou un serveur MCP local exécuté dans la sandbox.",
   "integrationEditor.description.auths": "Les méthodes de connexion au compte du service.",
-  "integrationEditor.description.tools": "Les outils exposés aux agents et les droits que chacun demande.",
+  "integrationEditor.description.tools": "Les outils exposés aux agents et les droits que chacun demande, tels que définis dans le manifeste.",
   "detail.settings.definitionGroup": "Package AFPS",
   "editor.tabIdentity": "Identité",
   "editor.saved": "Définition enregistrée",
