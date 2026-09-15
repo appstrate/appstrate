@@ -1009,6 +1009,16 @@ export function App() {
               }
             />
             <Route
+              path="/mcp-servers/:scope/:name/edit"
+              element={
+                <RequirePermission permission="mcp-servers:write">
+                  <LazyRoute>
+                    <PackageEditorPage type="mcp-server" />
+                  </LazyRoute>
+                </RequirePermission>
+              }
+            />
+            <Route
               path="/mcp-servers/:scope/:name"
               element={
                 <RequirePermission permission="mcp-servers:read">

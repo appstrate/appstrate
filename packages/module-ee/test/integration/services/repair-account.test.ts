@@ -97,6 +97,32 @@ describe("repairBillingAccount", () => {
     expect((await account())!.creditsUsed).toBe(42);
   });
 
+  it("leaves no trace when it is interrupted after the provision, so a re-run still repairs", async () => {
+    // The two statements used to commit separately: an interruption between them
+    // (Ctrl-C, a pool blip, a pod eviction) left the account provisioned with the
+    // debt unapplied, and the guard above then refused every re-run — writing the
+    // org's whole debt off while claiming there was nothing to repair.
+    await seedBillingCursor(0);
+    seedLlmUsage({ orgId, costUsd: 0.05, contextId: "run-1" }); // 50 credits
+    await runBillingSweep();
+    expect(await account()).toBeNull();
+
+    await expect(
+      repairBillingAccount(orgId, "owner@example.com", {
+        onBeforeCommit: () => Promise.reject(new Error("interrupted")),
+      }),
+    ).rejects.toThrow("interrupted");
+
+    expect(await account()).toBeNull();
+
+    // A re-run completes the repair, and `creditQuota` proves the rolled-back
+    // attempt did not burn the email's non-renewable free-tier claim either.
+    const outcome = await repairBillingAccount(orgId, "owner@example.com");
+
+    expect(outcome).toMatchObject({ status: "repaired", creditQuota: 5000, creditsApplied: 50 });
+    expect((await account())!.creditsUsed).toBe(50);
+  });
+
   it("leaves the org billable again — the next sweep debits it normally", async () => {
     await seedBillingCursor(0);
     seedLlmUsage({ orgId, costUsd: 0.05, contextId: "run-1" });

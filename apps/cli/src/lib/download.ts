@@ -66,6 +66,14 @@ const DEFAULT_TOTAL_MS = 20 * 60_000;
 /** Never fire `onProgress` more than once per this interval (plus a final tick). */
 const PROGRESS_THROTTLE_MS = 250;
 
+/**
+ * Bytes buffered in the destination `FileSink` before it flushes. Load-bearing,
+ * not a tuning knob: without an explicit `highWaterMark` a `FileSink` holds
+ * every chunk in memory until `end()` — the whole artifact resident, which is
+ * the buffering this helper exists to avoid.
+ */
+const STREAM_FLUSH_BYTES = 1024 * 1024;
+
 /** Reason tags carried on the AbortController so the catch can explain itself. */
 const STALL = Symbol("stall");
 const TOTAL = Symbol("total");
@@ -148,7 +156,7 @@ export async function streamDownload(
       throw new Error(`GET ${url} → empty response body`);
     }
 
-    sink = Bun.file(destPath).writer();
+    sink = Bun.file(destPath).writer({ highWaterMark: STREAM_FLUSH_BYTES });
     const reader = res.body.getReader();
     armStall();
     try {
@@ -158,7 +166,11 @@ export async function streamDownload(
         armStall();
         const bytes = chunk.value;
         hasher.update(bytes);
-        sink.write(bytes);
+        // AWAITED: `FileSink.write` returns a promise exactly when the sink
+        // drains, which the watermark above makes happen. Un-awaited, a
+        // mid-write failure escapes the `catch` below as an unhandled
+        // rejection (fatal in Bun) and the partial file is never unlinked.
+        await sink.write(bytes);
         received += bytes.byteLength;
         emit(false, total);
       }

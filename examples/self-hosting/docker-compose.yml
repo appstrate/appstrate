@@ -68,7 +68,7 @@ services:
     # Pinned to a verified release (digest-locked) — matches the tier3
     # `docker-compose.yml`. `:latest` would let `docker compose pull`
     # silently swap the storage engine under running data.
-    image: minio/minio:RELEASE.2025-03-12T18-04-18Z@sha256:46b3009bf7041eefbd90bd0d2b38c6ddc24d20a35d609551a1802c558c1c958f
+    image: quay.io/minio/minio:RELEASE.2025-03-12T18-04-18Z@sha256:46b3009bf7041eefbd90bd0d2b38c6ddc24d20a35d609551a1802c558c1c958f
     networks:
       - appstrate-data
     command: server /data
@@ -89,7 +89,7 @@ services:
   minio-init:
     # Pinned to a verified release (digest-locked) — matches the tier3
     # `docker-compose.yml`.
-    image: minio/mc:RELEASE.2025-03-12T17-29-24Z@sha256:470f5546b596e16c7816b9c3fa7a78ce4076bb73c2c73f7faeec0c8043923123
+    image: quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z@sha256:470f5546b596e16c7816b9c3fa7a78ce4076bb73c2c73f7faeec0c8043923123
     networks:
       - appstrate-data
     restart: "no"

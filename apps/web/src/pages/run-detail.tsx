@@ -11,6 +11,7 @@ import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
@@ -54,6 +55,8 @@ export function RunDetailPage() {
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const { can, ready: permissionsReady } = usePermissions();
+  const canReadAgent = can("agents:read");
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -260,11 +263,16 @@ export function RunDetailPage() {
               <UIBadge variant="secondary">{t("runs.inlineBadge")}</UIBadge>
             )}
             <RunHeaderActions
-              canRerun={!isRunning && !isInline && !!agent}
+              canRerun={!isRunning && !isInline && !!agent && permissionsReady}
               canCancel={isRunning && enrichedRun.runOrigin !== "remote"}
               rerunPending={runAgent.isPending}
               cancelPending={cancelRun.isPending}
-              onRerun={() => setInputOpen(true)}
+              onRerun={() => {
+                if (canReadAgent) setInputOpen(true);
+                // The API conceals resolved input from runners: replay that
+                // snapshot server-side, keeping its parameters.
+                else runAgent.mutate({ rerun_from: run.id, version: run.version_ref });
+              }}
               onCancel={() => cancelRun.mutate(runId!)}
             />
           </>
@@ -273,7 +281,7 @@ export function RunDetailPage() {
         <RunHeaderSummary run={enrichedRun} />
       </PageHeader>
 
-      {agent && (
+      {agent && canReadAgent && (
         <RunModal
           open={inputOpen}
           onClose={() => setInputOpen(false)}

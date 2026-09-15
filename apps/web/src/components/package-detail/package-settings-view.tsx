@@ -4,37 +4,31 @@
  * Paramètres for the packages with nothing set per space — skills and local
  * MCP servers — in the shape an agent's and an integration's have.
  *
- * Two groups, not three: Explorer (the tree and the versions, read) and
- * Package AFPS (what the archive holds, edited in place by whoever may write
- * it): Identité, the manifest's form, and Fichiers, the table of every file
- * with the main one edited from it. The raw manifest is not a section (every
- * form writes into it) but a modal reached from under Identité and from
- * `manifest.json` in the table.
+ * Two groups, not three: Explorer (the tree, where files are changed, and the
+ * versions) and Package AFPS (what the archive holds): Identité, the
+ * manifest's form, for whoever may write it, and Contenu, the table of every
+ * file, for whoever reads the package. The raw manifest is not a section (every
+ * form writes into it) but a modal reached from under Identité.
  */
 import { lazy, Suspense, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { FileArchive, FolderTree, History, IdCard } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
-import { primaryDisplayFile } from "../../lib/package-files";
 import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
 import { LoadingState } from "../page-states";
+import { PackageFilesSection } from "../package-files/package-files-section";
 import { PackageFilesView } from "../package-files/package-files-view";
 import { RailLink } from "../settings/rail-link";
 import { PackageVersionsSection } from "./package-versions-section";
 
-const SkillDefinitionEditor = lazy(() =>
+const PackageDefinitionEditor = lazy(() =>
   import("../../pages/package-editor").then((module) => ({
-    default: module.SkillDefinitionEditor,
-  })),
-);
-const McpServerDefinitionEditor = lazy(() =>
-  import("../../pages/package-editor").then((module) => ({
-    default: module.McpServerDefinitionEditor,
+    default: module.PackageDefinitionEditor,
   })),
 );
 
-/** Package AFPS › Fichiers is `bundle` in the URL: `files` is Explorer's tree. */
+/** Package AFPS › Contenu is `bundle` in the URL: `files` is Explorer's tree. */
 type PackageSettingsSection = "files" | "versions" | "general" | "bundle";
 
 export function PackageSettingsView({
@@ -55,7 +49,6 @@ export function PackageSettingsView({
 }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
-  const navigate = useNavigate();
   const editable = canEditDefinition && Boolean(detail) && version === undefined;
 
   const params = new URLSearchParams(location.search);
@@ -64,10 +57,10 @@ export function PackageSettingsView({
   const active: PackageSettingsSection =
     requested === "versions" && versions.isOwned
       ? "versions"
-      : editable && (requested === "general" || requested === "bundle")
-        ? requested
-        : // A skill's SKILL.md stopped being a section: it is a row of Fichiers.
-          editable && requested === "content"
+      : editable && requested === "general"
+        ? "general"
+        : // Contenu reads the bundle, so whoever reads the package reads it.
+          requested === "bundle"
           ? "bundle"
           : "files";
 
@@ -109,17 +102,15 @@ export function PackageSettingsView({
           : []),
       ],
     },
-    ...(editable
-      ? [
-          {
-            label: t("detail.settings.definitionGroup"),
-            items: [
-              { id: "general" as const, icon: IdCard, label: t("editor.tabIdentity") },
-              { id: "bundle" as const, icon: FileArchive, label: t("editor.tabPackageFiles") },
-            ],
-          },
-        ]
-      : []),
+    {
+      label: t("detail.settings.definitionGroup"),
+      items: [
+        ...(editable
+          ? [{ id: "general" as const, icon: IdCard, label: t("editor.tabIdentity") }]
+          : []),
+        { id: "bundle" as const, icon: FileArchive, label: t("editor.tabPackageFiles") },
+      ],
+    },
   ];
 
   return (
@@ -150,22 +141,16 @@ export function PackageSettingsView({
     >
       {active === "versions" ? (
         <PackageVersionsSection type={type} packageId={packageId} {...versions} />
-      ) : (active === "general" || active === "bundle") && detail ? (
+      ) : active === "bundle" ? (
+        <PackageFilesSection
+          type={type}
+          packageId={packageId}
+          manifest={detail?.manifest ?? {}}
+          filesHref={filesHref}
+        />
+      ) : active === "general" && detail ? (
         <Suspense fallback={<LoadingState />}>
-          {type === "skill" ? (
-            <SkillDefinitionEditor
-              detail={detail}
-              section={active === "bundle" ? "files" : "general"}
-              onSection={(next) => void navigate(sectionHref(next === "files" ? "bundle" : next))}
-              filesHref={filesHref}
-            />
-          ) : (
-            <McpServerDefinitionEditor
-              detail={detail}
-              section={active === "bundle" ? "files" : "general"}
-              filesHref={filesHref}
-            />
-          )}
+          <PackageDefinitionEditor type={type} detail={detail} />
         </Suspense>
       ) : (
         <PackageFilesView
@@ -177,11 +162,9 @@ export function PackageSettingsView({
           editHref={
             editable
               ? (path) =>
-                  type === "skill" && path === primaryDisplayFile("skill").name
-                    ? sectionHref("bundle", { modal: { name: "edit", value: path } })
-                    : path === "manifest.json"
-                      ? sectionHref("bundle", { modal: { name: "editManifest", value: "1" } })
-                      : undefined
+                  path === "manifest.json"
+                    ? sectionHref("general", { modal: { name: "editManifest", value: "1" } })
+                    : undefined
               : undefined
           }
         />

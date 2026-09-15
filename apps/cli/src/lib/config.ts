@@ -32,7 +32,41 @@ export interface Profile {
   email: string;
   orgId?: string;
   spaceId?: string;
-  syncSpaces?: string[];
+  syncSpaces?: string[] | InvalidSyncSpaces;
+}
+
+/**
+ * A `syncSpaces` that is not a list of space IDs, carried verbatim instead of
+ * thrown. `readConfig` runs at the first line of every command for every
+ * profile, so throwing there turned one typo in one profile into a CLI with no
+ * way left to repair or even log out of it (#1363). The value stays on the
+ * profile so a write that touches another key round-trips the typo rather than
+ * silently deleting it — deleting it would turn a narrowed sync back into
+ * "every space" without saying so. Read the list through `syncSpaceIds`, which
+ * is where the malformed case turns into the repair instruction.
+ */
+export interface InvalidSyncSpaces {
+  readonly invalid: unknown;
+}
+
+function isInvalidSyncSpaces(value: string[] | InvalidSyncSpaces): value is InvalidSyncSpaces {
+  return !Array.isArray(value);
+}
+
+/**
+ * The space IDs this profile narrows skill sync to, or `undefined` when it
+ * narrows nothing. Throws — naming the profile, the key and the file — when the
+ * stored value is malformed, so the one command that reads the list is the one
+ * command a typo stops.
+ */
+export function syncSpaceIds(profileName: string, profile: Profile): string[] | undefined {
+  const value = profile.syncSpaces;
+  if (value === undefined) return undefined;
+  if (isInvalidSyncSpaces(value))
+    throw new Error(
+      `Invalid syncSpaces for profile "${profileName}" in ${getConfigPath()}: expected an array of space IDs, e.g. syncSpaces = ["spc_abc123"].`,
+    );
+  return value;
 }
 
 export interface Config {
@@ -134,7 +168,7 @@ export async function readConfig(): Promise<Config> {
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
       spaceId: typeof row.spaceId === "string" ? row.spaceId : undefined,
-      ...(row.syncSpaces === undefined ? {} : { syncSpaces: readSyncSpaces(name, row.syncSpaces) }),
+      ...(row.syncSpaces === undefined ? {} : { syncSpaces: readSyncSpaces(row.syncSpaces) }),
     };
   }
   return { defaultProfile, profiles };
@@ -144,15 +178,24 @@ export async function readConfig(): Promise<Config> {
  * Hand-edited, unlike every other field here, so a malformed value is a typo to
  * report rather than a corrupt write to ignore: a skipped row would surface as
  * "profile not configured" and send the user to `login`, which overwrites the
- * pins they were editing. The message names the profile and the fix instead.
- * Trimming and deduplicating here keeps the rest of the CLI comparing raw IDs.
+ * pins they were editing — and would leave `logout` unable to remove the very
+ * section that needs removing. It is kept instead, and reported by
+ * `syncSpaceIds`. Trimming and deduplicating here keeps the rest of the CLI
+ * comparing raw IDs.
  */
-function readSyncSpaces(profileName: string, value: unknown): string[] {
+function readSyncSpaces(value: unknown): string[] | InvalidSyncSpaces {
   if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id.trim().length > 0))
-    throw new Error(
-      `Invalid syncSpaces for profile "${profileName}" in ${getConfigPath()}: expected an array of space IDs, e.g. syncSpaces = ["spc_abc123"].`,
-    );
+    return { invalid: value };
   return [...new Set((value as string[]).map((id) => id.trim()))];
+}
+
+/** The TOML shape of a profile: identical to the in-memory one except that a
+ *  malformed `syncSpaces` unwraps back to the raw value it was read from. */
+function storedProfile(profile: Profile): Record<string, unknown> {
+  const { syncSpaces } = profile;
+  if (syncSpaces !== undefined && isInvalidSyncSpaces(syncSpaces))
+    return { ...profile, syncSpaces: syncSpaces.invalid };
+  return { ...profile };
 }
 
 /** Overwrite the config file atomically (tmp + rename). */
@@ -163,7 +206,12 @@ export async function writeConfig(config: Config): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
   const payload = stringifyToml({
     defaultProfile: config.defaultProfile,
-    profile: config.profiles,
+    // A malformed `syncSpaces` goes back exactly as it was read: a command that
+    // rewrites some other key must not quietly drop the user's typo, because
+    // dropping it widens the next sync to every space.
+    profile: Object.fromEntries(
+      Object.entries(config.profiles).map(([name, profile]) => [name, storedProfile(profile)]),
+    ),
   });
   await writeFile(tmp, payload, { mode: 0o600 });
   try {

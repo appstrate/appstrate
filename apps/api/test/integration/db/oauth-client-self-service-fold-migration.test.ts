@@ -28,6 +28,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
+import { assertSelfServiceFoldApplied } from "../../../src/lib/boot.ts";
 
 const SCRIPT = new URL(
   "../../../../../scripts/migration/0011-oauth-clients-self-service-fold.sql",
@@ -138,5 +139,20 @@ describe("scripts/migration/0011 — `self_service` folded out of the metadata J
 
     expect((await clientRow(FOLDED)).self_service).toBe(true);
     expect((await clientRow(UNPARSEABLE)).self_service).toBe(false);
+  });
+
+  // The boot gate (`assertSelfServiceFoldApplied`) is what makes the window
+  // between `0057` and this script visible instead of silent, and it reads the
+  // live database through the same predicate. Exercised here rather than beside
+  // the gate because the seed above IS the state it exists to catch.
+  it("boot refuses until the fold has run, and passes once it has", async () => {
+    await expect(assertSelfServiceFoldApplied()).rejects.toThrow(/Refusing to boot/);
+
+    await execScript(await Bun.file(SCRIPT).text());
+
+    // The unparseable row is still `false` and still says nothing this predicate
+    // can read: a boot the script cannot clear would be a permanent outage.
+    expect((await clientRow(UNPARSEABLE)).self_service).toBe(false);
+    expect(await assertSelfServiceFoldApplied()).toBeUndefined();
   });
 });

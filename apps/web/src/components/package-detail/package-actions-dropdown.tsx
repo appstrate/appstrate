@@ -176,6 +176,7 @@ export function PackageActionsDropdown({
           variant="outline"
           size={labelledTrigger ? "sm" : "icon"}
           className={labelledTrigger ? "h-8 gap-1.5 px-2.5" : undefined}
+          aria-label={labelledTrigger ? undefined : t("package.actions")}
         >
           {labelledTrigger ? (
             <>

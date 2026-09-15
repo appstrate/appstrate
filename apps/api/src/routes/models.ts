@@ -121,7 +121,15 @@ export const setDefaultSchema = z
 export const seedModelsSchema = z
   .object({
     credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
-    modelIds: z.array(z.string().min(1)).min(1, "at least one modelId is required").max(50),
+    modelIds: z
+      .array(z.string().min(1))
+      .min(1, "at least one modelId is required")
+      .max(50)
+      // The same id twice is one binding asked for twice, and
+      // `uq_org_models_unaliased_binding` refuses it. The seed insert is a
+      // single atomic statement, so a self-duplicating body would fail the
+      // whole batch on a constraint the caller cannot see — name it here.
+      .refine((ids) => new Set(ids).size === ids.length, "modelIds must be unique"),
   })
   .strict();
 

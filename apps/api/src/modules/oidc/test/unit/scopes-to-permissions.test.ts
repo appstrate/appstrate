@@ -4,7 +4,13 @@ import { describe, it, expect, spyOn, afterEach } from "bun:test";
 import { scopesToPermissions } from "../../auth/claims.ts";
 import { logger } from "../../../../lib/logger.ts";
 import { orgPermissions, presetPermissions } from "../../../../lib/permissions.ts";
-import { OIDC_ALLOWED_SCOPES } from "../../auth/scopes.ts";
+import {
+  getAppstrateScopes,
+  getEndUserScopeSet,
+  getSelfServiceScopes,
+  OIDC_ALLOWED_SCOPES,
+  OIDC_DASHBOARD_ONLY_SCOPES,
+} from "../../auth/scopes.ts";
 import {
   setModulePermissionsProvider,
   type ModulePermissionsSnapshot,
@@ -171,6 +177,52 @@ describe("scopesToPermissions — module endUserGrantable propagation", () => {
     try {
       const perms = scopesToPermissions("tasks:read", "dashboard_user", "member");
       expect(perms.size).toBe(0);
+    } finally {
+      debugSpy.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Requestable vocabulary vs end-user allowlist (issue #1372)
+//
+// The two used to be the same array, so a scope kept out of the end-user
+// allowlist was also absent from the provider's vocabulary: no client could ask
+// for it, and every dashboard token was capped at its own runs with no way to
+// widen. These assertions hold the split — requestable at the provider,
+// ungrantable to an end-user.
+// ---------------------------------------------------------------------------
+
+describe("dashboard-only scopes", () => {
+  it("are requestable — present in the provider vocabulary", () => {
+    const vocabulary = new Set(getAppstrateScopes());
+    for (const scope of OIDC_DASHBOARD_ONLY_SCOPES) {
+      expect(vocabulary.has(scope)).toBe(true);
+    }
+    expect(vocabulary.has("runs:read-all")).toBe(true);
+  });
+
+  it("are excluded from the end-user allowlist and from the self-service ceiling", () => {
+    for (const scope of OIDC_DASHBOARD_ONLY_SCOPES) {
+      expect((OIDC_ALLOWED_SCOPES as ReadonlySet<string>).has(scope)).toBe(false);
+      expect(getEndUserScopeSet().has(scope)).toBe(false);
+      expect(getSelfServiceScopes()).not.toContain(scope);
+    }
+  });
+
+  it("reach a dashboard token whose role carries them", () => {
+    // The mint admits every space-level permission; the per-request
+    // intersection with the subject's membership in the pinned space is what
+    // narrows it (RBAC spec §7.2), exactly as for `agents:delete` above.
+    const perms = scopesToPermissions("openid runs:read runs:read-all", "dashboard_user", "admin");
+    expect([...perms].sort()).toEqual(["runs:read", "runs:read-all"]);
+  });
+
+  it("are still dropped from an end-user token that asks for them", () => {
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const perms = scopesToPermissions("runs:read runs:read-all", "end_user");
+      expect([...perms]).toEqual(["runs:read"]);
     } finally {
       debugSpy.mockRestore();
     }

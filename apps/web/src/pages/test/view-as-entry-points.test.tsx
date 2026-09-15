@@ -78,6 +78,7 @@ function preset(key: string): components["schemas"]["RoleObject"] {
     name: key,
     description: null,
     permissions: [],
+    unavailable_permissions: [],
     createdAt: null,
     updatedAt: null,
   };
@@ -241,6 +242,7 @@ describe("custom-role gating on the roles page", () => {
     name: "Responsable assistance",
     description: "Assistance clients",
     permissions: ["agents:read"],
+    unavailable_permissions: [],
     createdAt: null,
     updatedAt: null,
   };

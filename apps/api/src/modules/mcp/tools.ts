@@ -46,6 +46,7 @@ import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { canReadRuns } from "../../lib/run-visibility.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -955,18 +956,21 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
     // `GET /api/runs/{id}` through the same in-process dispatch — and
     // `internal-dispatch.ts` is explicit that the marker "does not
     // authenticate, elevate, or alter identity", so the caller's own scopes
-    // gate the poll. Without this, a credential holding `agents:run` but not
-    // `runs:read` provisions the container, incurs the LLM spend, and only THEN
-    // takes a 403 on the first poll: a billed orphan instead of a refusal. The
-    // description above also tells the model not to fall back to `getRun`, so
-    // there is no recovery path once the run is away.
-    if (!ctx.permissions.has("runs:read")) {
+    // gate the poll. Without this, a credential holding `agents:run` but no
+    // run-read permission provisions the container, incurs the LLM spend, and
+    // only THEN takes a 403 on the first poll: a billed orphan instead of a
+    // refusal. The description above also tells the model not to fall back to
+    // `getRun`, so there is no recovery path once the run is away. The predicate
+    // is `canReadRuns`, never a literal `runs:read` test: `runs:read-all` is a
+    // superset, so a principal holding only the wide permission reads the poll
+    // route fine and must not be refused here.
+    if (!canReadRuns(ctx.permissions)) {
       emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
       return textResult(
         {
           error:
-            "Permission 'runs:read' is required to wait for a run. Launching without it would " +
-            "start the run and then fail to read its status.",
+            "Permission 'runs:read' or 'runs:read-all' is required to wait for a run. Launching " +
+            "without one would start the run and then fail to read its status.",
         },
         true,
       );

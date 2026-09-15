@@ -17,6 +17,9 @@ import {
   getPlans,
   type PlanDefinition,
 } from "../../src/config.ts";
+import { applyEeFixtureEnv } from "../helpers/fixture-env.ts";
+
+applyEeFixtureEnv();
 
 function plan(id: string, tier: number, stripePriceId: string | null): PlanDefinition {
   return {

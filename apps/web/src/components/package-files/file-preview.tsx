@@ -28,6 +28,7 @@
  * rendering mode exists.
  */
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Download, FileWarning, Pencil } from "lucide-react";
@@ -49,13 +50,22 @@ import { usePackageFile, usePackageFileDownload } from "./use-package-file";
 interface FilePreviewProps {
   /** Target of the tree's `aria-controls` — see `FileExplorer`. */
   id: string;
-  packageId: string;
+  packageId: string | undefined;
   version: string | undefined;
   entry: PackageFileEntry;
   className?: string;
   hideHeader?: boolean;
   /** "Modifier" beside the download, when a Définition section edits this file. */
   editHref?: string;
+  /**
+   * Extra controls in the header, right of the download button. The authoring
+   * surface puts *Remplacer* and *Supprimer* here: a binary or oversized file
+   * has no editable body, so its header is the only place those two gestures
+   * can live.
+   */
+  actions?: ReactNode;
+  /** A staged file has no downloadable server representation yet. */
+  downloadPath?: string | null;
 }
 
 export function FilePreview({
@@ -66,6 +76,8 @@ export function FilePreview({
   className,
   hideHeader = false,
   editHref,
+  actions,
+  downloadPath = entry.path,
 }: FilePreviewProps) {
   const { t } = useTranslation("agents");
   const { resolvedTheme } = useTheme();
@@ -111,11 +123,13 @@ export function FilePreview({
             size="sm"
             className="shrink-0"
             aria-label={t("files.downloadFile")}
-            onClick={() => void download(entry.path)}
+            disabled={downloadPath === null}
+            onClick={() => downloadPath !== null && void download(downloadPath)}
           >
             <Download size={14} />
             <span className="hidden sm:inline">{t("files.downloadFile")}</span>
           </Button>
+          {actions}
         </div>
       )}
 

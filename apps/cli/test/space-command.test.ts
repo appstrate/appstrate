@@ -93,6 +93,8 @@ const twoSpaces = {
       name: "Default",
       isDefault: true,
       createdAt: "t",
+      access: "member",
+      permissions: ["skills:read"],
     },
     {
       id: "spc_2",
@@ -100,6 +102,8 @@ const twoSpaces = {
       name: "Staging",
       isDefault: false,
       createdAt: "t",
+      access: "member",
+      permissions: ["skills:read"],
     },
   ],
 };

@@ -127,7 +127,7 @@ appstrate/
 - Auth: Better Auth cookie sessions + `X-Org-Id` header for org context
 - API key auth (`ask_*` prefix) tried first, then cookie fallback
 - Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
-- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`apiKeySpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
+- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`pinnedSpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
 - Rate limiting: Redis-backed, keyed by `method:path:identity`
 
 ### Frontend Patterns

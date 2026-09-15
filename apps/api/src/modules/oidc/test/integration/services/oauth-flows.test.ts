@@ -52,7 +52,7 @@ import {
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
-import { encodeBasicCredentials } from "@better-auth/core/oauth2";
+import { encodeBasicCredentials } from "better-auth/oauth2";
 import { decodeJwt } from "jose";
 
 // The protected-resource registry is a process-wide singleton shared with the

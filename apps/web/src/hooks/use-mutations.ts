@@ -8,7 +8,7 @@ import i18n from "../i18n";
 import { ApiError, client, type components } from "../api/client";
 import { PACKAGE_CONFIG, type PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
-import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { splitPackageRef } from "../lib/package-paths";
 import {
   packageKeys,
   agentsKeys,
@@ -90,12 +90,12 @@ export function useSaveInputSettings(packageId: string) {
 
 interface RunAgentParams {
   input?: Record<string, unknown>;
+  /** Replay a prior run's persisted input instead of supplying `input`. */
+  rerun_from?: string;
   /**
    * Version selector forwarded as `?version=`: `"draft"`, `"published"`, or
-   * a version spec. When omitted, the editor default `"draft"` is sent
-   * explicitly — the API's own default is published-when-exists (#636), but
-   * dashboard test-runs must keep executing the working copy the user is
-   * looking at.
+   * a version spec. Omitted selectors use the API's published-when-exists
+   * default; callers testing a working copy explicitly pass `"draft"`.
    */
   version?: string;
   /**
@@ -127,6 +127,7 @@ export function useRunAgent(packageId: string) {
     mutationFn: async (params?: RunAgentParams) => {
       const {
         input,
+        rerun_from,
         version,
         connectionOverrides,
         modelId,
@@ -149,6 +150,7 @@ export function useRunAgent(packageId: string) {
           // never>` — narrow the editor-built input; the server validates it
           // against the agent's input schema.
           ...(input !== undefined ? { input: input as Record<string, never> } : {}),
+          ...(rerun_from !== undefined ? { rerun_from } : {}),
           ...(connectionOverrides !== undefined
             ? { connection_overrides: connectionOverrides }
             : {}),
@@ -348,9 +350,8 @@ export function useDeleteAllMemories(packageId: string) {
 
 // --- Package (skill/tool) create/update mutations ---
 
-export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
+export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   return useMutation({
     // Exactly the keys the editor sends: the skill/integration branches forward
     // this object whole and the create schemas are `.strict()`, so a key
@@ -360,9 +361,12 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
+      operations?: components["schemas"]["PackageFileWriteOperation"][];
     }): Promise<{ id: string }> => {
       // 201 → the created package resource, bare (issue #657).
       switch (type) {
+        case "mcp-server":
+          throw new Error("MCP servers are created by importing their bundle");
         case "agent": {
           const { data } = await client.POST("/api/packages/agents", {
             // The editor builds the manifest as a plain `Record<string,
@@ -372,8 +376,8 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
             // `content` stays checked, and the server validates the manifest
             // against the AFPS schema.
             body: {
+              ...body,
               manifest: body.manifest as components["schemas"]["AgentManifest"],
-              content: body.content,
             },
           });
           return { id: data!.id };
@@ -388,13 +392,10 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
         }
       }
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.all });
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
-      if (data.id) {
-        navigate(packageDetailPath(type, data.id));
-      }
     },
     onError: onMutationError,
   });
@@ -406,18 +407,15 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
  * page — the visual map's in-place edit dialogs — pass false, since navigating
  * would drop the URL hash and throw the user back to the default tab.
  */
-export function useUpdatePackage(
-  type: PackageType,
-  packageId: string,
-  opts: { redirect?: boolean } = {},
-) {
+export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const cfg = PACKAGE_CONFIG[type];
   return useMutation({
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
-      content: string;
+      /** Legacy API content field; the editor sends ordered file operations. */
+      content?: string;
+      operations?: import("../lib/package-file-tree").PackageFileWriteOperation[];
       lock_version: number;
     }): Promise<{ id: string; lock_version: number }> => {
       const { data } = await client.PUT(`/api/packages/${cfg.path}/{scope}/{name}`, {
@@ -446,7 +444,6 @@ export function useUpdatePackage(
         void invalidateIntegrationQueries(qc);
       }
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      if (opts.redirect !== false) navigate(packageDetailPath(type, packageId));
     },
     onError: onMutationError,
   });

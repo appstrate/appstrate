@@ -261,12 +261,22 @@ export function createIntegrationMitmListener(
   // Outer TCP server: parse CONNECT, peek ClientHello for SNI, relay
   // to the per-SNI Bun.serve.
   const tcpServer = netCreateServer((rawSocket: Socket) => {
+    // `netCreateServer`'s handler is void-returning, so nothing in the runtime
+    // observes this promise. `handleInboundConnection` awaits the SSRF/DNS
+    // resolver and the ClientHello reads, none of which is inside a try — one
+    // rejection there is an unhandled rejection, which in Bun takes the whole
+    // sidecar down and with it the run it is proxying for. Route it through the
+    // same `tls-error` + destroy path the function's own failure branches use,
+    // so a bad connection kills the connection and nothing else.
     handleInboundConnection(
       rawSocket,
       async (sniHost) => getOrCreateTlsServer(sniHost),
       emit,
       options.resolveHostFn,
-    );
+    ).catch((err: unknown) => {
+      emit({ kind: "tls-error", error: `connection handler failed: ${(err as Error).message}` });
+      rawSocket.destroy();
+    });
   });
 
   let readyResolve!: () => void;

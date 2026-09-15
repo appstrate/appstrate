@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { encodeBasicCredentials } from "@better-auth/core/oauth2";
+import { encodeBasicCredentials } from "better-auth/oauth2";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user as userTable, session as sessionTable } from "@appstrate/db/schema";

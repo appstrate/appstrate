@@ -4,7 +4,7 @@
  * In-place editing from the visual map.
  *
  * Deliberately thin: it mounts the SAME widgets the agent editor uses
- * (`ResourceSection` for skills / integrations, `PromptEditor` for the prompt)
+ * (`ResourceSection` for skills / integrations, `ContentEditor` for the prompt)
  * and saves through the SAME mutation (`useUpdatePackage`, which owns the cache
  * invalidations). Nothing about how a manifest is read or written lives here —
  * `getResourceEntries` / `setResourceEntries` remain the single round-trip for
@@ -23,7 +23,7 @@ import type { ResourceEntry } from "@appstrate/shared-types";
 import { Modal } from "../../components/modal";
 import { Spinner } from "../../components/spinner";
 import { ResourceSection } from "../../components/agent-editor/resource-section";
-import { PromptEditor } from "../../components/agent-editor/prompt-editor";
+import { ContentEditor } from "../../components/package-editor/content-editor";
 import { RuntimeToolsGroup } from "../../components/agent-editor/runtime-tools-group";
 import { SchemaSection, type SchemaField } from "../../components/agent-editor/schema-section";
 import {
@@ -134,7 +134,7 @@ function MapEditForm({
 }) {
   const { t } = useTranslation(["agents", "agent-map", "common"]);
   const qc = useQueryClient();
-  const update = useUpdatePackage("agent", packageId, { redirect: false });
+  const update = useUpdatePackage("agent", packageId);
   const activate = useActivateIntegration();
   const [draftPrompt, setDraftPrompt] = useState(prompt);
   const [entries, setEntries] = useState<ResourceEntry[]>(() =>
@@ -225,7 +225,7 @@ function MapEditForm({
     <>
       <div className="max-h-[60vh] overflow-y-auto">
         {kind === "prompt" ? (
-          <PromptEditor value={draftPrompt} onChange={setDraftPrompt} />
+          <ContentEditor value={draftPrompt} onChange={setDraftPrompt} language="markdown" />
         ) : kind === "runtime_tools" ? (
           <RuntimeToolsGroup selected={runtimeTools} onChange={setRuntimeTools} />
         ) : isSchemaKind(kind) ? (

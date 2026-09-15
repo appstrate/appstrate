@@ -71,7 +71,8 @@ export const modelsPaths = {
       operationId: "createModel",
       tags: ["Models"],
       summary: "Create a custom model",
-      description: "Create a new custom LLM model for the organization.",
+      description:
+        "Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -141,6 +142,7 @@ export const modelsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": { $ref: "#/components/responses/ModelAlreadyAdded" },
       },
     },
   },
@@ -226,6 +228,7 @@ export const modelsPaths = {
                   type: "array",
                   minItems: 1,
                   maxItems: 50,
+                  uniqueItems: true,
                   items: { type: "string", minLength: 1 },
                 },
               },
@@ -504,6 +507,7 @@ export const modelsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": { $ref: "#/components/responses/ModelAlreadyAdded" },
       },
     },
     delete: {

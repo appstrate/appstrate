@@ -2262,6 +2262,57 @@ describe("Packages API", () => {
       });
     });
 
+    it("moves lock_version when it overwrites an existing package, so a stale editor save is refused", async () => {
+      const enc = (str: string) => new TextEncoder().encode(str);
+      const id = "@pkgorg/reimported-skill";
+      const manifest = (description: string) => ({
+        name: id,
+        version: "1.0.0",
+        type: "skill",
+        schema_version: "0.1",
+        display_name: "Reimported Skill",
+        description,
+      });
+      const archive = (description: string, body: string) => {
+        const afps = zipSync({
+          "manifest.json": enc(JSON.stringify(manifest(description))),
+          "SKILL.md": enc(
+            `---\nname: reimported-skill\ndescription: ${description}\n---\n\n${body}`,
+          ),
+        });
+        const form = new FormData();
+        form.append("file", new File([new Uint8Array(afps)], "skill.afps"));
+        return form;
+      };
+      const importArchive = (form: FormData, query = "") =>
+        app.request(`/api/packages/import${query}`, {
+          method: "POST",
+          headers: authHeaders(ctx),
+          body: form,
+        });
+
+      expect((await importArchive(archive("First import.", "First."))).status).toBe(201);
+      const before = await app.request(`/api/packages/skills/${id}`, { headers: authHeaders(ctx) });
+      const stale = ((await before.json()) as { lock_version: number }).lock_version;
+
+      // A re-import is the later writer: it overwrites the draft wholesale.
+      expect(
+        (await importArchive(archive("Second import.", "Second."), "?force=true")).status,
+      ).toBe(201);
+
+      // An editor tab holding the pre-import token must be told its save is
+      // stale rather than writing its screen over the freshly imported draft.
+      const put = await app.request(`/api/packages/skills/${id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          content: "---\nname: reimported-skill\ndescription: Stale.\n---\n\nStale.",
+          lock_version: stale,
+        }),
+      });
+      expect(put.status).toBe(409);
+    });
+
     // The dashboard's resource-section ".afps import" (useUploadPackage) routes
     // skill/integration/agent ZIPs here — the per-type create endpoints are
     // JSON-only. Cover a non-agent type so type-detection on this path is

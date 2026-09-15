@@ -3,13 +3,15 @@
 import Stripe from "stripe";
 import { z } from "zod";
 import { getStripe } from "./client.ts";
-import { getEeDb } from "../db.ts";
+import { cancelSubscription } from "./cancel.ts";
+import { getEeDb, type EeTx } from "../db.ts";
 import { billingAccounts, stripeEvents } from "../../drizzle/schema.ts";
-import { and, eq, isNull, notInArray, or, type SQL } from "drizzle-orm";
+import { and, eq, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { logger } from "../logger.ts";
 import {
   getPlans,
   isPlanId,
+  ENDED_SUBSCRIPTION_STATUSES,
   HELD_SUBSCRIPTION_STATUSES,
   type Plans,
   type PlanDefinition,
@@ -98,8 +100,8 @@ function noHeldSubscription(): SQL {
 }
 
 /**
- * The predicate for `customer.subscription.created`, whose payload carries CREATION-time
- * state: it attaches only where nothing is held, so a late one rolls nothing back.
+ * The creation safety net only attaches an unheld account; it must not replace
+ * a subscription already established by checkout or invoice delivery.
  */
 function unattachedAccount(orgId: string): SQL {
   return and(eq(billingAccounts.orgId, orgId), noHeldSubscription())!;
@@ -108,6 +110,10 @@ function unattachedAccount(orgId: string): SQL {
 /**
  * The predicate for `checkout.session.completed` and `invoice.paid`: they carry
  * AUTHORITATIVE data and also write the account already carrying that subscription.
+ *
+ * `noHeldSubscription()` deliberately matches a cancelled account, so this predicate alone
+ * does NOT prove the subscription is alive — callers MUST first gate on the live object
+ * from Stripe ({@link isEndedSubscription}), or a late event re-attaches a dead id.
  */
 function attachableSubscription(orgId: string, subscriptionId: string): SQL {
   return and(
@@ -116,7 +122,21 @@ function attachableSubscription(orgId: string, subscriptionId: string): SQL {
   )!;
 }
 
-/** One line for an event on a subscription this org is not on — a replacement's tail. */
+/**
+ * A subscription Stripe will never bill again. The event payload cannot decide this — it
+ * freezes at emission and Stripe guarantees no delivery order, so a `checkout.session.completed`
+ * delivered after the cancellation still describes a live subscription. Only the retrieved
+ * object does, which is why both attach paths retrieve before granting entitlements.
+ */
+function isEndedSubscription(subscription: Stripe.Subscription): boolean {
+  return ENDED_SUBSCRIPTION_STATUSES.has(subscription.status);
+}
+
+/**
+ * One line for an event on a subscription this org is not on — a replacement's tail. Log
+ * only: a duplicate that is still billing came from a Checkout, and is cancelled by its own
+ * `checkout.session.completed` ({@link reconcileSupersededCheckout}).
+ */
 function logSupersededSubscription(
   event: Stripe.Event,
   orgId: string,
@@ -129,6 +149,90 @@ function logSupersededSubscription(
     subscriptionId,
   });
 }
+
+/** One line for an attach refused because Stripe no longer holds the subscription. */
+function logEndedSubscription(
+  event: Stripe.Event,
+  orgId: string,
+  subscription: Stripe.Subscription,
+): void {
+  logger.warn("Stripe event skipped — subscription has ended, no entitlement granted", {
+    eventId: event.id,
+    type: event.type,
+    orgId,
+    subscriptionId: subscription.id,
+    status: subscription.status,
+  });
+}
+
+/**
+ * The subscription the org's account carries right now — null when nothing does, which
+ * after a refused attach means the org has no billing row at all (every other shape
+ * satisfies {@link attachableSubscription}).
+ */
+async function heldSubscriptionId(db: EeTx, orgId: string): Promise<string | null> {
+  const [account] = await db
+    .select({ stripeSubscriptionId: billingAccounts.stripeSubscriptionId })
+    .from(billingAccounts)
+    .where(eq(billingAccounts.orgId, orgId));
+  return account?.stripeSubscriptionId ?? null;
+}
+
+/**
+ * A paid checkout the org cannot be attached to, because another subscription already holds
+ * the account. `createCheckoutSession` reads state Stripe writes only once a session is
+ * PAID, so two sessions opened before either payment both pass its guard and Stripe bills
+ * both. Only one can be the org's; the loser is cancelled here, because logging it leaves a
+ * live subscription charging a customer that nothing in the product names, indefinitely.
+ *
+ * Cancels only against positive evidence of the winner — on no billing row there is no
+ * duplicate to reconcile, and ending a paid subscription on that much would be guesswork.
+ * A refused cancellation throws: the handler wrote nothing, so the dropped claim lets
+ * Stripe's redelivery retry, and a cancel of an already-gone subscription is a no-op.
+ */
+async function reconcileSupersededCheckout(
+  db: EeTx,
+  event: Stripe.Event,
+  orgId: string,
+  subscriptionId: string,
+): Promise<void> {
+  logSupersededSubscription(event, orgId, subscriptionId);
+
+  // No winner to point at: no billing row (nothing to reconcile against), or a row already
+  // on this very subscription (no duplicate at all) — neither justifies ending a paid one.
+  const heldId = await heldSubscriptionId(db, orgId);
+  if (heldId === null || heldId === subscriptionId) return;
+
+  logger.warn("Duplicate paid subscription — cancelling the one that lost the attach", {
+    eventId: event.id,
+    orgId,
+    subscriptionId,
+    heldSubscriptionId: heldId,
+  });
+
+  if (!(await cancelSubscription(subscriptionId, { orgId, reason: "superseded-checkout" }))) {
+    throw new Error(`Failed to cancel superseded subscription ${subscriptionId} for org ${orgId}`);
+  }
+}
+
+/** Resolve before any Stripe request, so cancellation also waits for in-flight GETs. */
+function eventSubscriptionId(event: Stripe.Event): string | null {
+  switch (event.type) {
+    case "checkout.session.completed":
+      return refId(event.data.object.subscription);
+    case "invoice.paid":
+    case "invoice.payment_failed":
+      return refId(event.data.object.parent?.subscription_details?.subscription);
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
+      return event.data.object.id;
+    default:
+      return null;
+  }
+}
+
+type AfterCommit = Array<() => void | Promise<unknown>>;
 
 export async function handleWebhook(body: string, signature: string): Promise<void> {
   const event = await getStripe().webhooks.constructEventAsync(
@@ -171,31 +275,51 @@ export async function handleWebhook(body: string, signature: string): Promise<vo
     return; // Being processed by another handler
   }
 
+  const afterCommit: AfterCommit = [];
   try {
-    await processEvent(event);
+    await db.transaction(async (tx) => {
+      const subscriptionId = eventSubscriptionId(event);
+      if (subscriptionId) {
+        // Different event IDs can describe the same subscription. Serialize its live
+        // read AND account mutation across replicas; an UPDATE's row lock alone starts
+        // too late. Transaction scope releases the lock on rollback or connection loss,
+        // and all SQL uses this connection rather than exhausting the pool with waiters.
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtextextended(${`ee-stripe-subscription:${subscriptionId}`}, 0))`,
+        );
+      }
+      await processEvent(event, tx, afterCommit);
 
-    // Mark done only while the claim is still `processing`. This is a partial
-    // guard, not a full claim-ownership check: it detects the common case where
-    // OUR row was deleted by a stale-claim reclaim mid-processing (0 rows → we
-    // log it). It does NOT distinguish our claim from a fresh reinserted one, so
-    // the pathological interleave (handler runs > CLAIM_TTL, gets reclaimed, a
-    // retry reinserts + reprocesses) is not fully prevented — fully closing it
-    // needs a per-claim nonce column. Accepted: handlers are sub-second, so the
-    // > 5-min window is effectively unreachable; most handlers are idempotent
-    // (the subscription_cycle credit reset being the exception).
-    const [confirmed] = await db
-      .update(stripeEvents)
-      .set({ status: "done", processedAt: new Date() })
-      .where(and(eq(stripeEvents.eventId, event.id), eq(stripeEvents.status, "processing")))
-      .returning({ eventId: stripeEvents.eventId });
+      // Mark done only while the claim is still `processing`. This is a partial
+      // guard, not a full claim-ownership check: it detects the common case where
+      // OUR row was deleted by a stale-claim reclaim mid-processing (0 rows → we
+      // log it). It does NOT distinguish our claim from a fresh reinserted one, so
+      // the pathological interleave (handler runs > CLAIM_TTL, gets reclaimed, a
+      // retry reinserts + reprocesses) is not fully prevented — fully closing it
+      // needs a per-claim nonce column. Accepted: handlers are sub-second, so the
+      // > 5-min window is effectively unreachable; most handlers are idempotent
+      // (the subscription_cycle credit reset being the exception).
+      const [confirmed] = await tx
+        .update(stripeEvents)
+        .set({ status: "done", processedAt: new Date() })
+        .where(and(eq(stripeEvents.eventId, event.id), eq(stripeEvents.status, "processing")))
+        .returning({ eventId: stripeEvents.eventId });
 
-    if (!confirmed) {
-      logger.warn("Stripe event claim was reclaimed during processing — may reprocess on retry", {
-        eventId: event.id,
-        type: event.type,
-      });
-    }
+      if (!confirmed) {
+        logger.warn("Stripe event claim was reclaimed during processing — may reprocess on retry", {
+          eventId: event.id,
+          type: event.type,
+        });
+      }
+    });
   } catch (err) {
+    logger.error("Stripe event processing failed", {
+      eventId: event.id,
+      type: event.type,
+      objectId: "id" in event.data.object ? event.data.object.id : undefined,
+      subscriptionId: eventSubscriptionId(event),
+      err,
+    });
     // Delete claim to allow immediate retry by Stripe
     await db
       .delete(stripeEvents)
@@ -203,10 +327,23 @@ export async function handleWebhook(body: string, signature: string): Promise<vo
       .catch(() => {});
     throw err;
   }
+
+  // Platform projection reads the committed plan using another pool connection;
+  // neither it nor email delivery may run against an uncommitted account update.
+  for (const effect of afterCommit) {
+    try {
+      await effect();
+    } catch (err) {
+      logger.error("Stripe post-commit effect failed", { eventId: event.id, err });
+    }
+  }
 }
 
-async function processEvent(event: Stripe.Event): Promise<void> {
-  const db = getEeDb();
+async function processEvent(
+  event: Stripe.Event,
+  db: EeTx,
+  afterCommit: AfterCommit,
+): Promise<void> {
   const plans = getPlans();
 
   switch (event.type) {
@@ -227,10 +364,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         });
         break;
       }
-      const { orgId, planId } = metadata;
-
-      const plan = isPlanId(planId) ? plans[planId] : undefined;
-      if (!plan || !plan.stripePriceId) break;
+      const { orgId } = metadata;
 
       const customerId = refId(session.customer);
       const subscriptionId = refId(session.subscription);
@@ -243,61 +377,82 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         break;
       }
 
+      // The session froze at completion; Stripe may have cancelled the subscription since
+      // (deliveries are unordered). Retrieve the live object BEFORE granting: throwing on
+      // failure deletes the claim so Stripe retries, as on the invoice.paid path — the
+      // grant is billing-critical and must not proceed on unverified state.
+      const checkoutSubscription = await getStripe().subscriptions.retrieve(subscriptionId);
+
+      if (isEndedSubscription(checkoutSubscription)) {
+        logEndedSubscription(event, orgId, checkoutSubscription);
+        break;
+      }
+
+      const plan = planForSubscription(checkoutSubscription, plans);
+      if (!plan) {
+        logger.warn("No plan matches subscription price, skipping checkout attach", {
+          orgId,
+          subscriptionId,
+        });
+        break;
+      }
+
       const [linked] = await db
         .update(billingAccounts)
         .set({
-          planId,
+          planId: plan.id,
           creditQuota: plan.creditQuota,
           stripeCustomerId: customerId,
           stripeSubscriptionId: subscriptionId,
-          subscriptionStatus: "active",
+          // The live status, not a hardcoded "active": a checkout that opens a trial is
+          // `trialing`, and the row must not claim a state Stripe does not hold.
+          subscriptionStatus: checkoutSubscription.status,
           updatedAt: new Date(),
         })
         .where(attachableSubscription(orgId, subscriptionId))
         .returning({ orgId: billingAccounts.orgId });
 
       if (!linked) {
-        logSupersededSubscription(event, orgId, subscriptionId);
+        await reconcileSupersededCheckout(db, event, orgId, subscriptionId);
         break;
       }
 
       logger.info("Checkout completed — org linked + quota allocated", {
         orgId,
-        planId,
+        planId: plan.id,
         creditQuota: plan.creditQuota,
       });
 
       // Project the new plan onto the platform storage limit (best-effort —
       // the periodic resync repairs a miss).
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
 
-      // Email: subscription confirmation — retrieve real period end from Stripe
-      let checkoutPeriodEnd: Date | null = null;
-      try {
-        const sub = await getStripe().subscriptions.retrieve(subscriptionId);
-        checkoutPeriodEnd = subscriptionPeriodEnd(sub);
-      } catch {
-        // Best-effort — send email without precise date if Stripe call fails
-      }
-
-      sendBillingEmail(orgId, "subscription-confirmed", {
-        planName: plan.name,
-        price: plan.monthlyPrice,
-        periodEnd: (checkoutPeriodEnd ?? new Date()).toISOString(),
-        locale: "fr",
-      });
+      afterCommit.push(() =>
+        sendBillingEmail(orgId, "subscription-confirmed", {
+          planName: plan.name,
+          price: plan.monthlyPrice,
+          periodEnd: (subscriptionPeriodEnd(checkoutSubscription) ?? new Date()).toISOString(),
+          locale: "fr",
+        }),
+      );
       break;
     }
 
     case "customer.subscription.created": {
       // Safety net: captures subscriptions created outside Checkout flow
-      const subscription = event.data.object;
-      const subMetadata = parseStripeMetadata(subscription.metadata);
+      const subMetadata = parseStripeMetadata(event.data.object.metadata);
       if (!subMetadata) {
         logger.warn("Subscription created with invalid metadata", { eventId: event.id });
         break;
       }
       const { orgId } = subMetadata;
+      // Creation-time payloads survive cancellation too. Retrieve under the same
+      // subscription lock as checkout/invoice before attaching an unheld account.
+      const subscription = await getStripe().subscriptions.retrieve(event.data.object.id);
+      if (isEndedSubscription(subscription)) {
+        logEndedSubscription(event, orgId, subscription);
+        break;
+      }
 
       const subCustomerId = refId(subscription.customer);
       if (!subCustomerId) {
@@ -309,18 +464,24 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       }
 
       const plan = planForSubscription(subscription, plans);
-      const planId = plan?.id ?? subMetadata.planId;
+      if (!plan) {
+        logger.warn("No plan matches subscription price, skipping creation attach", {
+          orgId,
+          subscriptionId: subscription.id,
+        });
+        break;
+      }
 
       // The condition rides in the UPDATE, where the row lock decides it: a read-then-write
       // lets a concurrent handler attach between the two.
       const [linked] = await db
         .update(billingAccounts)
         .set({
-          planId,
+          planId: plan.id,
           // Allocate quota here too (trial / non-checkout path), so a
           // subscription that never goes through checkout.session.completed
           // still gets its plan budget before the first invoice.paid.
-          ...(plan ? { creditQuota: plan.creditQuota } : {}),
+          creditQuota: plan.creditQuota,
           stripeCustomerId: subCustomerId,
           stripeSubscriptionId: subscription.id,
           subscriptionStatus: subscription.status,
@@ -337,11 +498,11 @@ async function processEvent(event: Stripe.Event): Promise<void> {
 
       logger.info("Subscription created (non-Checkout path) — org linked to Stripe", {
         orgId,
-        planId,
+        planId: plan.id,
         status: subscription.status,
       });
 
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
       break;
     }
 
@@ -369,19 +530,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         break;
       }
 
-      let subscription: Stripe.Subscription;
-      try {
-        subscription = await getStripe().subscriptions.retrieve(refId(subscriptionRef)!);
-      } catch (err) {
-        // Throw — deletes the claim so Stripe retries. Budget allocation is the
-        // billing-critical path; a silent break would lose the grant entirely.
-        logger.error("Failed to retrieve subscription for budget allocation", {
-          eventId: event.id,
-          invoiceId: invoice.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
-      }
+      const subscription = await getStripe().subscriptions.retrieve(refId(subscriptionRef)!);
 
       const metadata = parseStripeMetadata(subscription.metadata);
       if (!metadata) {
@@ -392,6 +541,13 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         break;
       }
       const { orgId } = metadata;
+
+      // Same guard as the checkout attach: an invoice settled after the cancellation must
+      // not re-attach the dead subscription with a fresh quota.
+      if (isEndedSubscription(subscription)) {
+        logEndedSubscription(event, orgId, subscription);
+        break;
+      }
 
       const plan = planForSubscription(subscription, plans);
       if (!plan) {
@@ -418,8 +574,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           ...(resetCredits ? { creditsUsed: 0 } : {}),
           creditQuota: plan.creditQuota,
           periodEnd: subscriptionPeriodEnd(subscription),
-          // Invoice paid = subscription is current
-          subscriptionStatus: "active",
+          subscriptionStatus: subscription.status,
           stripeSubscriptionId: subscription.id,
           ...(invoiceCustomerId ? { stripeCustomerId: invoiceCustomerId } : {}),
           updatedAt: new Date(),
@@ -440,23 +595,26 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         billingReason: invoice.billing_reason,
       });
 
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
 
       // Email: payment receipt
       const amountPaid = (invoice.amount_paid ?? 0) / 100; // cents → dollars
-      sendBillingEmail(orgId, "payment-receipt", {
-        planName: plan.name,
-        amount: amountPaid,
-        invoiceUrl: invoice.hosted_invoice_url ?? null,
-        periodEnd: (subscriptionPeriodEnd(subscription) ?? new Date()).toISOString(),
-        locale: "fr",
-      });
+      afterCommit.push(() =>
+        sendBillingEmail(orgId, "payment-receipt", {
+          planName: plan.name,
+          amount: amountPaid,
+          invoiceUrl: invoice.hosted_invoice_url ?? null,
+          periodEnd: (subscriptionPeriodEnd(subscription) ?? new Date()).toISOString(),
+          locale: "fr",
+        }),
+      );
       break;
     }
 
     case "customer.subscription.updated": {
-      // Handles: plan changes, status transitions, cancel_at_period_end, pause/resume
-      const subscription = event.data.object;
+      // Delivery order is not event order. Read under the subscription lock so
+      // delayed updates cannot restore an obsolete plan, quota or status.
+      const subscription = await getStripe().subscriptions.retrieve(event.data.object.id);
       const subMetadata = parseStripeMetadata(subscription.metadata);
       if (!subMetadata) {
         logger.warn("Subscription updated with invalid metadata", {
@@ -467,8 +625,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       }
       const { orgId } = subMetadata;
 
-      const previousAttributes = (event.data as { previous_attributes?: Record<string, unknown> })
-        .previous_attributes;
+      const previousAttributes = event.data.previous_attributes;
       const itemPeriodEnd = subscriptionPeriodEnd(subscription);
       const newPlan = planForSubscription(subscription, plans);
 
@@ -479,7 +636,19 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         updatedAt: new Date(),
       };
       if (itemPeriodEnd) updates.periodEnd = itemPeriodEnd;
-      if (newPlan) updates.planId = newPlan.id;
+      if (newPlan) {
+        updates.planId = newPlan.id;
+        // The plan and its ceiling are ONE fact: `changeSubscriptionPlan` deliberately
+        // writes neither, and `create_prorations` bills on the next cycle, so no
+        // `invoice.paid` follows a plan switch to repair a stale quota.
+        //
+        // `creditsUsed` is deliberately left alone — consumption already billed is never
+        // erased by a plan move (same rule as invoice.paid outside `subscription_cycle`).
+        // An upgrade therefore frees exactly the added headroom, and a downgrade below
+        // current consumption leaves the account over its ceiling until the renewal
+        // invoice resets the counter.
+        updates.creditQuota = newPlan.creditQuota;
+      }
 
       // Org from metadata (ordering-independent), written only if the org is still ON this
       // subscription. Nothing here ATTACHES one, so an `updated` naming another is a tail.
@@ -502,44 +671,50 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       });
 
       // Plan may have changed (Customer Portal switch) — re-project storage.
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
 
-      const accessUntil = (itemPeriodEnd ?? new Date()).toISOString();
+      // Notifications describe the delivered transition, while entitlements
+      // above describe Stripe now. A later plan change must not rewrite history.
+      const historical = event.data.object;
+      const historicalPlan = planForSubscription(historical, plans);
+      const accessUntil = (subscriptionPeriodEnd(historical) ?? new Date()).toISOString();
 
       // Email: cancellation confirmed (cancel_at_period_end just turned true)
       if (
-        subscription.cancel_at_period_end &&
+        historical.cancel_at_period_end &&
         previousAttributes &&
         "cancel_at_period_end" in previousAttributes &&
         !previousAttributes.cancel_at_period_end
       ) {
-        sendBillingEmail(orgId, "cancellation-confirmed", {
-          planName: newPlan?.name ?? subMetadata.planId,
-          accessUntil,
-          locale: "fr",
-        });
+        afterCommit.push(() =>
+          sendBillingEmail(orgId, "cancellation-confirmed", {
+            planName: historicalPlan?.name ?? subMetadata.planId,
+            accessUntil,
+            locale: "fr",
+          }),
+        );
       }
 
       // Email: plan changed (price changed, not a cancellation)
       if (
-        newPlan &&
+        historicalPlan &&
         previousAttributes &&
         "items" in previousAttributes &&
-        !subscription.cancel_at_period_end
+        !historical.cancel_at_period_end
       ) {
-        const previousPriceId = (
-          previousAttributes.items as { data?: Array<{ price?: { id?: string } }> }
-        )?.data?.[0]?.price?.id;
+        const previousPriceId = previousAttributes.items?.data[0]?.price.id;
         const oldPlan = Object.values(plans).find((p) => p?.stripePriceId === previousPriceId);
 
-        if (oldPlan && oldPlan.id !== newPlan.id) {
-          sendBillingEmail(orgId, "plan-changed", {
-            oldPlanName: oldPlan.name,
-            newPlanName: newPlan.name,
-            newPrice: newPlan.monthlyPrice,
-            effectiveDate: accessUntil,
-            locale: "fr",
-          });
+        if (oldPlan && oldPlan.id !== historicalPlan.id) {
+          afterCommit.push(() =>
+            sendBillingEmail(orgId, "plan-changed", {
+              oldPlanName: oldPlan.name,
+              newPlanName: historicalPlan.name,
+              newPrice: historicalPlan.monthlyPrice,
+              effectiveDate: accessUntil,
+              locale: "fr",
+            }),
+          );
         }
       }
       break;
@@ -592,13 +767,15 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       // Storage follows the plan, not the credit anti-abuse rule: the org
       // drops to the free-plan ceiling (existing documents are never evicted;
       // the platform only blocks new writes above the limit).
-      await syncOrgStorageEntitlement(orgId);
+      afterCommit.push(() => syncOrgStorageEntitlement(orgId));
 
       // Email: subscription expired
-      sendBillingEmail(orgId, "subscription-expired", {
-        resubscribeUrl: billingSettingsUrl(getAppUrl()),
-        locale: "fr",
-      });
+      afterCommit.push(() =>
+        sendBillingEmail(orgId, "subscription-expired", {
+          resubscribeUrl: billingSettingsUrl(getAppUrl()),
+          locale: "fr",
+        }),
+      );
       break;
     }
 
@@ -643,21 +820,33 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           const amountDue = (invoice.amount_due ?? 0) / 100;
           const attemptCount = invoice.attempt_count ?? 1;
 
-          sendBillingEmail(failedAccount.orgId, "payment-failed", {
-            planName: plan?.name ?? failedAccount.planId,
-            amount: amountDue,
-            attemptNumber: attemptCount,
-            updateUrl: billingSettingsUrl(getAppUrl()),
-            locale: "fr",
-          });
+          afterCommit.push(() =>
+            sendBillingEmail(failedAccount.orgId, "payment-failed", {
+              planName: plan?.name ?? failedAccount.planId,
+              amount: amountDue,
+              attemptNumber: attemptCount,
+              updateUrl: billingSettingsUrl(getAppUrl()),
+              locale: "fr",
+            }),
+          );
         }
       }
       break;
     }
 
     case "customer.source.expiring": {
-      // Pre-dunning: card expiring soon (sent ~30 days before expiry by Stripe)
-      const source = event.data.object as Stripe.Card;
+      // Pre-dunning: card expiring soon (sent ~30 days before expiry by Stripe).
+      // The payload is a `CustomerSource` — `Account | BankAccount | Card | Source`.
+      // Only a `Card` carries `exp_month` / `exp_year`; the other members have no
+      // expiry to announce, so there is nothing to send.
+      const source = event.data.object;
+      if (source.object !== "card") {
+        logger.debug("Source expiring is not a card — no email", {
+          eventId: event.id,
+          sourceObject: source.object,
+        });
+        break;
+      }
       const expiringCustomerId = refId(source.customer);
 
       if (expiringCustomerId) {
@@ -667,12 +856,14 @@ async function processEvent(event: Stripe.Event): Promise<void> {
           .where(eq(billingAccounts.stripeCustomerId, expiringCustomerId));
 
         if (expiringAccount) {
-          sendBillingEmail(expiringAccount.orgId, "card-expiring", {
-            cardLast4: source.last4 ?? "????",
-            expiryMonth: `${String(source.exp_month).padStart(2, "0")}/${String(source.exp_year).slice(-2)}`,
-            updateUrl: billingSettingsUrl(getAppUrl()),
-            locale: "fr",
-          });
+          afterCommit.push(() =>
+            sendBillingEmail(expiringAccount.orgId, "card-expiring", {
+              cardLast4: source.last4,
+              expiryMonth: `${String(source.exp_month).padStart(2, "0")}/${String(source.exp_year).slice(-2)}`,
+              updateUrl: billingSettingsUrl(getAppUrl()),
+              locale: "fr",
+            }),
+          );
         }
       }
       break;

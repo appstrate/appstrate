@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, spaceMembers, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
+import { setFeatureFlag } from "../../../../../../test/helpers/app.ts";
 import {
   createTestContext,
   createTestUser,
@@ -19,9 +20,17 @@ import {
 
 describe("OIDC signup space assignments", () => {
   let owner: TestContext;
+  let restoreFlag: () => void;
   beforeEach(async () => {
     await truncateAll();
+    // A signup policy naming a bundle grants one at every login it drives, so
+    // it asks the same licence a direct grant does (`assertCustomRolesFeature`).
+    restoreFlag = setFeatureFlag("custom_roles", true);
     owner = await createTestContext({ orgSlug: "oidc-assignment" });
+  });
+
+  afterEach(() => {
+    restoreFlag();
   });
 
   function orgClient(

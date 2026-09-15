@@ -28,6 +28,7 @@ function pickRow(overrides: Partial<ModelPickRow> & { id: string }): ModelPickRo
     input: null,
     reasoning: null,
     source: null,
+    endpointCapabilities: {},
     cost: null,
     origin: "discover",
     featured: false,

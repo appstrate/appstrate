@@ -259,6 +259,21 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // routes.ts. The user-consent screen remains the real authorization gate.
       // Default and ceiling are ONE array, so they cannot drift: the provider
       // unions them, and a default outside the ceiling would widen it silently.
+      //
+      // A registration `scope` is ADVISORY (issue #1351). The provider validates
+      // it against the union above and then persists that union verbatim
+      // (`persistOAuthClientRegistration`), so a client declaring `openid` may
+      // still ask for `mcp:invoke` at `/authorize`. Upstream documents this: the
+      // persisted set is an operator-approved CAPABILITY set a later user
+      // authorization steps up within, and a registration request "is not an
+      // authorization grant". We do not narrow it back down, because the
+      // declaration is CLIENT-CONTROLLED — the same registrant re-registers, or
+      // edits its metadata document, and declares the whole ceiling instead.
+      // Honouring it would buy no confinement and would break every MCP client
+      // that publishes a minimal `scope` and then requests what the protected
+      // resource advertises. The gates that hold are this ceiling, the consent
+      // screen, and the caller's live role. See README § "Self-service client
+      // registration (DCR / CIMD)".
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
       clientRegistrationDefaultScopes: selfServiceScopes,

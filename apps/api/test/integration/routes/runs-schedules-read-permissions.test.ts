@@ -169,6 +169,31 @@ describe("run + schedule GET routes — read permission", () => {
     }
   });
 
+  it("403s a schedule's run list for a key holding the schedule scope but no run scope", async () => {
+    // The rows this route returns are runs — the full enriched projection
+    // (input, result, checkpoint, error, context snapshot, cost) — so the
+    // credential ceiling that caps `GET /api/runs` caps it too. `schedules:read`
+    // alone is a legal, grantable scope set, and it used to read every run of
+    // every schedule in the space while `GET /api/runs` answered 403 to the
+    // very same key.
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["schedules:read"],
+    });
+    const headers = { Authorization: `Bearer ${key.rawKey}` };
+
+    const runList = await app.request(`/api/schedules/${scheduleId}/runs`, { headers });
+    expect(runList.status).toBe(403);
+    expect((await app.request("/api/runs", { headers })).status).toBe(403);
+
+    // The control: the schedule surfaces the scope actually names stay open —
+    // only the run list moved behind the run gate.
+    expect((await app.request("/api/schedules", { headers })).status).toBe(200);
+    expect((await app.request(`/api/schedules/${scheduleId}`, { headers })).status).toBe(200);
+  });
+
   it("keeps org-role sessions unaffected (every role carries both read scopes)", async () => {
     for (const route of readRoutes()) {
       const res = await app.request(route.path, { headers: authHeaders(ctx) });

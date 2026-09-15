@@ -188,13 +188,21 @@ async function loadPackageAccess(
   return { pkg, accessible, installations };
 }
 
-/** A package draft/version is shared: authority is required in every affected installation. */
+/**
+ * A package draft/version is shared: authority is required in every affected
+ * installation.
+ *
+ * Returns the package row it resolved — id, type, source and org — so a handler
+ * that needs the type it just authorized against (the file-tree write route
+ * resolves its label and its editability from it) reads it from here instead of
+ * issuing the same query again.
+ */
 export async function assertPackageMutationAccess(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete",
   resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
-): Promise<void> {
+) {
   const { pkg, accessible, installations } = await loadPackageAccess(c, packageId, resolvedSpaces);
   // The catalog read above is `orgOrSystemFilter`ed, so another org's package
   // never loads at all (404). A row whose org does not match is a SYSTEM one.
@@ -212,6 +220,7 @@ export async function assertPackageMutationAccess(
       "Modifying a shared package requires permission in every space where it is installed.",
     );
   }
+  return pkg;
 }
 
 /** Forking reads source bytes, including when the destination is another organization. */

@@ -176,6 +176,16 @@ describe("resolveTargetVersion", () => {
     draft: flags.draft ?? false,
     prerelease: flags.prerelease ?? false,
   });
+  /**
+   * Pad a page to `per_page` entries with filler npm-package Releases. GitHub
+   * fills every page but the last, and the resolver reads that as "keep
+   * walking" — a short page ends the walk, so a multi-page fixture needs full
+   * pages to be reached at all.
+   */
+  const fullPage = (...head: unknown[]) => [
+    ...head,
+    ...Array.from({ length: 100 - head.length }, (_, i) => release(`core@9.0.${i}`)),
+  ];
   /** Serve `pages[n-1]` for `page=n`, `[]` past the last one, like GitHub. */
   const paged = (pages: unknown[][], calls?: string[]) => async (url: string) => {
     calls?.push(url);
@@ -189,7 +199,9 @@ describe("resolveTargetVersion", () => {
       fetchText: paged([[release("v2.5.0")]], calls),
     });
     expect(out).toBe("2.5.0");
-    expect(calls).toEqual([`${RELEASES_URL}?per_page=30&page=1`]);
+    // A short page is the last one: no request is spent probing for an empty
+    // page 2.
+    expect(calls).toEqual([`${RELEASES_URL}?per_page=100&page=1`]);
   });
 
   it("skips newer npm-package releases and picks the newest platform v* release", async () => {
@@ -241,15 +253,46 @@ describe("resolveTargetVersion", () => {
     const calls: string[] = [];
     const out = await resolveTargetVersion(undefined, {
       fetchText: paged(
-        [[release("cli@1.0.0-beta.56"), release("core@9.0.0")], [release("v1.0.0-beta.56")]],
+        [fullPage(release("cli@1.0.0-beta.56")), [release("v1.0.0-beta.56")]],
         calls,
       ),
     });
     expect(out).toBe("1.0.0-beta.56");
     expect(calls).toEqual([
-      `${RELEASES_URL}?per_page=30&page=1`,
-      `${RELEASES_URL}?per_page=30&page=2`,
+      `${RELEASES_URL}?per_page=100&page=1`,
+      `${RELEASES_URL}?per_page=100&page=2`,
     ]);
+  });
+
+  it("picks the highest version ACROSS pages, not the highest on the first page holding one", async () => {
+    // Issue #1361. `v1.1.0` shipped, a full page of npm Releases accumulated,
+    // then `v1.0.1` was cut for the old line — so page 1 holds only the lower
+    // version. Returning on the first page with a candidate downgrades every
+    // user to 1.0.1 and pins them there.
+    const calls: string[] = [];
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: paged(
+        [fullPage(release("v1.0.1"), release("cli@1.0.1")), [release("v1.1.0")]],
+        calls,
+      ),
+    });
+    expect(out).toBe("1.1.0");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("stops at the page cap and still returns the highest candidate seen", async () => {
+    // The cap bounds the API calls; it must not turn into an early return that
+    // reintroduces the first-page pick.
+    const calls: string[] = [];
+    const out = await resolveTargetVersion(undefined, {
+      fetchText: async (url) => {
+        calls.push(url);
+        const page = Number(new URL(url).searchParams.get("page"));
+        return JSON.stringify(fullPage(release(page === 1 ? "v1.0.1" : "v1.1.0")));
+      },
+    });
+    expect(out).toBe("1.1.0");
+    expect(calls).toHaveLength(2);
   });
 
   it("names the releases it saw when none is a platform v* release", async () => {
@@ -261,8 +304,8 @@ describe("resolveTargetVersion", () => {
     ).rejects.toThrow(
       /No platform v\* release among the newest 2 .*cli@1\.0\.0-beta\.56, core@9\.0\.0/,
     );
-    // Stopped at the first empty page, not at the page cap.
-    expect(calls).toHaveLength(2);
+    // A short page is the last one: stopped there, not at the page cap.
+    expect(calls).toHaveLength(1);
   });
 
   it("stops at the page cap when every page holds only npm-package releases", async () => {
@@ -271,11 +314,11 @@ describe("resolveTargetVersion", () => {
       resolveTargetVersion(undefined, {
         fetchText: async (url) => {
           calls.push(url);
-          return JSON.stringify([release("cli@1.0.0-beta.56")]);
+          return JSON.stringify(fullPage(release("cli@1.0.0-beta.56")));
         },
       }),
-    ).rejects.toThrow(/No platform v\* release among the newest 5 /);
-    expect(calls).toHaveLength(5);
+    ).rejects.toThrow(/No platform v\* release among the newest 200 /);
+    expect(calls).toHaveLength(2);
   });
 
   it("throws on malformed GitHub response", async () => {
@@ -492,6 +535,44 @@ describe("runSelfUpdate — curl flow", () => {
     expect(out.exitCode).toBe(SELF_UPDATE_EXIT.OK);
     expect(out.message).toMatch(/Already on appstrate 1\.2\.3/);
     expect(state.replaced).toEqual([]);
+  });
+
+  it("refuses to downgrade when the target is older than the running binary", async () => {
+    // Issue #1361: the second half of the guard. Even if a resolver bug or a
+    // vanished release hands back an older tag, the binary is never replaced.
+    const state = freshState();
+    const out = await runSelfUpdate({
+      source: "curl",
+      platform: { platform: "linux", arch: "x64" },
+      log: () => {},
+      version: "1.0.1",
+      currentVersion: "1.1.0",
+      deps: makeFakeDeps(state),
+    });
+    // Exit 0, not a failure code: unattended runs on a box that is ahead of
+    // the newest release must not start failing.
+    expect(out.exitCode).toBe(SELF_UPDATE_EXIT.OK);
+    expect(out.message).toMatch(/NEWER than 1\.0\.1/);
+    expect(out.message).toMatch(/--force/);
+    expect(state.replaced).toEqual([]);
+    // Nothing was even downloaded.
+    expect(state.fetched).toEqual([]);
+  });
+
+  it("--force downgrades deliberately", async () => {
+    const state = freshState();
+    const out = await runSelfUpdate({
+      source: "curl",
+      platform: { platform: "linux", arch: "x64" },
+      log: () => {},
+      version: "1.2.3",
+      currentVersion: "9.9.9",
+      force: true,
+      deps: makeFakeDeps(state),
+    });
+    expect(out.exitCode).toBe(SELF_UPDATE_EXIT.OK);
+    expect(out.message).toContain("Updated appstrate to 1.2.3");
+    expect(state.replaced).toHaveLength(1);
   });
 
   it("--force reinstalls even when versions match", async () => {

@@ -177,6 +177,105 @@ test.describe("View as role", () => {
     await expect(banner(page)).toHaveCount(0);
   });
 
+  test("does not start a preview the user cancelled while it was loading", async ({
+    authedPage: page,
+  }) => {
+    // Submitting loads the persona's org row before committing anything, and
+    // that load is the whole window: the dialog unmounts on Cancel but the
+    // closure runs on. A preview committed there is persisted and survives a
+    // reload, and the server accepts this persona, so nothing ever ends it.
+    let release = () => {};
+    const stalled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let previewedListing = false;
+    await page.route(
+      (url) => url.pathname === "/api/orgs",
+      async (route) => {
+        // Only the listing asked for AS the persona waits; the app's own org
+        // reads have to keep answering or the page stops working.
+        if (!route.request().headers()["x-view-as"]) return route.continue();
+        previewedListing = true;
+        await stalled;
+        await route.continue();
+      },
+    );
+
+    await page.goto("/org-settings/space/members");
+    await page.getByTestId("view-as-space-button").click();
+    const dialog = page.getByRole("dialog");
+    await dialog.locator("#view-as-space").click();
+    await page.getByRole("option", { name: "Aucun espace" }).click();
+    await dialog.getByTestId("view-as-submit").click();
+    await expect.poll(() => previewedListing).toBe(true);
+
+    await dialog.getByRole("button", { name: /^(Annuler|Cancel)$/ }).click();
+    await expect(dialog).toHaveCount(0);
+
+    release();
+
+    await expect(banner(page)).toHaveCount(0);
+    expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull();
+    // Still the owner's own authority: this trigger is hidden from a member.
+    await expect(page.getByTestId("view-as-space-button")).toBeVisible();
+
+    // Nothing was persisted, so a reload has no preview to resume either.
+    await page.reload();
+    await expect(banner(page)).toHaveCount(0);
+  });
+
+  test("does not activate a loading preview after SPA navigation unmounts the dialog", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/org-settings");
+    await page.locator('a[href="/org-settings/roles"]').first().click();
+    await expect(page.getByTestId("view-as-button")).toBeVisible();
+
+    let release = () => {};
+    const stalled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let pending = false;
+    await page.route(
+      (url) => url.pathname === "/api/orgs",
+      async (route) => {
+        if (!route.request().headers()["x-view-as"]) return route.continue();
+        pending = true;
+        await stalled;
+        await route.continue();
+      },
+    );
+
+    await page.getByTestId("view-as-button").click();
+    const dialog = page.getByRole("dialog");
+    await dialog.locator("#view-as-space").click();
+    await page.getByRole("option", { name: "Aucun espace" }).click();
+    await dialog.getByTestId("view-as-submit").click();
+    await expect.poll(() => pending).toBe(true);
+
+    // The preceding Link made a same-document history entry: back unmounts
+    // the route without closing the dialog or destroying the fetch's realm.
+    await page.goBack();
+    await expect(dialog).toHaveCount(0);
+    const reply = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/orgs" &&
+        !!response.request().headers()["x-view-as"],
+    );
+    release();
+    await (await reply).finished();
+    // Let the response's promise continuation and React's render both settle
+    // before asserting absence — an immediate check can pass before activation.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull();
+    await expect(banner(page)).toHaveCount(0);
+  });
+
   test("previews a viewer, then gives the owner their authority back @critical", async ({
     authedPage: page,
     apiClient,
@@ -274,7 +373,7 @@ test.describe("View as role", () => {
     });
 
     await page.goto("/agents");
-    await expect(page.getByText(/Prévisualisation arrêtée|Preview stopped/)).toBeVisible();
+    await expect(page.getByText(/Prévisualisation indisponible|Preview unavailable/)).toBeVisible();
     await expect(banner(page)).toHaveCount(0);
   });
 
@@ -308,7 +407,9 @@ test.describe("View as role", () => {
       });
       await page.goto("/agents");
 
-      await expect(page.getByText(/Prévisualisation arrêtée|Preview stopped/)).toBeVisible();
+      await expect(
+        page.getByText(/Prévisualisation indisponible|Preview unavailable/),
+      ).toBeVisible();
       await expect(banner(page)).toHaveCount(0);
     } finally {
       await context.close();

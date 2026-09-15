@@ -8,14 +8,14 @@
  */
 
 import type { Context, Next } from "hono";
-import { findTargetHandler } from "hono/utils/handler";
 import type { AppEnv } from "../types/index.ts";
+import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 import { ApiError } from "../lib/errors.ts";
 import {
   acquireIdempotencyLock,
   storeIdempotencyResult,
   releaseIdempotencyLock,
-  computeBodyHash,
+  computeRequestHash,
 } from "../lib/idempotency.ts";
 
 const MAX_KEY_LENGTH = 255;
@@ -30,29 +30,17 @@ const MAX_KEY_LENGTH = 255;
  * handler part of this request's chain?" — instead of consulting a
  * hand-maintained list that could drift away from the mounts.
  *
- * A symbol property rather than `handler.name`: a name survives neither
- * wrapping nor minification. The property survives minification, and survives
- * wrapping only because `isIdempotencyAware` explicitly unwraps — see below.
+ * Stamped and read through `handler-marker.ts`, which owns the symbol-vs-name
+ * reasoning and the unwrapping of Hono's own handler wrapping.
  */
 const IDEMPOTENCY_AWARE = Symbol.for("appstrate.idempotencyAware");
 
 /**
  * True when `handler` is a middleware produced by `idempotency()` — i.e. the
  * route it is mounted on genuinely de-duplicates on `Idempotency-Key`.
- *
- * The marker is read *through* Hono's own handler wrapping. `app.route(path,
- * sub)` re-wraps every handler of `sub` when the sub-app installed its own
- * `onError()` (hono 4.12 `hono-base.js` `route()`), keeping the original only
- * under the `COMPOSED_HANDLER` property. A naive property read on the wrapper
- * returns `undefined`, so a sub-router with an `onError()` would silently lose
- * its idempotency support and the guard would 400 a header the route does
- * honour. `findTargetHandler` is Hono's own recursive unwrapper for exactly
- * that property, so this tracks their wrapping instead of guessing at it.
  */
 export function isIdempotencyAware(handler: unknown): boolean {
-  if (typeof handler !== "function") return false;
-  const target = findTargetHandler(handler as (...args: never[]) => unknown);
-  return (target as unknown as Record<symbol, unknown>)[IDEMPOTENCY_AWARE] === true;
+  return hasHandlerMarker(handler, IDEMPOTENCY_AWARE);
 }
 
 /**
@@ -67,7 +55,9 @@ export function isIdempotencyAware(handler: unknown): boolean {
  * Note: control characters in headers are rejected at the HTTP layer (Request constructor),
  * so we only need to validate length here.
  */
-export function idempotency() {
+export function idempotency(
+  replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>,
+) {
   const middleware = async (c: Context<AppEnv>, next: Next) => {
     const key = c.req.header("Idempotency-Key");
     if (!key) return next();
@@ -87,16 +77,16 @@ export function idempotency() {
     // cannot replay a cached response across two different spaces.
     const spaceId = c.get("spaceId");
     const rawBody = await c.req.text();
-    const bodyHash = computeBodyHash(rawBody);
+    const requestHash = computeRequestHash(c.req.raw, rawBody);
 
-    const lockResult = await acquireIdempotencyLock(orgId, spaceId, key, bodyHash);
+    const lockResult = await acquireIdempotencyLock(orgId, spaceId, key, requestHash);
 
-    if (lockResult.status === "body_mismatch") {
+    if (lockResult.status === "request_mismatch") {
       throw new ApiError({
         status: 422,
         code: "idempotency_conflict",
         title: "Idempotency Conflict",
-        detail: "This idempotency key was already used with a different request body.",
+        detail: "This idempotency key was already used with a different method, URL or body.",
         param: "Idempotency-Key",
       });
     }
@@ -112,14 +102,17 @@ export function idempotency() {
     }
 
     if (lockResult.status === "cached") {
-      // Replay the cached response (body hash already verified in acquireIdempotencyLock)
+      // Replay the cached response (request hash already verified in acquireIdempotencyLock)
       const cached = lockResult.result;
       const headers = new Headers(cached.headers);
       headers.set("Idempotent-Replayed", "true");
-      return new Response(cached.body, {
+      const response = new Response(cached.body, {
         status: cached.statusCode,
         headers,
       });
+      // Authorization belongs before this middleware; resource projections may
+      // also depend on the caller's current rights, without launching again.
+      return replay ? replay(c, response) : response;
     }
 
     // Lock acquired — execute the request.
@@ -168,10 +161,9 @@ export function idempotency() {
       statusCode,
       headers: resHeaders,
       body: resBody,
-      bodyHash,
+      requestHash,
     });
   };
 
-  Object.defineProperty(middleware, IDEMPOTENCY_AWARE, { value: true });
-  return middleware;
+  return markHandler(middleware, IDEMPOTENCY_AWARE);
 }

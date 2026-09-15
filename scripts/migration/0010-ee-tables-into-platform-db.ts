@@ -21,17 +21,21 @@
  * declares copies nothing, and a column only the SOURCE has is refused — that
  * one would lose data.
  *
+ * The LEVEL is read from the source's own journal; a source below
+ * {@link REQUIRED_SOURCE_TAG} is refused.
+ *
  * Why the move: the module used to open a second URL and auto-create the
  * database it named. Two pools, two backups, no shared transaction — and a
  * mistyped name silently created an empty database while Stripe kept charging.
  * Its seven tables now live beside the platform's own under their own journal
  * (`drizzle.ee_migrations`), so only the ROWS have to move.
  *
- * Order: every check first — connectivity, one prefix across the source, no
- * unknown `ee_`/`cloud_` table left behind, no source-only column, no row
- * already on the target — and only once they all pass does `--apply` migrate
- * the target through the module's own `migrateEeDb`, copy every table in ONE
- * target transaction, and verify source count = target count per table.
+ * Order: every check first — connectivity, one prefix across the source, a
+ * source level the copy can carry, no unknown `ee_`/`cloud_` table left behind,
+ * no source-only column, no billing row already on the target — and only once
+ * they all pass does `--apply` migrate the target through the module's own
+ * `migrateEeDb`, copy every table in ONE target transaction, and verify source
+ * count = target count per table.
  *
  * Fidelity: every value is read as `text` and re-cast to the TARGET's own type
  * on the way in, so ids, `text[]` arrays and — the reason this is not a plain
@@ -45,9 +49,11 @@
  * reserved connection, so the counts the checks report and the pages the copy
  * walks all see one snapshot.
  *
- * Idempotent by refusal, not by merge: a second `--apply` finds rows on the
- * target and stops. That is deliberate — the source is the only record of what
- * was already copied, and a partial re-copy would double-count billed usage.
+ * Idempotent by refusal, not by merge: a second `--apply` finds billing rows on
+ * the target and stops, printing both sides' counts rather than an instruction —
+ * the source is the only record of what was already copied, and no branch of a
+ * refusal here may read as "empty something". The one row a refusal forgives is
+ * the watermark a boot seeds; see {@link BOOT_SEEDED_TABLE}.
  *
  * Rows: UNMEASURED. Rehearse against a `pg_dump` restore of both databases and
  * record the per-table counts this script prints, per `scripts/migration/README.md`.
@@ -63,16 +69,27 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const MODULE_ROOT = resolve(import.meta.dir, "../../packages/module-ee");
+const MIGRATIONS_META = resolve(MODULE_ROOT, "drizzle/migrations/meta");
+
+/** One entry of the module's journal. `when` is what its migrator stores as `created_at`. */
+interface JournalEntry {
+  idx: number;
+  when: number;
+  tag: string;
+}
+
+/** The module's migration journal, oldest first — the ledger every level here is read against. */
+const JOURNAL: JournalEntry[] = (
+  JSON.parse(readFileSync(resolve(MIGRATIONS_META, "_journal.json"), "utf8")) as {
+    entries: JournalEntry[];
+  }
+).entries.sort((a, b) => a.idx - b.idx);
 
 /** Column names the module's newest drizzle snapshot declares, per target table. */
 function declaredColumns(): Map<string, string[]> {
-  const meta = resolve(MODULE_ROOT, "drizzle/migrations/meta");
-  const journal = JSON.parse(readFileSync(resolve(meta, "_journal.json"), "utf8")) as {
-    entries: { idx: number }[];
-  };
-  const idx = Math.max(...journal.entries.map((e) => e.idx));
+  const idx = JOURNAL[JOURNAL.length - 1]!.idx;
   const snapshot = JSON.parse(
-    readFileSync(resolve(meta, `${String(idx).padStart(4, "0")}_snapshot.json`), "utf8"),
+    readFileSync(resolve(MIGRATIONS_META, `${String(idx).padStart(4, "0")}_snapshot.json`), "utf8"),
   ) as { tables: Record<string, { name: string; columns: Record<string, unknown> }> };
 
   const declared = new Map<string, string[]>();
@@ -97,6 +114,31 @@ const LOGICAL = EE_TABLES.map((t) => {
 
 /** Rows read from the source per round trip — bounds memory on a large table. */
 const PAGE = 500;
+
+/**
+ * The last migration in the module's history that REWRITES rows — `0001` derives
+ * `cost_usd` from `cost_credits`, `0003` normalizes the free-plan subscription
+ * status. A source below it is refused: every DML the module ever shipped names
+ * the pre-rename `cloud_*` tables, so nothing can repair it after the move.
+ */
+const REQUIRED_SOURCE_TAG = "0003_normalize_free_subscription_status";
+
+const REQUIRED_SOURCE_IDX = ((): number => {
+  const entry = JOURNAL.find((e) => e.tag === REQUIRED_SOURCE_TAG);
+  if (!entry) throw new Error(`The module's journal has no \`${REQUIRED_SOURCE_TAG}\` entry`);
+  return entry.idx;
+})();
+
+/**
+ * The one target table a boot may legitimately have written before the move. The
+ * module's `init()` calls `ensureCursorSeeded`, which INSERTs the singleton
+ * watermark row, so a restart, a health probe or an operator starting the stack
+ * early is enough to put a row there — that is an artefact the module recreates,
+ * not data, and the source's cursor is the authoritative one. The copy therefore
+ * deletes it and writes the source's in its place, in the same transaction.
+ * Rows in ANY other table are data this script cannot merge, and are refused.
+ */
+const BOOT_SEEDED_TABLE = "ee_billing_cursor";
 
 type SourcePrefix = "ee_" | "cloud_";
 
@@ -302,13 +344,56 @@ async function appliedMigrations(db: SQL): Promise<number> {
   return row.count;
 }
 
-/** Migrations the module ships, so a dry-run can say how many the target lacks. */
-function shippedMigrations(): number {
-  const journal = readFileSync(
-    resolve(MODULE_ROOT, "drizzle/migrations/meta/_journal.json"),
-    "utf8",
-  );
-  return (JSON.parse(journal) as { entries: unknown[] }).entries.length;
+/**
+ * Where a database records the module's applied migrations. The name moved with
+ * the module, exactly as the table prefix did: `drizzle.__drizzle_migrations` is
+ * drizzle's default, which is what the module wrote while it owned a database
+ * outright, and `drizzle.ee_migrations` is the name the in-tree one states so
+ * its chain sits beside the platform's. A source carries one or the other.
+ */
+const JOURNAL_TABLES = ["drizzle.__drizzle_migrations", "drizzle.ee_migrations"] as const;
+
+/**
+ * Which migration the SOURCE last applied — READ, never inferred from shape. The
+ * columns a copy can see cannot tell `0003` from `0002`: its one statement
+ * rewrites rows and adds nothing. That difference is a free-plan org that works
+ * after the move against one refused every paid operation.
+ *
+ * Matched on the `created_at` stamp the migrator copies from the journal's
+ * `when`, so a stamp belonging to no entry is a history this script does not
+ * know and will not grade.
+ */
+async function sourceLevel(src: SQL): Promise<JournalEntry> {
+  const stamps: number[] = [];
+  for (const table of JOURNAL_TABLES) {
+    const [present] = (await src.unsafe(`SELECT to_regclass($1) IS NOT NULL AS present`, [
+      table,
+    ])) as [{ present: boolean }];
+    if (!present.present) continue;
+    const [row] = (await src.unsafe(`SELECT max(created_at)::text AS stamp FROM ${table}`)) as [
+      { stamp: string | null },
+    ];
+    if (row.stamp !== null) stamps.push(Number(row.stamp));
+  }
+
+  if (stamps.length === 0) {
+    throw new Refusal([
+      "refusing: the source records no migration of the module's as applied.",
+      `Neither ${JOURNAL_TABLES.join(" nor ")} holds a row, so nothing here can say whether its rows`,
+      "have been through the migrations that rewrite them. Establish the source's level by hand.",
+    ]);
+  }
+
+  const newest = Math.max(...stamps);
+  const entry = JOURNAL.find((e) => e.when === newest);
+  if (!entry) {
+    throw new Refusal([
+      `refusing: the source's newest applied migration is stamped ${newest}, which matches no entry in`,
+      "the module's journal. This script grades the source against that journal, and a history it does",
+      "not know may or may not have been through the migrations that rewrite rows.",
+    ]);
+  }
+  return entry;
 }
 
 /**
@@ -326,9 +411,9 @@ async function applyModuleMigrations(url: string): Promise<void> {
   await db.migrateEeDb(url);
 }
 
-function planLines(prefix: SourcePrefix, plans: TablePlan[]): string[] {
+function planLines(prefix: SourcePrefix, level: JournalEntry, plans: TablePlan[]): string[] {
   const width = Math.max(...EE_TABLES.map((t) => t.length));
-  const lines = [`source prefix: ${prefix}`];
+  const lines = [`source prefix: ${prefix}`, `source level:  ${level.tag}`];
   for (const plan of plans) {
     const detail =
       plan.source === null
@@ -359,6 +444,19 @@ function summary(
 async function move(src: SQL, target: SQL, targetUrl: string, apply: boolean): Promise<number> {
   const held = await prefixedTables(src);
   const prefix = detectPrefix(held);
+
+  const level = await sourceLevel(src);
+  if (level.idx < REQUIRED_SOURCE_IDX) {
+    throw new Refusal([
+      `refusing: the source is at ${level.tag}; the move needs ${REQUIRED_SOURCE_TAG} or later.`,
+      "Every migration that rewrites rows names the pre-rename `cloud_*` tables, so the target cannot",
+      "apply them to the copied rows afterwards — a free-plan org would arrive carrying the terminal",
+      "`subscription_status` 0003 exists to clear, and be refused every paid operation.",
+      "Apply the missing packages/module-ee/drizzle/migrations/*.sql to the SOURCE in order and record",
+      "each in its journal (`created_at` = the `when` in meta/_journal.json), then re-run this script.",
+    ]);
+  }
+
   const known = new Set(LOGICAL.map((n) => `${prefix}${n}`));
   const unknown = held.filter((t) => !known.has(t));
   if (unknown.length > 0) {
@@ -370,26 +468,39 @@ async function move(src: SQL, target: SQL, targetUrl: string, apply: boolean): P
 
   const plans = await planTables(src, prefix);
 
+  const sourceCounts = await Promise.all(
+    plans.map(async (plan) => (plan.source === null ? null : await countRows(src, plan.source))),
+  );
   const before = await Promise.all(EE_TABLES.map((t) => countRows(target, t)));
+
   const occupied = EE_TABLES.filter((_, i) => (before[i] ?? 0) > 0);
-  if (occupied.length > 0) {
+  const data = occupied.filter((t) => t !== BOOT_SEEDED_TABLE);
+  if (data.length > 0) {
     throw new Refusal([
-      `refusing: the target already holds ee_* rows (${occupied.join(", ")}).`,
-      "This script copies, it does not merge — re-running it would double-count billed usage.",
-      "If the move already ran, nothing is left to do; otherwise empty the target first.",
+      `refusing: the target already holds billing rows (${data.join(", ")}).`,
+      "This script copies, it does not merge, and it cannot tell a finished move from a half-finished",
+      "one. EE_SOURCE_DATABASE_URL is the only record of what was copied: do not empty, drop or",
+      "overwrite either side. Both sides' counts follow — identical on every table is a finished move,",
+      "anything else is a state to reconcile by hand before the platform starts.",
+      "",
+      ...summary(
+        EE_TABLES.map((table, i) => ({ table, source: sourceCounts[i]!, target: before[i]! })),
+      ),
     ]);
   }
+  const seededCursor = occupied.includes(BOOT_SEEDED_TABLE);
 
-  const sourceCounts = await Promise.all(
-    plans.map((plan) => (plan.source === null ? null : countRows(src, plan.source))),
-  );
-
-  for (const line of planLines(prefix, plans)) out(line);
+  for (const line of planLines(prefix, level, plans)) out(line);
+  if (seededCursor) {
+    out(
+      `  ${BOOT_SEEDED_TABLE}: the target holds a watermark a boot seeded — replaced by the source's`,
+    );
+  }
   out("");
 
   if (!apply) {
     out(
-      `would apply the module's migrations — ${shippedMigrations() - (await appliedMigrations(target))} pending on the target`,
+      `would apply the module's migrations — ${JOURNAL.length - (await appliedMigrations(target))} pending on the target`,
     );
     out("");
     for (const line of summary(
@@ -404,6 +515,7 @@ async function move(src: SQL, target: SQL, targetUrl: string, apply: boolean): P
 
   await applyModuleMigrations(targetUrl);
   await target.begin(async (tx: SQL) => {
+    if (seededCursor) await tx.unsafe(`DELETE FROM "${BOOT_SEEDED_TABLE}"`);
     for (const plan of plans) await copyTable(src, tx, plan);
   });
 

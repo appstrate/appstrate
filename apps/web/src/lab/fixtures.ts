@@ -311,6 +311,7 @@ function presetRole(preset: LabPreset): Role {
     name: preset,
     description: null,
     permissions: [...spacePermissionsForPreset(preset)].sort(),
+    unavailable_permissions: [],
     createdAt: null,
     updatedAt: null,
   };
@@ -342,6 +343,7 @@ export const roles: Json200<"/api/roles", "get"> = {
         "runs:read",
         "runs:read-all",
       ],
+      unavailable_permissions: [],
       createdAt: ago(30_000),
       updatedAt: ago(4_000),
     },

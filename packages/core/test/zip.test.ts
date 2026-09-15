@@ -7,6 +7,7 @@ import {
   zipArtifact,
   unzipArtifact,
   stripWrapperPrefix,
+  isSafeArchivePath,
 } from "../src/zip.ts";
 import { formatErrorChain } from "../src/errors.ts";
 
@@ -360,6 +361,83 @@ describe("zipArtifact determinism", () => {
 // ─────────────────────────────────────────────
 // Path traversal & sanitization
 // ─────────────────────────────────────────────
+
+describe("isSafeArchivePath", () => {
+  it("accepts the shapes a package legitimately carries", () => {
+    for (const path of [
+      "SKILL.md",
+      "manifest.json",
+      "scripts/run.py",
+      "a/b/c/d.txt",
+      ".gitignore",
+      "docs/.keep",
+      "file..txt",
+      "notes...md",
+      "dir/file..backup.txt",
+      "dossier/étude.md",
+      "name with spaces.md",
+      "..hidden.md",
+      "trailing..",
+    ]) {
+      expect({ path, safe: isSafeArchivePath(path) }).toEqual({ path, safe: true });
+    }
+  });
+
+  it("refuses traversal, absolute, empty-segment, control and metadata names", () => {
+    for (const path of [
+      "..",
+      "../etc/passwd",
+      "dir/../../secret",
+      "dir/..",
+      "/etc/passwd",
+      "dir//file.txt",
+      "dir/",
+      "",
+      "evil\0.txt",
+      "dir\\file.txt",
+      "..\\etc\\passwd",
+      "__MACOSX/._safe.txt",
+      // A `.` segment names a file another entry already names, so only one of
+      // the two survives extraction — and the CLI materializer refuses it.
+      ".",
+      "./notes.md",
+      "a/./b.md",
+      "docs/.",
+      // A Windows drive prefix is absolute on the extraction target while every
+      // segment reads as relative. The backslash form is caught above.
+      "C:/Users/x.md",
+      "c:/x.md",
+    ]) {
+      expect({ path, safe: isSafeArchivePath(path) }).toEqual({ path, safe: false });
+    }
+  });
+
+  it("is the predicate unzipArtifact sanitizes with", () => {
+    // Positive control: every entry below is one `unzipArtifact` keeps or drops,
+    // and the predicate has to agree entry for entry — one rule, two policies.
+    const entries: Record<string, Uint8Array> = {};
+    const encoder = new TextEncoder();
+    for (const path of [
+      "safe.txt",
+      "dir/deep.md",
+      "../escape",
+      "__MACOSX/._x",
+      "dir//x",
+      "./dotted.md",
+      "C:/drive.md",
+    ]) {
+      entries[path] = encoder.encode("x");
+    }
+    const files = unzipArtifact(zipArtifact(entries));
+
+    for (const path of Object.keys(entries)) {
+      expect({ path, kept: Object.hasOwn(files, path) }).toEqual({
+        path,
+        kept: isSafeArchivePath(path),
+      });
+    }
+  });
+});
 
 describe("unzipArtifact sanitization", () => {
   it("filters out path traversal entries (../)", () => {

@@ -551,6 +551,8 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Fork an agent",
   },
 
+  // ─── Package draft file tree ────────────────────────────────────────────
+
   // ─── Integrations ───────────────────────────────────────────────────────
   {
     method: "POST",

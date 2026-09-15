@@ -4,7 +4,13 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  orgOnlyHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { user as userTable, account as accountTable } from "@appstrate/db/schema";
@@ -164,6 +170,40 @@ describe("Profile API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.data).toHaveLength(0);
+    });
+
+    // Putting names on ids IS reading the org directory, so the route is
+    // bounded by `members:read` (RBAC spec §3.2). A `guest` is exactly the
+    // org role defined as member reads MINUS that permission, and must be
+    // refused — otherwise the omissions alone answer "is this id in my org?".
+    // Org-only headers: a guest has no implicit space, and the refusal under
+    // test is the permission one, not a space-context one.
+    it("refuses a guest, who does not hold members:read", async () => {
+      const guest = await memberContext(ctx, "guest");
+
+      const res = await app.request("/api/profiles/batch", {
+        method: "POST",
+        headers: orgOnlyHeaders(guest, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids: [ctx.user.id] }),
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    // Positive control for the bound above: an ordinary `member` holds
+    // `members:read` and still resolves colleague names.
+    it("allows an org member, who holds members:read", async () => {
+      const member = await memberContext(ctx, "member");
+
+      const res = await app.request("/api/profiles/batch", {
+        method: "POST",
+        headers: orgOnlyHeaders(member, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ ids: [ctx.user.id] }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.data).toHaveLength(1);
     });
   });
 

@@ -29,7 +29,9 @@ useEeTestSeams();
 
 const orgId = "00000000-0000-4000-a000-000000000900";
 
-function beforeUsage(...args: Parameters<NonNullable<typeof eeModule.hooks>["beforeUsage"]>) {
+function beforeUsage(
+  ...args: Parameters<NonNullable<NonNullable<typeof eeModule.hooks>["beforeUsage"]>>
+) {
   return eeModule.hooks!.beforeUsage!(...args);
 }
 

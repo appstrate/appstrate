@@ -64,8 +64,8 @@ export function createEndUsersRouter() {
   router.post(
     "/",
     rateLimit(60),
-    idempotency(),
     requirePermission("end-users", "write"),
+    idempotency(),
     async (c) => {
       const scope = getSpaceScope(c);
       const data = await readJsonBody(c, createEndUserSchema);

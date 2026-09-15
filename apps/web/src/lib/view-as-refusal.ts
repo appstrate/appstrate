@@ -11,11 +11,22 @@
  */
 
 import { VIEW_AS_HEADER, VIEW_AS_REFUSAL_CODES } from "@appstrate/core/permissions";
+import { ApiError } from "../api/errors";
 import { exitViewAs, viewAsStore } from "../stores/view-as-store";
 
 /** Did this failure refuse the PERSONA, rather than the operation? */
 function isViewAsRefusal(code: string | undefined): boolean {
   return code !== undefined && VIEW_AS_REFUSAL_CODES.has(code);
+}
+
+/**
+ * The refusal a thrown request names, for the copy that names it back
+ * (`viewAs.stopped.<code>`). `null` covers both a denial the persona correctly
+ * earned and a transport failure that named nothing — neither has copy of its
+ * own, and only the second is worth retrying.
+ */
+export function viewAsRefusalCode(err: unknown): string | null {
+  return err instanceof ApiError && isViewAsRefusal(err.code) ? err.code : null;
 }
 
 /**

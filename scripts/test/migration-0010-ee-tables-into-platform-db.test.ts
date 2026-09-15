@@ -15,8 +15,12 @@
  * arrays) and pages past `PAGE` on a composite key, a `cloud_*` source lands in
  * `ee_*` with the columns it never had taking their defaults, a second `--apply`
  * refuses instead of double-counting, and a source the script cannot account for
- * — an unknown table, a column the target does not declare — is refused before
- * the target is touched at all.
+ * — an unknown table, a column the target does not declare, a level below the
+ * one the copy can carry, no journal at all — is refused before the target is
+ * touched at all. And the case an operator actually hits: a target the module
+ * has already booted against, whose seeded watermark is replaced rather than
+ * refused, while a target holding anything else is still refused — with both
+ * sides' counts, and no branch telling anyone to discard a database.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -54,14 +58,24 @@ const BILLING_CC = ["copy@example.com", "second copy@example.com"];
 const MANAGERS = 501;
 
 /**
- * How many migrations the module ships, read where the script reads it. A
- * literal here would turn every new migration into a failure of this file.
+ * The module's journal, read where the script reads it. Literals here would turn
+ * every new migration into a failure of this file.
  */
-const SHIPPED_MIGRATIONS = (
+const JOURNAL = (
   JSON.parse(readFileSync(resolve(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as {
-    entries: unknown[];
+    entries: { when: number; tag: string }[];
   }
-).entries.length;
+).entries;
+const SHIPPED_MIGRATIONS = JOURNAL.length;
+const WHEN = new Map(JOURNAL.map((e) => [e.tag, e.when]));
+
+/** Production's level: the last migration the module applied while it owned a database. */
+const PRODUCTION_CHAIN = [
+  "0000_init",
+  "0001_cursor_billing",
+  "0002_numeric_cost",
+  "0003_normalize_free_subscription_status",
+];
 
 let admin: SQL | undefined;
 const created: string[] = [];
@@ -71,12 +85,18 @@ let target: SQL;
 let legacy: SQL;
 let legacyTarget: SQL;
 let refusalTarget: SQL;
+let unmigrated: SQL;
+let bootedTarget: SQL;
+let bootedDataTarget: SQL;
 
 let sourceUrl: string;
 let targetUrl: string;
 let legacyUrl: string;
 let legacyTargetUrl: string;
 let refusalTargetUrl: string;
+let unmigratedUrl: string;
+let bootedTargetUrl: string;
+let bootedDataTargetUrl: string;
 
 function databaseUrl(name: string): string {
   const url = new URL(process.env.DATABASE_URL!);
@@ -112,9 +132,13 @@ async function snapshot(db: SQL): Promise<Record<string, unknown[]>> {
 }
 
 /**
- * Apply ONE migration file, statement by statement — the migrator only ever
- * runs the whole outstanding folder, and this is how the module's own
- * `migrate.test.ts` builds an intermediate schema.
+ * Apply ONE migration file, statement by statement, and record it the way
+ * drizzle's default migrator does — `drizzle.__drizzle_migrations`, stamped with
+ * the journal's `when`. That table is the one the module wrote for as long as it
+ * owned a database outright, and `0010` reads it to grade the source's level.
+ * The migrator only ever runs the whole outstanding folder, so building an
+ * intermediate schema means replaying files, as the module's own
+ * `migrate.test.ts` does.
  */
 async function applyMigration(db: SQL, tag: string): Promise<void> {
   const file = readFileSync(resolve(MIGRATIONS_DIR, `${tag}.sql`), "utf8");
@@ -125,6 +149,15 @@ async function applyMigration(db: SQL, tag: string): Promise<void> {
     }
     await db.unsafe(statement);
   }
+  await db.unsafe(`CREATE SCHEMA IF NOT EXISTS drizzle`);
+  await db.unsafe(
+    `CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
+       id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)`,
+  );
+  await db.unsafe(
+    `INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ($1, $2::bigint)`,
+    [new Bun.CryptoHasher("sha256").update(file).digest("hex"), String(WHEN.get(tag)!)],
+  );
 }
 
 /**
@@ -140,6 +173,9 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
     legacyUrl = await createDatabase("ee_legacy_src");
     legacyTargetUrl = await createDatabase("ee_legacy_dst");
     refusalTargetUrl = await createDatabase("ee_refuse_dst");
+    unmigratedUrl = await createDatabase("ee_old_src");
+    bootedTargetUrl = await createDatabase("ee_booted_dst");
+    bootedDataTargetUrl = await createDatabase("ee_booted_data_dst");
 
     await migrateEeDb(sourceUrl);
     source = new SQL(sourceUrl);
@@ -147,6 +183,25 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
     legacy = new SQL(legacyUrl);
     legacyTarget = new SQL(legacyTargetUrl);
     refusalTarget = new SQL(refusalTargetUrl);
+    unmigrated = new SQL(unmigratedUrl);
+
+    // Two targets the module has already booted against: `migrateEeDb` ran and
+    // `ensureCursorSeeded` INSERTed the singleton watermark. The second also
+    // holds a billing account, which is data no copy may walk over.
+    await migrateEeDb(bootedTargetUrl);
+    await migrateEeDb(bootedDataTargetUrl);
+    bootedTarget = new SQL(bootedTargetUrl);
+    bootedDataTarget = new SQL(bootedDataTargetUrl);
+    for (const db of [bootedTarget, bootedDataTarget]) {
+      await db.unsafe(
+        `INSERT INTO ee_billing_cursor (id, last_llm_usage_id, floor_id) VALUES (true, 7000, 7000)`,
+      );
+    }
+    await bootedDataTarget.unsafe(
+      `INSERT INTO ee_billing_accounts (org_id, plan_id, credits_used, credit_quota)
+       VALUES ($1, 'pro', 1, 20000)`,
+      [ORG_B],
+    );
 
     await source.unsafe(
       `INSERT INTO ee_billing_accounts (org_id, plan_id, credits_used, credit_quota, billing_cc, created_at, updated_at)
@@ -189,14 +244,19 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
 
     // Production's shape: the chain stops at 0003, so the tables are still
     // `cloud_*`, there is no managers table and no billing contact columns.
-    for (const tag of [
-      "0000_init",
-      "0001_cursor_billing",
-      "0002_numeric_cost",
-      "0003_normalize_free_subscription_status",
-    ]) {
+    for (const tag of PRODUCTION_CHAIN) {
       await applyMigration(legacy, tag);
     }
+    // One migration short of production: 0003's normalization has not run, so
+    // its rows are the ones the copy could never repair.
+    for (const tag of PRODUCTION_CHAIN.slice(0, -1)) {
+      await applyMigration(unmigrated, tag);
+    }
+    await unmigrated.unsafe(
+      `INSERT INTO cloud_billing_accounts (org_id, plan_id, credits_used, credit_quota, subscription_status, created_at, updated_at)
+       VALUES ($1, 'free', 0, 0, 'canceled', $2::timestamptz, $2::timestamptz)`,
+      [ORG_A, CREATED_AT],
+    );
     await legacy.unsafe(
       `INSERT INTO cloud_billing_accounts (org_id, plan_id, credits_used, credit_quota, created_at, updated_at)
        VALUES ($1, 'pro', 42, 20000, $2::timestamptz, $2::timestamptz)`,
@@ -219,6 +279,9 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
     await legacy?.close();
     await legacyTarget?.close();
     await refusalTarget?.close();
+    await unmigrated?.close();
+    await bootedTarget?.close();
+    await bootedDataTarget?.close();
     if (!admin) return;
     for (const name of created) {
       await admin.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
@@ -287,9 +350,83 @@ describeRequiresPostgres("scripts/migration/0010-ee-tables-into-platform-db", ()
       const before = await snapshot(target);
       const { code, output } = run({ source: sourceUrl, target: targetUrl }, ["--apply"]);
       expect(code).toBe(1);
-      expect(output).toContain("refusing: the target already holds ee_* rows");
+      expect(output).toContain("refusing: the target already holds billing rows");
       expect(output).toContain("ee_billing_accounts");
       expect(await snapshot(target)).toEqual(before);
+    }, 60_000);
+  });
+
+  /**
+   * The module's `init()` seeds the singleton billing cursor, so a restart or a
+   * health probe before the maintenance window puts one row on the target. That
+   * is the module's own artefact, not a copy, and the refusal that used to fire
+   * on it told the operator the move had already run.
+   */
+  describe("0010 — a target the module has already booted against", () => {
+    it("replaces the boot-seeded watermark with the source's instead of refusing", async () => {
+      const { code, output } = run({ source: legacyUrl, target: bootedTargetUrl }, ["--apply"]);
+      expect(code).toBe(0);
+      expect(output).toContain("a watermark a boot seeded — replaced by the source's");
+      expect(output).toContain("copied — every table matches");
+
+      const rows = await bootedTarget.unsafe(
+        `SELECT last_llm_usage_id, floor_id FROM ee_billing_cursor`,
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].last_llm_usage_id).toBe(41);
+      // The source predates 0006, so its cursor has no floor of its own: the
+      // column takes the declared default rather than the boot's 7000.
+      expect(rows[0].floor_id).toBe(0);
+
+      const [{ accounts }] = await bootedTarget.unsafe(
+        `SELECT count(*)::int AS accounts FROM ee_billing_accounts`,
+      );
+      expect(accounts).toBe(1);
+    }, 60_000);
+
+    it("still refuses when a table other than the cursor holds rows, and says so with counts", async () => {
+      const before = await snapshot(bootedDataTarget);
+      const { code, output } = run({ source: legacyUrl, target: bootedDataTargetUrl }, ["--apply"]);
+      expect(code).toBe(1);
+      expect(output).toContain(
+        "refusing: the target already holds billing rows (ee_billing_accounts)",
+      );
+      // The counts are the evidence the refusal hands over; no branch of it may
+      // read as an instruction to discard either side.
+      expect(output).toMatch(/ee_billing_accounts\s+\|\s+1\s+\|\s+1\s+\|/);
+      expect(output).toMatch(/ee_usage_records\s+\|\s+1\s+\|\s+0\s+\|/);
+      expect(output).not.toContain("nothing is left to do");
+      expect(output).not.toContain("empty the target");
+      expect(await snapshot(bootedDataTarget)).toEqual(before);
+    }, 60_000);
+  });
+
+  describe("0010 — a source below the level the copy can carry", () => {
+    it("refuses a source that never ran 0003 rather than copying rows nothing can repair", async () => {
+      const { code, output } = run({ source: unmigratedUrl, target: refusalTargetUrl }, [
+        "--apply",
+      ]);
+      expect(code).toBe(1);
+      expect(output).toContain("refusing: the source is at 0002_numeric_cost");
+      expect(output).toContain("needs 0003_normalize_free_subscription_status or later");
+
+      const [{ present }] = await refusalTarget.unsafe(
+        `SELECT to_regclass('ee_billing_accounts') IS NOT NULL AS present`,
+      );
+      expect(present).toBe(false);
+    }, 60_000);
+
+    it("refuses a source with no journal of the module's at all", async () => {
+      await unmigrated.unsafe(`ALTER TABLE drizzle.__drizzle_migrations RENAME TO parked`);
+      try {
+        const { code, output } = run({ source: unmigratedUrl, target: refusalTargetUrl }, [
+          "--apply",
+        ]);
+        expect(code).toBe(1);
+        expect(output).toContain("refusing: the source records no migration of the module's");
+      } finally {
+        await unmigrated.unsafe(`ALTER TABLE drizzle.parked RENAME TO __drizzle_migrations`);
+      }
     }, 60_000);
   });
 

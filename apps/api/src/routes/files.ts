@@ -25,7 +25,7 @@
  * creator (an end-user cleaning up its own upload holds no org permission).
  */
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -72,6 +72,19 @@ import {
 
 const fileSearchSchema = z.string().trim().max(200).optional();
 
+/**
+ * The lifecycle half of the file ACL for THIS request. Every file resolution in
+ * this router passes it, so the DTO's `capabilities` and the two enforcement
+ * points below can never disagree.
+ */
+function fileLifecycleCeiling(c: Context<AppEnv>): { creatorCanManage: boolean } {
+  // Ownership is not a role grant, so `permissions` cannot cap it — the
+  // credential's own scope ceiling does (RBAC spec §7.1). A cookie session
+  // carries no ceiling and keeps the right.
+  const ceiling = c.get("scopeCeiling");
+  return { creatorCanManage: ceiling === undefined || ceiling.has("files:delete") };
+}
+
 export function createFilesRouter() {
   const router = new Hono<AppEnv>();
 
@@ -104,7 +117,13 @@ export function createFilesRouter() {
     if (startingAfter) filters.startingAfter = startingAfter;
     filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
 
-    const page = await listFilesForActor(scope, actor, filters, callerPermissions(c));
+    const page = await listFilesForActor(
+      scope,
+      actor,
+      filters,
+      callerPermissions(c),
+      fileLifecycleCeiling(c),
+    );
     return c.json(page);
   });
 
@@ -113,7 +132,13 @@ export function createFilesRouter() {
   router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
-    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, callerPermissions(c));
+    const resolved = await getFileForActor(
+      scope,
+      actor,
+      c.req.param("id")!,
+      callerPermissions(c),
+      fileLifecycleCeiling(c),
+    );
     if (!resolved) throw notFound("File not found");
     return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
   });
@@ -134,6 +159,7 @@ export function createFilesRouter() {
         actor,
         c.req.param("id")!,
         callerPermissions(c),
+        fileLifecycleCeiling(c),
       );
       if (!resolved) throw notFound("File not found");
       if (!resolved.capabilities.download) {
@@ -187,12 +213,21 @@ export function createFilesRouter() {
   router.delete("/files/:id", rateLimit(60), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
-    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, callerPermissions(c));
+    const resolved = await getFileForActor(
+      scope,
+      actor,
+      c.req.param("id")!,
+      callerPermissions(c),
+      fileLifecycleCeiling(c),
+    );
     if (!resolved) throw notFound("File not found");
     const { row } = resolved;
 
     if (!resolved.capabilities.delete) {
-      throw forbidden("Only the file creator or an admin can delete this file");
+      throw forbidden(
+        "Deleting this file needs the files:delete permission, or its creator on a " +
+          "credential whose scopes admit files:delete",
+      );
     }
 
     await deleteFile(scope, row.id);
@@ -213,12 +248,21 @@ export function createFilesRouter() {
   router.post("/files/:id/keep", rateLimit(60), async (c) => {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
-    const resolved = await getFileForActor(scope, actor, c.req.param("id")!, callerPermissions(c));
+    const resolved = await getFileForActor(
+      scope,
+      actor,
+      c.req.param("id")!,
+      callerPermissions(c),
+      fileLifecycleCeiling(c),
+    );
     if (!resolved) throw notFound("File not found");
     const { row } = resolved;
 
     if (!resolved.capabilities.keep) {
-      throw forbidden("Only the file creator or an admin can keep this file");
+      throw forbidden(
+        "Keeping this file needs the files:delete permission, or its creator on a " +
+          "credential whose scopes admit files:delete",
+      );
     }
 
     const wasExpiring = row.expiresAt !== null;

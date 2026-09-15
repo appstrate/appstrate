@@ -647,7 +647,7 @@ export const schemas = {
           },
         ],
         description:
-          "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
+          "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`. A summary read (`agents:run` without `agents:read`) still receives every locked field's NAME, but `values` carries no entry for one — a field the launcher cannot set is not one it reads the stored value of.",
       },
       output: {
         type: "object",
@@ -829,6 +829,86 @@ export const schemas = {
       },
     },
   },
+  // The three edits a draft-tree batch is made of. Named rather than inline so
+  // `PackageFileWriteOperation`'s discriminator can actually select one — a
+  // discriminator over inline branches selects nothing.
+  PackageFileWriteEntry: {
+    type: "object",
+    required: ["op", "path"],
+    additionalProperties: false,
+    properties: {
+      op: { type: "string", const: "write" },
+      path: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        description:
+          "Archive-relative path to write. Creates the entry or replaces it; parent directories are implicit (a path is just a name containing `/`).",
+      },
+      text: {
+        type: "string",
+        description:
+          "File content, stored as its UTF-8 encoding. Mutually exclusive with `bytes_base64`; exactly one of the two is required.",
+      },
+      bytes_base64: {
+        type: "string",
+        description:
+          "File content as standard base64 (URL-safe base64 is refused). Mutually exclusive with `text`; exactly one of the two is required.",
+      },
+    },
+  },
+  PackageFileDeleteEntry: {
+    type: "object",
+    required: ["op", "path"],
+    additionalProperties: false,
+    properties: {
+      op: { type: "string", const: "delete" },
+      path: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        description: "Entry to remove. A path the tree does not hold is a `404`.",
+      },
+    },
+  },
+  PackageFileMoveEntry: {
+    type: "object",
+    required: ["op", "from", "to"],
+    additionalProperties: false,
+    properties: {
+      op: { type: "string", const: "move" },
+      from: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        description: "Entry to rename. A path the tree does not hold is a `404`.",
+      },
+      to: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        description:
+          "New path. A move NEVER overwrites: a destination that is already taken is a `400 path_conflict`, so a rename cannot carry off a file the operation does not name. To replace, `delete` the destination earlier in the same batch.",
+      },
+    },
+  },
+  // One edit to a draft file tree. The batch applies these IN ORDER, so a
+  // `move` followed by a `write` on the new path is one request.
+  PackageFileWriteOperation: {
+    oneOf: [
+      { $ref: "#/components/schemas/PackageFileWriteEntry" },
+      { $ref: "#/components/schemas/PackageFileDeleteEntry" },
+      { $ref: "#/components/schemas/PackageFileMoveEntry" },
+    ],
+    discriminator: {
+      propertyName: "op",
+      mapping: {
+        write: "#/components/schemas/PackageFileWriteEntry",
+        delete: "#/components/schemas/PackageFileDeleteEntry",
+        move: "#/components/schemas/PackageFileMoveEntry",
+      },
+    },
+  },
   Run: {
     type: "object",
     // Every field a run response carries unconditionally. The list/detail/
@@ -902,9 +982,12 @@ export const schemas = {
         type: "string",
         enum: ["pending", "running", "success", "failed", "timeout", "cancelled"],
       },
-      // `runs.input` is a nullable jsonb column (createFailedRun writes null);
-      // emitted verbatim, so the wire value can be null.
-      input: { type: ["object", "null"], additionalProperties: true },
+      input: {
+        type: ["object", "null"],
+        additionalProperties: true,
+        description:
+          "Resolved run input. Registered-agent input is null without agents:read because it can contain editor-imposed values, including historical locks. Inline input remains visible. Execution and rerun retain the complete input server-side.",
+      },
       result: {
         type: ["object", "null"],
         description:
@@ -1965,6 +2048,7 @@ export const schemas = {
       "name",
       "description",
       "permissions",
+      "unavailable_permissions",
       "createdAt",
       "updatedAt",
     ],
@@ -1983,7 +2067,19 @@ export const schemas = {
       permissions: {
         type: "array",
         items: { type: "string" },
-        description: "Space-level permission strings the role grants, sorted.",
+        description:
+          "Space-level permission strings the role grants on this deployment, sorted. " +
+          "A custom bundle is projected through the same vocabulary enforcement uses, so " +
+          "this array is always one a `PATCH` accepts back.",
+      },
+      unavailable_permissions: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Entries stored on the bundle that this deployment cannot name — their module is " +
+          "no longer loaded — sorted. They grant nothing and are never part of `permissions`; " +
+          "sending a `permissions` array without them is what drops them from the row. " +
+          "Always empty for a preset.",
       },
       createdAt: { type: ["string", "null"], format: "date-time" },
       updatedAt: { type: ["string", "null"], format: "date-time" },

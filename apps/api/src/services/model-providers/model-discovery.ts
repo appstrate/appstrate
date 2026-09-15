@@ -12,8 +12,8 @@
  *     (`listServedModels`), intersected with the discovery candidates and
  *     persisted as `available_model_ids` — the seed gate's authorization
  *     record, read only through `resolveCredentialModelIds`. AUTH_FAILED never
- *     persists; RATE_LIMITED is retried once; any other failure, or an empty
- *     intersection, leaves the previous list standing.
+ *     persists; RATE_LIMITED is retried once; any other failure, a truncated
+ *     listing, or an empty intersection, leaves the previous list standing.
  */
 
 import { eq, and } from "drizzle-orm";
@@ -113,6 +113,19 @@ export async function discoverAvailableModels(
       error: listing.error,
       status: listing.status,
       message: listing.message,
+    });
+    return { outcome: "nothing_verified", candidateCount: candidates.length };
+  }
+
+  // A short listing is a partial view of what the endpoint serves, so
+  // intersecting against it would drop candidates that sit past the cap — the
+  // same reason the failure branches above keep the previous list.
+  if (listing.truncated) {
+    logger.warn("model discovery read a truncated listing — keeping previous list", {
+      credentialId,
+      providerId: creds.providerId,
+      candidateCount: candidates.length,
+      servedCount: listing.models.length,
     });
     return { outcome: "nothing_verified", candidateCount: candidates.length };
   }

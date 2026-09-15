@@ -93,6 +93,12 @@ export type ModelFormSubmission = ModelFormData | ModelFormMultiData;
 /** The ids a batch could not create, and the credential it created for a retry to bind to. */
 export interface ModelFormSubmitOutcome {
   failedModelIds: string[];
+  /**
+   * The subset of `failedModelIds` the server refused as `model_already_added`
+   * — this organization already has a row for that (credential, model) pair.
+   * Named apart because it is not a failure to retry: the model is there.
+   */
+  duplicateModelIds: string[];
   credentialId?: string;
 }
 
@@ -224,23 +230,34 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormPa
   };
 }
 
+/** The values a row carries, as explicit overrides. An empty modality list is dropped: the server refuses it. */
+function describedCapabilities(
+  row: ModelPickRow["endpointCapabilities"],
+): ModelCapabilityOverrides {
+  return {
+    ...(row.input?.length ? { input: row.input } : {}),
+    ...(row.contextWindow != null ? { contextWindow: row.contextWindow } : {}),
+    ...(row.maxTokens != null ? { maxTokens: row.maxTokens } : {}),
+    ...(row.reasoning != null ? { reasoning: row.reasoning } : {}),
+  };
+}
+
 /**
- * How much of a picked row ships depends on its listing. `catalog`: the id
- * only, the vendored catalog answers for the rest. `discover`: what the
- * listing reported, as explicit overrides; nothing is defaulted. `search`:
- * everything, cost included — the search IS the billing rate.
+ * Search includes the billing rate; catalog rows resolve at read time.
+ * Discovery pins only endpoint capabilities, never catalog display hints.
  */
 function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
-  if (row.origin === "catalog") return { modelId: row.id };
+  if (row.origin === "search") {
+    return {
+      ...(row.label ? { label: row.label } : {}),
+      modelId: row.id,
+      ...describedCapabilities(row),
+      ...(row.cost ? { cost: row.cost } : {}),
+    };
+  }
   return {
-    ...(row.label ? { label: row.label } : {}),
     modelId: row.id,
-    // The server refuses an empty modality list.
-    ...(row.input?.length ? { input: row.input } : {}),
-    ...(row.contextWindow !== null ? { contextWindow: row.contextWindow } : {}),
-    ...(row.maxTokens !== null ? { maxTokens: row.maxTokens } : {}),
-    ...(row.reasoning !== null ? { reasoning: row.reasoning } : {}),
-    ...(row.origin === "search" && row.cost ? { cost: row.cost } : {}),
+    ...(row.origin === "discover" ? describedCapabilities(row.endpointCapabilities) : {}),
   };
 }
 

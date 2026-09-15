@@ -749,7 +749,7 @@ const context: ExecutionContext = {
 // event). Re-awaiting the loader surfaces the ESM-cached rejection with its
 // real message, and `die()` restores the fail-fast contract: one
 // `appstrate.error` + a failed finalize instead of a lying ready signal.
-if (piSdkWarmup && (await piSdkWarmup) === null) {
+if ((await piSdkWarmup) === null) {
   try {
     await loadPiCodingAgentSdk();
   } catch (err) {

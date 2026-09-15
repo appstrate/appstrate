@@ -33,6 +33,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
@@ -181,8 +182,8 @@ export function createRunsRemoteRouter() {
   router.post(
     "/runs/remote",
     rateLimit(getPlatformRunLimits().per_org_global_rate_per_min),
-    idempotency(),
     requirePermission("agents", "run"),
+    idempotency(),
     async (c) => {
       const body = await readJsonBody(c, CreateRemoteRunBodySchema);
 
@@ -202,7 +203,7 @@ export function createRunsRemoteRouter() {
       // the space-scope boundary for this write. The org-scope assertion below
       // only proves space∈org, so without this check a credential pinned to space
       // A could name a sibling space B in the body and escape its space scope (the
-      // path-param `apiKeySpaceScopeGuard` doesn't cover the body). Enforced for
+      // path-param `pinnedSpaceScopeGuard` doesn't cover the body). Enforced for
       // EVERY auth method — gating on `authMethod === "api_key"` would leave
       // the same escape open to any module strategy that pins a space
       // (e.g. oauth2-end-user bearers).
@@ -405,8 +406,8 @@ export function createRunsRemoteRouter() {
 
   // PATCH /api/runs/:runId/sink/extend — push out sink_expires_at for a
   // long-running remote run. Same auth as creation: agents:run. Runs are
-  // space-scoped but this route resolves the run by id (not space path) so the
-  // handler checks ownership explicitly.
+  // space-scoped but this route resolves the run by id (not space path), so
+  // tenancy AND run visibility are both predicates on the UPDATE below.
   router.patch(
     "/runs/:runId/sink/extend",
     rateLimit(30),
@@ -421,11 +422,15 @@ export function createRunsRemoteRouter() {
       const ttl = Math.min(body.ttl_seconds, env.REMOTE_RUN_SINK_MAX_TTL_SECONDS);
       const newExpiresAt = new Date(Date.now() + ttl * 1000);
 
-      // Update only open sinks (not closed, not already expired) owned by
-      // the caller's org AND space. Filtering on `spaceId` too
-      // stops a space-A principal from extending a space-B run's sink within
-      // the same org. Mismatched ownership or closed sink → 404, which
-      // avoids leaking whether a run exists across tenancies.
+      // Update only open sinks (not closed, not already expired) inside the
+      // caller's org AND space, and only among the runs the caller may READ.
+      // Tenancy is not visibility: `agents:run` gates the action, the
+      // `runVisibilityFilter` predicate gates WHICH rows, exactly as
+      // `runs:cancel` + `assertRunVisible` do on POST /runs/:id/cancel. Without
+      // it a member who cannot even see a colleague's run could push out its
+      // sink expiry and bump `last_heartbeat_at`, defeating the stall watchdog,
+      // and read the 200-vs-404 as a liveness oracle over the whole space.
+      // A row outside any of these → 404, so nothing leaks about its existence.
       const orgId = c.get("orgId");
       // Bumping `last_heartbeat_at` alongside `sink_expires_at` turns
       // /sink/extend into the canonical keep-alive: runners that are
@@ -441,6 +446,7 @@ export function createRunsRemoteRouter() {
             eq(runs.id, runId),
             eq(runs.orgId, orgId),
             eq(runs.spaceId, c.get("spaceId")),
+            runVisibilityFilter(c),
             sql`sink_closed_at IS NULL`,
             sql`sink_expires_at IS NOT NULL`,
           ),

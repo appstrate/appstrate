@@ -54,7 +54,7 @@ import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
 import { ErrorState, LoadingState } from "../page-states";
 import { FilePreview } from "./file-preview";
-import { ReadOnlyFileTree } from "./read-only-file-tree";
+import { FileTree } from "./file-tree";
 import { usePackageFileDownload } from "./use-package-file";
 import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 
@@ -348,7 +348,7 @@ export function PackageFilesView({
               ) : !bundleIndex || dependenciesLoading ? (
                 <LoadingState />
               ) : (
-                <ReadOnlyFileTree
+                <FileTree
                   entries={visibleFiles.map((file) => file.treeEntry)}
                   directories={[
                     "Bundle AFPS",

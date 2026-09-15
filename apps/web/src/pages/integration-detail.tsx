@@ -16,6 +16,7 @@ import {
   IntegrationMap,
 } from "../components/package-detail/integration-structure";
 import { PackageFilesView } from "../components/package-files/package-files-view";
+import { PackageFilesSection } from "../components/package-files/package-files-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 import { CallbackUrlHint } from "../components/package-detail/callback-url-hint";
 
@@ -126,19 +127,18 @@ const IntegrationDefinitionEditor = lazy(() =>
   })),
 );
 
-/** Rail id → editor section. `bundle`, because `files` is Explorer's tree. */
+/** Rail id → editor section. Contenu (`bundle`) is not one: it reads the bundle. */
 const DEFINITION_RAIL: Record<string, IntegrationDefinitionSection> = {
   identity: "general",
   source: "source",
   "auth-methods": "auths",
   tools: "tools",
-  bundle: "files",
 };
 
 /** Sections that moved: the policy joined the catalog, the document the files table. */
 const RENAMED_SECTIONS: Record<string, string> = {
   "tool-policies": "tools",
-  documentation: "bundle",
+  documentation: "files",
 };
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
 
@@ -638,6 +638,7 @@ function IntegrationSettings({
     requested === "functioning" ||
     requested === "map" ||
     (requested === "versions" && isOwned) ||
+    requested === "bundle" ||
     (definition && requested && requested in DEFINITION_RAIL)
       ? requested
       : requested === "files" || !canConfigure
@@ -707,6 +708,11 @@ function IntegrationSettings({
         : [
             { id: "functioning", label: t("integration.structure.functioning"), icon: Plug },
             { id: "tools", label: t("integrationEditor.tabTools", { ns: "agents" }), icon: Wrench },
+            {
+              id: "bundle",
+              label: t("editor.tabPackageFiles", { ns: "agents" }),
+              icon: FileArchive,
+            },
           ],
     },
   ];
@@ -754,10 +760,16 @@ function IntegrationSettings({
               );
               if (railId) void navigate(sectionHref(railId));
             }}
-            filesHref={(path) => sectionHref("files", { file: path })}
             toolInspection={detail.tool_catalog_inspection}
           />
         </Suspense>
+      ) : active === "bundle" ? (
+        <PackageFilesSection
+          type="integration"
+          packageId={packageId}
+          manifest={detail.manifest}
+          filesHref={(path) => sectionHref("files", { file: path })}
+        />
       ) : active === "versions" ? (
         <PackageVersionsSection type="integration" packageId={packageId} isOwned={isOwned} />
       ) : active === "files" ? (
@@ -770,10 +782,8 @@ function IntegrationSettings({
             definition
               ? (path) =>
                   path === "manifest.json"
-                    ? sectionHref("bundle", { editManifest: "1" })
-                    : path === "INTEGRATION.md"
-                      ? sectionHref("bundle", { edit: path })
-                      : undefined
+                    ? sectionHref("identity", { editManifest: "1" })
+                    : undefined
               : undefined
           }
         />

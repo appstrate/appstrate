@@ -391,7 +391,8 @@ export const schedulesPaths = {
       operationId: "listScheduleRuns",
       tags: ["Schedules"],
       summary: "List runs for a schedule",
-      description: "List recent runs triggered by a specific schedule.",
+      description:
+        "List recent runs triggered by a specific schedule. Takes `schedules:read` AND a run read permission: the rows are runs, so `runs:read` lists the ones the caller launched — including the runs of the caller's own schedules — and `runs:read-all` the whole space. A credential holding `schedules:read` alone is rejected with 403.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

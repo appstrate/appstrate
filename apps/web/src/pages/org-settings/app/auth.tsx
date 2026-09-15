@@ -18,7 +18,7 @@ export function OrgSettingsAppAuthPage() {
   const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!can("spaces:write") || !spaceId || !features.oidc) {
+  if (!can("space-settings:write") || !spaceId || !features.oidc) {
     return <NavigateKeepingState to="/workspace-settings/general" />;
   }
 

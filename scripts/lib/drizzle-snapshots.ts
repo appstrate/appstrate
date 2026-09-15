@@ -12,7 +12,15 @@ export interface DrizzleJournal {
 
 /** The subset of `meta/NNNN_snapshot.json` these gates read. */
 export interface DrizzleSnapshot {
-  tables: Record<string, { schema?: string; indexes?: Record<string, unknown> }>;
+  tables: Record<
+    string,
+    {
+      schema?: string;
+      indexes?: Record<string, unknown>;
+      /** Keyed by SQL column name; drizzle writes `notNull` on every entry. */
+      columns?: Record<string, { notNull?: boolean }>;
+    }
+  >;
 }
 
 /** Zero-padded to the 4 digits drizzle-kit uses: `40` → `0040_snapshot.json`. */

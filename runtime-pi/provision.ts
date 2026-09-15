@@ -274,7 +274,11 @@ export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        writer.write(value);
+        // AWAITED: `FileSink.write` hands back a promise whenever the sink has
+        // to drain, and dropping it sent a mid-write failure out as an
+        // unhandled rejection instead of into the `catch` below that routes it
+        // through `die()`.
+        await writer.write(value);
         // Apply backpressure so a fast upstream cannot queue unbounded chunks
         // in the sink buffer — keeps peak memory flat for large files.
         await writer.flush();

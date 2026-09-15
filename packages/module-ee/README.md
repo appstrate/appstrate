@@ -29,14 +29,154 @@ but production use needs a written agreement. Every `.ts` file carries
 
 ### Removing the module from a redistribution
 
-Deleting `packages/module-ee/` alone leaves `bun run check` red — stale
-allowlist entries fail it by design. Also drop the seven `Ee*` rows from
-`apps/api/src/openapi/response-type-registry.ts` (`EeBillingAccount`,
-`EeBillingPlan`, `EeBillingUpgradePlan`, `EeCheckoutPlanId`, `EeBillingManager`,
-`EeBillingManagerList`, `EeBillingContact`) and the `POST /api/billing/webhooks`
-row from `apps/api/src/openapi/zod-schema-registry.ts`; remove
-`@appstrate/module-ee` from `apps/api/package.json` and its `knip.config.ts`
-block; regenerate `apps/web/src/api/schema.d.ts` with `bun run generate:api`.
+Deleting `packages/module-ee/` alone leaves `bun run check` red. The commercial
+tree is opt-in at RUNTIME, not at build time: the platform's gates, the OpenAPI
+registries, the SPA, the i18n bundles and several gate self-tests all name the
+module or its wire contract, and every stale reference fails something by
+design. The complete recipe is below.
+
+`scripts/test/module-ee-removal-recipe.test.ts` holds this list to the code: it
+derives, from the tracked files, every file that names an `Ee*` schema, an
+`/api/billing` path or a `packages/module-ee` path, and fails unless each one is
+named here. A new coupling therefore cannot be added without extending this
+section.
+
+**1. Delete the module and the one-off that moved its tables**
+
+- `packages/module-ee/`
+- `scripts/migration/0010-ee-tables-into-platform-db.ts` and
+  `scripts/test/migration-0010-ee-tables-into-platform-db.test.ts` — the script
+  that moved the `ee_*` tables into the platform database. Its test reads the
+  script from disk, so leaving the test behind crashes `bun test` with `ENOENT`.
+- `scripts/test/module-ee-removal-recipe.test.ts` — the gate that holds this
+  section to the code. It reads this README, so it goes with it.
+
+**2. API — the wire contract**
+
+- `apps/api/src/openapi/response-type-registry.ts` — drop the seven `Ee*` rows:
+  `EeBillingAccount`, `EeBillingPlan`, `EeBillingUpgradePlan`,
+  `EeCheckoutPlanId`, `EeBillingManager`, `EeBillingManagerList`,
+  `EeBillingContact`.
+- `apps/api/src/openapi/zod-schema-registry.ts` — drop the
+  `POST /api/billing/webhooks` row.
+- `apps/api/package.json` — drop the `@appstrate/module-ee` workspace
+  dependency.
+
+**3. SPA — delete (14 files)**
+
+`apps/web/src/components/billing-contact-section.tsx`,
+`apps/web/src/components/billing-managers-section.tsx`,
+`apps/web/src/components/plan-card.tsx`,
+`apps/web/src/components/sidebar-billing.tsx`,
+`apps/web/src/components/test/plan-card.test.tsx`,
+`apps/web/src/hooks/use-billing.ts`,
+`apps/web/src/lib/billing-contact.ts`,
+`apps/web/src/lib/billing-managers.ts`,
+`apps/web/src/lib/test/billing-contact.test.ts`,
+`apps/web/src/lib/test/billing-managers.test.ts`,
+`apps/web/src/pages/onboarding/plan-step.tsx`,
+`apps/web/src/pages/org-settings/billing.tsx`,
+`apps/web/src/pages/test/billing-admin-sections.test.tsx`,
+`apps/web/src/pages/test/billing-plan-change.test.tsx`.
+
+**4. SPA — edit (6 files)**
+
+- `apps/web/src/app.tsx` — drop the two `lazy()` imports (`OnboardingPlanStep`,
+  `OrgSettingsBillingPage`) and their two `<Route>` blocks (`/onboarding/plan`,
+  and `path="billing"` under `RequirePermission billing:read`).
+- `apps/web/src/components/app-sidebar.tsx` — drop the `SidebarBilling` import
+  and its usage.
+- `apps/web/src/components/onboarding-layout.tsx` — drop `"plan"` from the
+  `StepKey` union and its `ALL_STEPS` entry. The `showWhen: "billing"` mechanism
+  becomes vestigial; it is unused, not broken.
+- `apps/web/src/pages/org-settings/layout.tsx` — drop the
+  `/org-settings/billing` nav entry AND the `CreditCard` lucide import it was
+  the only user of.
+- `apps/web/src/pages/onboarding/done-step.tsx` — drop the `useBilling` and
+  `useAppConfig` imports, both hook calls, and the `{features.billing && billing
+&& (…)}` card.
+- `apps/web/src/hooks/use-global-run-sync.ts` — drop the
+  `qc.invalidateQueries({ queryKey: ["get", "/api/billing"] })` call. It is
+  untyped, so nothing fails if it stays; it is dead either way.
+
+**5. i18n — the keys must go, a gate checks it**
+
+`apps/web/src/locales/test/locale-keys.test.ts` runs the reverse guard (every
+declared key must be referenced by some source file) plus en/fr parity, so an
+orphaned key is a test failure, not dead weight.
+
+- `apps/web/src/locales/en/settings.json` and
+  `apps/web/src/locales/fr/settings.json` — 55 keys each: `billing.*` (24),
+  `billingContact.*` (10), `billingManagers.*` (12), `onboarding.plan*` (8),
+  `onboarding.summaryPlan`.
+- `apps/web/src/locales/en/common.json` and
+  `apps/web/src/locales/fr/common.json` — `nav.credits`.
+
+**6. Gates and shared packages**
+
+- `scripts/verify-no-migration-dml.ts` — **required**: it reads
+  `packages/module-ee/drizzle/migrations` from disk and exits 1 with `ENOENT`
+  once the directory is gone. Drop the `SCANS` entry, the `EE_GRANDFATHERED`
+  constant with its doc block, and the header sentences that describe two
+  migration trees.
+- `knip.config.ts` — drop `ee|` from `ignoreDependencies` and the whole
+  `"packages/module-ee": { entry: [...] }` workspace block. Both, not either.
+- `packages/emails/src/index.ts` — drop the `RenderedEmail` and
+  `SupportedLocale` re-exports. They exist only for the module's
+  `emailOverrides`, and become dead exports (`verify:dead-code`).
+- `scripts/verify-license-boundary.ts` (`COMMERCIAL_PREFIX`),
+  `scripts/verify-module-isolation.ts` (`COMMERCIAL_MODULE_PREFIX`) and
+  `scripts/verify-module-contract.ts` (the `module-ee` owner entry) keep
+  `packages/module-ee` constants that simply match nothing once the directory is
+  gone. Nothing fails whether you drop them or not.
+- `scripts/generate-api-types.ts` — its banner explains that the generated SPA
+  schema carries this module's contract. Update it only together with
+  `scripts/test/verify-license-boundary.test.ts`, which asserts the banner text.
+
+**7. Gate self-tests that assert this module is present**
+
+These run in CI under `bun test` and assert against the REAL repo, so they go
+red the moment the module is gone. Relax each to its post-removal truth (or
+delete the case):
+
+- `scripts/test/verify-module-isolation.test.ts` — asserts the scan reached
+  `packages/module-ee/drizzle/schema.ts`.
+- `scripts/test/verify-module-sql-boundary.test.ts` — negative control asserts
+  the run did NOT report `0 raw-SQL literal(s) read`.
+- `scripts/test/verify-compose-defaults.test.ts` — asserts the run did NOT
+  report `0 module schema(s)`.
+- `scripts/test/verify-env-docs.test.ts` — asserts at least one module schema
+  was discovered; after relaxing it, drop the then-unused `out` binding.
+- `scripts/test/module-env-schemas.test.ts` — asserts a discovered schema with
+  `id === "ee"`, `STRIPE_SECRET_KEY` in its shape and `eeEnvSchema` as its
+  export name.
+- `scripts/test/verify-no-migration-dml.test.ts` — indexes `SCANS[1]`, which
+  stops existing with the `SCANS` entry removed in step 6.
+
+Two more name the module in SYNTHETIC fixtures only and keep passing untouched
+— `scripts/test/check-index-drift.test.ts` and
+`apps/api/test/unit/module-isolation-acceptances.test.ts`. Leave them, or rename
+the fixtures for tidiness.
+
+**8. Reinstall and regenerate**
+
+```sh
+bun install
+bun run generate:api    # rewrites apps/web/src/api/schema.d.ts without the EE contract
+bun run check
+```
+
+`apps/web/src/api/schema.d.ts` is generated from whatever `packages/module-*`
+directories exist on disk, so regenerating it — not editing it — is what drops
+the `Ee*` schemas and `/api/billing/*` paths from the SPA's typed client.
+
+Stale mentions with no gate behind them, cosmetic only: `docs/ENV.md` (the
+`MODULES` row and the `STRIPE_*` / `EE_RECONCILIATION_*` rows), the commented EE
+block in `.env.example`, `.github/workflows/stripe-live.yml` (the whole workflow
+targets this module's live tests), and comment-only references in
+`scripts/check-consumer-versions.ts`, `test/setup/preload.ts`,
+`test/setup/modules.test.ts`, `packages/env/src/index.ts`,
+`packages/db/src/schema/organizations.ts` and `packages/emails/src/registry.ts`.
 
 ## Architecture
 
@@ -147,10 +287,10 @@ These seven tables live in the **platform** database (`DATABASE_URL`). `migrateE
 
 **Module features** (merged into `AppConfig.features` at boot):
 
-| Flag           | Meaning                                                                                                                                                                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `billing`      | The billing surface exists — the dashboard renders plan/usage/checkout                                                                                                                                                                   |
-| `custom_roles` | Licenses the platform's own `POST/PATCH/DELETE /api/roles` (RBAC spec §9). The space-role data model, the four presets and the read routes are OSS; DEFINING a custom bundle is the EE half, and EE is the module that licenses it today |
+| Flag           | Meaning                                                                                                                                                                                                                                                                                                                                                     |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `billing`      | The billing surface exists — the dashboard renders plan/usage/checkout                                                                                                                                                                                                                                                                                      |
+| `custom_roles` | Licenses the platform's own `POST/PATCH /api/roles` AND every path that grants a bundle — space-member writes, invitations, OAuth signup policies (RBAC spec §9). The space-role data model, the four presets, the read routes and `DELETE /api/roles/{id}` are OSS: dropping the flag freezes what bundles reach and still lets a deployment clean them up |
 
 > **Signup gating is no longer EE-owned.** Domain allowlist (`AUTH_ALLOWED_SIGNUP_DOMAINS`), invitation-only signup (`AUTH_DISABLE_SIGNUP`), platform-admin allowlist (`AUTH_PLATFORM_ADMIN_EMAILS`), and bootstrap-owner auto-org (`AUTH_BOOTSTRAP_OWNER_EMAIL`) all live natively in the platform's `evaluateSignupPolicy` since PR #282. The `beforeSignup` hook + `DomainNotAllowedError` were removed from EE in this PR.
 
@@ -276,7 +416,9 @@ Every subscription-scoped webhook writes only to the account that **currently ca
 
 The handlers that ATTACH a subscription share the "no held subscription" arms: an account qualifies when it carries no subscription id, or when the id it carries names a subscription outside `HELD_SUBSCRIPTION_STATUSES`. That second arm is what a stale id needs — only `customer.subscription.deleted` nulls the column, so a lost or late one leaves a dead id behind, and pinning on the id alone drops the org's next paid checkout as "superseded", leaving it charged with no plan and no quota. An account on a different subscription Stripe DOES hold is excluded.
 
-`checkout.session.completed` and `invoice.paid` add one arm: they also write the account already carrying THAT subscription, because both carry authoritative data for it and neither may depend on winning the ordering race against the other. `customer.subscription.created` does not — its payload is creation-time state (`incomplete` or `trialing`, `cancel_at_period_end: false`), so a late one would roll the live status and cancel flag back on the very subscription the account is on.
+`checkout.session.completed` and `invoice.paid` add one arm: they also write the account already carrying THAT subscription, because both carry authoritative data for it and neither may depend on winning the ordering race against the other. `customer.subscription.created` only attaches an unheld account. All three retrieve the live subscription and refuse ended subscriptions before granting entitlements.
+
+Subscription-scoped handlers take a PostgreSQL transaction advisory lock keyed by subscription id **before** any live Stripe read. The lock covers the account update and event completion together: a cancellation waits for an in-flight attach, then clears its grant. If cancellation was processed first, the attach's live read sees the ended subscription. Distinct event-id claims alone cannot provide this ordering. Storage projection and emails run after commit, so they see the committed account and never consume a second connection while lock waiters occupy the pool.
 
 The condition lives in the `UPDATE` rather than in a preceding `SELECT`, so two handlers cannot both win it. An event about any other subscription matches no row, changes nothing, and is logged at `info` — the expected tail of a replacement, not a fault.
 
@@ -513,6 +655,49 @@ The sum is the only way to apply that debt: the orphaned ledger rows were claime
 and the watermark advanced past them in the same committed transaction that
 recorded them, so no future sweep can ever read them again.
 
+### Turning the module off, and back on
+
+Taking `@appstrate/module-ee` out of `MODULES` (or pinning
+`EE_RECONCILIATION_INTERVAL_SECONDS=0`) stops the sweep. It does **not** stop the
+platform appending to `llm_usage` — metering is platform-side. Three things
+happen across such a window, and only the first is guarded:
+
+1. **The gap is still billable.** The watermark outlives the window, so the first
+   tick after re-enabling claims every row that accumulated in it and debits the
+   lot against the organizations' **current** quotas — soft-cap overshoots and
+   quota-warning emails fleet-wide, credits already spent by the time anyone
+   reads the heartbeat, and irreversible (the claim table is never purged, so the
+   rows cannot be un-billed by re-reading them). `assertCursorResumable`
+   (`src/billing/billing-sweeper.ts`) refuses that boot instead: it fires when the
+   sweep last confirmed the watermark more than `EE_RECONCILIATION_MAX_GAP_SECONDS`
+   ago (default a day) **and** more rows piled up than one tick can drain. Both
+   halves are required — age alone would refuse a platform that was simply shut
+   down for a week, backlog alone a sweep that is honestly behind while ticking.
+   The guard counts actual rows through bounded `usage.list` pages: at most one
+   tick plus one forward row and the replay window. Missing serial ids do not
+   count. Unsettled BYOK rows can be passed; an unsettled system row, including
+   below the watermark in the replay window, stops the scan just as it stops the sweep.
+   The two decisions the refusal names:
+   - **forgive the gap** — `DELETE FROM ee_billing_cursor;`, then boot. `init()`
+     re-seeds the watermark _and_ `floor_id` at the current settled frontier,
+     exactly as the original cutover did, so nothing below it is ever read again.
+     This is the usual answer: customers were told billing was off;
+   - **bill the gap** — set `EE_RECONCILIATION_MAX_GAP_SECONDS` above the age the
+     refusal printed (`0` resumes over any gap). Rehearse it: the debits land
+     against today's balances, not the window's.
+2. **Orgs created in the window have no billing account.** `onOrgCreate` never
+   fired for them, so their first metered usage is refused (`no_account` →
+   `402 quota_exceeded`) and the sweep reports each one at `error`. Repair with
+   `bun run repair:account -- <orgId> <ownerEmail>` above. This is deliberately
+   NOT reconciled at boot: the module reads the platform only through
+   `ctx.services` and the two org queries, and none of them enumerates
+   organizations — a fleet-wide backfill would need a new core query, and
+   provisioning free tiers for orgs an operator never saw is a commercial call.
+3. **Usage of orgs deleted in the window is gone.** `onOrgDelete`'s final drain
+   never ran and the platform cascade took their `llm_usage` rows with them.
+   Nothing can recover that revenue after the fact — it is the cost of the window,
+   and worth knowing before opening one.
+
 ### Moving an existing deployment
 
 A deployment whose billing tables sit in a database of their own moves them with
@@ -575,9 +760,10 @@ knowing:
   (`bun run test:tier0`) the module is not imported, not initialized, and its
   test files are not collected. It needs PostgreSQL and `postgres.js`, neither
   of which the tier-0 PGlite adapter offers. The runner prints the skip.
-- the same file sets `EE_RECONCILIATION_INTERVAL_SECONDS=0` so `init()` arms
-  no periodic sweep — a timer firing mid-suite would bill rows a test seeded.
-  The sweep functions are driven directly by
+- the same file sets `EE_RECONCILIATION_INTERVAL_SECONDS=0`, which pauses
+  METERING — a sweep firing mid-suite would bill rows a test seeded. `init()`
+  still arms the maintenance tick that keeps running under it; `useEeTestSeams()`
+  is what disarms that. The sweep functions are driven directly by
   `test/integration/services/billing-sweeper.test.ts`.
 
 `test/helpers/setup.ts` installs the two seams these tests drive themselves: the
@@ -607,17 +793,47 @@ therefore returning `null` in every test that touched it. The confirmation
 e-mail silently fell back to today's date, and no test noticed, because the
 fixture and the assertions were written from the same stale belief.
 
-`test/live/stripe-contract.test.ts` is the other half. It runs against real
-Stripe in **test mode** and checks the two things the mock structurally cannot:
+Two things close that gap, and they are worth separating because only one of
+them needs a Stripe key.
 
-- **Shape** — every key path a fixture claims must exist on the live object.
-  Extra live fields are ignored (the fixtures are deliberately minimal); invented
-  ones fail. This is what turns the next relocation into a red mock rather than a
-  quiet production lie.
+**Without a key — the fixtures are typed.** `test/helpers/stripe.ts` declares
+`Fixture<T>`, a deep-partial of the real SDK type: a fixture may omit any field
+production never reads, but every field it DOES carry must exist on
+`Stripe.Subscription`, `Stripe.Invoice`, … with a compatible type. The module's
+`tsconfig.json` includes `test` for exactly this reason. So a bump of `stripe`
+that RELOCATES a field fails `bunx tsc --noEmit -p packages/module-ee` on the
+fixture, on any machine, with no account involved. That is the check the
+2025-03-31 move of `current_period_end` would have tripped. Note the one hole it
+cannot see: TypeScript exempts spread properties from excess-property checking,
+so fixture fields are written as direct properties (`amount_paid: undefined`)
+rather than `...(cond ? {} : { amount_paid })`.
+
+**With a key — the live contract suite.** `test/live/stripe-contract.test.ts`
+runs against real Stripe in **test mode** and checks the two things neither the
+mock nor the typechecker can:
+
+- **Shape** — every key path a fixture claims must exist on the live object,
+  for Subscription, Customer, Checkout.Session, BillingPortal.Session and
+  Invoice. Extra live fields are ignored (the fixtures are deliberately
+  minimal); invented ones fail. It also asserts that every path production
+  dereferences resolves on the live object AND on the fixture — a path present
+  in only one of the two is a test proving nothing. The invoice set covers
+  `parent.subscription_details.subscription`, the post-basil replacement for the
+  removed top-level `invoice.subscription`, on which budget allocation hangs.
 - **Semantics** — that `subscriptions.update` replaces the priced item, that
   `current_period_end` is a timestamp on the item, that a forged webhook
   signature raises `StripeSignatureVerificationError` and an unknown id raises
-  `StripeInvalidRequestError` (both classes are branched on in `src/routes/`).
+  `StripeInvalidRequestError` (both classes are branched on in `src/routes/`),
+  and that every enabled webhook endpoint on the account renders payloads at the
+  version the module pins. That last one is a separate contract: the SDK pin
+  governs what a `retrieve` returns, while a webhook payload is rendered at the
+  version configured on the ENDPOINT, and `subscriptionPeriodEnd` is applied to
+  `event.data.object` too.
+
+The API version lives in exactly one place, `STRIPE_API_VERSION` in
+`src/stripe/client.ts`, pinned with `satisfies Stripe.LatestApiVersion` — a
+literal type, so an SDK bump makes that line a hard `TS2322`. The live suite
+imports it rather than restating it.
 
 It creates a customer and a subscription and deletes them in `afterAll`, so it
 needs a key that may mutate the account:
@@ -632,8 +848,12 @@ shape as `scripts/conformance/probes.ts`. It is deliberately **not**
 `bun test` start creating objects in an account nobody aimed at. A key that does
 not begin with `sk_test_` is refused outright rather than skipped.
 
-In CI it is `.github/workflows/stripe-live.yml` — weekly, on demand, and on any
-PR touching `packages/module-ee/**` (which includes a Dependabot bump of the
-`stripe` dependency). The repository secret is `STRIPE_LIVE_SECRET_KEY`; until it
-is provisioned the job runs green with the suite skipped, and says so in an
-annotation.
+In CI it is `.github/workflows/stripe-live.yml`: weekly, on demand, on every
+**push to `main`** touching `packages/module-ee/**`, and on any PR touching the
+same paths. The push trigger is not redundant — a Dependabot PR reads the
+_Dependabot_ secret store, not repository secrets, so `STRIPE_LIVE_SECRET_KEY`
+is empty there, every test skips, and the job would otherwise report green on
+the one PR that most needs the check. The merge of that PR is what runs the
+suite for real. Fork PRs skip for the same structural reason and are equally
+tolerated; on `push`, `schedule` and `workflow_dispatch`, where repository
+secrets ARE available, a missing key **fails** the job instead of skipping.

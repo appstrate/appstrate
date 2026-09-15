@@ -393,6 +393,19 @@ describe("multi-space skill distribution — access decides the sources", () => 
     ]);
   });
 
+  // #1363: a malformed `syncSpaces` no longer breaks `readConfig`, so the one
+  // command that reads the list is the one command that has to refuse it —
+  // rather than silently syncing every space it can reach.
+  it("fails the sync when the configured syncSpaces is malformed", async () => {
+    installSpaces(TWO_SPACES, BOTH);
+    await updateProfile("default", { syncSpaces: { invalid: "spc_library" } });
+    const { io, stderr } = createMemoryIO();
+
+    await expect(skillsSyncCommand({}, io)).rejects.toBeInstanceOf(ExitError);
+
+    expect(stderr()).toContain('Invalid syncSpaces for profile "default"');
+  });
+
   it("narrows to syncSpaces, and skips a configured space that access no longer covers", async () => {
     installSpaces(TWO_SPACES, BOTH);
     await updateProfile("default", { syncSpaces: ["spc_library"] });

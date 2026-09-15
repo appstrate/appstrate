@@ -10,7 +10,7 @@
  * services injected at init) is a legitimate backward dependency — modules
  * reference core entities; that is the FK-backward-ref pattern, not a violation.
  *
- * What this enforces, in two directions:
+ * What this enforces, in three directions:
  *   module → module. A module MUST NOT import another module's source tree —
  *   importing its `schema.ts` is how a cross-module SQL join sneaks in.
  *   core → module. No platform file may statically import a module, by bare
@@ -18,15 +18,23 @@
  *   through `MODULES`, and a static import makes one mandatory and drags a
  *   differently-licensed tree into the Apache-2.0 one. The loader's computed
  *   `import(specifier)` is invisible to a specifier scan; a literal one is not.
- * `apps/web` is out of scope of that rule (the SPA imports a module's UI on
- * purpose). Test files are exempt module→module, but not platform→module under `scripts/`.
+ *   Apache-2.0 → commercial. NOTHING outside `packages/module-ee/` may statically
+ *   import it — see `reviewCommercialDependencies`.
+ * `apps/web` is out of scope of the core→module rule (the SPA imports a module's
+ * UI on purpose). Test files are exempt module→module, and the platform→module
+ * scan reads only `src` trees plus `scripts/` (including its tests). Neither
+ * narrowing applies to the third direction, which reads EVERY tracked source
+ * file in the repository: that is what closes the blind spot where a static
+ * commercial import from `apps/api/test/**` or from `apps/web/**` passed every
+ * gate.
  *
  * Override via env: `MODULE_ISOLATION_POLICY=warn|fail|off`.
  */
 
 import { Glob } from "bun";
-import { resolve, dirname, relative, sep } from "node:path";
+import { resolve, dirname, relative, sep, join } from "node:path";
 import { readGatePolicy } from "./lib/policy-env.ts";
+import { SOURCE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 import { REGEX_PRECEDERS, scanQuoted } from "./lib/ts-lexer.ts";
 
 // Under CI the override is ignored, so a green pipeline can never be bought
@@ -120,7 +128,20 @@ function stripComments(source: string): string {
     if (ch === '"' || ch === "'" || ch === "`" || opensRegex) {
       const close = opensRegex ? "/" : ch;
       const end = scanQuoted(source, i, close);
-      out += source.slice(i, end);
+      // The literal is copied through — the specifier of a real import IS a
+      // literal — but its INTERIOR quotes are blanked, because a quote inside
+      // one cannot open the specifier of an import: the whole literal is one
+      // token. Without this, a source that merely QUOTES an import statement
+      // (`'import "@appstrate/module-ee";'`, which is how this gate's own test
+      // feeds it synthetic input) matches as if it performed one. A real
+      // specifier never contains a quote, so this only ever removes matches.
+      // An unterminated literal (EOF, or a regex closed by a newline) is copied
+      // verbatim: there is no interior to blank without eating a real character.
+      const raw = source.slice(i, end);
+      out +=
+        raw.length >= 2 && raw.endsWith(close)
+          ? raw[0]! + raw.slice(1, -1).replace(/["'`]/g, "�") + close
+          : raw;
       i = end;
       prev = close;
       continue;
@@ -222,6 +243,44 @@ export function reviewPlatformModuleImports(imports: readonly PlatformImport[]):
       `${imp.file} imports \`${imp.spec}\` → reaches into a module. Modules are opt-in at ` +
         `runtime through MODULES; the platform loads them with a computed \`import(specifier)\`, ` +
         `never a static one.`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * The commercial tree — the repository's ONE non-Apache-2.0 directory, the same
+ * prefix `verify-license-boundary.ts` checks headers against.
+ */
+const COMMERCIAL_MODULE_PREFIX = "packages/module-ee/";
+const COMMERCIAL_MODULE_SPEC = "@appstrate/module-ee";
+
+/**
+ * Decide which files take a STATIC dependency on the commercial tree. Pure — the
+ * scan feeds it every tracked source file outside `packages/module-ee/`, the
+ * tests feed it synthetic ones.
+ *
+ * A direction of its own rather than a wider `platformRoots` list: the core→module rule is
+ * narrowed for legitimate cases (`apps/web` imports module UI, tests drive modules), and the
+ * licence rule has none — so it reads every tracked source file with no exemption list to keep
+ * current.
+ *
+ * The module's own files are excluded by the caller, not here: reaching into
+ * itself is not a cross-licence import.
+ */
+export function reviewCommercialDependencies(imports: readonly PlatformImport[]): string[] {
+  const problems: string[] = [];
+  for (const imp of imports) {
+    const reaches =
+      imp.spec === COMMERCIAL_MODULE_SPEC ||
+      imp.spec.startsWith(`${COMMERCIAL_MODULE_SPEC}/`) ||
+      imp.resolved?.startsWith(COMMERCIAL_MODULE_PREFIX) === true;
+    if (!reaches) continue;
+    problems.push(
+      `${imp.file} imports \`${imp.spec}\` → reaches into \`${COMMERCIAL_MODULE_PREFIX}\`, the one ` +
+        `source-available tree in this repository. No Apache-2.0 file may depend on it statically: ` +
+        `the module is opt-in through MODULES and removable from a redistribution, so this import ` +
+        `is both a licence leak and a build that dies with the directory.`,
     );
   }
   return problems;
@@ -384,7 +443,38 @@ if (import.meta.main) {
   }
   problems.push(...reviewPlatformModuleImports(platformImports));
 
-  if (verbose) for (const file of scannedFiles.sort()) console.log(`   scanned: ${file}`);
+  // ─── Apache-2.0 → commercial ────────────────────────────────────────
+  // Every tracked source file, the commercial tree excepted. Population from the git INDEX, so a
+  // new directory is covered the day its first file is committed. A file the platform→module pass
+  // above already read can report twice: both lines are true and both are fatal.
+  const commercialImports: PlatformImport[] = [];
+  const licensedFiles = trackedFiles(SOURCE_GLOBS, "source file", "skip").filter(
+    (file) => !file.startsWith(COMMERCIAL_MODULE_PREFIX),
+  );
+  // Bounded batches: one `await` per file is I/O-bound enough to blow this gate's own test
+  // timeout, and one `Promise.all` over everything would blow `ulimit -n`.
+  const BATCH = 512;
+  for (let i = 0; i < licensedFiles.length; i += BATCH) {
+    const batch = licensedFiles.slice(i, i + BATCH);
+    const sources = await Promise.all(batch.map((f) => Bun.file(join(ROOT, f)).text()));
+    batch.forEach((file, n) => {
+      scannedFiles.push(file);
+      for (const spec of importSpecifiers(sources[n]!)) {
+        const resolved = spec.startsWith(".")
+          ? relative(ROOT, resolve(dirname(join(ROOT, file)), spec))
+              .split(sep)
+              .join("/")
+          : undefined;
+        commercialImports.push({ file, spec, resolved });
+      }
+    });
+  }
+  problems.push(...reviewCommercialDependencies(commercialImports));
+
+  // Deduplicated: the commercial pass re-reads files the platform pass already
+  // listed, and a `--verbose` roster that names one file twice reads as a bug.
+  if (verbose)
+    for (const file of [...new Set(scannedFiles)].sort()) console.log(`   scanned: ${file}`);
 
   for (const p of problems) console.error(`❌ ${p}`);
 
@@ -392,7 +482,8 @@ if (import.meta.main) {
     const accepted = ACCEPTED_CROSS_MODULE_IMPORTS.length;
     console.log(
       `✅ module isolation clean — ${filesScanned} files across ${Object.keys(MODULE_ROOTS).length} modules, ` +
-        `${platformFilesScanned} platform files with no static module import` +
+        `${platformFilesScanned} platform files with no static module import, ` +
+        `${licensedFiles.length} tracked files with no static import of ${COMMERCIAL_MODULE_PREFIX}` +
         `${accepted > 0 ? `, ${accepted} accepted cross-module import(s)` : ", no cross-module imports"}.`,
     );
     for (const e of ACCEPTED_CROSS_MODULE_IMPORTS) {

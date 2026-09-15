@@ -9,6 +9,9 @@
 
 import { describe, expect, it } from "bun:test";
 import eeModule from "../../src/index.ts";
+import { applyEeFixtureEnv } from "../helpers/fixture-env.ts";
+
+applyEeFixtureEnv();
 
 describe("ee init without DATABASE_URL", () => {
   it("refuses with a message naming DATABASE_URL", async () => {

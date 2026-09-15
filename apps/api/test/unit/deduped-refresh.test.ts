@@ -204,4 +204,119 @@ describe("dedupedRefresh", () => {
     expect(await run(true)).toBe("EXCHANGED");
     expect(exchanges).toBe(1);
   });
+
+  it("lets a forced caller adopt an in-flight proactive EXCHANGE", async () => {
+    const gate = deferred();
+    let exchanges = 0;
+
+    // PROACTIVE flight held inside its exchange: the stored token was stale,
+    // so this flight IS minting a new one.
+    const proactive = dedupedRefresh<string>("cred_adopt", {
+      lockKey: "test:cred_adopt",
+      lockLabel: "test",
+      force: false,
+      reReadFreshness: async () => null,
+      doRefresh: async () => {
+        await gate.promise;
+        exchanges += 1;
+        return "EXCHANGED";
+      },
+    });
+
+    // FORCED caller arriving while that exchange is in flight. Its token was
+    // minted upstream, so it cannot be the one that just 401'd this caller —
+    // adopting it beats paying another lock wait + exchange behind it.
+    const forced = dedupedRefresh<string>("cred_adopt", {
+      lockKey: "test:cred_adopt",
+      lockLabel: "test",
+      force: true,
+      reReadFreshness: async () => null,
+      doRefresh: async () => {
+        exchanges += 1;
+        return "SECOND-EXCHANGE";
+      },
+    });
+
+    gate.resolve();
+
+    expect(await proactive).toBe("EXCHANGED");
+    expect(await forced).toBe("EXCHANGED");
+    // The whole point: no second hop. Queueing behind the proactive flight
+    // would have cost a second lock wait + a second upstream exchange.
+    expect(exchanges).toBe(1);
+  });
+
+  it("makes a forced caller run its own refresh when the proactive flight fails", async () => {
+    const gate = deferred();
+    let exchanges = 0;
+
+    const proactive = dedupedRefresh<string>("cred_adopt_fail", {
+      lockKey: "test:cred_adopt_fail",
+      lockLabel: "test",
+      force: false,
+      reReadFreshness: async () => null,
+      doRefresh: async () => {
+        await gate.promise;
+        throw new Error("upstream 503");
+      },
+    });
+
+    const forced = dedupedRefresh<string>("cred_adopt_fail", {
+      lockKey: "test:cred_adopt_fail",
+      lockLabel: "test",
+      force: true,
+      reReadFreshness: async () => null,
+      doRefresh: async () => {
+        exchanges += 1;
+        return "EXCHANGED";
+      },
+    });
+
+    gate.resolve();
+
+    await expect(proactive).rejects.toThrow("upstream 503");
+    // A failure is not a token: the forced caller must not inherit it.
+    expect(await forced).toBe("EXCHANGED");
+    expect(exchanges).toBe(1);
+  });
+
+  it("collapses forced callers re-entering after a proactive short-circuit", async () => {
+    const gate = deferred();
+    let exchanges = 0;
+
+    const proactive = dedupedRefresh<string>("cred_reentry", {
+      lockKey: "test:cred_reentry",
+      lockLabel: "test",
+      force: false,
+      reReadFreshness: async ({ force }) => {
+        await gate.promise;
+        return force ? null : "STORED";
+      },
+      doRefresh: async () => {
+        exchanges += 1;
+        return "EXCHANGED";
+      },
+    });
+
+    const forced = () =>
+      dedupedRefresh<string>("cred_reentry", {
+        lockKey: "test:cred_reentry",
+        lockLabel: "test",
+        force: true,
+        reReadFreshness: async ({ force }) => (force ? null : "STORED"),
+        doRefresh: async () => {
+          exchanges += 1;
+          return "EXCHANGED";
+        },
+      });
+
+    const all = [forced(), forced(), forced()];
+    gate.resolve();
+
+    expect(await proactive).toBe("STORED");
+    expect(await Promise.all(all)).toEqual(["EXCHANGED", "EXCHANGED", "EXCHANGED"]);
+    // Re-entry after a non-adoptable outcome must not storm the upstream: the
+    // first re-entrant publishes the forced flight, the others collapse in.
+    expect(exchanges).toBe(1);
+  });
 });

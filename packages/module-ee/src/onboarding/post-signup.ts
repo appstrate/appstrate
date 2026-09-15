@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Appstrate-Commercial
 
-import { getEeDb } from "../db.ts";
+import { getEeDb, type EeTx } from "../db.ts";
 import { billingAccounts, freeTierClaims } from "../../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import { getPlans } from "../config.ts";
@@ -39,9 +39,13 @@ export function normalizeEmail(email: string): string {
  * orgs (the ON CONFLICT dedups the claim row, but both accounts were already
  * credited). Deriving the grant from the insert win closes that race.
  *
- * Both writes run in ONE transaction so a claim is never consumed without the
- * matching account being created — otherwise a failure between the two would
- * burn the email's claim and leave every future org for it at 0 credits.
+ * THE CALLER OWNS THE TRANSACTION, and there must be one: a claim must never be
+ * consumed without the matching account being created, or a failure between the
+ * two burns the email's claim and leaves every future org for it at 0 credits.
+ * Taking `tx` rather than opening one lets `repair:account` provision and apply
+ * the recovered debt atomically — a repair that half-commits is worse than one
+ * that never ran, because the account it leaves behind makes the org look
+ * already repaired.
  *
  * `billingEmail` seeds the billing contact and is the address AS TYPED, not
  * `normalizedEmail`: normalization strips plus- and dot-addressing to make the
@@ -49,47 +53,41 @@ export function normalizeEmail(email: string): string {
  * the wrong one for an address a human reads.
  */
 export async function provisionBillingAccount(
+  tx: EeTx,
   orgId: string,
   normalizedEmail: string,
   billingEmail: string,
 ): Promise<{ freeTierGranted: boolean; creditQuota: number }> {
-  const db = getEeDb();
   const freePlan = getPlans().free;
 
-  const claim = await db.transaction(async (tx) => {
-    const [won] = await tx
-      .insert(freeTierClaims)
-      .values({ email: normalizedEmail })
-      .onConflictDoNothing({ target: freeTierClaims.email })
-      .returning({ email: freeTierClaims.email });
+  const [won] = await tx
+    .insert(freeTierClaims)
+    .values({ email: normalizedEmail })
+    .onConflictDoNothing({ target: freeTierClaims.email })
+    .returning({ email: freeTierClaims.email });
 
-    await tx
-      .insert(billingAccounts)
-      .values({
-        orgId,
-        planId: "free",
-        creditsUsed: 0,
-        creditQuota: won ? freePlan.creditQuota : 0,
-        periodEnd: null, // Non-renewable, no reset
-        billingEmail,
-      })
-      .onConflictDoNothing({ target: billingAccounts.orgId });
-
-    return won ?? null;
-  });
+  await tx
+    .insert(billingAccounts)
+    .values({
+      orgId,
+      planId: "free",
+      creditsUsed: 0,
+      creditQuota: won ? freePlan.creditQuota : 0,
+      periodEnd: null, // Non-renewable, no reset
+      billingEmail,
+    })
+    .onConflictDoNothing({ target: billingAccounts.orgId });
 
   return {
-    freeTierGranted: claim !== null,
-    creditQuota: claim ? freePlan.creditQuota : 0,
+    freeTierGranted: won !== undefined,
+    creditQuota: won ? freePlan.creditQuota : 0,
   };
 }
 
 export async function onOrgCreate(orgId: string, userEmail: string): Promise<void> {
   const normalized = normalizeEmail(userEmail);
-  const { freeTierGranted, creditQuota } = await provisionBillingAccount(
-    orgId,
-    normalized,
-    userEmail,
+  const { freeTierGranted, creditQuota } = await getEeDb().transaction((tx) =>
+    provisionBillingAccount(tx, orgId, normalized, userEmail),
   );
 
   if (freeTierGranted) {

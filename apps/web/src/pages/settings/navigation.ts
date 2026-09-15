@@ -153,7 +153,7 @@ export function buildSettingsNavigation({
           to: "/workspace-settings/auth",
           icon: Shield,
           labelKey: "appSettings.tabAuth",
-          show: features.oidc && can("spaces:write"),
+          show: features.oidc && can("space-settings:write"),
         },
         {
           to: "/workspace-settings/api-keys",

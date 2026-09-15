@@ -280,6 +280,19 @@ async function main(): Promise<number> {
   // It goes before `Bun.argv.slice(2)` so that a caller who genuinely wants a
   // budget (`bun run lint --max-warnings 20`) still wins: eslint takes the last
   // occurrence.
+  //
+  // `node_modules/.bin/eslint` is a NODE script, so the lint runs under node's
+  // default old-space limit of ~4 GB — and the type-aware block in
+  // `eslint.config.mjs` builds one TypeScript program per tsconfig it reaches,
+  // which exhausts it. 8 GB is chosen against CI's 16 GB runner rather than
+  // against today's peak, so the gate does not need re-tuning the next time a
+  // package lands.
+  //
+  // `NODE_OPTIONS` rather than an argv flag: the flag has to reach node
+  // itself, and the child here is the eslint shim, not node. An existing
+  // NODE_OPTIONS is preserved and takes precedence — node applies the last
+  // occurrence, so a caller can still override the size.
+  const nodeOptions = `--max-old-space-size=8192 ${process.env.NODE_OPTIONS ?? ""}`.trim();
   const proc = Bun.spawnSync({
     cmd: [
       eslint,
@@ -292,6 +305,7 @@ async function main(): Promise<number> {
       ...present,
     ],
     cwd: REPO_ROOT,
+    env: { ...process.env, NODE_OPTIONS: nodeOptions },
     stdio: ["inherit", "inherit", "inherit"],
   });
   return proc.exitCode ?? 1;

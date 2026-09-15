@@ -12,7 +12,9 @@ export default {
     STRIPE_WEBHOOK_SECRET: "whsec_test_secret_for_webhook_verification",
     STRIPE_PRICE_ID_STARTER: "price_starter_test",
     STRIPE_PRICE_ID_PRO: "price_pro_test",
-    // A timer firing mid-suite would bill rows a test seeded into the ledger.
+    // A sweep firing mid-suite would bill rows a test seeded into the ledger. This
+    // pauses METERING only — `useEeTestSeams()` disarms the maintenance tick that
+    // keeps running under it.
     EE_RECONCILIATION_INTERVAL_SECONDS: "0",
   },
 } as const;

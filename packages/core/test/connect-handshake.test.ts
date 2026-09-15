@@ -408,25 +408,41 @@ describe("completionMatches — the payloads the platform emits", () => {
   });
 
   it("delivers the context-less /connect/start errors to everyone", () => {
-    // routes/integrations.ts `/connect/start` — popupHtmlError(msg, {}), emitted
-    // before the token resolved a package or a state. This is the carve-out, and
-    // it is the reason a surface with no context can still show an error at all.
-    // The last two are the OAuth `begin` refusals: the configuration detail an
-    // ApiError carries (#1263, rendered verbatim with its 4xx) and the generic
-    // 502 wording every other failure keeps.
-    for (const msg of [
-      "Missing connect token",
-      "This connect link is invalid or expired.",
-      "This integration is no longer available.",
-      "This connect link has already been used.",
-      "This integration cannot be connected.",
-      "Administrator must register OAuth client credentials for '@acme/gmail' auth 'primary' before connection",
-      "Could not start the connection. Please try again.",
-    ]) {
+    // routes/integrations.ts `/connect/start` — popupHtmlError(msg, {}), and
+    // these two are the ONLY pages that still emit that shape: they run before
+    // the token resolved a package or a state, so they identify nothing. This is
+    // the carve-out, and it is the reason a surface with no context can still
+    // show an error at all.
+    for (const msg of ["Missing connect token", "This connect link is invalid or expired."]) {
       const contextLess = detail({ ok: false, error: msg });
       for (const [, target] of MATRIX_TARGETS) {
         expect(completionMatches(contextLess, target)).toBe(true);
       }
+    }
+  });
+
+  it("confines the rest of the /connect/start errors to that integration", () => {
+    // Everything past `readConnectToken` names `claims.package_id` (#1346): the
+    // link is gone, the jti is spent, the auth cannot be connected, and both
+    // OAuth `begin` outcomes — the 4xx refusal and the generic 502. These have a
+    // package and no state, so they reach the surfaces holding that package —
+    // the hosted card that opened the link, the SPA popup — and no other.
+    for (const msg of [
+      "This integration is no longer available.",
+      "This connect link has already been used.",
+      "This integration cannot be connected.",
+      "This integration is not ready to be connected. Ask an administrator to finish setting it up, then open this link again.",
+      "Could not start the connection. Please try again.",
+    ]) {
+      const addressed = detail({ ok: false, packageId: PKG, error: msg });
+      expect(completionMatches(addressed, hostedCard)).toBe(true);
+      expect(completionMatches(addressed, spaPopup)).toBe(true);
+      // The card on another integration no longer sees another flow's failure —
+      // the hijack of #1346. Nor does a card correlating by state alone, which
+      // shares no identifier with a payload that carries none.
+      expect(completionMatches(addressed, { packageId: OTHER_PKG })).toBe(false);
+      expect(completionMatches(addressed, oauthCardStateOnly)).toBe(false);
+      expect(completionMatches(addressed, {})).toBe(false);
     }
   });
 

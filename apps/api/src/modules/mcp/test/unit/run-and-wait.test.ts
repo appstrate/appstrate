@@ -517,4 +517,17 @@ describe("run_and_wait", () => {
     expect(parseResult(res).error).toContain("runs:read");
     expect(calls.length).toBe(0);
   });
+
+  it("launches for a caller holding only `runs:read-all`", async () => {
+    // `read-all` is a superset of `read`, not a companion to it
+    // (`lib/run-visibility.ts`), and `runs:read-all` is separately grantable to
+    // an API key. A literal `runs:read` test refused this principal before the
+    // launch even though the poll route it gates reads every run in the space.
+    const { tool, calls } = makeRunAndWait({ permissions: ["mcp:invoke", "runs:read-all"] });
+
+    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+
+    expect(res.isError).toBeFalsy();
+    expect(calls.find((c) => c.method === "POST")).toBeDefined();
+  });
 });

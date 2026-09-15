@@ -41,6 +41,47 @@ export const responses = {
       },
     },
   },
+  /**
+   * The 403 of anything that DEFINES or GRANTS a custom space role: two causes,
+   * one status. `code` is what tells them apart, so both are named — the
+   * generic `Forbidden` documents only the first.
+   */
+  CustomRoleFeatureForbidden: {
+    description:
+      "`forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The four built-in presets stay usable, and DELETING a leftover bundle never asks for the feature.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        examples: {
+          forbidden: {
+            summary: "Missing permission",
+            value: {
+              type: "https://docs.appstrate.dev/errors/forbidden",
+              title: "Forbidden",
+              status: 403,
+              detail: "Insufficient permissions",
+              instance: "urn:appstrate:request:req_2f1c6d84",
+              code: "forbidden",
+              requestId: "req_2f1c6d84",
+            },
+          },
+          feature_unavailable: {
+            summary: "Feature not on this deployment",
+            value: {
+              type: "https://docs.appstrate.dev/errors/feature-unavailable",
+              title: "Feature Unavailable",
+              status: 403,
+              detail:
+                "Defining a custom space role requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
+              instance: "urn:appstrate:request:req_2f1c6d84",
+              code: "feature_unavailable",
+              requestId: "req_2f1c6d84",
+            },
+          },
+        },
+      },
+    },
+  },
   NotFound: {
     description: "Resource not found",
     content: {
@@ -198,6 +239,20 @@ export const responses = {
       },
     },
   },
+  /**
+   * The 409 of both model writes — the one-row-per-binding rule is a property
+   * of the table, so `POST` and `PATCH` refuse for the same reason and share
+   * one description.
+   */
+  ModelAlreadyAdded: {
+    description:
+      "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+      },
+    },
+  },
   InternalServerError: {
     description: "Unexpected server error",
     content: {
@@ -347,7 +402,7 @@ export const responses = {
     },
   },
   IdempotencyConflict: {
-    description: "Same Idempotency-Key used with a different request body",
+    description: "Same Idempotency-Key used with a different method, URL or body",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
@@ -357,7 +412,7 @@ export const responses = {
           title: "Idempotency Conflict",
           status: 422,
           detail:
-            "This Idempotency-Key was already used with a different request body. Use a new key for different requests.",
+            "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
           code: "idempotency_conflict",
           requestId: "req_abc123",
         },

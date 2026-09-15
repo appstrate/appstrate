@@ -28,19 +28,15 @@ import { AgentConfigurationView, type ConfigurationSection } from "./agent-confi
 import { AgentDetailSplit } from "./agent-detail-split";
 import { LoadingState } from "../page-states";
 import { PackageVersionsSection } from "../package-detail/package-versions-section";
-import { primaryDisplayFile } from "../../lib/package-files";
+import { PackageFilesSection } from "../package-files/package-files-section";
 import type { AgentDefinitionSection } from "../../pages/package-editor";
 
-/** Package AFPS › Fichiers is `bundle` in the URL: `files` is Explorer's tree. */
-type DefinitionRailSection = Exclude<AgentDefinitionSection, "files" | "json"> | "bundle";
-
+/**
+ * Package AFPS › Contenu is `bundle` in the URL: `files` is Explorer's tree. It
+ * is not an editor section — it reads the bundle, and its rows open Explorer.
+ */
 type AgentSettingsSection =
-  ConfigurationSection | DefinitionRailSection | "map" | "files" | "versions";
-
-const toEditorSection = (section: DefinitionRailSection): AgentDefinitionSection =>
-  section === "bundle" ? "files" : section;
-const toRailSection = (section: AgentDefinitionSection): AgentSettingsSection =>
-  section === "files" ? "bundle" : section === "json" ? "general" : section;
+  ConfigurationSection | AgentDefinitionSection | "bundle" | "map" | "files" | "versions";
 
 /** The editor sections, lazily: the editor weighs more than the page reading it. */
 const AgentDefinitionEditor = lazy(() =>
@@ -49,13 +45,12 @@ const AgentDefinitionEditor = lazy(() =>
   })),
 );
 
-const DEFINITION_SECTION_IDS: readonly DefinitionRailSection[] = [
+const DEFINITION_SECTION_IDS: readonly AgentDefinitionSection[] = [
   "general",
   "schema",
   "skills",
   "integrations",
   "tools",
-  "bundle",
 ];
 
 /**
@@ -107,6 +102,7 @@ const SETTINGS_SECTION_IDS: readonly AgentSettingsSection[] = [
   "schedules",
   "map",
   ...DEFINITION_SECTION_IDS,
+  "bundle",
   "files",
   "versions",
 ];
@@ -143,7 +139,9 @@ export function AgentSettingsView({
       return can("agents:configure");
     }
     if (section === "schedules") return can("schedules:read");
-    if (section === "map" || section === "files") return can("agents:read");
+    if (section === "map" || section === "files" || section === "bundle") {
+      return can("agents:read");
+    }
     // A system agent has no history of its own to browse.
     if (section === "versions") return can("agents:read") && detail.source !== "system";
     // The definition is edited where it is read, by whoever may write it, on
@@ -157,8 +155,9 @@ export function AgentSettingsView({
   })).filter((group) => group.items.length > 0);
   const params = new URLSearchParams(location.search);
   const requestedRaw = params.get("agentSettings");
-  // The prompt stopped being a section: it is a row of Package AFPS › Fichiers.
-  const requested = requestedRaw === "prompt" ? "bundle" : requestedRaw;
+  // The prompt stopped being a section: it is a file, read in Contenu and
+  // changed in Explorer › Fichiers.
+  const requested = requestedRaw === "prompt" ? "files" : requestedRaw;
   const requestedFile = params.get("file") ?? undefined;
   const fallback: AgentSettingsSection = groups[0]?.items[0]?.id ?? "connections";
   const activeSection =
@@ -187,20 +186,13 @@ export function AgentSettingsView({
     return `${location.pathname}${query ? `?${query}` : ""}#settings`;
   };
 
-  // The bundle files a Définition section edits, and the section that does.
+  // The manifest is edited through its forms, its raw editor over Identité.
   const fileEditHref = (path: string) => {
-    // Both open their modal over Package AFPS › Fichiers, where they are listed.
-    const modal =
-      path === primaryDisplayFile("agent").name
-        ? { name: "edit", value: path }
-        : path === "manifest.json"
-          ? { name: "editManifest", value: "1" }
-          : null;
-    if (!modal) return undefined;
+    if (path !== "manifest.json") return undefined;
     const search = new URLSearchParams(location.search);
-    search.set("agentSettings", "bundle");
+    search.set("agentSettings", "general");
     search.delete("file");
-    search.set(modal.name, modal.value);
+    search.set("editManifest", "1");
     return `${location.pathname}?${search.toString()}#settings`;
   };
 
@@ -213,13 +205,19 @@ export function AgentSettingsView({
   const body =
     activeSection === "versions" ? (
       <PackageVersionsSection type="agent" packageId={packageId} {...versions} />
+    ) : activeSection === "bundle" ? (
+      <PackageFilesSection
+        type="agent"
+        packageId={packageId}
+        manifest={detail.manifest ?? {}}
+        filesHref={filesHref}
+      />
     ) : (DEFINITION_SECTION_IDS as readonly string[]).includes(activeSection) ? (
       <Suspense fallback={<LoadingState />}>
         <AgentDefinitionEditor
           detail={detail}
-          section={toEditorSection(activeSection as DefinitionRailSection)}
-          onSection={(next) => void navigate(sectionHref(toRailSection(next)))}
-          filesHref={filesHref}
+          section={activeSection as AgentDefinitionSection}
+          onSection={(next) => void navigate(sectionHref(next))}
         />
       </Suspense>
     ) : activeSection === "map" || activeSection === "files" ? (

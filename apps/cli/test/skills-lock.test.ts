@@ -14,7 +14,14 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getLockPath, SyncLockBusyError, withSyncLock } from "../src/lib/skills-sync/lock.ts";
+import { closeSync, openSync } from "node:fs";
+import {
+  getLockPath,
+  resolveTryLock,
+  SyncLockBusyError,
+  withSyncLock,
+} from "../src/lib/skills-sync/lock.ts";
+import { createMemoryIO } from "./helpers/memory-io.ts";
 
 const originalDataHome = process.env.XDG_DATA_HOME;
 let dataHome: string;
@@ -121,6 +128,58 @@ describe("withSyncLock", () => {
     holder.kill("SIGKILL");
     await holder.exited;
     expect(await withSyncLock(async () => "taken", { timeoutMs: 30, pollMs: 5 })).toBe("taken");
+  });
+});
+
+describe("the flock binding", () => {
+  it("reads errno and calls a held lock busy", async () => {
+    // Two descriptors on one file: flock is per open file description, so the
+    // second attempt is exactly what a competing process would see.
+    await withSyncLock(async () => "seed");
+    const held = openSync(getLockPath(), "a", 0o600);
+    const rival = openSync(getLockPath(), "a", 0o600);
+    try {
+      const tryLock = resolveTryLock();
+      expect(tryLock(held)).toEqual({ status: "acquired" });
+      expect(tryLock(rival)).toEqual({ status: "busy" });
+    } finally {
+      closeSync(rival);
+      closeSync(held);
+    }
+  });
+
+  it("calls an errno that is not EWOULDBLOCK unsupported, not busy", () => {
+    // EBADF stands in for the ENOLCK / EOPNOTSUPP an flock-less mount returns:
+    // the point is that a non-EWOULDBLOCK errno must not enter the poll loop.
+    const attempt = resolveTryLock()(9999);
+    expect(attempt.status).toBe("unsupported");
+    expect(attempt).toMatchObject({ reason: expect.stringContaining("errno") });
+  });
+});
+
+describe("withSyncLock without a working flock", () => {
+  it("runs the body unlocked and says so on stderr", async () => {
+    const { io, stderr } = createMemoryIO();
+    const result = await withSyncLock(async () => "ran", {
+      io,
+      tryLock: () => ({ status: "unsupported", reason: "Windows has no flock(2)" }),
+    });
+    expect(result).toBe("ran");
+    expect(stderr()).toContain("skills sync lock unavailable (Windows has no flock(2))");
+    expect(stderr()).toContain("continuing unlocked");
+  });
+
+  it("never reports a competing sync that does not exist", async () => {
+    // The bug: an unsupported filesystem waited out the whole timeout and then
+    // named another process. Nothing here is allowed to throw or to poll.
+    const { io } = createMemoryIO();
+    await expect(
+      withSyncLock(async () => "ran", {
+        io,
+        timeoutMs: 0,
+        tryLock: () => ({ status: "unsupported", reason: "flock(2) failed with errno 95" }),
+      }),
+    ).resolves.toBe("ran");
   });
 });
 

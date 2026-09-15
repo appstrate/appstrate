@@ -81,6 +81,7 @@ describe("describeServedModel", () => {
       input: ["text", "image"],
       reasoning: true,
       source: "catalog",
+      endpointCapabilities: {},
     });
   });
 
@@ -92,6 +93,7 @@ describe("describeServedModel", () => {
       input: ["text"],
       reasoning: false,
       source: "catalog",
+      endpointCapabilities: {},
     });
   });
 
@@ -109,6 +111,7 @@ describe("describeServedModel", () => {
       input: null,
       reasoning: null,
       source: null,
+      endpointCapabilities: {},
     });
   });
 
@@ -135,6 +138,7 @@ describe("describeServedModel", () => {
       input: entry!.capabilities.filter((c) => c === "text" || c === "image"),
       reasoning: entry!.capabilities.includes("reasoning"),
       source: "catalog",
+      endpointCapabilities: {},
     });
   });
 
@@ -148,6 +152,7 @@ describe("describeServedModel", () => {
       input: ["text", "image"],
       reasoning: true,
       source: "endpoint",
+      endpointCapabilities: { contextWindow: 262144 },
     });
   });
 
@@ -161,6 +166,7 @@ describe("describeServedModel", () => {
       input: ["text"],
       reasoning: null,
       source: "endpoint",
+      endpointCapabilities: { contextWindow: 40960, input: ["text"] },
     });
   });
 

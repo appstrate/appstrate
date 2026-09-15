@@ -54,6 +54,29 @@ describe("streamDownload", () => {
     expect(new Uint8Array(await readFile(dest))).toEqual(payload);
   });
 
+  it("round-trips a payload larger than the sink watermark", async () => {
+    // The destination `FileSink` is opened with an explicit `highWaterMark`
+    // (STREAM_FLUSH_BYTES, 1 MiB) so it flushes mid-stream instead of holding
+    // the whole artifact in memory until `end()`. That watermark is the only
+    // thing that makes `FileSink.write` ever return a promise — a download
+    // smaller than it never drains, so it never exercises the awaited write.
+    // Cross it: the bytes on disk and the streamed sha256 must still match.
+    const dest = await tmpDest();
+    const payload = new Uint8Array(2 * 1024 * 1024 + 7);
+    for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
+    const chunkSize = 64 * 1024;
+    const chunks: Uint8Array[] = [];
+    for (let o = 0; o < payload.length; o += chunkSize) {
+      chunks.push(payload.subarray(o, Math.min(o + chunkSize, payload.length)));
+    }
+    const res = await streamDownload("https://example/big", dest, {
+      fetchImpl: async () => streamingResponse(chunks),
+    });
+    expect(res.bytesWritten).toBe(payload.length);
+    expect(res.sha256).toBe(sha(payload));
+    expect(new Uint8Array(await readFile(dest))).toEqual(payload);
+  });
+
   it("reports progress with total from Content-Length", async () => {
     const dest = await tmpDest();
     const chunks = [new Uint8Array(10), new Uint8Array(10)];

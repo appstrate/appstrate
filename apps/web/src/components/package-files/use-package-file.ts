@@ -43,9 +43,10 @@ export function packageFileText(query: { isSuccess: boolean; data: unknown }): s
  * the hook the entire index as well.
  */
 export function usePackageFile(
-  packageId: string,
+  packageId: string | undefined,
   version: string | undefined,
   entry: PackageFileEntry,
+  fresh = false,
 ): { text: string | undefined; isLoading: boolean; isError: boolean } {
   const scope = useOrgScope();
   // Only text files within the preview ceiling are ever fetched — a binary or
@@ -65,13 +66,16 @@ export function usePackageFile(
     "/api/packages/{scope}/{name}/files/content",
     {
       params: {
-        path: splitPackageRef(packageId),
+        path: splitPackageRef(packageId ?? ""),
         query: { path: entry.path, version },
         header: scope.header,
       },
       parseAs: "text",
     },
-    { enabled: scope.enabled && needsFetch },
+    {
+      enabled: scope.enabled && !!packageId && needsFetch,
+      ...(fresh ? { staleTime: 0, gcTime: 0, refetchOnMount: "always" as const } : {}),
+    },
   );
 
   // `parseAs: "text"` yields a string; the spec types the body as a Blob because
@@ -79,12 +83,14 @@ export function usePackageFile(
   // reaches `parseAs` at all — the route sets `Content-Length: "0"` and
   // openapi-fetch returns `data: undefined` on the success path — so "read an
   // empty file" is read off the query state, not off `data`.
-  const fetched = packageFileText(query);
+  // An authoring pane must not seed uncontrolled Monaco from a stale cache.
+  const fetched = fresh && !query.isFetchedAfterMount ? undefined : packageFileText(query);
 
   return {
     text: entry.inline ?? (needsFetch ? fetched : undefined),
     // `isPending` stays true on a disabled query — gate it on actually fetching.
-    isLoading: needsFetch && query.isPending,
+    isLoading:
+      needsFetch && (query.isPending || (fresh && !query.isFetchedAfterMount && !query.isError)),
     isError: needsFetch && query.isError,
   };
 }
@@ -97,12 +103,13 @@ export function usePackageFile(
  * guards apply here too. A non-2xx throws in the client middleware and lands in
  * the catch below.
  */
-export function usePackageFileDownload(packageId: string, version: string | undefined) {
+export function usePackageFileDownload(packageId: string | undefined, version: string | undefined) {
   const { t } = useTranslation("common");
   const scope = useOrgScope();
   const header = scope.header;
   return useCallback(
     async (path: string) => {
+      if (!packageId) return;
       try {
         const { data } = await client.GET("/api/packages/{scope}/{name}/files/content", {
           params: {

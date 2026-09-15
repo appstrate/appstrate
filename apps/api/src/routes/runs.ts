@@ -51,7 +51,7 @@ import {
   normalizeContextFileUris,
   triggerInlineRun,
 } from "../services/inline-run.ts";
-import { assertPackageDependenciesAccessible } from "../lib/package-access.ts";
+import { agentReadIsSummary, assertPackageDependenciesAccessible } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
@@ -236,6 +236,22 @@ function closedSetListQuery<T extends string>(
 
 // --- Router ---
 
+async function replayRun(c: Context<AppEnv>, response: Response): Promise<Response> {
+  if (response.status !== 201) return response;
+  const { id } = z.object({ id: z.string() }).parse(await response.json());
+  const run = await getRunFull(
+    getSpaceScope(c),
+    id,
+    getActor(c),
+    runVisibilityFilter(c),
+    !agentReadIsSummary(c),
+  );
+  if (!run || (c.get("package") && run.packageId !== c.get("package").id)) {
+    throw notFound("Run not found");
+  }
+  return c.json(run, 201, { "Idempotent-Replayed": "true" });
+}
+
 export function createRunsRouter() {
   const router = new Hono<AppEnv>();
 
@@ -243,9 +259,9 @@ export function createRunsRouter() {
   router.post(
     `/agents/${SCOPED_PACKAGE_ROUTE}/run`,
     rateLimit(20),
-    idempotency(),
-    requireAgent(),
     requirePermission("agents", "run"),
+    requireAgent(),
+    idempotency(replayRun),
     async (c) => {
       const agent = c.get("package");
       const orgId = c.get("orgId");
@@ -402,7 +418,13 @@ export function createRunsRouter() {
         // #635, plus status, version_ref, agent_scope, …) without a follow-up
         // GET. The run row exists once `prepareAndExecuteRun` resolves.
         // No legacy `runId` alias (#657): the run id is `id`.
-        const row = await getRunFull(getSpaceScope(c), runId, getActor(c));
+        const row = await getRunFull(
+          getSpaceScope(c),
+          runId,
+          getActor(c),
+          undefined,
+          !agentReadIsSummary(c),
+        );
         if (!row) {
           // The run row was inserted by `prepareAndExecuteRun` above and is
           // read back on the same scope, so a miss means it was deleted out
@@ -438,6 +460,7 @@ export function createRunsRouter() {
       actor: getActor(c),
       status,
       visibility: runVisibilityFilter(c),
+      canReadAgentInput: !agentReadIsSummary(c),
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
@@ -520,6 +543,7 @@ export function createRunsRouter() {
       search,
       actor,
       visibility,
+      canReadAgentInput: !agentReadIsSummary(c),
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
@@ -543,7 +567,7 @@ export function createRunsRouter() {
     const waitMs = parseWaitQuery(c.req.query("wait"));
 
     const visibility = runVisibilityFilter(c);
-    const row = await getRunFull(scope, runId, getActor(c), visibility);
+    const row = await getRunFull(scope, runId, getActor(c), visibility, !agentReadIsSummary(c));
     if (!row) {
       throw notFound("Run not found");
     }
@@ -564,7 +588,7 @@ export function createRunsRouter() {
         // timers/subscriptions for a response nobody will read.
         signal: c.req.raw.signal,
       });
-      const fresh = await getRunFull(scope, runId, getActor(c), visibility);
+      const fresh = await getRunFull(scope, runId, getActor(c), visibility, !agentReadIsSummary(c));
       // The run can be deleted mid-wait (e.g. DELETE agent runs) — surface
       // the same 404 the initial read would have.
       if (!fresh) {
@@ -704,7 +728,7 @@ export function createRunsRouter() {
     // Return the bare updated run resource — read AFTER synthesiseFinalize so
     // the response reflects the terminal state (`status: "cancelled"`, cost,
     // completed_at). Same DTO and serializer as GET /runs/:id (#657).
-    const row = await getRunFull(scope, runId, getActor(c));
+    const row = await getRunFull(scope, runId, getActor(c), undefined, !agentReadIsSummary(c));
     if (!row) {
       // The run was readable above; a miss here means a concurrent delete
       // raced the finalize. The resource is gone — surface the same 404 a
@@ -727,8 +751,8 @@ export function createRunsRouter() {
     // each time the middleware is constructed. We read it at route-build
     // time; changes to the env require a reboot.
     rateLimit(getInlineRunLimits().rate_per_min),
-    idempotency(),
     requirePermission("agents", "run"),
+    idempotency(replayRun),
     async (c) => {
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");
@@ -817,7 +841,13 @@ export function createRunsRouter() {
         // to read from the `packageId` envelope field is the resource's own
         // `packageId`. The run row exists once `triggerInlineRun` resolves
         // (`prepareAndExecuteRun` inserts it before returning).
-        const row = await getRunFull(getSpaceScope(c), runId, getActor(c));
+        const row = await getRunFull(
+          getSpaceScope(c),
+          runId,
+          getActor(c),
+          undefined,
+          !agentReadIsSummary(c),
+        );
         if (!row) {
           // The shadow run was inserted by `triggerInlineRun` and read back on
           // the same scope; a miss means a concurrent teardown deleted it. The
@@ -884,13 +914,13 @@ export function createRunsRouter() {
   // DELETE /api/agents/:scope/:name/runs — delete all runs for an agent
   router.delete(
     `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
-    requireAgent(),
     requirePermission("runs", "delete"),
     // The only run mutation that is not per-row: it spans every run of the
     // agent in the space, so `assertRunVisible` has no row to apply and the
     // space-wide read is what authorizes the span. Without it a principal
     // scoped `runs:delete` alone would delete runs it cannot read.
     requirePermission("runs", "read-all"),
+    requireAgent(),
     async (c) => {
       const agent = c.get("package");
       const scope = getSpaceScope(c);

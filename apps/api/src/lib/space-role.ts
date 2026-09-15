@@ -13,7 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
-import { knownSpaceLevelPermissions, presetPermissions, type Permission } from "./permissions.ts";
+import { partitionSpacePermissions, presetPermissions, type Permission } from "./permissions.ts";
 
 export interface SpaceAccessRow {
   id: string;
@@ -57,26 +57,34 @@ export function resolveSpaceRole(
 }
 
 /**
- * A custom bundle is filtered to what the running platform still understands,
- * so a string that became unknown (module unloaded) never reaches `Set.has`.
+ * A custom bundle is narrowed to what the running platform still understands
+ * ({@link partitionSpacePermissions}), so a string that became unknown (module
+ * unloaded) never reaches `Set.has`.
+ *
+ * A bundle whose every string became unknown grants nothing, and the holder
+ * keeps an explicit membership that grants nothing: explicit beats implicit in
+ * both directions, so it does NOT fall back to an open space's default role.
+ * Falling back would hand someone MORE than their bundle names on the very
+ * replica that understands it least.
  */
 export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   if (!ref) return new Set<Permission>();
   if (ref.kind === "preset") return presetPermissions(ref.preset);
-  const known = knownSpaceLevelPermissions();
-  const granted = new Set<Permission>();
-  for (const perm of ref.role.permissions) {
-    if (known.has(perm)) granted.add(perm as Permission);
-  }
-  return granted;
+  return partitionSpacePermissions(ref.role.permissions).granted;
 }
 
-/** One indexed lookup on the composite PK, custom role joined in the same query. */
+/**
+ * One indexed lookup on the composite PK, custom role joined in the same query.
+ *
+ * `executor` takes an open transaction handle so a caller that must read the
+ * row and write it in one go does not read it on a second connection.
+ */
 export async function loadSpaceMember(
   spaceId: string,
   userId: string,
+  executor: Pick<typeof db, "select"> = db,
 ): Promise<SpaceMemberRow | null> {
-  const [row] = await db
+  const [row] = await executor
     .select({
       presetRole: spaceMembers.presetRole,
       customRoleId: spaceMembers.customRoleId,

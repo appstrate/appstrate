@@ -16,6 +16,8 @@ export interface DiscoveryState {
   key: string;
   outcome: DiscoveredModelsResponse["outcome"] | "request_failed";
   models: DiscoveredModel[];
+  /** The endpoint serves more than `models` lists — a cap stopped the read. */
+  truncated: boolean;
 }
 
 export function discoveryErrorKey(outcome: DiscoveryState["outcome"]): string {

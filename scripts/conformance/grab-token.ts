@@ -160,7 +160,11 @@ async function main(): Promise<void> {
         const err = url.searchParams.get("error");
         if (err) {
           queueMicrotask(() => {
-            server.stop();
+            // `void` on all three `stop()` calls below: the microtask callback
+            // is void-returning, so an un-marked rejection would surface as an
+            // unhandled rejection, and the flow genuinely does not need the
+            // listening socket drained before the promise settles.
+            void server.stop();
             reject(new Error(`authorization denied: ${err}`));
           });
           return new Response(`Authorization failed: ${err}`, { status: 400 });
@@ -168,13 +172,13 @@ async function main(): Promise<void> {
         const got = url.searchParams.get("code");
         if (!got || url.searchParams.get("state") !== state) {
           queueMicrotask(() => {
-            server.stop();
+            void server.stop();
             reject(new Error("missing code or state mismatch on callback"));
           });
           return new Response("invalid callback", { status: 400 });
         }
         queueMicrotask(() => {
-          server.stop();
+          void server.stop();
           resolve(got);
         });
         return new Response(

@@ -17,9 +17,14 @@ import {
   countCacheRates,
   coverageRow,
   formatCoverageSummary,
+  formatPriceChangeSummary,
+  formatRateDelta,
+  priceChanges,
+  assertPricesRetained,
   projectGenerationCapabilities,
   projectEntry,
   type CoverageRow,
+  type PriceChange,
 } from "../refresh-pricing-catalog.ts";
 
 const ORIG_EXCLUDE = process.env.FEATURED_MODELS_EXCLUDE;
@@ -236,6 +241,118 @@ describe("formatCoverageSummary", () => {
   });
 });
 
+// #1327 — catalog-backed `org_models` rows resolve their price live, so the
+// weekly refresh silently re-prices existing customers and zero-rates any model
+// upstream drops. These three helpers are what turns that into a reviewable
+// list in the PR body instead of a line buried in a JSON diff.
+describe("priceChanges", () => {
+  const named = (costs: Record<string, Record<string, number>>) =>
+    Object.fromEntries(Object.entries(costs).map(([id, c]) => [id, entry(c)]));
+
+  it("reports a rate move on a model both snapshots carry", () => {
+    const local = named({ "magistral-medium-latest": { input: 2, output: 5 } });
+    const upstream = named({ "magistral-medium-latest": { input: 2, output: 7.5 } });
+    expect(priceChanges("mistral", local, upstream)).toEqual([
+      {
+        provider: "mistral",
+        model: "magistral-medium-latest",
+        before: { input: 2, output: 5 },
+        after: { input: 2, output: 7.5 },
+      },
+    ]);
+  });
+
+  it("reports a dropped model with `after: null` — the zero-rating case", () => {
+    const local = named({ "gemini-3.1-flash-live-preview": { input: 0.3, output: 2.5 } });
+    expect(priceChanges("google-ai", local, {})).toEqual([
+      {
+        provider: "google-ai",
+        model: "gemini-3.1-flash-live-preview",
+        before: { input: 0.3, output: 2.5 },
+        after: null,
+      },
+    ]);
+  });
+
+  it("ignores added models — nothing can be billed on a price that did not exist", () => {
+    const upstream = named({ old: { input: 1, output: 2 }, brand: { input: 9, output: 9 } });
+    expect(priceChanges("openai", named({ old: { input: 1, output: 2 } }), upstream)).toEqual([]);
+  });
+
+  it("ignores metadata-only churn — only `cost` is money", () => {
+    const local = { m: entry({ input: 1, output: 2 }) };
+    const upstream = {
+      m: {
+        contextWindow: 999,
+        maxTokens: 4096,
+        capabilities: ["text"],
+        cost: { input: 1, output: 2 },
+      } as never,
+    };
+    expect(priceChanges("openai", local, upstream)).toEqual([]);
+  });
+});
+
+describe("formatRateDelta", () => {
+  it("renders a rise, a drop and an unchanged bucket", () => {
+    expect(formatRateDelta(5, 7.5)).toBe("5 → 7.5 (+50%)");
+    expect(formatRateDelta(1.5, 0.6)).toBe("1.5 → 0.6 (-60%)");
+    expect(formatRateDelta(2, 2)).toBe("·");
+    expect(formatRateDelta(undefined, undefined)).toBe("·");
+  });
+
+  it("flags a LOST rate — those tokens are now priced at zero, not free", () => {
+    expect(formatRateDelta(0.1, undefined)).toBe("0.1 → — ⚠️");
+    expect(formatRateDelta(undefined, 0.1)).toBe("— → 0.1");
+  });
+
+  it("states the move without a percentage when the old rate was zero", () => {
+    expect(formatRateDelta(0, 0.5)).toBe("0 → 0.5");
+    expect(formatRateDelta(0, 0.5)).not.toContain("Infinity");
+  });
+});
+
+describe("formatPriceChangeSummary", () => {
+  const change = (over: Partial<PriceChange>): PriceChange => ({
+    provider: "mistral",
+    model: "magistral-medium-latest",
+    before: { input: 2, output: 5 },
+    after: { input: 2, output: 7.5 },
+    ...over,
+  });
+
+  it("says so plainly when no vendored model moved", () => {
+    const md = formatPriceChangeSummary([]);
+    expect(md).toContain("No vendored model was re-priced or dropped");
+    expect(md).not.toContain("| Provider |");
+  });
+
+  it("tables a re-priced model with its per-bucket delta", () => {
+    const md = formatPriceChangeSummary([change({})]);
+    expect(md).toContain("#### Re-priced — 1 model(s)");
+    expect(md).toContain("| `mistral` | `magistral-medium-latest` | · | 5 → 7.5 (+50%) | · | · |");
+  });
+
+  it("tables a dropped model separately, naming the zero-billing consequence", () => {
+    const md = formatPriceChangeSummary([
+      change({ provider: "google-ai", model: "gemini-3.1-flash-live-preview", after: null }),
+    ]);
+    expect(md).toContain("#### Dropped by upstream — 1 model(s), now billed at ZERO");
+    expect(md).toContain("`pricing_status` becomes `unpriced`");
+    expect(md).toContain("| `google-ai` | `gemini-3.1-flash-live-preview` | 2 | 5 | — | — |");
+    expect(md).not.toContain("#### Re-priced");
+  });
+
+  it("elides past the listing cap rather than blowing the PR body limit", () => {
+    const many = Array.from({ length: 70 }, (_, i) => change({ model: `m${i}` }));
+    const md = formatPriceChangeSummary(many);
+    expect(md).toContain("#### Re-priced — 70 model(s)");
+    expect(md).toContain("`m59`");
+    expect(md).not.toContain("`m60`");
+    expect(md).toContain("_…and 10 more — read the file diff._");
+  });
+});
+
 describe("generation capabilities", () => {
   const normalizedGeneration = {
     temperature: "supported",
@@ -449,5 +566,30 @@ describe("normalized artifact provenance", () => {
 
   it("rejects a lock without a normalized output digest", () => {
     expect(() => assertNormalizedCatalogDigest(artifact, undefined)).toThrow(/normalizedDigest/);
+  });
+});
+
+describe("pricing refresh removal guard", () => {
+  const before = { input: 1, output: 2, cacheRead: 0.1 };
+  it("refuses removed models and disappearing token rates", () => {
+    for (const after of [null, { input: 1, output: 2 }]) {
+      expect(() =>
+        assertPricesRetained([{ provider: "anthropic", model: "priced", before, after }]),
+      ).toThrow("anthropic/priced");
+    }
+  });
+
+  it("permits explicit zero prices, price changes and additions", () => {
+    expect(() => assertPricesRetained([])).not.toThrow();
+    expect(() =>
+      assertPricesRetained([
+        {
+          provider: "anthropic",
+          model: "priced",
+          before,
+          after: { input: 0, output: 3, cacheRead: 0, cacheWrite: 0.5 },
+        },
+      ]),
+    ).not.toThrow();
   });
 });

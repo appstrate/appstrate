@@ -7,50 +7,12 @@
  * unconfirmed cancellation leaves a subscription charging a customer that nothing names.
  */
 
-import Stripe from "stripe";
 import { eq, isNotNull } from "drizzle-orm";
 import { getEeDb } from "../db.ts";
 import { billingAccounts, orgUsageRecords } from "../../drizzle/schema.ts";
-import { getStripe } from "../stripe/client.ts";
+import { cancelSubscription } from "../stripe/cancel.ts";
 import { logger } from "../logger.ts";
 import { deleteBillingManagers } from "./managers.ts";
-
-/**
- * Stripe's sentence for "already canceled", returned as a 400 with no distinguishing
- * `code`. Anchored: reading any other 400 as success deletes the subscription id.
- */
-const ALREADY_CANCELED_MESSAGE =
-  /^A canceled subscription can only update its cancellation_details/;
-
-/** Is this failure indistinguishable from success — a subscription Stripe no longer has? */
-function isAlreadyCanceled(err: unknown): boolean {
-  if (!(err instanceof Stripe.errors.StripeInvalidRequestError)) return false;
-  if (err.code === "resource_missing" || err.statusCode === 404) return true;
-  return err.statusCode === 400 && ALREADY_CANCELED_MESSAGE.test(err.message);
-}
-
-/** Cancel `subscriptionId`; true when it is gone, "already gone" included. Never throws. */
-async function cancelSubscription(orgId: string, subscriptionId: string): Promise<boolean> {
-  try {
-    await getStripe().subscriptions.cancel(subscriptionId);
-    logger.info("Stripe subscription canceled for a deleted org", { orgId, subscriptionId });
-    return true;
-  } catch (err) {
-    if (isAlreadyCanceled(err)) {
-      logger.info("Stripe subscription was already gone for a deleted org", {
-        orgId,
-        subscriptionId,
-      });
-      return true;
-    }
-    logger.error("Failed to cancel Stripe subscription — billing rows kept for retry", {
-      orgId,
-      subscriptionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return false;
-  }
-}
 
 /** Remove the org's EE-owned rows: no EE table FKs the platform, so nothing cascades. */
 async function deleteOrgBillingRows(orgId: string): Promise<void> {
@@ -75,7 +37,7 @@ export async function cancelSubscriptionAndCleanUp(
       .set({ cancelRequestedAt: new Date(), updatedAt: new Date() })
       .where(eq(billingAccounts.orgId, orgId));
 
-    if (!(await cancelSubscription(orgId, subscriptionId))) return false;
+    if (!(await cancelSubscription(subscriptionId, { orgId, reason: "org-deleted" }))) return false;
   }
 
   await deleteOrgBillingRows(orgId);

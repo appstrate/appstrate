@@ -25,12 +25,24 @@
 -- `viewer` row in every space that exists today reproduces their reach exactly,
 -- and does not widen onto spaces created later. RBAC spec §11, decision 6.
 --
--- Idempotent: every WHERE is exactly the condition it removes, so a second run
--- matches zero rows. Step 1 additionally uses `ON CONFLICT DO NOTHING`, so a
--- partially-applied database converges. Step 4 removes its condition by filling
--- the snapshot, which is why it may only run in the window above: a client
--- whose org has no space at all keeps an empty snapshot, and a run made after
--- spaces exist would give it those.
+-- Idempotent, steps 1-3: every WHERE is exactly the condition it removes, so a
+-- second run matches zero rows, and step 1 additionally uses
+-- `ON CONFLICT DO NOTHING`, so a partially-applied database converges.
+--
+-- Step 4 is the exception, and it is guarded MECHANICALLY — a comment saying
+-- "run this once" is not a guard. Its predicate (`signup_role = 'guest'` with
+-- an empty snapshot) is permanent, not window-scoped: once the new application
+-- is up it re-matches any client an admin DELIBERATELY left with no space
+-- assignments, and a second run would hand that client `viewer` rows in every
+-- space created since — a widening of the auto-provisioning path. So a run that
+-- commits records itself in `drizzle.migration_scripts`, and every later run
+-- captures an EMPTY step-4 set: steps 1-3 still converge, step 4 writes nothing
+-- and NAMES the clients it would otherwise have widened. Nothing is left for
+-- the next operator to remember.
+--
+-- Re-running step 4 on purpose — a first run made against the wrong database —
+-- means deleting that row by hand, which is a deliberate act:
+--   DELETE FROM drizzle.migration_scripts WHERE script = '0008-org-viewer-to-guest';
 --
 -- One transaction: a failure leaves nothing half-done. Fenced, per
 -- `scripts/migration/README.md` requirement 3.
@@ -74,6 +86,21 @@ BEGIN;
 SET LOCAL lock_timeout = '3s';
 SET LOCAL statement_timeout = '300s';
 
+-- ═══ RUN-ONCE MARKER ════════════════════════════════════════════════════════
+--
+-- `drizzle` is the schema the migrator already keeps its journals in
+-- (`__drizzle_migrations`, `ee_migrations`), so this bookkeeping row sits
+-- outside the application schema: the app never reads it, drizzle never
+-- generates from it, and `scripts/check-index-drift.ts` — which reads `public`
+-- only — does not see it. The schema exists by the time this script runs (it
+-- runs after the drizzle batch); `IF NOT EXISTS` is for a rehearsal replayed
+-- into a bare database.
+CREATE SCHEMA IF NOT EXISTS drizzle;
+CREATE TABLE IF NOT EXISTS drizzle.migration_scripts (
+  script text        PRIMARY KEY,
+  ran_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- ═══ 0. BEFORE — captured, not just printed ═════════════════════════════════
 --
 -- The viewer set goes into a temp table because step 2 destroys it: after the
@@ -92,7 +119,30 @@ CREATE TEMP TABLE mig0008_invitations ON COMMIT DROP AS
 -- is no way left to ask which clients owed one.
 CREATE TEMP TABLE mig0008_oauth_clients ON COMMIT DROP AS
   SELECT id, referenced_org_id FROM oauth_clients
-  WHERE signup_role = 'guest' AND signup_space_assignments = '[]'::jsonb;
+  WHERE signup_role = 'guest' AND signup_space_assignments = '[]'::jsonb
+    -- The window, made mechanical: on every run after the first this NOT EXISTS
+    -- is false, the captured set is empty and step 4 writes nothing. Applied to
+    -- the CAPTURE rather than to step 4 so the step-5 coverage checks agree —
+    -- they verify exactly what was captured.
+    AND NOT EXISTS (
+      SELECT 1 FROM drizzle.migration_scripts WHERE script = '0008-org-viewer-to-guest'
+    );
+
+-- Name what the stale predicate would have taken, so a second run is legible
+-- rather than silently narrower than the first.
+DO $$
+DECLARE
+  v_ran_at timestamptz;
+  v_would  text;
+BEGIN
+  SELECT ran_at INTO v_ran_at
+    FROM drizzle.migration_scripts WHERE script = '0008-org-viewer-to-guest';
+  IF NOT FOUND THEN RETURN; END IF;
+  SELECT string_agg(id, ', ' ORDER BY id) INTO v_would FROM oauth_clients
+    WHERE signup_role = 'guest' AND signup_space_assignments = '[]'::jsonb;
+  RAISE NOTICE '0008 already ran at % — step 4 SKIPPED. OAuth signup client(s) its predicate matches today, and would have widened onto every space created since: %. Steps 1-3 re-run and match zero rows.',
+    v_ran_at, COALESCE(v_would, 'none');
+END $$;
 
 DO $$
 DECLARE
@@ -237,5 +287,14 @@ BEGIN
     RAISE EXCEPTION '% OAuth signup space assignment(s) missing — those clients would provision a guest who reaches nothing — aborting', v_missing_client_assignments;
   END IF;
 END $$;
+
+-- ═══ 6. Close the window ════════════════════════════════════════════════════
+--
+-- Reached only when step 5 accepted the result: an abort rolls this back with
+-- everything else, so a failed run stays re-runnable in full. Written even when
+-- there was nothing to move — the point of the marker is that the window is
+-- over, not that rows changed.
+INSERT INTO drizzle.migration_scripts (script) VALUES ('0008-org-viewer-to-guest')
+ON CONFLICT (script) DO NOTHING;
 
 COMMIT;

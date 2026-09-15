@@ -29,8 +29,9 @@
  *
  *   - `drizzle-kit generate` compares the schema to the snapshot. Both carry
  *     the 70-byte name, so there is no drift to report.
- *   - `scripts/check-index-drift.ts` compares INDEX NAMES ONLY, against a LIVE
- *     `DATABASE_URL`. It cannot see a constraint, and it cannot run in `check`.
+ *   - `scripts/check-index-drift.ts` compares index names and column
+ *     name/nullability against a LIVE `DATABASE_URL`. It cannot see a
+ *     constraint, and it cannot run in `check`.
  *   - `migration-index-parity.test.ts` compares indexes to the snapshot.
  *   - the whole suite passes, because the FK works perfectly. Only its NAME is
  *     wrong, and nothing addresses a constraint by name until something does.

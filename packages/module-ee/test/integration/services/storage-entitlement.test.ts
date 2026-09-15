@@ -19,7 +19,11 @@
 import { describe, expect, it, beforeEach, spyOn } from "bun:test";
 import { truncateEeTables } from "../../helpers/db.ts";
 import { seedBillingAccount, seedBillingCursor } from "../../helpers/seed.ts";
-import { resetStripeMock, generateWebhookEvent } from "../../helpers/stripe.ts";
+import {
+  resetStripeMock,
+  generateWebhookEvent,
+  setSubscriptionResponse,
+} from "../../helpers/stripe.ts";
 import { mockStorageLimitCalls, resetMockStorageLimits } from "../../helpers/mock-platform.ts";
 import { setMockStorageLimitError, setMockStorageLimitHook } from "../../helpers/mock-platform.ts";
 import { eq } from "drizzle-orm";
@@ -238,6 +242,7 @@ describe("storage entitlement", () => {
           },
         },
       });
+      setSubscriptionResponse(JSON.parse(body).data.object);
       await handleWebhook(body, signature);
 
       expect(mockStorageLimitCalls).toEqual([{ orgId, bytes: 100 * GIB }]);

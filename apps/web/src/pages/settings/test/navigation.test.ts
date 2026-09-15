@@ -56,8 +56,11 @@ describe("unified settings navigation", () => {
     expect(admin).toContain("/org-settings/spaces");
     expect(admin).toContain("/org-settings/models");
     expect(admin).not.toContain("/org-settings/proxies");
-    // `spaces:write` also governs a space's own auth screen, and says so.
-    expect(admin).toContain("/workspace-settings/auth");
+    // A space's own auth screen is its settings, not the org's spaces.
+    expect(admin).not.toContain("/workspace-settings/auth");
+    expect(destinations(ALL_FEATURES, ["space-settings:write"])).toContain(
+      "/workspace-settings/auth",
+    );
   });
 
   it("keeps a module's screen behind its module, whatever the permission", () => {

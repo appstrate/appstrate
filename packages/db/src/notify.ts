@@ -74,6 +74,36 @@ export async function notifyRunMetric(db: Db, payload: RunMetricNotifyPayload): 
  * Safe to call multiple times (uses CREATE OR REPLACE).
  */
 export async function createNotifyTriggers(db: Db): Promise<void> {
+  // Byte budget for one free-form value inside a NOTIFY payload.
+  //
+  // `pg_notify` raises above 8 000 BYTES; `left()` counts CHARACTERS, so a cap
+  // written with it bounds nothing — 2 000 emoji are 8 000 bytes. And the raw
+  // byte length is not the spend either: the value is interpolated into JSON,
+  // where a control character becomes a six-byte `\u0001`. So measure what the
+  // value actually costs — its JSON encoding — and scale the character count
+  // down by the bytes-per-character that measurement reveals.
+  //
+  // The loop is strictly decreasing (the ratio is < 1 whenever it runs) and
+  // therefore terminates; in practice one or two passes.
+  await db.execute(drizzleSql`
+    CREATE OR REPLACE FUNCTION notify_text_budget(_value text, _max_bytes int)
+    RETURNS text AS $$
+    DECLARE
+      _bytes int;
+    BEGIN
+      IF _value IS NULL THEN
+        RETURN NULL;
+      END IF;
+      LOOP
+        _bytes := octet_length(to_json(_value)::text);
+        EXIT WHEN _bytes <= _max_bytes OR _value = '';
+        _value := left(_value, ((length(_value)::bigint * _max_bytes) / _bytes)::int);
+      END LOOP;
+      RETURN _value;
+    END;
+    $$ LANGUAGE plpgsql STABLE
+  `);
+
   // Trigger function for run changes
   await db.execute(drizzleSql`
     CREATE OR REPLACE FUNCTION notify_run_change()
@@ -90,10 +120,11 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'space_id', NEW.space_id,
         'schedule_id', NEW.schedule_id,
         -- Bound the error text: the whole NOTIFY payload must stay under
-        -- Postgres' 8 KB limit, else pg_notify raises and aborts the
-        -- finalize transaction — orphaning the run in 'running'. 2 KB is
-        -- ample for a surfaced error message; the full text lives in run_logs.
-        'error', LEFT(NEW.error, 2000),
+        -- Postgres' 8 000-BYTE limit, else pg_notify raises and aborts the
+        -- finalize transaction — orphaning the run in 'running'. 2 000 bytes
+        -- is ample for a surfaced error message; the full text lives in
+        -- run_logs. Every other value here is an id, an enum or a timestamp.
+        'error', notify_text_budget(NEW.error, 2000),
         'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'duration', NEW.duration
@@ -125,15 +156,17 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         'space_id', _space_id,
         'user_id', _user_id,
         'end_user_id', _end_user_id,
-        'type', NEW.type,
-        'level', NEW.level,
-        'event', NEW.event,
-        -- Payload budget: pg_notify raises above 8 000 bytes, and it raises
+        -- Payload budget: pg_notify raises above 8 000 BYTES, and it raises
         -- INSIDE this trigger, so an over-long frame aborts the run_logs INSERT
-        -- rather than merely losing a frame. The two caps below (2 000 for the
-        -- message, 5 000 for the data) plus the fixed keys, the two ids and the
-        -- two actor columns stay under that ceiling with room to spare.
-        'message', LEFT(NEW.message, 2000),
+        -- rather than merely losing a frame. Every free-form column is bounded
+        -- in bytes: message carries agent output, and type / event are
+        -- open-ended by design (modules invent their own progress kinds).
+        -- 100 + 400 + 2 000 plus the 5 000-byte data cap, the fixed keys, the
+        -- ids, the two actor columns and the timestamp stay under the ceiling.
+        'type', notify_text_budget(NEW.type, 100),
+        'level', NEW.level,
+        'event', notify_text_budget(NEW.event, 400),
+        'message', notify_text_budget(NEW.message, 2000),
         'data', CASE
           WHEN NEW.data IS NULL THEN NULL
           WHEN octet_length(NEW.data::text) <= 5000 THEN NEW.data
@@ -169,7 +202,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   // one the previous write already delivered — the fan-out is unchanged for
   // every payload-visible transition (status, error, timestamps, duration,
   // ownership, scheduling). `error` is compared in full even though the
-  // payload truncates it to 2 000 chars: comparing the untruncated value can
+  // payload truncates it to 2 000 bytes: comparing the untruncated value can
   // only make the guard fire MORE often, never less.
   //
   // Columns deliberately NOT in the list (a write touching only these no

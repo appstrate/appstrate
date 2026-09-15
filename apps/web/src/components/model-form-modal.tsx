@@ -210,7 +210,14 @@ function ModelForm({
   const [picked, setPicked] = useState<ModelPickRow[]>([]);
   /** Ids a batch could not create — re-offered instead of silently dropped. */
   const [failedModelIds, setFailedModelIds] = useState<string[]>([]);
-  /** The credential a partially failed batch already created: a retry binds to it. */
+  // Refused as already-added rather than failed — a separate line, because the
+  // model IS there and re-submitting will not change that.
+  const [duplicateModelIds, setDuplicateModelIds] = useState<string[]>([]);
+  /**
+   * The credential a refused submission already minted from the typed key. It
+   * outlives the model step: a retry binds to it instead of minting a second
+   * one against the same secret and orphaning the first.
+   */
   const [createdCredentialId, setCreatedCredentialId] = useState<string | null>(null);
   const [modelMode, setModelMode] = useState<"list" | "manual" | null>(null);
 
@@ -231,7 +238,16 @@ function ModelForm({
   const dropListing = () => {
     setPicked([]);
     setFailedModelIds([]);
+    setDuplicateModelIds([]);
+  };
+
+  /**
+   * The endpoint and the typed key are what a credential is minted from:
+   * editing either strands whatever a refused submission already minted.
+   */
+  const dropEndpointBinding = () => {
     setCreatedCredentialId(null);
+    dropListing();
   };
 
   const resetModelStep = () => {
@@ -249,11 +265,12 @@ function ModelForm({
     dropListing();
   };
 
-  /** A typed key never coexists with a saved credential. */
+  /** A typed key never coexists with a saved credential — nor with what it minted. */
   const bindCredential = (id: string) => {
     setValue("credentialId", id);
     setValue("inlineApiKey", "");
     clearErrors("credentialId");
+    setCreatedCredentialId(null);
   };
 
   /**
@@ -266,6 +283,8 @@ function ModelForm({
     clearErrors();
     setValue("credentialId", "");
     if (!keepTypedKey) setValue("inlineApiKey", "");
+    // A minted credential is pinned to the provider it was created for.
+    setCreatedCredentialId(null);
     const provider = getProviderById(id, registry);
     if (provider) {
       setValue("apiShape", provider.apiShape);
@@ -311,8 +330,15 @@ function ModelForm({
         }),
       },
       {
-        onSuccess: (data) => setDiscovery({ key, outcome: data.outcome, models: data.models }),
-        onError: () => setDiscovery({ key, outcome: "request_failed", models: [] }),
+        onSuccess: (data) =>
+          setDiscovery({
+            key,
+            outcome: data.outcome,
+            models: data.models,
+            truncated: data.truncated,
+          }),
+        onError: () =>
+          setDiscovery({ key, outcome: "request_failed", models: [], truncated: false }),
       },
     );
   };
@@ -339,16 +365,22 @@ function ModelForm({
       const outcome = await onSubmit(batch.data);
       if (outcome.failedModelIds.length === 0) return;
       if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
-      setFailedModelIds(outcome.failedModelIds);
-      // Only what failed stays checked — the rest are rows in the table now.
-      setPicked(picked.filter((r) => outcome.failedModelIds.includes(r.id)));
+      // An already-added model is not a retry candidate — it is a row in the
+      // table like the ones that succeeded, just not one this submission made.
+      const retryable = outcome.failedModelIds.filter(
+        (id) => !outcome.duplicateModelIds.includes(id),
+      );
+      setFailedModelIds(retryable);
+      setDuplicateModelIds(outcome.duplicateModelIds);
+      // Only what can be retried stays checked — the rest are rows in the table now.
+      setPicked(picked.filter((r) => retryable.includes(r.id)));
       return;
     }
     const result = buildModelFormPayload({
       fields: data,
       dirtyFields,
       provider: selectedProvider,
-      selectedCredentialId: selectedCredential?.id ?? null,
+      selectedCredentialId: selectedCredential?.id ?? createdCredentialId,
       capabilities: capabilitiesExplicit ? "explicit" : "auto",
       isEdit: !!model,
       catalogEntry: catalogEntry(data.modelId.trim()),
@@ -360,7 +392,14 @@ function ModelForm({
     // The host closes on success and reports nothing here.
     const outcome = await onSubmit(result.data);
     if (outcome.failedModelIds.length > 0) {
-      setError("modelId", { message: t("models.form.saveFailed") });
+      if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
+      setError("modelId", {
+        message: t(
+          outcome.duplicateModelIds.length > 0
+            ? "models.form.alreadyAdded"
+            : "models.form.saveFailed",
+        ),
+      });
     }
   });
 
@@ -408,14 +447,19 @@ function ModelForm({
         providers={registry.filter((p) => p.baseUrlOverridable)}
         onApiTypeChange={(entry) => switchProvider(entry.providerId, true)}
         providerLocked={!!model}
-        baseUrlProps={register("baseUrl", { validate: baseUrlValidate, onChange: dropListing })}
+        baseUrlProps={register("baseUrl", {
+          validate: baseUrlValidate,
+          onChange: dropEndpointBinding,
+        })}
         // The URL is a property of the credential, not of the model.
         baseUrlLocked={!!selectedCredential}
         baseUrlError={showError("baseUrl") ? errors.baseUrl?.message : undefined}
-        apiKeyProps={register("inlineApiKey", { onChange: dropListing })}
+        apiKeyProps={register("inlineApiKey", { onChange: dropEndpointBinding })}
         apiKeyError={showError("credentialId") ? errors.credentialId?.message : undefined}
+        // Once the typed key HAS been minted, a retry rebinds to it — promising
+        // another automatic create would be a lie.
         apiKeyHint={
-          !selectedCredential && inlineApiKey.trim()
+          !selectedCredential && !createdCredentialId && inlineApiKey.trim()
             ? t("models.form.createCredentialHint")
             : undefined
         }
@@ -471,6 +515,11 @@ function ModelForm({
           {failedModelIds.length > 0 && (
             <div className="text-destructive text-sm">
               {t("models.form.addFailed", { ids: failedModelIds.join(", ") })}
+            </div>
+          )}
+          {duplicateModelIds.length > 0 && (
+            <div className="text-muted-foreground text-sm">
+              {t("models.form.addSkippedDuplicate", { ids: duplicateModelIds.join(", ") })}
             </div>
           )}
           {source !== "discover" && offersManual && manualToggle("manual")}

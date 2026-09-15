@@ -10,9 +10,11 @@ import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   createTestContext,
+  memberContext,
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
+import { seedSpace, seedSpaceMember } from "../../../../../../test/helpers/seed.ts";
 import oidcModule from "../../../index.ts";
 import { _clearSmtpCacheForTesting } from "../../../services/smtp.ts";
 
@@ -139,5 +141,102 @@ describe("/api/spaces/:id/smtp-config", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean };
     expect(body.ok).toBe(true);
+  });
+});
+
+/**
+ * #1337 — the SMTP routes were gated on the ORG-level `spaces:read` /
+ * `spaces:write`, strings every `member` and `guest` holds for the whole org,
+ * with the only space check being "does this space belong to my org". They now
+ * enter the space named by `:id` and require the SPACE-level
+ * `space-settings:write` there, so the answer depends on membership.
+ */
+describe("/api/spaces/:id/smtp-config — space membership gate", () => {
+  let ctx: TestContext;
+  let privateSpaceId: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    _clearSmtpCacheForTesting();
+    ctx = await createTestContext({ orgSlug: "smtp-gate" });
+    const space = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Private",
+      visibility: "private",
+      createdBy: ctx.user.id,
+    });
+    privateSpaceId = space.id;
+
+    // The org owner administers every space, so seeding through the route
+    // also proves the owner path is untouched by the new gate.
+    const seeded = await app.request(`/api/spaces/${privateSpaceId}/smtp-config`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        host: "smtp.sendgrid.net",
+        port: 587,
+        username: "apikey",
+        pass: "super-secret-pass",
+        fromAddress: "noreply@tenant.example",
+      }),
+    });
+    expect(seeded.status).toBe(200);
+  });
+
+  it("404s a guest on a private space it is not in — the config never leaks", async () => {
+    const guest = await memberContext(ctx, "guest");
+    const res = await app.request(`/api/spaces/${privateSpaceId}/smtp-config`, {
+      headers: authHeaders(guest),
+    });
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain("smtp.sendgrid.net");
+  });
+
+  it("403s a guest on an open space it is not in", async () => {
+    const guest = await memberContext(ctx, "guest");
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
+      headers: authHeaders(guest),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("403s a member of the space that does not administer it", async () => {
+    const viewer = await memberContext(ctx, "member", "viewer");
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
+      headers: authHeaders(viewer),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("serves the space's own admin, whatever their org role", async () => {
+    const spaceAdmin = await memberContext(ctx, "guest");
+    await seedSpaceMember({
+      spaceId: privateSpaceId,
+      userId: spaceAdmin.user.id,
+      presetRole: "admin",
+    });
+    const res = await app.request(`/api/spaces/${privateSpaceId}/smtp-config`, {
+      headers: authHeaders(spaceAdmin),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.host).toBe("smtp.sendgrid.net");
+    expect(body).not.toHaveProperty("pass");
+  });
+
+  it("refuses a guest's write the same way", async () => {
+    const guest = await memberContext(ctx, "guest");
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
+      method: "PUT",
+      headers: { ...authHeaders(guest), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        host: "smtp.attacker.example",
+        port: 587,
+        username: "u",
+        pass: "p",
+        fromAddress: "a@b.c",
+      }),
+    });
+    expect(res.status).toBe(403);
   });
 });
