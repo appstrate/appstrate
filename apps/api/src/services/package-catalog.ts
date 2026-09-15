@@ -149,7 +149,7 @@ export async function getPackage(
  * here — 404 semantics, no info leak.
  *
  * The RUN-side gate is `requireAgent()` (`middleware/guards.ts`), which asks
- * `hasPackageAccess` and then tells "placed but switched off" from "not placed
+ * `isPackageActiveHere` and then tells "placed but switched off" from "not placed
  * here" so the two refusals can be acted on differently. It does not live here
  * because that distinction needs the reachability read as well, and folding
  * both into one loader is what made every launch door answer the same opaque

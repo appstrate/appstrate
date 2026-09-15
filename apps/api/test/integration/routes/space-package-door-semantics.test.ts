@@ -27,7 +27,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { assertDbCount } from "../../helpers/assertions.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
-import { hasPackageAccess } from "../../../src/services/space-packages.ts";
+import { isPackageActiveHere } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -94,7 +94,7 @@ describe("a system package is switchable, and the row outranks the default", () 
 
   it("switches OFF for real, and the run gate obeys", async () => {
     expect(
-      await hasPackageAccess({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SYSTEM_SKILL),
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SYSTEM_SKILL),
     ).toBe(true);
     expect((await deactivate(SYSTEM_SKILL)).status).toBe(204);
     expect((await placementRow(SYSTEM_SKILL))?.enabled).toBe(false);
@@ -102,12 +102,12 @@ describe("a system package is switchable, and the row outranks the default", () 
     // kept running everywhere — a switch that changed nothing, and an audit
     // entry for an act that never happened.
     expect(
-      await hasPackageAccess({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SYSTEM_SKILL),
+      await isPackageActiveHere({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SYSTEM_SKILL),
     ).toBe(false);
     expect(await auditCount("package.deactivated", SYSTEM_SKILL)).toHaveLength(1);
 
     // …and only HERE. The other space never answered, so it keeps the default.
-    expect(await hasPackageAccess({ orgId: ctx.orgId, spaceId: otherSpaceId }, SYSTEM_SKILL)).toBe(
+    expect(await isPackageActiveHere({ orgId: ctx.orgId, spaceId: otherSpaceId }, SYSTEM_SKILL)).toBe(
       true,
     );
   });

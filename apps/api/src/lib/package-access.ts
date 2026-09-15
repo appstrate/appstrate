@@ -12,7 +12,7 @@ import {
   VERSION_SELECTOR_PUBLISHED,
 } from "../services/agent-version-resolver.ts";
 import { getLatestVersionId } from "../services/package-versions.ts";
-import { hasPackageAccess } from "../services/space-packages.ts";
+import { isPackageActiveHere } from "../services/space-packages.ts";
 import { parsePackageIdentity, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/permissions";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
@@ -228,7 +228,7 @@ export function placementGrantsRead(
  * "Is this package readable from THIS space?" — VISIBILITY, not authorization:
  * the caller's `<type>:read` is a separate guard (the route's `readGuard`, or
  * `requirePackageReadPermission` where the type comes from the row). System
- * packages are readable from every space, and like `hasPackageAccess` this does
+ * packages are readable from every space, and like `isPackageActiveHere` this does
  * not filter `orgId`: its callers add the org boundary on the row they read next.
  */
 export async function isPackageReadableInSpace(
@@ -271,7 +271,7 @@ export type AgentExecutionBlock = "not_placed" | "not_active";
  *   - PLACED here: homed here, offered here, or shipped with the deployment
  *     ({@link isPackageReadableInSpace} — the same rule the reads use);
  *   - ACTIVE here: the placement row's `enabled`, or the deployment's default
- *     where there is no row (`hasPackageAccess` / `activeHereSql`).
+ *     where there is no row (`isPackageActiveHere` / `activeHereSql`).
  *
  * Stated ONCE because three callers ask it and drift between them is invisible:
  * the HTTP door (`requireActiveAgent`, `middleware/guards.ts`, mounted by
@@ -296,7 +296,7 @@ export type AgentExecutionBlock = "not_placed" | "not_active";
  * Both halves are read in parallel: they are independent rows, and the tick
  * pays for this on every fire.
  *
- * Adds no `orgId` predicate of its own: `hasPackageAccess` carries the org
+ * Adds no `orgId` predicate of its own: `isPackageActiveHere` carries the org
  * boundary in its own query, and every caller has already loaded the package
  * under it (`getPackage(packageId, orgId)`).
  */
@@ -306,7 +306,7 @@ export async function agentExecutionBlock(
 ): Promise<AgentExecutionBlock | null> {
   const [placed, active] = await Promise.all([
     isPackageReadableInSpace(scope.spaceId, packageId),
-    hasPackageAccess(scope, packageId),
+    isPackageActiveHere(scope, packageId),
   ]);
   if (!placed) return "not_placed";
   if (!active) return "not_active";

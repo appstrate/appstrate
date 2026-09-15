@@ -3594,7 +3594,7 @@ describe("Packages API", () => {
       // route derives it would otherwise surface as "row not found".
       expect(((await res.json()) as { id: string }).id).toBe(targetId);
       // The route activates the fork in the calling space, which is what
-      // satisfies the explorer's `hasPackageAccess` gate below — so no
+      // satisfies the explorer's `isPackageActiveHere` gate below — so no
       // activation of our own. The `200` asserted in `fileIndex` is the proof
       // that it happened.
     }

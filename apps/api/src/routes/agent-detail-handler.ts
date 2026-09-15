@@ -20,7 +20,7 @@ import {
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
-import { getSpacePackageSettings, hasPackageAccess } from "../services/space-packages.ts";
+import { getSpacePackageSettings, isPackageActiveHere } from "../services/space-packages.ts";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -218,7 +218,7 @@ export async function buildAgentDetailDto(
     // agent never requires it to be active — this detail is exactly what a
     // caller opens to put a switched-off agent back on — so the verdict travels
     // in the payload instead of turning the read into a 404.
-    hasPackageAccess(scope, agent.id),
+    isPackageActiveHere(scope, agent.id),
   ]);
 
   const parsed = parseScopedName(m.name);

@@ -70,7 +70,7 @@ interface PackageActionsDropdownProps {
   hasPublishedVersion?: boolean;
   /**
    * Whether the package is ACTIVE in the current space. The bundle export route
-   * runs the execution gate (`hasPackageAccess`), not the read gate, so a
+   * runs the execution gate (`isPackageActiveHere`), not the read gate, so a
    * package merely placed here — or placed and switched off — answers 404 on
    * click.
    */
@@ -246,7 +246,7 @@ export function PackageActionsDropdown({
               endpoint resolves `(packageId, version)` from the registry,
               so a draft-only package would 404. Hidden entirely when the
               agent is not ACTIVE here: that route runs the execution gate
-              (`hasPackageAccess`), so the home alone does not open it. */}
+              (`isPackageActiveHere`), so the home alone does not open it. */}
           {canRead && isAgent && isActiveHere && onDownloadBundle && (
             <DropdownMenuItem
               onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}

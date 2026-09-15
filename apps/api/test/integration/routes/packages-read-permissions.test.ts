@@ -3,7 +3,7 @@
 /**
  * RBAC on the package READ surface (issue #1123).
  *
- * Every `GET` under `/api/packages` used to be gated on `hasPackageAccess`
+ * Every `GET` under `/api/packages` used to be gated on `isPackageActiveHere`
  * alone — a visibility check ("is this package a system package, or installed
  * in THIS space?"), never an authorization one. A credential scoped
  * without `skills:read` could therefore read a skill's manifest AND its full
@@ -306,7 +306,7 @@ describe("packages version download — access + read permission", () => {
 
   it("404s a download for a package that is not installed in the calling space", async () => {
     // Pre-fix this route resolved the row with `orgOrSystemFilter` alone and
-    // never called `hasPackageAccess`, so it served artifact bytes for
+    // never called `isPackageActiveHere`, so it served artifact bytes for
     // packages the `/files` routes correctly hide. Permission is held here
     // (owner session) — the 404 is the visibility gate, nothing else.
     await publishSkill(ctx);

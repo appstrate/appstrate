@@ -44,7 +44,7 @@ import {
   type ConnectionResolutionSource,
 } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { activatePackageWithin, hasPackageAccess } from "./space-packages.ts";
+import { activatePackageWithin, isPackageActiveHere } from "./space-packages.ts";
 import { conflict, notFound, invalidRequest } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
@@ -805,7 +805,7 @@ export async function resolveAgentConnectionReadiness(args: {
   // it answers 200 and carries the cause next to `integration_not_active`. The
   // rest of the readiness still resolves: an operator about to switch the agent
   // back on wants to know what ELSE is missing, in one pass.
-  const agentActive = await hasPackageAccess(scope, agentPackageId);
+  const agentActive = await isPackageActiveHere(scope, agentPackageId);
   const { agent } = await resolveAgentRunVersion(loaded, version);
   const agentManifest = agent.manifest as unknown as Record<string, unknown>;
   const declared = parseManifestIntegrations(agentManifest);

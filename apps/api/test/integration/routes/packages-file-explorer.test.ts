@@ -44,7 +44,7 @@ import { indexEtag, mutatePackageDraftFiles } from "../../../src/services/packag
 import { ApiError } from "../../../src/lib/errors.ts";
 import { uploadPackageZip, buildMinimalZip } from "../../../src/services/package-storage.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
-import { hasPackageAccess } from "../../../src/services/space-packages.ts";
+import { isPackageActiveHere } from "../../../src/services/space-packages.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 
 const app = getTestApp();
@@ -617,15 +617,15 @@ describe("package file explorer", () => {
       await seedPackageShare(ctx.defaultSpaceId, id);
       await seedSpacePackage(ctx.defaultSpaceId, id);
       // TWO independent boundaries now stand between us and another org's
-      // bytes, and this pins both: `hasPackageAccess` carries the org filter in
+      // bytes, and this pins both: `isPackageActiveHere` carries the org filter in
       // its own query, and the explorer's read carries `orgOrSystemFilter`.
-      expect(await hasPackageAccess({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
+      expect(await isPackageActiveHere({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
         false,
       );
       // The same predicate answers `true` for the org that DOES own it — so
       // the `false` above is the boundary talking, not the fixture failing to
       // activate anything.
-      expect(await hasPackageAccess({ orgId: other.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
+      expect(await isPackageActiveHere({ orgId: other.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
         true,
       );
 

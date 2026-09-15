@@ -365,7 +365,7 @@ describe("the home is a read grant", () => {
     expect(await agentIndexIds(gamma)).not.toContain(AGENT);
   });
 
-  // The home opens READS. Running is a separate gate — `hasPackageAccess`, an
+  // The home opens READS. Running is a separate gate — `isPackageActiveHere`, an
   // ENABLED `space_packages` row in the space the run happens in — and the two
   // must not be conflated: an agent a space governs but has not activated is
   // not thereby executable there, with that space's credentials.

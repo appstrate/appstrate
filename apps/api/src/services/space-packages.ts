@@ -615,7 +615,7 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
  * an ephemeral shadow. Expects BOTH of {@link activeHereSql}'s joins —
  * `spacePackages` and `packageShares`, each on (package, this space).
  *
- * The predicate is {@link activeHereSql}, shared with {@link hasPackageAccess},
+ * The predicate is {@link activeHereSql}, shared with {@link isPackageActiveHere},
  * with the library's projection and with the index listings, so what an index
  * page shows, what the caller-context hints tell the model it may invoke, and
  * what the run gate lets through are one set rather than three.
@@ -906,7 +906,7 @@ export async function listActiveSkills(
  * caller drops silently, and the cost of stating it here is a predicate on an
  * indexed column.
  */
-export async function hasPackageAccess(scope: SpaceScope, packageId: string): Promise<boolean> {
+export async function isPackageActiveHere(scope: SpaceScope, packageId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: packages.id })
     .from(packages)
@@ -956,7 +956,7 @@ export interface SpacePackageSettings {
  * when this space holds no row it may act on.
  *
  * Carries the tenant boundary and the placement rule IN this query, like every
- * other reader of the table ({@link hasPackageAccess},
+ * other reader of the table ({@link isPackageActiveHere},
  * {@link getResolvedRunConfig}): `orgOrSystemFilter` so a row pointing at
  * another organization's package id resolves to defaults instead of handing
  * back its model and proxy override, and {@link placementReadFilter} so an
