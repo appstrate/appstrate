@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, asc, desc, eq, isNotNull, isNull, lt, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
@@ -9,7 +9,6 @@ import {
   organizations,
   packages,
   runs,
-  spacePackages,
   spaces,
   uploads,
 } from "@appstrate/db/schema";
@@ -21,7 +20,7 @@ import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
-import { reconcilePlacementsAfterRehome } from "./package-placement.ts";
+import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
@@ -636,18 +635,21 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  *
  * A homed package's write authority is this space (§6.9), so it cannot follow
  * the space out and `deleteSpace` refuses while one exists. The rule, and the
- * question it turns on is TAKEN UP ELSEWHERE — does another space of the
- * organization hold a `space_packages` row for it:
+ * question it turns on is PLACED ELSEWHERE — is the package placed in another
+ * space of the organization, by the ONE predicate that answers that everywhere
+ * else ({@link placementReadFilter}, `services/package-placement.ts`): an offer
+ * (`package_shares`) or a `space_packages` row an offer backs. The home is the
+ * third placement and it is the one leaving, which is why it is excluded rather
+ * than consulted:
  *
  *   - yes → re-homed to the organization's DEFAULT space, AND the offer that
  *     keeps each of the other spaces placed
- *     ({@link reconcilePlacementsAfterRehome}). Somebody else is running it, so
- *     it is already not private; the default space is where a package that
- *     belongs to no team lives, and it needs no offer of its own because it
- *     HOSTS the package from here on. The offer to the others is not a
- *     courtesy: a row without one is a placement nothing places, and the space
- *     would silently lose the package from every page while its schedules
- *     failed each tick.
+ *     ({@link reconcilePlacementsAfterRehome}). Another space can SEE it, so it
+ *     is already not private; the default space is where a package that belongs
+ *     to no team lives, and it needs no offer of its own because it HOSTS the
+ *     package from here on. The offer to the others is not a courtesy: a row
+ *     without one is a placement nothing places, and the space would silently
+ *     lose the package from every page while its schedules failed each tick.
  *
  *     What this HANDS OVER is deliberate and worth naming: the package —
  *     draft included — becomes readable and writable from the default space,
@@ -656,12 +658,20 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  *     team", and the alternative was a package nobody could author, which is
  *     the state `packages_org_package_has_home` refuses.
  *   - no → deleted, with its published artifacts enqueued for physical
- *     removal. It was private to a person who is gone. An OFFER nobody took up
- *     does not save it, deliberately: nothing runs on an offer, and keeping a
- *     dead author's draft alive because somebody was once shown its name would
- *     hand the organization a package no one asked for. The revoke of that
- *     offer is the space's own act and this one does not pre-empt it — the
- *     `package_shares` row goes with the package, by cascade.
+ *     removal. It was placed in that one space and nowhere else, so it was
+ *     private to a person who is gone and nobody else could ever see it.
+ *
+ *     An OFFER counts as a placement here, like everywhere else, and that is
+ *     the whole of the change from the first shape of this routine — which
+ *     asked for a `space_packages` row and therefore destroyed a published
+ *     package its author had deliberately offered to a colleague who had not
+ *     switched it on yet. "Taken up" is nobody's axis: Google Workspace splits
+ *     a departing user's Drive on SHARED versus not (including the unshared
+ *     files is a separate, explicit opt-in), Figma keeps a draft its author
+ *     shared before removal readable by everyone it was shared with, and n8n
+ *     makes transfer-or-delete an operator's choice rather than a policy. An
+ *     offer is a decision its author took and a recipient can see; only what
+ *     no one was ever shown dies with the account.
  *
  * ONE transaction, and every refusal comes BEFORE the first package mutation.
  * Both properties are load-bearing:
@@ -746,12 +756,11 @@ export async function emptyAndDeletePersonalSpace(
     let rehomedPackages = 0;
     let deletedPackages = 0;
     for (const pkg of homed) {
-      const [elsewhere] = await tx
-        .select({ spaceId: spacePackages.spaceId })
-        .from(spacePackages)
-        .where(and(eq(spacePackages.packageId, pkg.id), ne(spacePackages.spaceId, spaceId)))
-        .limit(1);
-      if (elsewhere) {
+      // PLACED elsewhere — the ONE placement rule, asked of every space but the
+      // one being emptied, by the module that owns it. An offer places the
+      // package exactly as a row does, so "present elsewhere" is never read
+      // twice.
+      if (await isPlacedElsewhere(tx, { packageId: pkg.id, exceptSpaceId: spaceId })) {
         if (!defaultSpace) {
           throw conflict(
             "organization_has_no_default_space",
@@ -773,6 +782,12 @@ export async function emptyAndDeletePersonalSpace(
         // platform refuses to honour, and the spaces still running the package
         // would have lost it from every page while their schedules failed each
         // tick.
+        //
+        // A package placed elsewhere by an OFFER alone reaches this branch too,
+        // and for it the reconciliation is a no-op on the insert half: the offer
+        // that placed it is untouched by the move and keeps placing it. Only its
+        // delete half can fire, and only if the departing author had offered the
+        // package to the default space — which now HOMES it.
         await reconcilePlacementsAfterRehome(tx, {
           packageId: pkg.id,
           orgId,

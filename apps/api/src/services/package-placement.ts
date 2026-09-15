@@ -61,6 +61,61 @@ export function placementReadFilter(spaceId: string) {
 }
 
 /**
+ * Is the package placed in ANY space of the organization other than
+ * `exceptSpaceId`? — the rule above, asked as an existence question.
+ *
+ * The one caller is the offboarding sweeper (`emptyAndDeletePersonalSpace`,
+ * `services/spaces.ts`), deciding whether a package homed in a departing
+ * member's personal space is re-homed or deleted, and `exceptSpaceId` is that
+ * space: its home placement is the one leaving, so it must not answer for
+ * itself, and neither may a row or an offer sitting in it.
+ *
+ * Both tables, because both place. An offer does it on its own — a space that
+ * was SHOWN a package can see it, so the package was never private — and a
+ * `space_packages` row does it through the offer behind it, except for the
+ * orphans `scripts/migration/0016` repairs, which is why the row half is asked
+ * rather than inferred from the offer half.
+ *
+ * It lives HERE and not in the sweeper for the reason the whole module exists:
+ * "present elsewhere" answered anywhere else would be a second reading of
+ * placement, and the sweeper would be the one path in the platform that owns
+ * one. The LEFT JOIN shape is `isPackageReadableInSpace`'s and
+ * `activeHereSql`'s, so it is one round trip.
+ *
+ * The org boundary is the caller's: the sweeper reads packages of one
+ * organization, and a `space_packages` or `package_shares` row pointing at
+ * another organization's space cannot be written by any live path
+ * ({@link reconcilePlacementsAfterRehome} joins `spaces` for exactly that).
+ * Were one to exist, it would answer "placed" and the package would be
+ * re-homed rather than deleted — the conservative direction.
+ */
+export async function isPlacedElsewhere(
+  tx: DbOrTx,
+  params: { packageId: string; exceptSpaceId: string },
+): Promise<boolean> {
+  const { packageId, exceptSpaceId } = params;
+  const [row] = await tx
+    .select({ id: packages.id })
+    .from(packages)
+    .leftJoin(
+      spacePackages,
+      and(eq(spacePackages.packageId, packages.id), ne(spacePackages.spaceId, exceptSpaceId)),
+    )
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), ne(packageShares.spaceId, exceptSpaceId)),
+    )
+    .where(
+      and(
+        eq(packages.id, packageId),
+        or(isNotNull(spacePackages.spaceId), isNotNull(packageShares.spaceId)),
+      ),
+    )
+    .limit(1);
+  return !!row;
+}
+
+/**
  * Re-home a package and leave no placement behind — the ONE reconciliation,
  * called by everything that rewrites `packages.home_space_id`.
  *

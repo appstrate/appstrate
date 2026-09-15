@@ -277,20 +277,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   **One reconciliation, and the offboarding sweeper calls it too.**
   `reconcilePlacementsAfterRehome` is the single function behind every rewrite of
   `packages.home_space_id`, and its second caller is the personal-space sweeper:
-  when an orphaned member's space is emptied, a package another space still runs
-  is re-homed to the organization's DEFAULT space AND offered to each of those
-  spaces, in the sweep's own transaction. The default space needs no offer — it
+  when an orphaned member's space is emptied, a package PLACED in another space
+  is re-homed to the organization's DEFAULT space AND offered to each space that
+  held a row, in the sweep's own transaction. The default space needs no offer — it
   is the home now — and the package, its draft included, becomes readable there,
   which is what "a package of the organization that belongs to no team" means. Sharing the reconciliation matters most on that
   path precisely because it acts on nobody's request: without it the sweep is the
   one thing in the platform that MAKES the placement rows everything else refuses
   to honour, and a team space keeps running a departed author's agent while
-  losing it from every page and failing its cron each tick. A package only ever
-  OFFERED elsewhere, with no space running it, is still DELETED with its author's
-  space: nothing runs on an offer, and keeping a dead author's draft alive
-  because somebody was once shown its name would hand the default space a
-  package no one asked for. **No live code path creates an orphan placement
-  now**; `scripts/migration/0016` repairs the inherited ones.
+  losing it from every page and failing its cron each tick. The question the
+  sweep turns on is PLACED elsewhere — the one placement predicate, so an OFFER
+  saves a package exactly as a row does, and only a package no other space was
+  ever placed for is deleted with its author's space. Every comparable splits a
+  departing member's content on the same axis: Google Workspace transfers the
+  SHARED half of a Drive and makes including the unshared files a separate
+  opt-in, Figma keeps a draft shared before removal readable by everyone it was
+  shared with, n8n makes transfer-or-delete an operator's choice. **No live code
+  path creates an orphan placement now**; `scripts/migration/0016` repairs the
+  inherited ones.
 
   Re-importing a bundle whose root is homed elsewhere follows the
   same rule: it activates it WITH an offer when the caller holds `<type>:share`
