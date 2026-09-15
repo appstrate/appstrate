@@ -151,14 +151,36 @@ export async function revokePackageShare(params: {
   packageId: string;
   spaceId: string;
   orgId: string;
+  /** The route's own rule, asked against the home this transaction holds — see {@link sharePackage}. */
+  authorizeHome: (homeSpaceId: string | null) => boolean;
 }): Promise<false | { placementRemoved: boolean }> {
-  const { packageId, spaceId, orgId } = params;
+  const { packageId, spaceId, orgId, authorizeHome } = params;
   // The org predicate lands in BOTH deletes' WHERE: neither table has an
   // `org_id`, so `(space_id, package_id)` alone would act on a row pointing at
   // a space this organization does not own. No such row can be written today;
   // the guard is what keeps that true.
   const inOrg = db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
   return db.transaction(async (tx) => {
+    // The authority, against the LOCKED home, for the reason `sharePackage`
+    // states: the route judged the home as it stood when the request arrived,
+    // and a `PATCH …/{scope}/{name}` committing in between moves the package to
+    // a home this caller may govern not at all. Withdrawing an audience is a
+    // lighter act than granting one — it takes access away rather than handing
+    // it out — but it is the SAME authority, and one of three home-dependent
+    // mutations left asking it of a stale row is the inconsistency that makes
+    // the other two look accidental.
+    const [pkg] = await tx
+      .select({ homeSpaceId: packages.homeSpaceId })
+      .from(packages)
+      .where(eq(packages.id, packageId))
+      .limit(1)
+      .for("share");
+    if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);
+    if (!authorizeHome(pkg.homeSpaceId)) {
+      throw forbidden(
+        `Withdrawing an offer of '${packageId}' requires the share permission in its home space — the package moved home while this request was in flight.`,
+      );
+    }
     const removed = await tx
       .delete(packageShares)
       .where(

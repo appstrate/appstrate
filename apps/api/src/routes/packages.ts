@@ -1959,6 +1959,36 @@ export function createPackagesRouter() {
       // object storage — a 422 here fails the whole move, which is the point.
       await assertMcpServerActivatable({ orgId, spaceId: target }, packageId);
       const activation = await db.transaction(async (tx) => {
+        // The SOURCE authority, re-asked against the home this transaction
+        // HOLDS — the same discipline `sharePackage` applies, against the same
+        // race and for a heavier stake. `assertPackageMutationAccess` above
+        // judged the home as it stood when this request arrived; a concurrent
+        // `PATCH` committing in between leaves the package homed somewhere this
+        // caller may govern not at all, and the move would then carry it OUT of
+        // a space whose write they never held. `FOR UPDATE` rather than
+        // `FOR SHARE`: this transaction is about to rewrite that column, so two
+        // moves racing must serialize rather than both read the same home.
+        const [locked] = await tx
+          .select({ homeSpaceId: packages.homeSpaceId })
+          .from(packages)
+          .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
+          .limit(1)
+          .for("update");
+        if (!locked) throw notFound(`Package '${packageId}' not found`);
+        if (locked.homeSpaceId !== pkg.homeSpaceId) {
+          // It moved under us. Re-ask the rule rather than re-deriving it, and
+          // refuse plainly: the caller's own next read shows the new home, and
+          // retrying from there is one request.
+          if (!holdsHomeAuthority(locked, accessible, packagePermission(pkg.type, "write"))) {
+            throw forbidden(
+              `Moving '${packageId}' requires '${packagePermission(pkg.type, "write")}' in its home space — the package moved home while this request was in flight.`,
+            );
+          }
+          // No special case for "a concurrent move already put it on `target`":
+          // the UPDATE, the reconciliation and the activation below are each
+          // idempotent, so the loser of that race commits the same state the
+          // winner did rather than a refusal the caller cannot act on.
+        }
         await tx
           .update(packages)
           .set({ homeSpaceId: target })
@@ -2240,7 +2270,8 @@ export function createPackagesRouter() {
     const packageId = getItemId(c);
     const target = c.req.param("target")!;
     const orgId = c.get("orgId");
-    await assertPackageShareAccess(c, packageId);
+    const revokeSpaces = await packageAccessSpaces(c);
+    const revokePkg = await assertPackageShareAccess(c, packageId, revokeSpaces);
 
     let spaceId: string;
     let recipientUserId: string | null = null;
@@ -2268,7 +2299,17 @@ export function createPackagesRouter() {
     // Withdrawing the offer withdraws the placement it backs, in one
     // transaction (plan decision 3) — otherwise the package keeps running in a
     // space that is no longer allowed to see it.
-    const revoked = await revokePackageShare({ packageId, spaceId, orgId });
+    const revoked = await revokePackageShare({
+      packageId,
+      spaceId,
+      orgId,
+      authorizeHome: (homeSpaceId) =>
+        holdsHomeAuthority(
+          { homeSpaceId },
+          revokeSpaces,
+          packagePermission(revokePkg.type, "share"),
+        ),
+    });
     if (!revoked) throw notFound(`Package '${packageId}' is not shared with '${target}'`);
     await recordAuditFromContext(c, {
       action: "package.unshared",
