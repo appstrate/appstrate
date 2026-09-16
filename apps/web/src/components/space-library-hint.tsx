@@ -2,7 +2,9 @@
 
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import type { PackageType } from "@appstrate/core/validation";
 import { usePermissions } from "../hooks/use-permissions";
+import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
 
 /**
  * Where the rest of the space's packages are, said on the screen that does not
@@ -14,14 +16,20 @@ import { usePermissions } from "../hooks/use-permissions";
  * management view (RBAC spec §6.8). Without this line an empty index reads as
  * "nothing was ever placed here", which is the one thing it does not mean.
  *
- * The link is gated on the permission the route itself is gated on
- * (`spaces:read`), so it never sends a reader to a page that answers "no
- * access" — the same rule the org switcher's entry follows.
+ * Gated on the TYPE's own `read` in THIS space, which is the predicate the
+ * library's contents are built from (`readableSpaceIds`,
+ * `services/package-library.ts`) — not on the org-level `spaces:read` the route
+ * merely mounts behind. The two are different questions, and a `runner` is
+ * where they part: it holds `agents:run` and `spaces:read` but no
+ * `agents:read`, so the page answers 200 with an empty list rather than a 403.
+ * Gating on reachability alone therefore sent the one preset that can act on
+ * NOTHING in that library — no activation, no deactivation, no configuration —
+ * to a page that is empty for it by design.
  */
-export function SpaceLibraryHint() {
+export function SpaceLibraryHint({ type }: { type: PackageType }) {
   const { t } = useTranslation("common");
   const { can } = usePermissions();
-  if (!can("spaces:read")) return null;
+  if (!can(`${PACKAGE_PERMISSIONS[type].resource}:read`)) return null;
   return (
     <Trans
       t={t}

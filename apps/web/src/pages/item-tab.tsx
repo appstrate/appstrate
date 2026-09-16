@@ -65,7 +65,7 @@ export function ItemTab({
         isLoading={isLoading}
         emoji={presentation.emoji}
         emptyMessage={t("packages.emptyItems", { type: typeLabel })}
-        emptyHint={<SpaceLibraryHint />}
+        emptyHint={<SpaceLibraryHint type={type} />}
         emptyIcon={presentation.emptyIcon}
         extraActions={
           <>

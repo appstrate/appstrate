@@ -123,7 +123,7 @@ export function PackageList() {
         isLoading={isLoading}
         error={error}
         emptyMessage={t("list.empty")}
-        emptyHint={<SpaceLibraryHint />}
+        emptyHint={<SpaceLibraryHint type="agent" />}
         emptyIcon={Layers}
         extraActions={
           can("agents:write") ? (

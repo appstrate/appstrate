@@ -123,7 +123,11 @@ export function IntegrationsPage() {
       ) : error ? (
         <ErrorState message={String(error)} />
       ) : filtered.length === 0 ? (
-        <EmptyState icon={Boxes} message={t("integrations.empty")} hint={<SpaceLibraryHint />} />
+        <EmptyState
+          icon={Boxes}
+          message={t("integrations.empty")}
+          hint={<SpaceLibraryHint type="integration" />}
+        />
       ) : (
         <div
           className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
