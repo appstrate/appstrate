@@ -77,7 +77,7 @@ const canonicalRunsPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted means the latest published version, and returns `404 no_published_version` when nothing is published. `draft` requires WRITE authority on the package — the type's `write` permission in the package's home space, organization owner or admin when it has none — and answers `403 draft_not_writable` otherwise: a working copy runs for the people who author it, everybody else runs what they published. The run object's `version_ref` states which definition executed. Ignored for system agents.",
+            "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted means the latest published version, and returns `404 no_published_version` when nothing is published. `draft` requires WRITE authority on the package — the type's `write` permission in the package's home space — and answers `403 draft_not_writable` otherwise: a working copy runs for the people who author it, everybody else runs what they published. The run object's `version_ref` states which definition executed. Ignored for system agents.",
         },
       ],
       requestBody: {

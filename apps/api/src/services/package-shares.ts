@@ -98,6 +98,7 @@ function sharerView(row: {
 export async function sharePackage(params: {
   packageId: string;
   spaceId: string;
+  orgId: string;
   sharedBy: string;
   /**
    * "Does the caller still hold `<type>:share` in THIS home?" — the route's own
@@ -106,12 +107,32 @@ export async function sharePackage(params: {
    */
   authorizeHome: (homeSpaceId: string | null) => boolean;
 }): Promise<{ created: boolean }> {
-  const { packageId, spaceId, sharedBy, authorizeHome } = params;
+  const { packageId, spaceId, orgId, sharedBy, authorizeHome } = params;
+  // The org boundary is asserted HERE, in the service, the same place {@link
+  // revokePackageShare} asserts it and for the same reason: neither
+  // `package_shares` nor the pair `(package_id, space_id)` carries an
+  // `org_id`, so nothing below would stop a row naming another tenant's space.
+  // `authorizeHome` refuses a foreign home already — it resolves against the
+  // caller's own spaces — but that leaves the tenant check inside a callback
+  // the service cannot see, which is the asymmetry that made one of two
+  // sibling functions look accidental.
+  //
+  // It takes two statements where the revoke takes one clause, and the reason
+  // is SQL rather than taste: a DELETE has a WHERE to hang `inArray(…, inOrg)`
+  // on, an INSERT … VALUES has none. So the two ends are read explicitly
+  // instead — the package below, under the lock it needs anyway, and the
+  // target space here.
   return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
+      .limit(1);
+    if (!target) throw notFound(`Space '${spaceId}' not found`);
     const [pkg] = await tx
       .select({ homeSpaceId: packages.homeSpaceId })
       .from(packages)
-      .where(eq(packages.id, packageId))
+      .where(and(eq(packages.id, packageId), eq(packages.orgId, orgId)))
       .limit(1)
       .for("share");
     if (!pkg) throw notFound(`Package '${packageId}' not found in this organization`);

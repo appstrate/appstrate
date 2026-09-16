@@ -178,7 +178,7 @@ Restore a production dump into a throwaway `postgres:16-alpine` and run every
 step below against it. Record the counts; production volume is UNMEASURED for
 both scripts until this is done.
 
-Synthetic rehearsal (2026-09-11): `personal-spaces-backfill.test.ts` executes both files unchanged on PGlite and PostgreSQL 16. The home fixture covers one installation, multiple installations, no installation, an operator move and replay; the personal-space fixture covers live membership, an orphan and replay. These tests validate behavior, not production volume or lock duration.
+Synthetic rehearsal (2026-09-11): `apps/api/test/integration/db/personal-spaces-backfill.test.ts` executes all three files unchanged on PGlite and PostgreSQL 16. The home fixture covers one installation, multiple installations, no installation, an operator move and replay; the share fixture covers an installation outside its home, one inside it, a system package, a cross-tenant stray row, the ordering guard that makes `0016` abort when `0014` has not run, and replay; the personal-space fixture covers live membership, an orphan and replay. These tests validate behavior, not production volume or lock duration.
 
 ### 2. Pre-flight — which packages `0014` has to guess about
 

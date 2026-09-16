@@ -2192,8 +2192,20 @@ export function createPackagesRouter() {
     //
     // EVERY target, person or space: both receive the package under the same
     // rule — the latest published version — so both are offered nothing when
-    // there is none. Checked BEFORE the target is resolved, so a refused offer
+    // there is none. Checked BEFORE the target is resolved, so THIS refusal
     // provisions no personal space.
+    //
+    // It is the only one of the three that can promise that, and the limit is
+    // worth stating rather than leaving to be discovered: `sharePackage`
+    // re-asks the authority and `share_target_is_home` against the home it
+    // has LOCKED, which is necessarily after `ensurePersonalSpaceFor` has run
+    // — the transaction needs the space id to lock anything. So a `user`
+    // target that loses the race against a `PATCH …/{scope}/{name}` leaves the
+    // recipient's personal space created and no offer in it. That is inert:
+    // `ensurePersonalSpaceFor` is idempotent and every member is provisioned
+    // one on their first space-scoped request anyway
+    // (`routes/spaces.ts` → `GET /api/spaces`), so the row is one the platform
+    // was going to write regardless, not a trace of the refused act.
     if ((await getLatestVersionId(packageId)) === null) {
       throw conflict(
         "package_has_no_version",
@@ -2233,6 +2245,7 @@ export function createPackagesRouter() {
     const { created } = await sharePackage({
       packageId,
       spaceId,
+      orgId,
       sharedBy: c.get("user").id,
       authorizeHome: (homeSpaceId) =>
         holdsHomeAuthority({ homeSpaceId }, accessible, sharePermission),

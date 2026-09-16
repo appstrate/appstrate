@@ -14,16 +14,39 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedSpacePackage, seedPackage, seedSpace } from "../../helpers/seed.ts";
 
+/**
+ * Every operator script here is `BEGIN … COMMIT`, and one of them is MEANT to
+ * abort: `0016` raises when `0014` has not run. A statement error stops the
+ * batch where it failed, so the trailing `COMMIT` never executes and the
+ * session is left in an aborted transaction — every later statement on it,
+ * `truncateAll()` included, then fails with `25P02` and the failure surfaces
+ * in a different test than the one that caused it. So the rollback is the
+ * harness's job, not each caller's, and it runs on the same session the script
+ * ran on or it rolls back nothing.
+ */
 async function execScript(script: string) {
   const embedded = getPGliteClient();
   if (embedded) {
-    await embedded.exec(script);
+    try {
+      await embedded.exec(script);
+    } catch (err) {
+      // `ROLLBACK` outside a transaction is a warning, not an error, so this
+      // is safe for a script that failed before its own `BEGIN`.
+      await embedded.exec("ROLLBACK;").catch(() => {});
+      throw err;
+    }
     return;
   }
   const connection = await reservePgConnection();
   if (!connection) throw new Error("PostgreSQL test connection unavailable");
   try {
     await connection.sql.unsafe(script).simple();
+  } catch (err) {
+    await connection.sql
+      .unsafe("ROLLBACK;")
+      .simple()
+      .catch(() => {});
+    throw err;
   } finally {
     connection.release();
   }
@@ -200,6 +223,51 @@ describe("personal-space rollout scripts on migrated data", () => {
     // Idempotent: the primary key guards the insert, so a replay is a no-op.
     await backfill("0016-package-shares-backfill.sql");
     expect(await shares()).toEqual(after);
+  });
+
+  // The ordering guard, and it is the one assertion this script cannot make
+  // about itself: run before `0014`, every predicate in the file compares
+  // against a NULL home, so `<>` is NULL, nothing matches, the INSERT writes
+  // nothing and BOTH verification queries print 0 — a green run that did
+  // nothing at all. The `DO $$ … RAISE EXCEPTION` block asserts `0014`'s
+  // postcondition directly instead, on the one fact the `<>` depends on.
+  //
+  // The positive control is the second half: the SAME fixture, with the homes
+  // filled in, writes the share. Without it this test would pass against a
+  // script that always threw.
+  it("refuses to run before 0014, and writes the share once the homes are in", async () => {
+    const team = await seedSpace({ orgId: ctx.orgId });
+    await withUnvalidatedHomeConstraint(async () => {
+      await seedPackage({
+        id: "@backfill/unhomed",
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: null,
+      });
+    });
+    // TWO installations, so `0014` has a home to choose and `0016` has an
+    // installation outside it to place. With one, `0014` homes the package in
+    // that very space and `0016` correctly writes nothing — which would make
+    // the positive control below pass for the wrong reason.
+    await seedSpacePackage(ctx.defaultSpaceId, "@backfill/unhomed", {
+      installedAt: new Date("2020-01-01"),
+    });
+    await seedSpacePackage(team.id, "@backfill/unhomed", {
+      installedAt: new Date("2021-01-01"),
+    });
+
+    await expect(backfill("0016-package-shares-backfill.sql")).rejects.toThrow(
+      /0016 requires 0014 first/,
+    );
+    expect(await db.select().from(packageShares)).toHaveLength(0);
+
+    // Positive control: give it the homes `0014` writes, and the same call now
+    // places the installation that sits outside the chosen home.
+    await backfill("0014-packages-home-space-backfill.sql");
+    await backfill("0016-package-shares-backfill.sql");
+    expect(
+      (await db.select().from(packageShares)).map((row) => `${row.packageId}@${row.spaceId}`),
+    ).toEqual([`@backfill/unhomed@${team.id}`]);
   });
 
   it("provisions exactly one private space per live membership and does not revive an orphan on replay", async () => {

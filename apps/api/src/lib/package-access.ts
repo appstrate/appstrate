@@ -853,12 +853,21 @@ export function holdsHomeAuthority(
  *
  * By default yes — the behaviour of Notion, Drive and Figma, and what a reader
  * can approximate by hand anyway. An organization that sets
- * `org_settings.restrict_package_copy` narrows the two routes that hand over a
- * whole package — `POST …/fork` and `GET …/{version}/download` — to callers who
- * hold `<type>:share` in the SOURCE's home space (owners and admins when it has
- * none). Without that key, personal spaces open "fork it into mine, then share
- * it on" to every reader, i.e. `share` would protect the link and not the
- * content.
+ * `org_settings.restrict_package_copy` narrows the three routes that hand over
+ * a whole package — `POST …/fork`, `GET …/{version}/download` and
+ * `GET /api/agents/{scope}/{name}/bundle` — to callers who hold `<type>:share`
+ * in the SOURCE's home space. Without that key, personal spaces open "fork it
+ * into mine, then share it on" to every reader, i.e. `share` would protect the
+ * link and not the content.
+ *
+ * There is no owner-or-admin fallback for a package with no home, because
+ * there is no such package to fall back for: `packages_org_package_has_home`
+ * (drizzle `0067`) makes a home mandatory for every organization package, and
+ * the two rows it exempts are refused above — a SYSTEM package by the early
+ * return, an `ephemeral` shadow by every route that could reach here. An owner
+ * or admin governs a package by reaching its home space like anyone else
+ * (RBAC spec §13.7); restating that as a second, org-level authority is the
+ * rule §6.9 replaced.
  *
  * SKILLS are exempt in both settings: the CLI's skills sync downloads them into
  * a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`), and a

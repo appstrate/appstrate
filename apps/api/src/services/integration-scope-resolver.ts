@@ -96,6 +96,21 @@ export async function computeRequiredScopes(
   // space has lost — never runs. Counting it would raise the consent floor for
   // an agent nobody can execute, and an IdP-side shrink below it would flag a
   // healthy connection as under-scoped.
+  //
+  // The set moves in BOTH directions, and the second is the one to notice: the
+  // scan starts from `packages` rather than from `space_packages`, so a SYSTEM
+  // agent the deployment switches on with no row at all is now counted where
+  // before only row-holders were. That is the same correction, not a separate
+  // one — such an agent runs here, so the scopes it needs are scopes some run
+  // will ask for, and leaving them out under-scoped the connection for the one
+  // cohort nobody had to activate. A deployment shipping system agents that
+  // declare this integration will see the floor RISE on the next refresh
+  // check; that floor is what those agents already require to run.
+  //
+  // `orgOrSystemFilter` + `notEphemeralFilter` come with the change of base
+  // table: reading `packages` directly puts every catalogue row in reach,
+  // including another organization's and an inline run's shadow, neither of
+  // which a join from `space_packages` could ever have returned.
   const { orgId, spaceId } = input.scope;
   const active = await db
     .select({ draftManifest: packages.draftManifest })
