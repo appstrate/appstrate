@@ -171,7 +171,7 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   expect(alreadyOn.status(), await alreadyOn.text()).toBe(200);
 
   // ── Moving the home activates the destination and leaves a share behind ──
-  const moved = await apiClient.patch(`/packages/${scope}/${name}`, {
+  const moved = await apiClient.put(`/packages/${scope}/${name}/home`, {
     home_space_id: target.id,
   });
   expect(moved.status(), await moved.text()).toBe(200);

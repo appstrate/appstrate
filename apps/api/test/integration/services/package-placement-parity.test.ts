@@ -93,8 +93,17 @@ async function sqlSaysPlaced(spaceId: string, packageId: string): Promise<boolea
  * of the platform refuses to read back.
  */
 async function updateFilterSaysPlaced(spaceId: string, packageId: string): Promise<boolean> {
-  const rows = await db.execute(sql`select ${placedRowFilter(db, spaceId, packageId)} as placed`);
-  return (rows as unknown as { rows: { placed: boolean }[] }).rows[0]!.placed;
+  // Read through the same drizzle SELECT the other forms use rather than
+  // `db.execute`: the raw executor hands back a bare array under postgres.js
+  // and a `{ rows }` envelope under PGlite, so a hand-unwrapped result passes
+  // on a tier-0 laptop and throws on the tier-3 runner — which is exactly how
+  // this arrived: green locally, eight red cells in CI.
+  const [hit] = await db
+    .select({ placed: sql<boolean>`${placedRowFilter(db, spaceId, packageId)}` })
+    .from(packages)
+    .where(eq(packages.id, packageId))
+    .limit(1);
+  return hit!.placed;
 }
 
 async function doorSaysPlaced(spaceId: string, packageId: string): Promise<boolean> {
