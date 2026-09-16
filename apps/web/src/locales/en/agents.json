@@ -505,7 +505,6 @@
   "editor.description.skills": "Declare the reusable methods and knowledge this agent depends on.",
   "editor.description.integrations": "Choose the integrations the agent depends on and the tools it may call in each. Connected accounts are set in Configuration.",
   "editor.discardChanges": "Discard changes",
-  "editor.noUnsavedChanges": "No unsaved changes",
   "editor.errorRequired": "Identifier is required.",
   "editor.errorPrompt": "Prompt is required.",
   "editor.skillsEmpty": "No skills in packages. Add some from the Packages page.",

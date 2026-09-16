@@ -505,7 +505,6 @@
   "editor.description.skills": "Déclarez les méthodes et connaissances réutilisables dont l’agent dépend.",
   "editor.description.integrations": "Choisissez les intégrations dont l’agent dépend et les outils qu’il peut appeler dans chacune. Les comptes connectés se règlent dans Configuration.",
   "editor.discardChanges": "Annuler les modifications",
-  "editor.noUnsavedChanges": "Aucune modification non enregistrée",
   "editor.errorRequired": "Le champ identifiant est requis.",
   "editor.errorPrompt": "Le prompt est requis.",
   "editor.skillsEmpty": "Aucun skill dans les packages. Ajoutez-en depuis la page Packages.",

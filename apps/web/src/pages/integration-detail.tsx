@@ -1679,7 +1679,7 @@ export function IntegrationDetailPage() {
         {/* Configuration is admin-only; package files stay readable for every member. */}
         <TabsContent
           value="configuration"
-          className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+          className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
         >
           <IntegrationSettings
             packageId={packageId}

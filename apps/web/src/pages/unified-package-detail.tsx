@@ -556,7 +556,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
             </TabsContent>
             <TabsContent
               value="settings"
-              className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+              className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
             >
               <AgentSettingsView
                 versions={versionsProps}
@@ -609,7 +609,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           {(type === "skill" || type === "mcp-server") && (
             <TabsContent
               value="settings"
-              className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+              className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
             >
               <PackageSettingsView
                 versions={versionsProps}
