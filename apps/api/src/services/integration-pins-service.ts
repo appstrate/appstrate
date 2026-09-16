@@ -68,7 +68,7 @@ import {
 } from "./integration-connection-resolver.ts";
 import type { ConnectionResolutionResult } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
-import { placementShareJoin } from "./package-placement.ts";
+import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 
 // Canonical wire shapes live in @appstrate/shared-types so the frontend
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
@@ -81,33 +81,25 @@ type PinSummary = IntegrationPin;
  * Toggle the per-(space, integration) lock.
  *
  * An existing `space_packages` row is updated in place — but only where the
- * package is PLACED here ({@link placedRowFilter}), which is the same conjunct
- * the READER of this flag applies (`isUserConnectionCreationBlocked`,
- * `services/integration-connection-resolver.ts`). Written on the bare
- * `(space_id, package_id)` pair, this answered `200 blocked: true` on an
- * ORPHAN row while the gate kept letting every member create a personal
- * connection — a padlock drawn over an open door. An orphan therefore matches
- * nothing here and falls through to the branch below, which refuses it.
+ * package is PLACED here ({@link placedRowFilter}), the same conjunct the
+ * READER of this flag applies (`isUserConnectionCreationBlocked`). On the bare
+ * `(space_id, package_id)` pair this would answer `200 blocked: true` on an
+ * ORPHAN row while the gate went on letting every member create a personal
+ * connection — a padlock drawn over an open door.
  *
- * With NO row the toggle
- * still has to persist somewhere, and the row it needs is a PLACEMENT row —
- * which makes creating it an activation, not a side effect. It therefore goes
- * through the one door that writes them (`activatePackageWithin`), inside this
- * transaction, instead of spelling the INSERT a second time here.
+ * With NO row the toggle still has to persist, and the row it needs is a
+ * PLACEMENT row — which makes creating it an activation, not a side effect. It
+ * goes through the one door that writes them (`activatePackageWithin`), inside
+ * this transaction, rather than spelling the INSERT a second time.
  *
- * The door reports whether the package was ALREADY active; only that case may
- * proceed. An integration the deployment offers (`SYSTEM_INTEGRATIONS`) is
- * active with no row at all, so materializing one records the block flag and
- * changes no verdict — which is why this act writes no `package.activated`
- * audit and needs no activation grant. Anything else would be switched ON by
- * the row, and recording a connection lock is not a decision to switch an
- * integration on: the throw rolls the whole transaction back, row included, and
- * the caller gets the same 404 it always got.
- *
- * That door is also what answers the orphan the UPDATE just refused: with no
- * home and no share here, `activatePackageWithin` finds `placedBefore` false
- * and — this call passes no `shareBy` — throws its own 404 before touching the
- * row. So an orphan is refused, never repaired, and never silently honoured.
+ * That door reports whether the package was ALREADY active, and only that case
+ * may proceed: an integration `SYSTEM_INTEGRATIONS` offers is active with no
+ * row, so materializing one records the flag and changes no verdict — hence no
+ * `package.activated` audit and no activation grant. Anything else would be
+ * switched ON by the row, and recording a connection lock is not a decision to
+ * switch an integration on, so the throw rolls the transaction back. The same
+ * door refuses the orphan the UPDATE just skipped: no home, no share, no
+ * `shareBy`, its own 404 before the row is touched.
  */
 export async function setBlockUserConnections(
   scope: SpaceScope,
@@ -205,10 +197,7 @@ export async function listAgentsConsumingIntegration(
   const rows = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
-    .leftJoin(
-      spacePackages,
-      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, scope.spaceId)),
-    )
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(

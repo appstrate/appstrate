@@ -81,17 +81,14 @@ export function requireAgent() {
  * press cannot disagree about what runs.
  *
  * `404 agent_not_active_in_space`, and the detail names both the space and the
- * one call that fixes it: the caller can already see this agent — the list page
- * is showing it to them — so an opaque "not found" would send the CLI and the
- * SPA hunting for a typo instead of offering the one click that repairs the
- * state. An agent this caller CANNOT see never reaches here: {@link
- * requireAgent} has already answered `agent_not_found` for it, so nothing about
- * a private catalogue leaks out of this distinction.
+ * one call that fixes it: the caller can already SEE this agent, so an opaque
+ * "not found" would send the CLI and the SPA hunting for a typo. An agent they
+ * cannot see never reaches here — {@link requireAgent} answered
+ * `agent_not_found` first — so the distinction leaks nothing.
  *
- * Readiness (`GET …/connection-readiness`) deliberately does NOT mount this. It
- * is a read that REPORTS what blocks a run, so inactivity belongs in its
- * payload as a blocking error next to `integration_not_active` — a 404 there
- * would blank the very panel that explains the refusal.
+ * Readiness (`GET …/connection-readiness`) deliberately does NOT mount this: it
+ * REPORTS what blocks a run, so inactivity belongs in its payload as a blocking
+ * error, and a 404 would blank the panel that explains the refusal.
  */
 export function requireActiveAgent() {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {

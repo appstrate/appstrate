@@ -34,7 +34,7 @@ import {
 import { resolveSpaceRole } from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
-import { placementShareJoin } from "../services/package-placement.ts";
+import { placementRowJoin, placementShareJoin } from "../services/package-placement.ts";
 
 const PACKAGE_RESOURCES = {
   agent: "agents",
@@ -42,6 +42,22 @@ const PACKAGE_RESOURCES = {
   integration: "integrations",
   "mcp-server": "mcp-servers",
 } as const;
+
+/**
+ * Permissions BEYOND `<resource>:read` that also let a caller SEE a package of
+ * this type (RBAC spec §3.4) — a table, because it is a fact of the permission
+ * catalogue and not a branch of behaviour.
+ *
+ * `agents:run` is the one entry: it opens the list, the detail and the resolved
+ * model the launch form reads, in a summary projection. So a `runner` reaches
+ * an agent, and every predicate that asks "may this caller know this package
+ * exists" — {@link requireAgentRead} as a route guard,
+ * {@link assertPackageIsReachable} as the 403-vs-404 decision — reads this same
+ * table. A type absent from it has exactly one read permission.
+ */
+const PACKAGE_EXTRA_READ_PERMISSIONS: Partial<Record<PackageType, readonly Permission[]>> = {
+  agent: ["agents:run"],
+};
 
 export function packagePermission(
   type: PackageType,
@@ -56,21 +72,11 @@ export const PACKAGE_WRITE_PERMISSIONS = Object.values(PACKAGE_RESOURCES).map(
 
 /**
  * Which permissions let a caller SEE a package of this type — the one statement
- * of that rule (RBAC spec §3.4).
- *
- * For an agent it is a disjunction: `agents:run` opens the list, the detail and
- * the resolved model the launch form reads, in a summary projection. So a
- * `runner` reaches an agent, and every predicate that asks "may this caller
- * know this package exists" — {@link requireAgentRead} as a route guard,
- * {@link assertPackageIsReachable} as the 403-vs-404 decision — has to ask the
- * same question. When they disagreed, a `runner` attempting a write got a 404
- * on an agent it was, at that same moment, allowed to read.
- *
- * Every other type has one read permission and this collapses to it.
+ * of that rule (RBAC spec §3.4), read off
+ * {@link PACKAGE_EXTRA_READ_PERMISSIONS} so the disjunction is data.
  */
 function packageReadPermissions(type: PackageType): readonly Permission[] {
-  const read = packagePermission(type, "read");
-  return type === "agent" ? [read, "agents:run"] : [read];
+  return [packagePermission(type, "read"), ...(PACKAGE_EXTRA_READ_PERMISSIONS[type] ?? [])];
 }
 
 /**
@@ -116,27 +122,22 @@ export function spacePackagePermission(
  * import CHANGES nothing — i.e. unless the package is already ACTIVE here
  * ({@link activeHereSql}, `services/package-activation.ts`).
  *
- * ACTIVE and not merely PLACED, because the act this gates is an activation:
- * `importBundle` ends by calling `activatePackage` on the root, which writes
- * `enabled = true` through the same door `POST /api/spaces/{id}/packages`
- * uses. Waiving the grant on a placed row that says `false` let an import
- * switch a package the space had deliberately switched OFF back on — the
- * sticky opt-out is a decision with its own authority, and the import path is
- * not entitled to overrule it any more than the HTTP door is. Reachable
- * wherever a custom space role grants `<type>:write` without the activation
- * string (both presets that write also activate, so no preset-only
- * organization is affected).
+ * ACTIVE and not merely PLACED, because the act this gates IS an activation:
+ * `importBundle` ends by calling `activatePackage` on the root. Waiving the
+ * grant on a placed row that says `false` would let an import switch a package
+ * the space had deliberately switched OFF back on, and the sticky opt-out is a
+ * decision the import path is no more entitled to overrule than the HTTP door
+ * is. Reachable wherever a custom space role grants `<type>:write` without the
+ * activation string — both presets that write also activate.
  *
  * A bare `space_packages` row is not enough either, for the reason the
- * activation rule conjoins placement: an ORPHAN row — one with neither a home
- * nor a share behind it, the residue `scripts/migration/0016` repairs — reads
- * as active nowhere, so leaning on it would let the leftover of a revoked
- * offer stand in for the offer itself.
+ * activation rule conjoins placement: an ORPHAN row reads as active nowhere,
+ * so leaning on it would let the leftover of a revoked offer stand in for the
+ * offer itself.
  *
- * The deployment's own default is an activation nobody performed, so it
- * waives the grant on its own: a system package, and an integration named by
- * `SYSTEM_INTEGRATIONS`, are already on here with no row at all and the
- * import leaves them exactly as it found them.
+ * The deployment's own default is an activation nobody performed and waives the
+ * grant on its own: a system package, and an integration `SYSTEM_INTEGRATIONS`
+ * names, are already on with no row at all.
  */
 export async function assertExistingPackageActivationAccess(
   c: Context<AppEnv>,
@@ -151,10 +152,7 @@ export async function assertExistingPackageActivationAccess(
     // than decoration: without the first the row half is always NULL and every
     // package falls back to the deployment default, without the second every
     // offered package reads as unplaced and its row stops counting.
-    .leftJoin(
-      spacePackages,
-      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, target)),
-    )
+    .leftJoin(spacePackages, placementRowJoin(packages.id, target))
     .leftJoin(packageShares, placementShareJoin(packages.id, target))
     .where(
       and(
@@ -187,36 +185,51 @@ export interface PackageAccessSpace {
 }
 
 /**
+ * A package read that crosses into ANOTHER organization, with the standing the
+ * caller holds THERE. Both halves travel together because neither is derivable
+ * from the request: `c.get("orgRole")` is the role in the org the request is
+ * scoped to, and a foreign org has no persona to read one off.
+ */
+export interface ForeignOrgStanding {
+  orgId: string;
+  orgRole: OrgRole;
+}
+
+/**
  * Resolve once for catalog listings and cross-space package operations. The org
  * role and the memberships are the CALLER's standing, which a preview replaces
  * — otherwise the catalog answers with the previewing admin's reach.
+ *
+ * NO argument means the org the request is scoped to. Another organization is
+ * reachable only by naming the caller's role in it ({@link ForeignOrgStanding}),
+ * and the type is what enforces that: `callerOrgRole` falls back to
+ * `c.get("orgRole")` when the org has no persona, so a foreign org resolved
+ * without a role would grant the caller their CURRENT org's standing over
+ * somebody else's spaces — an owner here reading a private space there. That
+ * failure is silent and it fails OPEN, which is why the role is not an optional
+ * parameter with a default.
  */
-export async function packageAccessSpaces(
-  c: Context<AppEnv>,
-  orgId = c.get("orgId"),
-  orgRole = callerOrgRole(c, orgId),
-) {
-  // MEMOIZED per request, keyed on the organization asked about. Every
-  // authority and reachability decision needs this set, so a single route
-  // resolved it up to four times over; the alternative that grew instead was
-  // an optional `resolvedSpaces` parameter threaded through ten signatures,
-  // where forgetting to pass it cost a query and passing a STALE one would
-  // have cost a wrong answer. The cache lives on the Hono context, so it dies
-  // with the request and cannot outlive the standing it describes.
+export async function packageAccessSpaces(c: Context<AppEnv>, foreign?: ForeignOrgStanding) {
+  const orgId = foreign?.orgId ?? c.get("orgId");
+  const orgRole = foreign?.orgRole ?? callerOrgRole(c, orgId);
+  // MEMOIZED per request. Every authority and reachability decision needs this
+  // set, so a single route resolved it up to four times over; an optional
+  // `resolvedSpaces` parameter threaded through the signatures instead would
+  // cost a query when forgotten and a wrong answer when stale. The cache lives
+  // on the Hono context, so it dies with the request and cannot outlive the
+  // standing it describes.
   //
-  // Keyed on `orgId` because the cross-organization fork reader resolves the
-  // SOURCE org's spaces under the caller's membership there — two different
-  // answers for one request, and a single-slot cache would hand one of them to
-  // the other. `orgRole` is not part of the key: it is derived from `orgId`
-  // everywhere but the fork path, which passes the membership role it just
-  // read for that same org.
+  // Keyed on the org AND the role, not the org alone: one request can ask about
+  // two organizations (the cross-organization fork), and a key that dropped the
+  // role would let whichever call ran first decide for the other.
   const cache =
     c.get("packageAccessSpacesCache") ?? new Map<string, Promise<PackageAccessSpace[]>>();
   if (!c.get("packageAccessSpacesCache")) c.set("packageAccessSpacesCache", cache);
-  const cached = cache.get(orgId);
+  const key = `${orgId}:${orgRole}`;
+  const cached = cache.get(key);
   if (cached) return cached;
   const pending = resolvePackageAccessSpaces(c, orgId, orgRole);
-  cache.set(orgId, pending);
+  cache.set(key, pending);
   return pending;
 }
 
@@ -273,40 +286,21 @@ async function resolvePackageAccessSpaces(
 }
 
 /**
- * Does a package's PLACEMENT grant read from these spaces?
+ * Does a package's PLACEMENT grant read from these spaces? — the IN-MEMORY form
+ * of the rule `placementReadFilter` states in SQL
+ * (`services/package-placement.ts`, which carries the reasoning; RBAC spec
+ * §6.9, §6.10). Homed there, or shared there. A `space_packages` row is not a
+ * third placement.
  *
- * One rule, one place (RBAC spec §6.9, §6.10): a package is readable where it
- * is HOMED and where it is SHARED. Exactly TWO placements. The home is a grant
- * of its own: a draft nobody has offered yet is readable where it lives, and an
- * author does not lose sight of their own package because a space switched off
- * it. Without it, write authority would exceed read access — a builder able to
- * `PUT` a package they cannot `GET`. The SHARE half is the audience rule, and
- * it has to grant read BEFORE anything is switched on: an offer the recipient
- * has not taken up still shows them its name, its description and the switch
- * that would activate it, which is only possible because the offer alone makes
- * the package readable.
+ * Its readers differ only in the set they compare against — the org-wide
+ * catalog check below, the current-space gate ({@link isPackageReadableInSpace}),
+ * the library listing. Holding `<type>:read` in one of those spaces is the
+ * other half of the rule and stays with each reader.
  *
- * A PLACEMENT ROW is deliberately not a third one. It is the only candidate
- * that would answer "why does this space see this package" without consulting
- * `<type>:share`: a builder of B who reads A's package anywhere would activate
- * it in B and hand B a placement A granted to nobody. Activating is the act
- * of TAKING an offer — `activatePackage` requires `home ∨ shared` before it
- * writes anything — so a placement row is a placement's consequence and never
- * its source.
- *
- * The readers of this rule differ only in the set they compare against: the
- * org-wide catalog check below, the current-space gate of the package read
- * routes ({@link isPackageReadableInSpace}), the library listing, and the
- * per-type index listing (`listOrgItems`, which expresses it in SQL). Holding
- * `<type>:read` in one of those spaces is the other half of the rule and stays
- * with each reader.
- *
- * READ only. RUNNING a package asks this AND one more: {@link
- * agentExecutionBlock} wants it placed here *and* ACTIVE here — the placement
- * row's `enabled`, or the deployment's default where there is no row
- * (`services/package-activation.ts`). That is why a share is not an
- * activation: an agent runs with the recipient's credentials, so the recipient
- * switches it on themselves.
+ * READ only. RUNNING asks this AND one more ({@link agentExecutionBlock}:
+ * placed here *and* ACTIVE here), which is why a share is not an activation —
+ * an agent runs with the recipient's credentials, so the recipient switches it
+ * on themselves.
  */
 export function placementGrantsRead(
   pkg: { homeSpaceId: string | null },
@@ -367,29 +361,22 @@ export type AgentExecutionBlock = "not_placed" | "not_active";
  * Stated ONCE because three callers ask it and drift between them is invisible:
  * the HTTP door (`requireActiveAgent`, `middleware/guards.ts`, mounted by
  * `POST …/run`, `POST …/schedules` and `GET …/bundle`), the remote-run resolver
- * (`services/registry-run-resolver.ts`, behind `POST /api/runs/remote`, which
- * takes a package id straight from the caller) and the scheduler tick, which
- * fires on its own with no request to refuse.
+ * (`services/registry-run-resolver.ts`, behind `POST /api/runs/remote`) and the
+ * scheduler tick, which fires on its own with no request to refuse. The
+ * activation half ALONE would let an ORPHAN placement execute from a cron in a
+ * space every HTTP door refuses to serve it to — and a cron is the caller
+ * nobody is watching.
  *
- * The activation half ALONE would let an ORPHAN placement — a `space_packages`
- * row with neither a home nor a share behind it, the residue
- * `scripts/migration/0016` repairs — execute from a cron in a space every HTTP
- * door refuses to serve it to. A cron is the one caller nobody is watching,
- * which is exactly why it must not be the permissive one.
+ * A VERDICT rather than a throw: each caller renders the refusal on its own
+ * channel (a 404 with a code at the HTTP door, the resolver's own 404 pair, a
+ * visible failed run with the schedule left ARMED at the tick), and one shared
+ * `ApiError` would tell a schedule to "pick a different space". The RULE is
+ * shared; the sentence is each caller's.
  *
- * A VERDICT rather than a throw: the three callers render the refusal on their
- * own channels — an RFC-9457 404 with a code at the HTTP door, the resolver's
- * own 404 pair, a visible failed run with the schedule left ARMED at the tick
- * — and folding their wording into one shared `ApiError` would tell a schedule
- * to "pick a different space". The RULE is shared; the sentence each caller
- * shows is its own.
- *
- * Both halves are read in parallel: they are independent rows, and the tick
- * pays for this on every fire.
- *
- * Adds no `orgId` predicate of its own: `isPackageActiveHere` carries the org
- * boundary in its own query, and every caller has already loaded the package
- * under it (`getPackage(packageId, orgId)`).
+ * Both halves are read in parallel — independent rows, and the tick pays for
+ * this on every fire. No `orgId` predicate of its own: `isPackageActiveHere`
+ * carries the org boundary, and every caller has already loaded the package
+ * under it.
  */
 export async function agentExecutionBlock(
   scope: SpaceScope,
@@ -404,20 +391,26 @@ export async function agentExecutionBlock(
   return null;
 }
 
-/** Catalog reachability permits copying between accessible spaces, never guessing a private id. */
+/**
+ * Catalog reachability permits copying between accessible spaces, never guessing
+ * a private id.
+ *
+ * `source` names ANOTHER organization, and carries the caller's role in it: a
+ * fork may cross organizations, and the reachability it asks about is
+ * reachability THERE. The role travels with the id rather than being defaulted,
+ * for the reason {@link packageAccessSpaces} gives — resolving a foreign org
+ * under `c.get("orgRole")` hands the caller their current standing over
+ * somebody else's spaces, silently and open.
+ */
 export async function assertCatalogPackageAccess(
   c: Context<AppEnv>,
   packageId: string,
-  sourceOrgId: string = c.get("orgId"),
+  source?: ForeignOrgStanding,
 ) {
+  const sourceOrgId = source?.orgId ?? c.get("orgId");
   const [pkg, accessible, sharedIn] = await Promise.all([
     loadPackageRow(packageId, sourceOrgId),
-    // The SOURCE organization's spaces, not the caller's own: a fork may cross
-    // organizations, and the reachability it asks about is reachability THERE.
-    // `assertForkSourceAccess` primes the memo for that org under the
-    // membership role it just read, so this is a hit and not a second resolve
-    // with the wrong role.
-    packageAccessSpaces(c, sourceOrgId),
+    packageAccessSpaces(c, source),
     loadPackageShares(packageId, sourceOrgId),
   ]);
   assertPackageIsReachable(packageId, pkg, sharedIn, accessible);
@@ -519,9 +512,9 @@ function assertPackageIsReachable(
  * There is deliberately no permission check against the CURRENT space. The home
  * lookup goes through `packageAccessSpaces` → `effectiveInSpace`, so it already
  * carries the view-as persona and the credential ceiling, and it already pins an
- * API key to its own space. A second check against the current space would turn
- * the rule into "home AND wherever I am browsing from", which is what made a
- * builder's own package unwritable from a space where they only read.
+ * API key to its own space. A second check would turn the rule into "home AND
+ * wherever I am browsing from", making a builder's own package unwritable from
+ * a space where they only read.
  *
  * Returns the loaded row so a caller that has to act on it does not read it again.
  *
@@ -542,25 +535,18 @@ export async function assertPackageMutationAccess(
  * carry; nothing else about the two answers differs, which is why they are one
  * function.
  *
- * `write` is {@link assertPackageMutationAccess}'s `write` (plan decision 4),
- * and it is what governs the DRAFT. A draft is the author's working copy: it
- * executes for whoever can WRITE the package, wherever they launch it from, and
- * for nobody else. That is not a new rule, it is the write rule read in a place
- * that must not throw — the run routes, the schedules, the readiness endpoint
- * and the detail page each answer something of their own (a
- * `403 draft_not_writable`, a published fallback, a projection) and none of
- * them wants the assert's 404/403 split. Stating it as a boolean here is what
- * keeps the four of them from each re-deriving "who owns the draft" and
- * drifting apart.
+ * `write` governs the DRAFT — the author's working copy, which executes for
+ * whoever can WRITE the package and for nobody else. Four callers each answer
+ * something of their own (a `403 draft_not_writable`, a published fallback, a
+ * projection) and none wants the assert's 404/403 split, so the rule is stated
+ * as a boolean once here rather than re-derived four times.
  *
- * `share` is {@link assertPackageShareAccess}, for the one caller that has to
- * CHOOSE rather than refuse: a bundle import whose root already lives in
- * another space activates it with the offer when the caller may make one, and
- * reports `root_active: false` when they may not.
+ * `share` is {@link assertPackageShareAccess}'s, for the one caller that has to
+ * CHOOSE rather than refuse: a bundle import whose root lives in another space
+ * activates it with the offer when the caller may make one, and reports
+ * `root_active: false` when they may not.
  *
- * `false`, never a throw, for every refusal either assert would spell out: a
- * package the org cannot see, a system package (nobody writes or shares those),
- * a home the caller does not govern.
+ * `false`, never a throw, for every refusal either assert would spell out.
  */
 async function holdsPackageAuthority(
   c: Context<AppEnv>,
@@ -624,14 +610,12 @@ export async function assertDraftSelectorAllowed(
  * the agent detail page, its readiness badge and the input-settings editor,
  * which must all judge the same bytes or the badge contradicts the form.
  *
- * Reading is not executing (RBAC spec §6.10). An author reads their DRAFT,
- * because that is the copy they are editing. Everybody else reads the latest
- * PUBLISHED version — unless nothing is published, in which case the draft is
- * the only definition that exists and hiding it would 404 a page the package
- * list has just linked to. The refusal belongs to the LAUNCH, which keeps
- * answering `404 no_published_version` for an omitted selector, and the wire
- * carries `definition` so the reader is told which of the two they are looking
- * at rather than inferring it.
+ * Reading is not executing (RBAC spec §6.10). An author reads their DRAFT;
+ * everybody else reads the latest PUBLISHED version — unless nothing is
+ * published, in which case the draft is the only definition there is and hiding
+ * it would 404 a page the list just linked to. The refusal belongs to the
+ * LAUNCH (`404 no_published_version`), and the wire carries `definition` so the
+ * reader is told which of the two they got.
  *
  * An EXPLICIT `?version=draft` is a different act and keeps its own rule:
  * naming the working copy is an author's move, refused with
@@ -660,20 +644,15 @@ export async function defaultDefinitionSelector(
  * copy — `dependency_overrides: { "@acme/skill": "draft" }` on the run route,
  * the remote-run route and both schedule writes.
  *
- * `version=draft` and a dependency override spelled `draft` are ONE act: they
- * both execute an unpublished working copy, and the authority that decides is
- * the authority over THAT package — the overridden skill, not the agent that
- * declares it. Without this, a caller refused the agent's own draft still ran
- * every declared dependency's draft in the same request, which is the same rule
- * unapplied on a second axis.
+ * `version=draft` and a dependency override spelled `draft` are ONE act, and
+ * the authority that decides is the authority over THAT package — the
+ * overridden skill, not the agent that declares it.
  *
- * FORM FIRST, and that is why the effective manifest is a parameter rather than
- * a concern left downstream: a key naming no declared dependency is a
- * malformed request, not an unauthorized one, and judging authority over it
- * answered `403 draft_not_writable` for an act the launch would never have
- * performed — a refusal that names the wrong problem and sends its reader after
- * a grant they do not need. `assertDependencyOverrideKeysDeclared` runs first,
- * here, so no caller can order the two wrong.
+ * FORM FIRST, which is why the effective manifest is a parameter: a key naming
+ * no declared dependency is a MALFORMED request, not an unauthorized one, and
+ * judging authority over it answers `403 draft_not_writable` for an act the
+ * launch would never have performed. `assertDependencyOverrideKeysDeclared`
+ * runs first, here, so no caller can order the two wrong.
  *
  * Non-`draft` values are version specs and stay a pure value concern: they can
  * only name something the author already published.
@@ -769,28 +748,19 @@ async function assertHomeAuthority(
  *
  * `home_space_id` is the home's id **only when the caller reaches that space**,
  * and `null` otherwise. The raw column cannot go on the wire: a package homed in
- * a member's PERSONAL space is legitimately readable by everyone it is
- * placed for, and emitting its home would hand each of them the id of a
- * space §3.6 says does not exist for them. `null` therefore means "not a space
- * you can see", and nothing downstream needs more than that: what a reader
- * actually wants to know is whether they may WRITE, which is the second field.
+ * a member's PERSONAL space is legitimately readable by everyone it is placed
+ * for, and emitting its home would hand each of them the id of a space §3.6
+ * says does not exist for them. `null` means "not a space you can see".
  *
- * `home_writable` is that answer, and it is `assertPackageMutationAccess`'s
- * WHOLE rule, not just its home half: a SYSTEM package is refused there before
- * the home is ever consulted, so it answers `false` here too however much
- * authority the caller holds. Answering `true` for an owner or admin on a
- * system package would render a button that 403s on click.
+ * `home_writable` is `assertPackageMutationAccess`'s WHOLE rule, not just its
+ * home half: a SYSTEM package is refused there before the home is consulted, so
+ * it answers `false` here too, however much authority the caller holds —
+ * otherwise the SPA renders a button that 403s on click. It is computed for the
+ * type's `write`; the SPA gates delete and move on it too, and the server still
+ * checks `<type>:delete` in its own right.
  *
- * It is computed for the type's `write`; the SPA gates delete and move on it
- * too, and the server still checks `<type>:delete` in its own right (they
- * diverge only under a custom role that grants one without the other, where the
- * API refuses and the UI over-offered).
- *
- * `home_shareable` is the same answer for the type's `share` (RBAC spec §6.10)
- * — what the "Share…" action is gated on. It is a field of its own rather than
- * an alias of `home_writable` because a custom role may hold one without the
- * other, and false on a system package for the same reason `home_writable` is:
- * the route refuses it before the home is consulted.
+ * `home_shareable` is the same answer for the type's `share` (RBAC spec §6.10),
+ * a field of its own because a custom role may hold one verb without the other.
  */
 export function homeWireForCaller(
   pkg: { type: PackageType; source: string; homeSpaceId: string | null },
@@ -894,30 +864,22 @@ export function holdsHomeAuthority(
  * into mine, then share it on" to every reader, i.e. `share` would protect the
  * link and not the content.
  *
- * There is no owner-or-admin fallback for a package with no home, because
- * there is no such package to fall back for: `packages_org_package_has_home`
- * (drizzle `0067`) makes a home mandatory for every organization package, and
- * the two rows it exempts are refused above — a SYSTEM package by the early
- * return, an `ephemeral` shadow by every route that could reach here. An owner
- * or admin governs a package by reaching its home space like anyone else
- * (RBAC spec §13.7); restating that as a second, org-level authority is the
- * rule §6.9 replaced.
+ * There is no owner-or-admin fallback for a homeless package, because there is
+ * no such package: `packages_org_package_has_home` (drizzle `0067`) makes a
+ * home mandatory, and the two rows it exempts are refused above. An owner or
+ * admin governs a package by reaching its home space like anyone else (RBAC
+ * spec §13.7).
  *
  * SKILLS are exempt in both settings: the CLI's skills sync downloads them into
- * a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`), and a
- * skill's audience is already the space it is placed in. RUNS are unaffected
- * — a run's bundle is assembled server-side and never travels as a copy.
- *
- * SYSTEM packages are exempt too, and they are the reason the exemption is
- * stated here rather than left to the home rule: the platform ships them
- * readable in every space of every organization, so there is no "space that
- * owns them" for a setting about copying OUT of one to protect. Exempting them
- * here is what keeps the key from making a refusal about somebody else's
- * content, which this setting never meant to make.
+ * a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`). RUNS are
+ * unaffected — a run's bundle is assembled server-side and never travels as a
+ * copy. SYSTEM packages are exempt too, and that is stated HERE rather than
+ * left to the home rule: they are readable in every space of every
+ * organization, so there is no owning space for this setting to protect, and
+ * refusing one would make the key a refusal about somebody else's content.
  *
  * The setting is read UNCACHED for the same reason the SSO gate is: a security
- * gate must not answer from a TTL. `c.get("orgSettings")` is the row the
- * session pipeline already loaded; an API key never passes through it.
+ * gate must not answer from a TTL.
  */
 export async function assertPackageCopyAllowed(
   c: Context<AppEnv>,
@@ -959,8 +921,7 @@ export async function assertForkSourceAccess(c: Context<AppEnv>, packageId: stri
   if (!pkg) throw notFound(`Package '${packageId}' not found`);
   if (!pkg.orgId || pkg.orgId === c.get("orgId")) {
     const orgId = c.get("orgId");
-    const orgRole = callerOrgRole(c, orgId);
-    const accessible = await packageAccessSpaces(c, orgId, orgRole);
+    const accessible = await packageAccessSpaces(c);
     const source = await assertCatalogPackageAccess(c, packageId);
     await assertPackageCopyAllowed(c, source, { orgId, accessible });
     return source;
@@ -970,8 +931,9 @@ export async function assertForkSourceAccess(c: Context<AppEnv>, packageId: stri
   }
   const membership = await getOrgMember(pkg.orgId, c.get("user").id);
   if (!membership) throw notFound(`Package '${packageId}' not found`);
-  const accessible = await packageAccessSpaces(c, pkg.orgId, membership.role);
-  const source = await assertCatalogPackageAccess(c, packageId, pkg.orgId);
+  const standing = { orgId: pkg.orgId, orgRole: membership.role };
+  const accessible = await packageAccessSpaces(c, standing);
+  const source = await assertCatalogPackageAccess(c, packageId, standing);
   await assertPackageCopyAllowed(c, source, { orgId: pkg.orgId, accessible });
   return source;
 }

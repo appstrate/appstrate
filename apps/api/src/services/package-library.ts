@@ -72,20 +72,18 @@ interface LibraryPackage {
  *     `enabled`), `inactive` (a row saying `false`), `none` (no row at all,
  *     i.e. an offer nobody has taken up yet).
  *
- * So a pending offer is not a section of its own: it is a placement with
- * `state: "none"`, on the same row and behind the same switch as every other
- * space. One act, one control — a separate section for offers would put the
- * same activation behind two different buttons, and would leave "offered" and
- * "switched off" indistinguishable from the matrix.
+ * A pending offer is therefore not a section of its own: it is a placement with
+ * `state: "none"`, behind the same switch as every other space. A separate
+ * section would put one activation behind two buttons.
  *
  * `GET /api/library` (owners and admins) returns every space the caller reads;
- * `GET /api/spaces/{id}/library` narrows the placements to the requested space,
- * which is what makes it a space's own page rather than an organization map.
- * A package with NO placement in that space is still listed there when the
- * caller could PLACE it — a system package, or a package whose home grants
- * them `<type>:share` — because `POST /api/spaces/{id}/packages` would create
- * the offer along with the activation. Never into a PERSONAL destination: an
- * offer into somebody's own space is somebody else's act.
+ * `GET /api/spaces/{id}/library` narrows to the requested space, which is what
+ * makes it a space's own page rather than an organization map. A package with
+ * NO placement there is still listed when the caller could PLACE it — a system
+ * package, or one whose home grants them `<type>:share` — since
+ * `POST /api/spaces/{id}/packages` would create the offer with the activation.
+ * Never into a PERSONAL destination: an offer into somebody's own space is
+ * somebody else's act.
  */
 export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgId = c.get("orgId");

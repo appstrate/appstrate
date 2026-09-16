@@ -22,20 +22,16 @@
  *
  * Access control: the package must exist in the org's catalog AND be runnable
  * in the calling space — {@link agentExecutionBlock}, PLACED here and ACTIVE
- * here, the same verdict `requireActiveAgent()` puts in front of `POST …/run`,
- * `POST …/schedules` and `GET …/bundle`, and the same one the scheduler tick
- * reads. This is the FOURTH execution door and it asks the whole question:
- * half of it — the activation half alone — would run an ORPHAN placement, a
- * `space_packages` row with neither a home nor a share behind it, from a space
- * every HTTP door refuses to serve it to.
+ * here, the same verdict `requireActiveAgent()` puts in front of the three
+ * other execution doors and the scheduler tick reads. This is the FOURTH door
+ * and it asks the whole question: the activation half alone would run an ORPHAN
+ * placement from a space every HTTP door refuses to serve it to.
  *
  * The two verdicts are rendered differently on purpose. `not_active` names the
  * switch and the call that flips it, because the caller can already see this
- * package. `not_placed` answers exactly what a nonexistent id answers, byte
- * for byte: a space with no placement learns nothing here, not even that the
- * package exists — this route takes a package id straight from the caller, so
- * a distinguishable refusal would be an existence oracle over every package
- * the organization owns.
+ * package. `not_placed` answers byte for byte what a nonexistent id answers:
+ * this route takes a package id straight from the caller, so a distinguishable
+ * refusal would be an existence oracle over the whole catalogue.
  *
  * `stage: "draft"` carries one more condition, and it is NOT asked here: write
  * authority over the package (`assertDraftSelectorAllowed`, 403

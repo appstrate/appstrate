@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ACTIVATED there. Two tables, because a package runs with the RECIPIENT's
   credentials: activating one is a consent, and an "offered but not accepted"
   state carried on `space_packages` would have had to be filtered at each of that
-  table's thirteen readers, where one miss executes a package nobody agreed to.
+  table's every reader, where one miss executes a package nobody agreed to.
   The subject is always a SPACE — "share with Bob" is a share with Bob's personal
   space, resolved server-side from his user id and created if he has none, and
   the sharer never learns that id: the listing renders such a target as its

@@ -19,7 +19,7 @@ import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { activeHereSql } from "../package-activation.ts";
-import { placementShareJoin } from "../package-placement.ts";
+import { placementRowJoin, placementShareJoin } from "../package-placement.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(
@@ -286,10 +286,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
       lockVersion: packages.lockVersion,
     })
     .from(packages)
-    .leftJoin(
-      spacePackages,
-      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
-    )
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
     .where(
       and(

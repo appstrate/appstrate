@@ -64,8 +64,8 @@ export type AppEnv = {
     spaceRole?: import("../lib/space-role.ts").SpaceRoleRef;
     /**
      * Per-request memo of `packageAccessSpaces`, keyed by organization — the
-     * caller's reach, which every authority and reachability decision reads and
-     * which a single route used to resolve several times over. Owned by
+     * caller's reach, which every authority and reachability decision reads, so
+     * one route asking it several times resolves it once. Owned by
      * `lib/package-access.ts`; nothing else writes it.
      */
     packageAccessSpacesCache?: Map<

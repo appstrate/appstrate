@@ -17,8 +17,7 @@ import { logger } from "./logger.ts";
 /**
  * The transaction handle passed to a `db.transaction` callback — the type a
  * function REQUIRING a transaction takes. Exported so no service re-derives it
- * from `db.transaction`: several used to, and a spelling copied by hand is a
- * spelling that drifts.
+ * from `db.transaction`: a spelling copied by hand is a spelling that drifts.
  */
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 

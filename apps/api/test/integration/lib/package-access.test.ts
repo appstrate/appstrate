@@ -9,8 +9,9 @@
  * here the function is called with a stub context and an explicit space list,
  * so each assertion pins the rule itself and nothing above it.
  *
- * `resolvedSpaces` is passed on every call, which is what keeps the context a
- * stub: `packageAccessSpaces` is the only reader of the rest of a real one.
+ * The caller's reach is seeded into the per-request memo rather than assembled
+ * from the database, which is what keeps the context a stub:
+ * `packageAccessSpaces` is the only reader of the rest of a real one.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -71,9 +72,7 @@ function caller(
   },
   /**
    * The caller's reach, seeded into the per-request memo `packageAccessSpaces`
-   * reads. It used to travel as an explicit argument through every assert;
-   * seeding the memo is how a REQUEST states it now, so the fixture and the
-   * production path agree on where that set comes from.
+   * reads, under the key that function uses — organization AND role.
    */
   accessible?: AccessibleSpaces,
 ): Context<AppEnv> {
@@ -83,7 +82,11 @@ function caller(
     authMethod: opts.authMethod ?? "session",
     permissions: new Set(opts.permissions),
     ...(accessible
-      ? { packageAccessSpacesCache: new Map([[ctx.orgId, Promise.resolve(accessible)]]) }
+      ? {
+          packageAccessSpacesCache: new Map([
+            [`${ctx.orgId}:${opts.orgRole}`, Promise.resolve(accessible)],
+          ]),
+        }
       : {}),
   };
   return {

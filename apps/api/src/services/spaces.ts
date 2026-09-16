@@ -130,10 +130,9 @@ export async function createDefaultSpace(orgId: string, createdBy?: string) {
  * The spaces of `orgId` this principal may be SHOWN, narrowed in SQL.
  *
  * The personal-space half of §6.3 is a `WHERE` clause rather than a TS filter
- * because there is one personal space per member: reading the whole `spaces`
- * table and dropping the rows afterwards made every listing grow with the
- * organization's headcount. Three disjuncts, and they are exactly the three
- * ways a space can be shown (§3.6):
+ * because there is one personal space per member: filtering afterwards would
+ * make every listing grow with the organization's headcount. Three disjuncts,
+ * exactly the three ways a space can be shown (§3.6):
  *
  *   - a team space (`owner_user_id IS NULL`) — the ordinary case, still filtered
  *     by {@link isSpaceVisibleTo} for `closed` / `private`;
@@ -280,11 +279,10 @@ function spaceHasActiveRuns() {
  * team space.
  *
  * `tx` joins an OPEN transaction instead of opening one, the shape
- * `provisionMember(tx, …)` uses. {@link emptyAndDeletePersonalSpace} passes it
- * so that emptying the space and deleting it are one atomic act; every other
- * caller omits it and gets its own transaction. Passing a non-transactional
- * handle would run the enumerate-enqueue-delete sequence unatomically, which is
- * the whole thing this function is arranged to avoid.
+ * `provisionMember(tx, …)` uses: {@link emptyAndDeletePersonalSpace} passes it
+ * so emptying and deleting are one atomic act. Every other caller omits it and
+ * gets its own — a non-transactional handle would run the
+ * enumerate-enqueue-delete sequence unatomically.
  */
 export async function deleteSpace(
   orgId: string,
@@ -417,8 +415,7 @@ export type SpaceAdminAct = "delete" | "convert-to-team" | "sweep";
  * 404, 409, or proceed — the ONE decision behind `DELETE /api/spaces/{id}`,
  * `convert-to-team` and `sweep-now`.
  *
- * All three take a space id from an owner or admin and all three had to answer
- * the same question, which is why it is one function: a 409 naming a LIVE
+ * One function because all three answer the same question: a 409 naming a LIVE
  * personal space that is not the caller's is an existence ORACLE. It confirms
  * that a given id is somebody's private workspace to a principal for whom, on
  * every other route, that space does not exist (§3.6). The rule, in order:
@@ -440,9 +437,9 @@ export type SpaceAdminAct = "delete" | "convert-to-team" | "sweep";
  *
  * `caller.userId` is the principal's PERSONAL-SPACE identity
  * (`callerPersonalOwnerId`), not simply the authenticated user: `null` for an
- * API key or a role preview, which own no personal space. Reading the key
- * creator's id here made a key answer a named 409 on a space it 404s on
- * everywhere else — the oracle this function exists to close.
+ * API key or a role preview, which own no personal space. The key CREATOR's id
+ * would make a key answer a named 409 on a space it 404s on everywhere else —
+ * the oracle this function exists to close.
  */
 export function assertSpaceAdminAct(
   space: { id: string; ownerUserId: string | null; orphanedAt: Date | null },
@@ -482,15 +479,12 @@ export function assertSpaceAdminAct(
  * transaction, because there is nothing else to commit with it; the membership
  * doors call `ensurePersonalSpace` inside theirs instead.
  *
- * `userId` is the CALLER for the lazy repair `GET /api/spaces` performs (plan
- * decision 4), and ANOTHER MEMBER when a share is resolved to its recipient's
- * space. Both are the same act on the same row, so they are the same function:
- * "share with Bob" means "share with Bob's personal space" (plan decision 2),
- * and a member who has not opened the dashboard since the feature shipped has
- * none — refusing the share would make sharing depend on the recipient having
- * logged in first. The sharer never learns the id: `POST …/shares` renders a
- * personal-space target as its OWNER (RBAC spec §6.10), which is what they
- * asked for anyway.
+ * `userId` is the CALLER for the lazy repair `GET /api/spaces` performs, and
+ * ANOTHER MEMBER when a share is resolved to its recipient's space — the same
+ * act on the same row. A member who has not opened the dashboard since the
+ * feature shipped has no space yet, and refusing the share would make sharing
+ * depend on the recipient having logged in first. The sharer never learns the
+ * id: `POST …/shares` renders such a target as its OWNER (RBAC spec §6.10).
  *
  * Provisioning is for the paths that GRANT something. A path that WITHDRAWS one
  * must not create a space to then find nothing in it — those read
@@ -559,11 +553,11 @@ export async function orphanPersonalSpaces(
  * former owner has left the organization, and only an orphaned space can be
  * converted, so there is never a standing to preserve.
  *
- * Only orphaned. This is the transfer that keeps what a DEPARTING member built
- * — the whole point of the 30-day window — and it is the ONLY way an
- * administrator reaches what is inside a personal space, which is why the route
- * audits it. Accepting a LIVE one would make it an administrative takeover of an
- * active member's private workspace, which §3.6 exists to refuse.
+ * Only orphaned. This is the transfer that keeps what a DEPARTING member built,
+ * and the ONLY way an administrator reaches what is inside a personal space —
+ * which is why the route audits it. Accepting a LIVE one would be an
+ * administrative takeover of an active member's private workspace, which §3.6
+ * exists to refuse.
  *
  * The 404-vs-409 decision belongs to {@link assertSpaceAdminAct}, which the
  * route applies first; the refusals here are the in-transaction backstop, taken
@@ -624,61 +618,43 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  * Empty a personal space of the packages it HOMES and then delete it.
  *
  * A homed package's write authority is this space (§6.9), so it cannot follow
- * the space out and `deleteSpace` refuses while one exists. The rule, and the
- * question it turns on is PLACED ELSEWHERE — is the package placed in another
- * space of the organization, by the ONE predicate that answers that everywhere
- * else ({@link placementReadFilter}, `services/package-placement.ts`): an offer
- * (`package_shares`) or a `space_packages` row an offer backs. The home is the
- * third placement and it is the one leaving, which is why it is excluded rather
- * than consulted:
+ * the space out and `deleteSpace` refuses while one exists. The question is
+ * PLACED ELSEWHERE, by the ONE predicate that answers it everywhere else
+ * ({@link placementReadFilter}, `services/package-placement.ts`). The home is
+ * the placement that is leaving, so it is excluded rather than consulted:
  *
- *   - yes → re-homed to the organization's DEFAULT space, AND the offer that
- *     keeps each of the other spaces placed
- *     ({@link reconcilePlacementsAfterRehome}). Another space can SEE it, so it
- *     is already not private; the default space is where a package that belongs
- *     to no team lives, and it needs no offer of its own because it HOSTS the
- *     package from here on. The offer to the others is not a courtesy: a row
- *     without one is a placement nothing places, and the space would silently
- *     lose the package from every page while its schedules failed each tick.
+ *   - yes → re-homed to the organization's DEFAULT space, AND given the offer
+ *     that keeps each of the other spaces placed
+ *     ({@link reconcilePlacementsAfterRehome}). The default space is where a
+ *     package that belongs to no team lives, and it needs no offer of its own
+ *     because it HOSTS the package from here on. The offer to the others is not
+ *     a courtesy: a row without one is a placement nothing places, and the space
+ *     would lose the package from every page while its schedules failed.
  *
- *     What this HANDS OVER is deliberate and worth naming: the package —
- *     draft included — becomes readable and writable from the default space,
- *     i.e. from the organization, under the default's own `<type>:read` /
- *     `<type>:write`. That is the meaning of "an organization package with no
- *     team", and the alternative was a package nobody could author, which is
- *     the state `packages_org_package_has_home` refuses.
- *   - no → deleted, with its published artifacts enqueued for physical
- *     removal. It was placed in that one space and nowhere else, so it was
- *     private to a person who is gone and nobody else could ever see it.
+ *     What this HANDS OVER is deliberate: the package — draft included —
+ *     becomes readable and writable from the default space, under its own
+ *     `<type>:read` / `<type>:write`. That is what "an organization package with
+ *     no team" means; the alternative is a package nobody can author, the state
+ *     `packages_org_package_has_home` refuses.
+ *   - no → deleted, with its published artifacts enqueued for physical removal.
+ *     It was placed in that one space and nowhere else, so it was private to a
+ *     person who is gone.
  *
- *     An OFFER counts as a placement here, like everywhere else, and that is
- *     the whole of the change from the first shape of this routine — which
- *     asked for a `space_packages` row and therefore destroyed a published
- *     package its author had deliberately offered to a colleague who had not
- *     switched it on yet. "Taken up" is nobody's axis: Google Workspace splits
- *     a departing user's Drive on SHARED versus not (including the unshared
- *     files is a separate, explicit opt-in), Figma keeps a draft its author
- *     shared before removal readable by everyone it was shared with, and n8n
- *     makes transfer-or-delete an operator's choice rather than a policy. An
- *     offer is a decision its author took and a recipient can see; only what
- *     no one was ever shown dies with the account.
+ *     An OFFER counts as a placement here, like everywhere else — asking for a
+ *     `space_packages` row instead would destroy a published package its author
+ *     had offered to a colleague who had not switched it on yet. "Taken up" is
+ *     nobody's axis: Drive splits a departing user's files on SHARED versus not,
+ *     Figma keeps a shared draft readable by everyone it was shared with, and
+ *     n8n makes transfer-or-delete an operator's choice.
  *
  * ONE transaction, and every refusal comes BEFORE the first package mutation.
- * Both properties are load-bearing:
- *
- *   - `deleteSpace` can still refuse (a run went in flight, the space stopped
- *     being sweepable). Emptying the packages in a transaction of its own meant
- *     that refusal left the drafts deleted and the space standing — the loss the
- *     30-day window exists to prevent.
- *   - the listing that selected this space (`listSweepablePersonalSpaces`, or an
- *     administrator's `sweep-now`) is a separate read, so a `convert-to-team`
- *     can commit in between. The row is therefore re-read `FOR UPDATE` and the
- *     two facts re-asserted under the lock: without it the sweep would empty and
- *     delete a TEAM space, which is precisely what converting one was meant to
- *     save.
- *
- * The lock order is the org row then the space row, the same order
- * {@link deleteSpace} uses; re-taking either inside it is free.
+ * Both are load-bearing: `deleteSpace` can still refuse (a run went in flight),
+ * and emptying the packages separately would leave the drafts deleted and the
+ * space standing — the loss the 30-day window exists to prevent. The listing
+ * that selected this space is a separate read, so a `convert-to-team` can commit
+ * in between; the row is re-read `FOR UPDATE` and both facts re-asserted under
+ * the lock, or the sweep would empty the TEAM space that conversion just saved.
+ * Lock order is the org row then the space row, as {@link deleteSpace} takes it.
  *
  * @throws 404 when the space is not in `orgId`; 409 `space_not_personal`,
  *   `personal_space_not_orphaned`, `space_has_active_runs` or
@@ -773,11 +749,9 @@ export async function emptyAndDeletePersonalSpace(
         // MOVE runs, called for the same reason — see
         // `reconcilePlacementsAfterRehome`. It also drops the destination's own
         // offer if one existed: the default space now HOMES the package, and a
-        // package is not offered to the space it lives in. Without this the
-        // sweeper was the one live producer of the orphan rows the rest of the
-        // platform refuses to honour, and the spaces still running the package
-        // would have lost it from every page while their schedules failed each
-        // tick.
+        // package is not offered to the space it lives in. Every space still
+        // running the package keeps it on every page, and its schedules keep
+        // firing.
         //
         // A package placed elsewhere by an OFFER alone reaches this branch too,
         // and for it the reconciliation is a no-op on the insert half: the offer

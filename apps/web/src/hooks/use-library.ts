@@ -135,21 +135,16 @@ function applyActivation(
  * from the payload is `undefined`, and only a package the payload carries can
  * be called inactive. Every reader tests `=== false` / `=== true`.
  *
- * The package's HOME is deliberately NOT derived here. It comes from the
- * package's own detail response (`home_space_id`), which every page showing it
- * already fetches — a cache built for activation state is not the authority on
- * who may write the package, and reading it from two places invites the two to
- * disagree.
+ * The package's HOME is deliberately NOT derived here: it comes from the
+ * package's own detail response (`home_space_id`), because a cache built for
+ * activation state is not the authority on who may write the package.
  *
- * The SAME reasoning now applies to the activation itself wherever a detail
- * response carries it: an agent's own read answers it (`AgentDetail.active`),
- * and the indexes no longer carry the question at all — they list the ACTIVE
- * set, so a listed agent is a runnable one. No agent surface reads this
- * projection any more, which is also what takes the `runner` blind spot above
- * off the launch controls for good. What is left is the families whose detail
- * carries no such field: a skill or an MCP server. Pass `enabled: false` from a
- * page that holds the answer already, so it never asks two sources one
- * question.
+ * The same reasoning applies to activation wherever a detail response carries
+ * it — an agent's own read answers `AgentDetail.active`, and the indexes list
+ * the ACTIVE set, so no agent surface reads this projection and the `runner`
+ * blind spot above never reaches a launch control. What is left is the families
+ * whose detail carries no such field: a skill or an MCP server. Pass
+ * `enabled: false` from a page that already holds the answer.
  */
 export function usePackageActivationState(packageId: string, options: { enabled?: boolean } = {}) {
   const { data: libraryData } = useSpaceLibrary(options);

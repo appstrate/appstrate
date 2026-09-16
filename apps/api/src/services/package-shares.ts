@@ -9,18 +9,14 @@
  * `space-packages.ts`, because a package runs with the RECIPIENT's credentials
  * and switching one on is therefore the recipient's own decision.
  *
- * The table is read as PLACEMENT, and it is read wherever the placement
- * question is asked: an offer is one half of `placementGrantsRead` (homed here
- * ∨ offered here), so every reader of that rule joins it — the EXECUTION
- * predicate included, which conjoins the placement filter so a `space_packages`
- * row with no placement behind it counts for nothing. The exact set of files
- * that name `packageShares`, and why each one does, is pinned by
+ * The table is read as PLACEMENT — an offer is one half of
+ * `placementGrantsRead` — so every reader of that rule joins it, the EXECUTION
+ * predicate included. Which files name `packageShares`, and why, is pinned by
  * `test/integration/routes/package-sharing.test.ts` ("the table has no other
  * reader"); that test is the authority, not a list in this comment.
  *
- * What a row here never is, on its own, is an authorization to RUN: it places
- * and it opens a read. Activation is a second act, on `space_packages`, and it
- * belongs to the recipient.
+ * What a row here never is, on its own, is an authorization to RUN. Activation
+ * is a second act, on `space_packages`, and it belongs to the recipient.
  */
 
 import { and, eq, inArray } from "drizzle-orm";
@@ -76,20 +72,15 @@ function sharerView(row: {
  * notification and the audit event on a repeat.
  *
  * The home is re-read `FOR SHARE` and BOTH refusals decided INSIDE the write's
- * transaction, the same discipline `activatePackageWithin` applies for the same
- * reason (`services/space-packages.ts`): `PUT /api/packages/{scope}/{name}/home`
- * rewrites `home_space_id` in a transaction of its own, so anything decided on
- * a row this call does not hold interleaves — the route reads home A, the move
- * commits home B, and the insert lands against a home nobody judged.
+ * transaction, the discipline `activatePackageWithin` applies for the same
+ * reason: `PUT …/home` rewrites `home_space_id` in a transaction of its own, so
+ * the route can read home A while the insert lands against home B, judged by
+ * nobody.
  *
- * TWO questions travel together, and the second is the load-bearing one.
- * `share_target_is_home` is the cheap invariant: an offer to the space the
- * package lives in. `authorizeHome` is the AUTHORITY — `<type>:share` in the
- * home — and it has to be re-asked here because the route asked it of home A
- * while this insert is judged against home B, where the caller may hold
- * nothing. Re-asking under the lock is what makes the answer true at COMMIT
- * rather than at request time; the `FOR SHARE` freezes the column, so the home
- * this reads is the home the row will have.
+ * Two questions travel together. `share_target_is_home` is the cheap invariant
+ * — no offer to the space the package lives in. `authorizeHome` is the
+ * AUTHORITY (`<type>:share` in the home), re-asked here so the answer is true
+ * at COMMIT rather than at request time.
  *
  * @throws 403 when the caller holds no share authority in the LOCKED home; 409
  *   `share_target_is_home`; 404 if the package went away under the caller's
@@ -108,20 +99,14 @@ export async function sharePackage(params: {
   authorizeHome: (homeSpaceId: string | null) => boolean;
 }): Promise<{ created: boolean }> {
   const { packageId, spaceId, orgId, sharedBy, authorizeHome } = params;
-  // The org boundary is asserted HERE, in the service, the same place {@link
-  // revokePackageShare} asserts it and for the same reason: neither
-  // `package_shares` nor the pair `(package_id, space_id)` carries an
-  // `org_id`, so nothing below would stop a row naming another tenant's space.
-  // `authorizeHome` refuses a foreign home already — it resolves against the
-  // caller's own spaces — but that leaves the tenant check inside a callback
-  // the service cannot see, which is the asymmetry that made one of two
-  // sibling functions look accidental.
-  //
-  // It takes two statements where the revoke takes one clause, and the reason
-  // is SQL rather than taste: a DELETE has a WHERE to hang `inArray(…, inOrg)`
-  // on, an INSERT … VALUES has none. So the two ends are read explicitly
-  // instead — the package below, under the lock it needs anyway, and the
-  // target space here.
+  // The org boundary is asserted HERE, in the service, where {@link
+  // revokePackageShare} asserts it too: neither `package_shares` nor the pair
+  // `(package_id, space_id)` carries an `org_id`, so nothing below would stop a
+  // row naming another tenant's space. `authorizeHome` refuses a foreign home
+  // already, but that leaves the tenant check inside a callback the service
+  // cannot see. It takes two statements where the revoke takes one clause
+  // because a DELETE has a WHERE to hang `inArray(…, inOrg)` on and an
+  // `INSERT … VALUES` has none.
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select({ id: spaces.id })

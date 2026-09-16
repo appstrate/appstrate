@@ -7,20 +7,12 @@
  * Two placements and no third (RBAC spec §6.9, §6.10): a package is placed in
  * the space that HOMES it and in every space it is SHARED with, plus — by
  * construction — in every space of every organization when the deployment
- * ships it. This module states that rule in SQL ({@link placementReadFilter})
- * and owns the ONE act that has to repair it: re-homing a package moves one of
- * the two placements, and every space that held the old one needs the other or
- * it is left with a `space_packages` row nothing places
- * ({@link reconcilePlacementsAfterRehome}).
+ * ships it. This module states that rule in SQL ({@link placementReadFilter}),
+ * owns the two ON clauses the rule is read through, and owns the ONE act that
+ * has to repair it ({@link reconcilePlacementsAfterRehome}).
  *
- * It is a leaf on purpose. `services/package-activation.ts` conjoins the read
- * filter into "active here" (a row only speaks for a space the package is
- * placed in), `services/package-items/crud.ts` and
- * `services/space-packages.ts` filter their listings with it, and both the
- * home MOVE (`routes/packages.ts`) and the personal-space sweeper
- * (`services/spaces.ts`) call the reconciliation. None of those can be
- * imported back from here, which is exactly why the rule lives in a module
- * that imports nothing of theirs.
+ * It is a leaf on purpose: the readers all import from here and nothing here
+ * imports from them, which is what keeps the rule single-voiced.
  */
 
 import { and, eq, isNotNull, ne, or } from "drizzle-orm";
@@ -31,27 +23,23 @@ import type { DbOrTx } from "../lib/db-helpers.ts";
 /**
  * Drizzle filter: is the package PLACED in `spaceId`?
  *
- * Homed here, offered here, or shipped with the deployment — the three, and
- * the reason each one grants read on its own. The HOME is a grant of its own:
- * a draft nobody has offered yet is readable where it lives, and without it
- * write authority would exceed read access — a builder able to `PUT` a package
- * they cannot `GET`. The SHARE half is the audience rule, and it has to grant
- * read BEFORE anything is switched on: an offer the recipient has not taken up
- * still shows them its name, its description and the switch that would
- * activate it.
+ * Homed here, offered here, or shipped with the deployment — three disjuncts,
+ * each a read grant on its own. The HOME grants read so that write authority
+ * never exceeds read access (a builder able to `PUT` a package they cannot
+ * `GET`), and so an author keeps sight of a draft nobody has been offered yet.
+ * The OFFER grants read BEFORE anything is switched on, since the recipient
+ * has to see a package's name and description to decide whether to activate it.
  *
- * A PLACEMENT ROW (`space_packages`) is deliberately not a fourth one. It is
- * the only candidate that would answer "why does this space see this package"
+ * A PLACEMENT ROW (`space_packages`) is deliberately not a fourth. It is the
+ * only candidate that would answer "why does this space see this package"
  * without consulting `<type>:share`: a builder of B who reads A's package
- * anywhere would activate it in B and hand B a placement A granted to nobody.
- * Activating is the act of TAKING an offer, so a row is a placement's
- * consequence and never its source — which is why `activeHereSql` conjoins
- * THIS filter rather than trusting the row alone.
+ * anywhere could switch it on in B and hand B a placement A granted to nobody.
+ * A row is a placement's consequence, never its source — which is why
+ * `activeHereSql` conjoins THIS filter rather than trusting the row alone.
  *
- * Reads its share half off a LEFT JOIN of `packageShares`, which
- * {@link placementShareJoin} owns — pass that as the join's ON clause and the
- * two cannot disagree. The org boundary (`orgOrSystemFilter`) and the shadow
- * filter (`notEphemeralFilter`) are the caller's, as everywhere else.
+ * Reads its share half off a LEFT JOIN of `packageShares`, whose ON clause is
+ * {@link placementShareJoin}. The org boundary (`orgOrSystemFilter`) and the
+ * shadow filter (`notEphemeralFilter`) are the caller's, as everywhere else.
  */
 export function placementReadFilter(spaceId: string) {
   return or(
@@ -65,23 +53,13 @@ export function placementReadFilter(spaceId: string) {
  * The ON clause every reader of {@link placementReadFilter} joins
  * `packageShares` with — `(this package, THIS space)`.
  *
- * It exists because the two halves of that rule used to be written in two
- * different places: the filter here, and the join hand-copied into each of the
- * queries that use it. Getting the join wrong does not fail the way the pair
- * was documented to, and the difference is the whole reason this function
- * exists — both halves were measured:
- *
- *   - OMITTING the join entirely raises a Postgres `missing FROM-clause entry`.
- *     Loud, immediate, impossible to ship.
- *   - JOINING ON THE PACKAGE ALONE — `eq(packageShares.packageId, …)` without
- *     the space — raises NOTHING. The filter then reads
- *     `package_shares.package_id IS NOT NULL` against a row matched in ANY
- *     space, so "offered to THIS space" silently becomes "offered to any space
- *     at all", and every caller of the rule widens at once.
- *
- * So the dangerous half is the quiet one, and it fails OPEN. Taking `spaceId`
- * as a required argument is what removes it: the narrowing cannot be forgotten
- * because there is nowhere to forget it.
+ * The narrowing is the whole function, because getting it wrong fails QUIETLY.
+ * Omitting the join raises a Postgres `missing FROM-clause entry`: loud,
+ * immediate, impossible to ship. Joining on the PACKAGE ALONE raises nothing —
+ * the filter then reads `package_shares.package_id IS NOT NULL` against a row
+ * matched in ANY space, so "offered to THIS space" becomes "offered to any
+ * space at all" and every reader of the rule widens at once. Taking `spaceId`
+ * as a required argument leaves that mistake nowhere to live.
  *
  * `packageIdColumn` is the left-hand side because the readers join from two
  * different tables — `packages.id` on the catalogue reads, and
@@ -92,33 +70,47 @@ export function placementShareJoin(packageIdColumn: AnyPgColumn, spaceId: string
 }
 
 /**
+ * The twin ON clause, for `spacePackages` — `(this package, THIS space)`.
+ *
+ * A placement ROW is deliberately NOT a placement ({@link placementReadFilter}
+ * above), so this join does not answer "is it placed here". It is the other
+ * half of the pair every placement-aware query carries: `activeHereSql`
+ * (`services/package-activation.ts`) reads the space's decision off it, and the
+ * listings project `enabled` and the per-space overrides from the same row.
+ *
+ * It is owned here for the reason {@link placementShareJoin} is, and the two
+ * live side by side so the symmetry is visible: the space narrowing is what
+ * makes either join answer for THIS space, and dropping it fails the same
+ * quiet, open way. Without it `spacePackages.packageId IS NOT NULL` matches a
+ * row another space wrote, so `activeHereSql` reads that space's `enabled` —
+ * and a listing projects its model and proxy overrides.
+ *
+ * `packageIdColumn` for the same reason: the readers join from `packages.id`
+ * and from `spacePackages.packageId` alike.
+ */
+export function placementRowJoin(packageIdColumn: AnyPgColumn, spaceId: string) {
+  return and(eq(spacePackages.packageId, packageIdColumn), eq(spacePackages.spaceId, spaceId));
+}
+
+/**
  * Is the package placed in ANY space of the organization other than
  * `exceptSpaceId`? — the rule above, asked as an existence question.
  *
- * The one caller is the offboarding sweeper (`emptyAndDeletePersonalSpace`,
+ * The caller is the offboarding sweeper (`emptyAndDeletePersonalSpace`,
  * `services/spaces.ts`), deciding whether a package homed in a departing
- * member's personal space is re-homed or deleted, and `exceptSpaceId` is that
- * space: its home placement is the one leaving, so it must not answer for
- * itself, and neither may a row or an offer sitting in it.
+ * member's personal space is re-homed or deleted. `exceptSpaceId` is that
+ * space: its home placement is the one leaving, so neither it nor a row or
+ * offer sitting in it may answer for itself.
  *
- * Both tables, because both place. An offer does it on its own — a space that
- * was SHOWN a package can see it, so the package was never private — and a
- * `space_packages` row does it through the offer behind it, except for the
- * orphans `scripts/migration/0016` repairs, which is why the row half is asked
- * rather than inferred from the offer half.
+ * Both tables are asked, because both place — and the row half is asked rather
+ * than inferred from the offer half because of the orphans
+ * `scripts/migration/0016` repairs. It lives HERE so that "placed elsewhere"
+ * is not a second reading of placement owned by the sweeper.
  *
- * It lives HERE and not in the sweeper for the reason the whole module exists:
- * "present elsewhere" answered anywhere else would be a second reading of
- * placement, and the sweeper would be the one path in the platform that owns
- * one. The LEFT JOIN shape is `isPackageReadableInSpace`'s and
- * `activeHereSql`'s, so it is one round trip.
- *
- * The org boundary is the caller's: the sweeper reads packages of one
- * organization, and a `space_packages` or `package_shares` row pointing at
- * another organization's space cannot be written by any live path
- * ({@link reconcilePlacementsAfterRehome} joins `spaces` for exactly that).
- * Were one to exist, it would answer "placed" and the package would be
- * re-homed rather than deleted — the conservative direction.
+ * The org boundary is the caller's: no live path writes a row pointing at
+ * another organization's space ({@link reconcilePlacementsAfterRehome} joins
+ * `spaces` for exactly that), and an inherited one would answer "placed" and
+ * get the package re-homed rather than deleted — the conservative direction.
  */
 export async function isPlacedElsewhere(
   tx: DbOrTx,
@@ -150,28 +142,22 @@ export async function isPlacedElsewhere(
  * Re-home a package and leave no placement behind — the ONE reconciliation,
  * called by everything that rewrites `packages.home_space_id`.
  *
- * A package is placed in a space by its home or by a share. Moving the home
- * OUT of a space that still holds a `space_packages` row would leave a
- * placement nothing places: invisible on every page of the space that runs it,
- * absent from its own index, and — until the doors learned to ask — still
- * firing from a cron. That is the exact state `scripts/migration/0016` exists
- * to repair on inherited data, and no live code path may create another one.
+ * Moving the home OUT of a space that still holds a `space_packages` row would
+ * leave a placement nothing places: invisible on every page of the space that
+ * runs it, absent from its own index, and still firing from a cron if the doors
+ * did not ask. That is the state `scripts/migration/0016` repairs on inherited
+ * data, and no live code path may create another one.
  *
- * So: every space of the organization holding a row, other than the NEW home,
- * gets the share that now places it, `shared_by` NULL because nobody offered
- * it — the home did, until this call. And the destination's own share is
- * dropped for the mirror-image reason `POST …/shares` answers
- * `share_target_is_home`: a package is not offered to the space it lives in.
+ * So every space of the organization holding a row, other than the NEW home,
+ * gets the share that now places it — `shared_by` NULL, because nobody offered
+ * it; the home did, until this call. The destination's own share is dropped for
+ * the mirror-image reason `POST …/shares` answers `share_target_is_home`: a
+ * package is not offered to the space it lives in. The only space whose answer
+ * is a CHOICE is the home being left (`previousHome` below).
  *
- * The one space whose answer is a CHOICE rather than an invariant is the home
- * being left: see `previousHome` below. Everything else here is forced.
- *
- * Two callers, one shape, and the second is why this is a function rather than
- * a paragraph inside the first: `PUT /api/packages/{scope}/{name}/home` moves a
- * home deliberately, and `emptyAndDeletePersonalSpace`
- * (`services/spaces.ts`) moves one because the author left — a package still
- * running elsewhere is re-homed to the organization's DEFAULT space. The
- * second produced orphans for as long as it did not share this code.
+ * Two callers: `PUT /api/packages/{scope}/{name}/home` moves a home
+ * deliberately, and `emptyAndDeletePersonalSpace` (`services/spaces.ts`) moves
+ * one because the author left, re-homing to the organization's DEFAULT space.
  *
  * Runs INSIDE the caller's transaction, always: the move and the placements it
  * invalidates commit together or not at all. Call it AFTER the
@@ -188,32 +174,25 @@ export async function reconcilePlacementsAfterRehome(
      * The home being LEFT, and what becomes of its placement — the one space
      * whose answer is a choice rather than an invariant.
      *
-     * Every OTHER space holding a row already holds an offer (that offer is
-     * what places it), so the backfill below only ever creates one row: the
-     * old home's, which until this call was placed by the home column itself.
-     * That is exactly the row a human is entitled to decide about, and
-     * `PUT /api/packages/{scope}/{name}/home` passes their answer here.
+     * Every OTHER space holding a row already holds an offer, so the backfill
+     * only ever creates one row: the old home's, which until this call was
+     * placed by the home column itself. `PUT …/home` passes a human's answer
+     * for it.
      *
-     * `keep: true` is the behaviour this function has always had, unchanged:
-     * the backfill above covers the old home when it holds a placement ROW,
-     * and leaves it out when it does not. That asymmetry is deliberate rather
-     * than tidy — the backfill exists to keep RUNNING what was running, so a
-     * space that had switched the package off has nothing to rescue, and
-     * writing it an offer anyway would WIDEN what that space sees on an act
-     * nobody asked to widen anything. Making the two cases uniform was tried
-     * and reverted for exactly that reason.
+     * `keep: true` backfills that space only when it holds a placement ROW.
+     * The asymmetry is deliberate: the backfill exists to keep RUNNING what was
+     * running, so a space that had switched the package off has nothing to
+     * rescue, and writing it an offer anyway would WIDEN what it sees on an act
+     * nobody asked to widen anything.
      *
-     * `keep: false` withdraws the offer AND the placement row together, the
-     * pair {@link revokePackageShare} withdraws, because dropping only the
-     * offer would leave a row nothing places — the ORPHAN this module exists
-     * to keep out of the database, the residue `scripts/migration/0016`
-     * repairs, and a state `activeHereSql` refuses to honour while the row
-     * goes on carrying the space's model, proxy and stored input values.
+     * `keep: false` withdraws the offer AND the placement row together — the
+     * pair {@link revokePackageShare} withdraws — because dropping only the
+     * offer leaves the ORPHAN this module exists to keep out of the database,
+     * with the space's model, proxy and input values still on it.
      *
-     * OMITTED by the personal-space sweeper, and that is the point of it being
-     * optional: the sweeper re-homes a departed author's package on nobody's
-     * request, so it has no answer to give and must keep the old behaviour —
-     * every space that was running the package goes on running it.
+     * OMITTED by the personal-space sweeper, which re-homes on nobody's request
+     * and so has no answer to give: every space that was running the package
+     * goes on running it.
      */
     previousHome?: { spaceId: string; keep: boolean };
   },

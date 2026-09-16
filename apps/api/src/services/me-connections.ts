@@ -37,7 +37,7 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
-import { placementShareJoin } from "./package-placement.ts";
+import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 
 /**
  * The authority boundary of the credential presented on `/api/me/connections`.
@@ -166,10 +166,7 @@ async function listAllActorIntegrationConnections(
         const agents = await db
           .select({ integrationIds: declaredIntegrationIds })
           .from(packages)
-          .leftJoin(
-            spacePackages,
-            and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
-          )
+          .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
           .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
           .where(
             and(

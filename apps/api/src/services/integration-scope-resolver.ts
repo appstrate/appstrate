@@ -49,7 +49,7 @@ import type { SpaceScope } from "../lib/scope.ts";
 import { notEphemeralFilter, orgOrSystemFilter } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
 import { getIntegration } from "./integration-service.ts";
-import { placementShareJoin } from "./package-placement.ts";
+import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 
 interface ComputeRequiredScopesResult {
   /** Union over all agents — the set to add to the IdP authorize request. */
@@ -116,10 +116,7 @@ export async function computeRequiredScopes(
   const active = await db
     .select({ draftManifest: packages.draftManifest })
     .from(packages)
-    .leftJoin(
-      spacePackages,
-      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
-    )
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
     .where(
       and(

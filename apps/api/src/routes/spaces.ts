@@ -257,16 +257,13 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
 // ─── Space packages: the permission is per PACKAGE TYPE ────────────────
 //
 // `spaces:write` is ORG-level — the catalog verb that creates and deletes
-// spaces. Gating activate/configure/deactivate on it meant a space admin could
-// not activate an agent in the space they run, while anyone who could create a
-// space could activate one in every space in the org. The permission that fits
-// is the space-level string for the type being activated, which is also what
-// the per-type package routes already use (`routes/packages.ts` →
-// `ROUTE_CONFIGS`).
+// spaces — so gating activate/configure/deactivate on it would stop a space
+// admin activating an agent in the space they run while letting anyone who can
+// create a space activate one everywhere. The fit is the space-level string for
+// the TYPE being activated, which the per-type package routes already use.
 //
 // `agents:configure` rather than `agents:write`: activating does not author the
-// agent, it decides which space runs it — the same distinction the catalog
-// already draws between writing an agent and configuring one.
+// agent, it decides which space runs it.
 //
 // The permission STRINGS keep the spelling their role rows carry
 // (`integrations:install` / `integrations:uninstall`): those are data in
@@ -274,49 +271,6 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
 // migration of rows, not of code.
 type SpacePackageOp = "activate" | "configure" | "deactivate";
 
-/**
- * Gate a space-package write and resolve the package's type, in the order that
- * keeps 403 and 404 independent of each other.
- *
- *   1. **Coarse gate, before any catalog read.** A caller holding none of the
- *      four strings this op can require is refused without the row ever being
- *      looked up, so it cannot tell a placed package from a package the org
- *      does not have. This is the step that stops the route being an
- *      enumeration oracle.
- *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
- *      reachability rule the reader obeys, for ALL THREE ops. An id the caller
- *      cannot reach answers the same 404 body here as it does on the read
- *      routes, so `POST`, `DELETE` and `PUT` cannot be told apart by their
- *      refusals. Two different `detail` strings — one for an org-visible id the
- *      caller cannot reach (homed in somebody else's personal space), one for
- *      an id that does not exist — would be an existence oracle over the whole
- *      catalogue for any holder of one activation grant.
- *   3. **Exact gate** for the resolved type.
- *
- * A residue remains at step 3 and is accepted: a caller holding `skills:write`
- * but not `agents:configure` still tells an existing agent (403) from a missing
- * one (404). That is inherent to gating per type, and it is a much narrower
- * disclosure than "any authenticated space member can enumerate the catalog".
- *
- * ONE op per route, and one verb per act: `POST` on the collection activates,
- * `DELETE` on an item deactivates, `PUT` configures. There is no body to
- * classify — `enabled` left `PUT` when activation got its own pair of doors —
- * so the op is a constant at each call site.
- *
- * ONE exception, and it is the whole authorization story of a PERSONAL space
- * (RBAC spec §3.6): when the target is the caller's OWN personal space, the
- * `activate` / `deactivate` grants are not required — ownership is the
- * authorization. A `guest` holds only the `operator` preset in their own space,
- * which carries none of `agents:configure` / `integrations:install` /
- * `<type>:write`, so requiring them there would mean a recipient could never
- * take up a package somebody offered them — nor put it back down. Both coarse
- * and exact gates are skipped together: a gate that refuses before the type is
- * known refuses just as hard. The catalog read is NOT skipped — a package the
- * caller cannot reach stays a 404 in their own space too, and the offer is
- * checked again, under a row lock, inside `activatePackage`'s transaction.
- * `configure` keeps its grant even there: choosing a model is spending the
- * organization's LLM budget, not accepting what was offered.
- */
 /**
  * Step 1 of {@link gateSpacePackageWrite}, callable on its own.
  *
@@ -343,6 +297,36 @@ async function coarseSpacePackageGate(
   return ownSpace;
 }
 
+/**
+ * Gate a space-package write and resolve the package's type, in the order that
+ * keeps 403 and 404 independent of each other.
+ *
+ *   1. **Coarse gate, before any catalog read**
+ *      ({@link coarseSpacePackageGate}). A caller holding none of the four
+ *      strings this op can require is refused without the row being looked up,
+ *      so the route is not an enumeration oracle.
+ *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
+ *      reachability rule the READ routes obey, for all three ops, so `POST`,
+ *      `DELETE` and `PUT` cannot be told apart by their refusals. Two different
+ *      `detail` strings here (org-visible but unreachable vs nonexistent) would
+ *      be an existence oracle over the whole catalogue.
+ *   3. **Exact gate** for the resolved type.
+ *
+ * A residue at step 3 is accepted: a caller holding `skills:write` but not
+ * `agents:configure` still tells an existing agent (403) from a missing one
+ * (404). Inherent to gating per type, and far narrower than letting any space
+ * member enumerate the catalog.
+ *
+ * ONE exception, and it is the whole authorization story of a PERSONAL space
+ * (RBAC spec §3.6): in the caller's OWN personal space the `activate` /
+ * `deactivate` grants are not required — ownership is the authorization. A
+ * `guest` holds only `operator` there, which carries none of them, so requiring
+ * them would mean a recipient could never take up a package offered to them.
+ * Both gates are skipped together; the CATALOG read is not, so an unreachable
+ * package stays a 404 in their own space too, and the offer is re-checked under
+ * a row lock inside `activatePackage`. `configure` keeps its grant even there:
+ * choosing a model spends the organization's LLM budget.
+ */
 async function gateSpacePackageWrite(
   c: Context<AppEnv>,
   orgId: string,
@@ -807,22 +791,16 @@ export function createSpacesRouter() {
   // a team space and a personal one alike, and for all four package types:
   // there is no per-type activation route beside it.
   //
-  // Idempotent by construction: the placement row is upserted, so activating an
-  // already-active package answers with the same body instead of a 409, and
-  // activating one that was switched off brings back every setting the space
-  // had chosen. 201 when this call put the package on; 200 when it was already
-  // on — which covers a system integration, active with no row at all.
+  // Idempotent by construction: the placement row is upserted, so a second
+  // activation answers with the same body instead of a 409 and brings back
+  // every setting the space had chosen. 201 when this call put the package on,
+  // 200 when it already was — which covers a system integration, on with no row.
   //
-  // A package is placed in a space by its HOME or by a SHARE. If neither holds
-  // here, this route can CREATE the share — but only for a caller who holds
-  // `<type>:share` in the package's home, which is exactly the authority an
-  // offer requires (`assertPackageShareAccess`: 404 when the id is unreachable,
-  // 403 when it is reachable but not the caller's to hand out). Activating is
-  // therefore not a way around `share`: reading A's package from B grants
-  // nothing about placing it there.
-  //
-  // An API key never carries `share`, so it activates the already-placed and
-  // nothing else — documented on the OpenAPI operation.
+  // When the package is neither HOMED nor SHARED here, this route can CREATE
+  // the share — but only for a caller holding `<type>:share` in its home
+  // (`assertPackageShareAccess`: 404 unreachable, 403 reachable but not theirs
+  // to hand out). Activating is therefore not a way around `share`. An API key
+  // never carries it, so a key activates the already-placed and nothing else.
   router.post("/:spaceId/packages", async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("spaceId")!;
@@ -984,21 +962,17 @@ export function createSpacesRouter() {
 
   // DELETE /api/spaces/:spaceId/packages/:packageId — DEACTIVATE it here.
   //
-  // The placement row and every setting on it stay: the space keeps the model,
-  // the proxy and the stored input values it chose, so switching a package off
-  // for a week costs nothing to undo. Only revoking the share that placed the
-  // package removes the row (`DELETE …/shares/{target}`), and only for the
-  // space that lost the offer.
+  // The placement row and every setting on it stay, so switching a package off
+  // for a week costs nothing to undo. Only revoking the share that placed it
+  // removes the row (`DELETE …/shares/{target}`).
   //
   // 204 when the space has a row, and when it has none but the package is ON by
   // the DEPLOYMENT's default — there the row is MATERIALIZED saying `false`,
-  // which is the sticky opt-out: the default switched the package on, and only
-  // an explicit row outvotes it. The default is the activation rule's, not a
-  // reading of `source`: a `system`-provenance integration this deployment does
-  // NOT offer is off already and falls into the case below.
-  // 404 for anything else with no row: an offer nobody has taken up is not on,
-  // so there is nothing to switch off, and writing the row would turn a pending
-  // offer into "switched off" — a decision its recipient never made.
+  // the sticky opt-out. That default is the activation rule's, not a reading of
+  // `source`: a `system`-provenance integration this deployment does NOT offer
+  // is off already and falls into the case below. 404 for anything else with no
+  // row — an offer nobody has taken up is not on, and writing the row would
+  // turn it into "switched off", a decision its recipient never made.
   router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");

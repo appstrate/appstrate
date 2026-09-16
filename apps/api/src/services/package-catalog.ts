@@ -44,18 +44,15 @@ interface DeclaredSkill {
  * HOME, or the current space when it has none.
  *
  * The home is the right anchor because a closure belongs to the package that
- * declares it, not to the space a given run happens to start in: an agent
- * homed in team space T and OFFERED to space U must keep running U's launches
- * with the skills T placed beside it, which judging against U would break on
- * the first share.
+ * declares it, not to the space a run happens to start in: an agent homed in
+ * team space T and OFFERED to space U must keep running U's launches with the
+ * skills T placed beside it.
  *
- * The fallback covers the two rows that carry no home
- * (`packages_org_package_has_home`): a SYSTEM agent, whose skills are system
- * packages and pass `placementReadFilter` on their `source` alone whatever
- * space is named, and an inline run's `ephemeral` shadow, whose manifest the
- * caller composed live in THIS space and whose references
- * `assertPackageDependenciesAccessible` has already judged against that
- * caller's reach.
+ * The fallback covers the two rows that carry no home: a SYSTEM agent, whose
+ * skills pass `placementReadFilter` on `source` alone, and an inline run's
+ * `ephemeral` shadow, whose references
+ * `assertPackageDependenciesAccessible` has already judged against the
+ * caller's own reach.
  *
  * `declaringPackageId` is the CATALOGUE row's id — never `manifest.name`,
  * which an inline run's caller writes freely and could therefore point at
@@ -92,23 +89,17 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
  * draft manifest for a published snapshot (#878). Returns one entry per
  * declared skill, in manifest order.
  *
- * PLACEMENT is part of the question, not a separate gate applied afterwards
- * (RBAC spec §6.9): a package is readable from its home and from the spaces it
- * is SHARED into, and `placementReadFilter` is that rule in SQL. Resolving on
- * `org_id` alone made this the one reader that answered for a package no route
- * will show — a skill homed in somebody's PERSONAL space, 404 everywhere else
- * (§3.6) — and the answer is not inert: an UNRESOLVED skill is a blocking
- * readiness error on every run origin, so the org-wide read let a manifest
- * name a private skill and then had its bytes assembled into the run's bundle
- * by `RunPackageCatalog`, which carries no placement predicate of its own. It
- * also handed the detail page that skill's `display_name` and `description`,
- * live, off its draft manifest.
+ * PLACEMENT is part of the question, not a gate applied afterwards (RBAC spec
+ * §6.9): `placementReadFilter` is conjoined here. Resolving on `org_id` alone
+ * would make this the one reader answering for a package no route will show — a
+ * skill homed in somebody's PERSONAL space — and the answer is not inert:
+ * `RunPackageCatalog` carries no placement predicate of its own, so that skill's
+ * bytes would be assembled into the run's bundle, and its `display_name` and
+ * `description` handed to the detail page live off its draft manifest.
  *
  * An unreachable skill is therefore reported exactly as a missing one —
- * `resolved: false`, with no `name` and no `description`. Telling the two
- * apart would be an existence oracle over every package the organization owns,
- * which is the same reason `assertPackageIsReachable` answers 404 rather than
- * 403.
+ * `resolved: false`, no `name`, no `description`. Telling the two apart would
+ * be an existence oracle over every package the organization owns.
  *
  * No DB read happens when the manifest declares no skills.
  */

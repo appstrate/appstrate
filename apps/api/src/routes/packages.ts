@@ -1933,19 +1933,18 @@ export function createPackagesRouter() {
 
   // --- The type-agnostic act family: `/{scope}/{name}/<act>` ---
   //
-  // `/api/packages/{scope}/{name}` is a NAMESPACE, never a resource: the
-  // package itself is read and written at `/api/packages/{type}/{scope}/{name}`,
-  // whose DTO is type-specific. What hangs off the untyped path are the acts
-  // that do not depend on the type — `home`, `shares`, `fork`, `files`,
-  // `{version}/download` — which is why none of them is a verb on the base
-  // path. A `PATCH` there would be a partial update of a namespace, and it
-  // would have no `GET` to answer for the resource it claimed to modify.
+  // `/api/packages/{scope}/{name}` is a NAMESPACE, never a resource: the package
+  // itself is read and written at `/api/packages/{type}/{scope}/{name}`, whose
+  // DTO is type-specific. What hangs off the untyped path are the acts that do
+  // not depend on the type — `home`, `shares`, `fork`, `files`,
+  // `{version}/download` — which is why none of them is a verb on the base path.
   //
-  // ORDERING, once for the whole family: `/{scope}/{name}/:version/download`
-  // takes a PARAMETER in the slot every act above fills with a literal, so it
-  // matches `home`, `shares` and `files` too. Every literal act must therefore
-  // be registered BEFORE it. Hono matches in order; there is no specificity
-  // rule to fall back on.
+  // ORDERING: `/{scope}/{name}/:version/download` takes a PARAMETER in the act
+  // slot, so it shadows any `GET` whose fourth segment is the literal `download`
+  // registered after it (Hono matches in order, with no specificity rule). No
+  // act has that shape today, so the constraint binds the NEXT one written;
+  // `no-route-shadows-version-download.test.ts` reads the route table and fails
+  // on one that does.
   //
   // --- Move a package to another home space ---
   //
@@ -2006,11 +2005,9 @@ export function createPackagesRouter() {
       // touching it would report a fully-published package as dirty.
       //
       // The move and the PLACEMENTS it invalidates travel in ONE transaction,
-      // through `reconcilePlacementsAfterRehome` — the same function the
-      // personal-space sweeper calls when it re-homes a package whose author
-      // left. Its docstring carries the reasoning; it is a function because
-      // there are two ways to move a home and the invariant belongs to the
-      // act, not to either caller.
+      // through `reconcilePlacementsAfterRehome`, whose docstring carries the
+      // reasoning.
+      //
       // An mcp-server whose `latest` archive does not parse is refused
       // activation by the door; the move must not be the way in. Run outside
       // the transaction, exactly as `activatePackage` runs it, because it reads
@@ -2018,14 +2015,12 @@ export function createPackagesRouter() {
       await assertMcpServerActivatable({ orgId, spaceId: target }, packageId);
       const activation = await db.transaction(async (tx) => {
         // The SOURCE authority, re-asked against the home this transaction
-        // HOLDS — the same discipline `sharePackage` applies, against the same
-        // race and for a heavier stake. `assertPackageMutationAccess` above
-        // judged the home as it stood when this request arrived; a concurrent
-        // `PATCH` committing in between leaves the package homed somewhere this
-        // caller may govern not at all, and the move would then carry it OUT of
-        // a space whose write they never held. `FOR UPDATE` rather than
-        // `FOR SHARE`: this transaction is about to rewrite that column, so two
-        // moves racing must serialize rather than both read the same home.
+        // HOLDS — the discipline `sharePackage` applies, for a heavier stake.
+        // The assert above judged the home as it stood when the request
+        // arrived; a concurrent move committing in between would leave this
+        // caller carrying the package OUT of a space whose write they never
+        // held. `FOR UPDATE`, not `FOR SHARE`: this transaction rewrites that
+        // column, so two moves racing must serialize.
         const [locked] = await tx
           .select({ homeSpaceId: packages.homeSpaceId })
           .from(packages)
@@ -2063,14 +2058,13 @@ export function createPackagesRouter() {
             ? { previousHome: { spaceId: locked.homeSpaceId, keep: body.keep_in_previous_home } }
             : {}),
         });
-        // The new home ACTIVATES it, exactly as creation does: a package lives
-        // where it is written, and arriving in a space that cannot run it
-        // would make the move a two-step act with no second button on the page
-        // that performed it. Through the activation door itself, in THIS
-        // transaction, so `space_packages` keeps a single writer and the act is
-        // audited like any other activation. `keepExistingDecision`: a space
-        // that deliberately switched the package off keeps that decision,
-        // because the move is about authority, not about what this space runs.
+        // The new home ACTIVATES it, exactly as creation does — arriving in a
+        // space that cannot run it would make the move a two-step act with no
+        // second button. Through the activation door itself, in THIS
+        // transaction, so `space_packages` keeps a single writer.
+        // `keepExistingDecision`: a space that deliberately switched the package
+        // off keeps that decision — the move is about authority, not about what
+        // this space runs.
         return activatePackageWithin(tx, { orgId, spaceId: target }, packageId, {
           keepExistingDecision: true,
         });
@@ -2232,30 +2226,20 @@ export function createPackagesRouter() {
     const pkg = await assertPackageShareAccess(c, packageId);
     const { target } = await readJsonBody(c, shareTargetSchema);
 
-    // Outside its home a package runs the LATEST PUBLISHED version, always
-    // (plan decisions 3 and 6) — so an offer of a package with nothing
-    // published is an offer of nothing: the recipient activates it and every
-    // launch answers `404 no_published_version`. Refusing HERE puts the refusal
-    // on the only principal who can clear it — the author, in the act they are
-    // performing, where the dialogue offers "Publish and share" — instead of on
-    // a recipient three screens away who cannot publish anything.
+    // Outside its home a package runs the LATEST PUBLISHED version, always, so
+    // an offer of a package with nothing published is an offer of nothing: the
+    // recipient activates it and every launch answers `404 no_published_version`.
+    // Refusing HERE puts the refusal on the only principal who can clear it —
+    // the author, in the act they are performing. Every target, person or space,
+    // receives the package under the same rule, and this runs BEFORE the target
+    // is resolved, so THIS refusal provisions no personal space.
     //
-    // EVERY target, person or space: both receive the package under the same
-    // rule — the latest published version — so both are offered nothing when
-    // there is none. Checked BEFORE the target is resolved, so THIS refusal
-    // provisions no personal space.
-    //
-    // It is the only one of the three that can promise that, and the limit is
-    // worth stating rather than leaving to be discovered: `sharePackage`
-    // re-asks the authority and `share_target_is_home` against the home it
-    // has LOCKED, which is necessarily after `ensurePersonalSpaceFor` has run
-    // — the transaction needs the space id to lock anything. So a `user`
-    // target that loses the race against a `PUT …/{scope}/{name}/home` leaves the
-    // recipient's personal space created and no offer in it. That is inert:
-    // `ensurePersonalSpaceFor` is idempotent and every member is provisioned
-    // one on their first space-scoped request anyway
-    // (`routes/spaces.ts` → `GET /api/spaces`), so the row is one the platform
-    // was going to write regardless, not a trace of the refused act.
+    // It is the only one of the three refusals that can promise that: the other
+    // two are re-asked inside `sharePackage`, against the home it has LOCKED,
+    // which is necessarily after `ensurePersonalSpaceFor` has run. A `user`
+    // target that loses a race against `PUT …/home` therefore leaves the
+    // recipient's personal space created and no offer in it — inert, since that
+    // space is provisioned on their first space-scoped request anyway.
     if ((await getLatestVersionId(packageId)) === null) {
       throw conflict(
         "package_has_no_version",
@@ -2972,7 +2956,7 @@ export function createPackagesRouter() {
     await assertPackageCopyAllowed(
       c,
       { ...pkg, type: pkg.type as PackageType },
-      { orgId, accessible: await packageAccessSpaces(c, orgId) },
+      { orgId, accessible: await packageAccessSpaces(c) },
     );
 
     const ver = await getVersionForDownload(packageId, versionSpec);

@@ -12,41 +12,32 @@
  *
  * The ROW ALWAYS WINS, WHERE THE PACKAGE IS PLACED. The first half is why a
  * system package can be switched off per space like any other: an explicit
- * `false` is an operator decision the platform must not overrule, and a switch
- * that changes nothing is worse than no switch at all. It is also what makes
- * the opt-out sticky — the row survives every run, so nothing silently
- * switches the package back on.
+ * `false` is an operator decision the platform must not overrule, and the row
+ * survives every run, so the opt-out is sticky.
  *
  * The second half is what keeps a row from being a placement of its own
  * ({@link placementReadFilter}, `services/package-placement.ts`). An ORPHAN
- * row — one with neither a home nor a share behind it, the residue
- * `scripts/migration/0016` repairs — is a decision about a package the space
- * no longer holds, and it must not read as "on" ANYWHERE: not in the caller
- * context handed to the model, not on a type's index page, not on the run
- * gate, not on the space-package reads. A rule that answered "active" there
- * would let a space run, and see the draft of, a package every placement-aware
- * page correctly refuses to show it.
+ * row — neither a home nor a share behind it, the residue
+ * `scripts/migration/0016` repairs — is a decision about a package the space no
+ * longer holds, and it must not read as "on" ANYWHERE: not in the caller
+ * context handed to the model, not on an index page, not on the run gate, not
+ * on the space-package reads. Otherwise a space runs, and sees the draft of, a
+ * package every placement-aware page refuses to show it.
  *
  * The default WITHOUT a row needs no placement conjunct: it only ever switches
- * on packages the deployment ships, and those are placed in every space by
- * construction.
- *
- * The default WITHOUT a row is `source = 'system'`, with one narrowing that
- * belongs to integrations alone: the deployment ships ~65 integration packages
- * and OFFERS the subset named by `SYSTEM_INTEGRATIONS` ({@link
- * isSystemIntegration}). Only those are on out of the box; the rest are catalog
- * entries a space activates deliberately, exactly like an org-authored one.
- * Reading `source` alone there would switch the whole catalog on in every
- * space.
+ * on packages the deployment ships, which are placed everywhere by
+ * construction. It is `source = 'system'`, with one narrowing for integrations:
+ * the deployment ships dozens of integration packages and OFFERS only the
+ * subset `SYSTEM_INTEGRATIONS` names ({@link isSystemIntegration}); the rest
+ * are catalog entries a space activates deliberately. Reading `source` alone
+ * there would switch the whole catalog on in every space.
  *
  * The two forms are twins, not two rules: a table-driven test
  * (`package-activation-parity.test.ts`) walks every (type × source × row ×
- * placed) cell and asserts they answer the same.
- *
- * Everything else PROJECTS one of the two rather than restating it — the
- * library's `state` (`package-library.ts`) calls {@link isActiveHere} and only
- * names WHY the answer was no (`inactive` a row saying `false`, `none` no row
- * at all), so there is no third copy to drift.
+ * placed) cell and asserts they answer the same. Everything else PROJECTS one
+ * of them — the library's `state` (`package-library.ts`) calls
+ * {@link isActiveHere} and only names WHY the answer was no — so there is no
+ * third copy to drift.
  */
 
 import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";

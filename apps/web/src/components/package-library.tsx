@@ -4,21 +4,18 @@
  * The library, in both of its forms, as ONE projection of the placement model.
  *
  * A package lives in exactly one space (its home) and reaches others through a
- * share; either way its presence in a space is a PLACEMENT, and the local
- * instance a placement carries — settings, model, proxy — is switched on or off
- * rather than created and destroyed. So there are three axes and no fourth, and
- * both views below render the same `placements` array:
+ * share; either way its presence in a space is a PLACEMENT, whose local
+ * instance is switched on and off rather than created and destroyed. Both views
+ * below render the same `placements` array:
  *
  *   - the ORGANIZATION library (`GET /api/library`, owners and admins) is the
  *     map: per package, its home, who it is shared with, and where it is on.
- *     Every cell is actionable, because the administrator who reads it is the
- *     one who decides. Switching on a space the package is not placed in shares
- *     it there and activates it in one click — the server does both in one
- *     transaction, which is why no separate "share, then activate" exists.
+ *     Every cell is actionable. Switching on a space the package is not placed
+ *     in shares it there and activates it in one click, in one transaction,
+ *     which is why no separate "share, then activate" exists.
  *   - one SPACE's view (`GET /api/spaces/{id}/library`) is the inventory of
- *     what is placed HERE, with its origin said in words and one switch. A
- *     pending offer is not a separate inbox: it is a placement whose state is
- *     `none`, listed with everything else and taken up by the same switch.
+ *     what is placed HERE, with its origin in words and one switch. A pending
+ *     offer is not a separate inbox: it is a placement whose state is `none`.
  */
 
 import { useMemo, useState } from "react";
@@ -186,12 +183,10 @@ function PackageName({
  * package may not be placed here at all — in which case switching it on is
  * really a share out of its home, and asks for `home_shareable` on top.
  *
- * A SYSTEM package has no third refusal. "Active here" has one definition for
- * the four families — the row wins, and the absence of a row means the system
- * default — so a system package is switched off per space like any other, and
- * the row it materializes is the sticky opt-out. Figma turns off a library it
- * ships, VS Code disables an extension per workspace; the platform's own
- * packages are not a category of their own.
+ * A SYSTEM package has no third refusal: "active here" has one definition for
+ * all four families — the row wins, its absence means the deployment default —
+ * so a system package is switched off per space like any other, and the row it
+ * materializes is the sticky opt-out.
  *
  * A live box on an untaken offer carries `consentHint` instead: switching it on
  * is a consent, not a setting (R17), and the sentence belongs where the click
