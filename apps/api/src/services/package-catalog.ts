@@ -2,7 +2,7 @@
 
 import { eq, and, count, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages } from "@appstrate/db/schema";
+import { packages, packageShares } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 import { caretRange } from "@appstrate/core/semver";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
@@ -10,6 +10,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { isPackageReadableInSpace } from "../lib/package-access.ts";
+import { placementReadFilter } from "./package-placement.ts";
 
 interface DbPackageRow {
   id: string;
@@ -23,8 +24,8 @@ interface DbPackageRow {
  * One entry of a manifest's `dependencies.skills` map, paired with what the
  * org/system catalog knows about it.
  *
- * Every DECLARED skill gets an entry — `resolved: false` marks one whose
- * package is not visible to the org. Callers that filter (readiness, run
+ * Every DECLARED skill gets an entry — `resolved: false` marks one the
+ * declaring package cannot reach. Callers that filter (readiness, run
  * paths) and callers that display (detail DTOs, missing ones included) read
  * the same array; absence is a flag, never a shorter list (#878).
  */
@@ -32,10 +33,45 @@ interface DeclaredSkill {
   id: string;
   /** Range declared by the manifest, or caret-of-current when it carries none. */
   version: string;
-  /** True when a skill package with this id is visible to the org. */
+  /** True when a skill package with this id is PLACED where the declaring package lives. */
   resolved: boolean;
   name?: string;
   description?: string;
+}
+
+/**
+ * WHERE a declared dependency is judged from — the declaring package's own
+ * HOME, or the current space when it has none.
+ *
+ * The home is the right anchor because a closure belongs to the package that
+ * declares it, not to the space a given run happens to start in: an agent
+ * homed in team space T and OFFERED to space U must keep running U's launches
+ * with the skills T placed beside it, which judging against U would break on
+ * the first share.
+ *
+ * The fallback covers the two rows that carry no home
+ * (`packages_org_package_has_home`): a SYSTEM agent, whose skills are system
+ * packages and pass `placementReadFilter` on their `source` alone whatever
+ * space is named, and an inline run's `ephemeral` shadow, whose manifest the
+ * caller composed live in THIS space and whose references
+ * `assertPackageDependenciesAccessible` has already judged against that
+ * caller's reach.
+ *
+ * `declaringPackageId` is the CATALOGUE row's id — never `manifest.name`,
+ * which an inline run's caller writes freely and could therefore point at
+ * somebody else's agent to borrow its home.
+ */
+async function placementAnchor(
+  declaringPackageId: string,
+  orgId: string,
+  spaceId: string,
+): Promise<string> {
+  const [row] = await db
+    .select({ homeSpaceId: packages.homeSpaceId })
+    .from(packages)
+    .where(and(eq(packages.id, declaringPackageId), orgOrSystemFilter(orgId)))
+    .limit(1);
+  return row?.homeSpaceId ?? spaceId;
 }
 
 function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
@@ -49,23 +85,45 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
 }
 
 /**
- * Project a manifest's declared skill dependencies against the org/system
- * catalog. The manifest handed in is the single input — the projection is
- * recomputed per call and never cached on a package object, so it cannot go
- * stale when a caller swaps the draft manifest for a published snapshot
- * (#878). Returns one entry per declared skill, in manifest order.
+ * Project a manifest's declared skill dependencies against the catalogue, as
+ * the DECLARING package may reach it. The manifest handed in is the single
+ * input for what is declared — the projection is recomputed per call and never
+ * cached on a package object, so it cannot go stale when a caller swaps the
+ * draft manifest for a published snapshot (#878). Returns one entry per
+ * declared skill, in manifest order.
+ *
+ * PLACEMENT is part of the question, not a separate gate applied afterwards
+ * (RBAC spec §6.9): a package is readable from its home and from the spaces it
+ * is SHARED into, and `placementReadFilter` is that rule in SQL. Resolving on
+ * `org_id` alone made this the one reader that answered for a package no route
+ * will show — a skill homed in somebody's PERSONAL space, 404 everywhere else
+ * (§3.6) — and the answer is not inert: an UNRESOLVED skill is a blocking
+ * readiness error on every run origin, so the org-wide read let a manifest
+ * name a private skill and then had its bytes assembled into the run's bundle
+ * by `RunPackageCatalog`, which carries no placement predicate of its own. It
+ * also handed the detail page that skill's `display_name` and `description`,
+ * live, off its draft manifest.
+ *
+ * An unreachable skill is therefore reported exactly as a missing one —
+ * `resolved: false`, with no `name` and no `description`. Telling the two
+ * apart would be an existence oracle over every package the organization owns,
+ * which is the same reason `assertPackageIsReachable` answers 404 rather than
+ * 403.
  *
  * No DB read happens when the manifest declares no skills.
  */
 export async function resolveDeclaredSkills(
   manifest: AgentManifest,
   orgId: string,
+  /** The catalogue row declaring them, and the space to fall back on — see {@link placementAnchor}. */
+  declaredBy: { packageId: string; spaceId: string },
 ): Promise<DeclaredSkill[]> {
   const m = parseDraftManifest(manifest);
   const declaredRanges = asRecord(asRecord(m.dependencies).skills) as Record<string, string>;
   const skillIds = extractSkillIdsFromManifest(m);
   if (skillIds.length === 0) return [];
 
+  const anchor = await placementAnchor(declaredBy.packageId, orgId, declaredBy.spaceId);
   const rows = await db
     .select({
       id: packages.id,
@@ -73,7 +131,15 @@ export async function resolveDeclaredSkills(
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    .where(and(inArray(packages.id, skillIds), orgOrSystemFilter(orgId)));
+    // The share half of `placementReadFilter` is read off this join; without
+    // it every offered skill would resolve as unreachable.
+    .leftJoin(
+      packageShares,
+      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, anchor)),
+    )
+    .where(
+      and(inArray(packages.id, skillIds), orgOrSystemFilter(orgId), placementReadFilter(anchor)),
+    );
 
   // A row of the wrong type is not a skill dependency, resolved or otherwise.
   const bySkillId = new Map(rows.filter((r) => r.type === "skill").map((r) => [r.id, r]));

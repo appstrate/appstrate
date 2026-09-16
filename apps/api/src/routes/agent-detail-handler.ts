@@ -74,6 +74,8 @@ async function buildDependencyGroups(
     summaryOnly: boolean;
     c: Context<AppEnv>;
     accessible: Awaited<ReturnType<typeof packageAccessSpaces>>;
+    /** WHERE the declared skills are judged from — this agent's own home (RBAC spec §6.9). */
+    declaredBy: { packageId: string; spaceId: string };
   },
 ): Promise<AgentDetail["dependencies"]> {
   const integrations = parseManifestIntegrations(m as Record<string, unknown>).map((e) => ({
@@ -91,7 +93,7 @@ async function buildDependencyGroups(
     ? Object.entries(
         (m as { dependencies?: { skills?: Record<string, string> } }).dependencies?.skills ?? {},
       ).map(([id, version]) => ({ id, ...(version ? { version } : {}) }))
-    : (await resolveDeclaredSkills(m, orgId))
+    : (await resolveDeclaredSkills(m, orgId, opts.declaredBy))
         .filter((s) => s.resolved)
         .map((s) => ({
           id: s.id,
@@ -200,6 +202,7 @@ export async function buildAgentDetailDto(
     summaryOnly,
     c,
     accessible,
+    declaredBy: { packageId: agent.id, spaceId },
   });
 
   const { values: storedValues, locked: lockedFields } = await getSpacePackageSettings(

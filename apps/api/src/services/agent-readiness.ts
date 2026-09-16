@@ -139,22 +139,31 @@ export async function collectAgentReadinessErrors(
   // resolved closure always describe the same definition (#878). The catalog
   // query is skipped entirely when no skill is declared.
   //
-  // Judged against the ORGANIZATION's catalogue, and the message says so.
-  // `resolveDeclaredSkills` is org-wide by design: a declared dependency is
-  // resolved from what the organization publishes, not from what the launching
-  // space happens to have switched on (RBAC spec §6.9) — a skill is carried
-  // into the bundle by the agent that declares it, not offered by the space.
-  // Activation governs what a space OFFERS — its hints, the CLI skill sync, the
-  // integration credentials a run may reach — which is a different question,
-  // and one this error must not pretend to have asked.
-  const declaredSkills = await resolveDeclaredSkills(manifest, orgId);
+  // Judged against what the DECLARING agent can reach — its home space, or
+  // this space when it has none (`resolveDeclaredSkills`, RBAC spec §6.9).
+  // ACTIVATION is deliberately not the question: a declared skill is carried
+  // into the bundle by the agent that declares it, not offered by the launching
+  // space, so a skill switched off here still runs. PLACEMENT is, and it is the
+  // gate that matters — this loop is what stops the run, and `RunPackageCatalog`
+  // downstream resolves the closure on `org_id` alone, so a skill reported
+  // resolved here has its bytes assembled into the bundle with nothing else
+  // asking.
+  //
+  // The message does NOT distinguish "not published" from "published somewhere
+  // you cannot reach": naming the difference would make this an existence
+  // oracle over every package the organization owns, which is the same reason
+  // an unreachable id is a 404 and not a 403 on the package routes.
+  const declaredSkills = await resolveDeclaredSkills(manifest, orgId, {
+    packageId: agent.id,
+    spaceId,
+  });
   for (const skill of declaredSkills) {
     if (skill.resolved) continue;
     errors.push({
       field: `dependencies.skills.${skill.id}`,
       code: "missing_skill",
       title: "Missing Skill",
-      message: `Required skill '${skill.id}' is not in this organization's catalog`,
+      message: `Required skill '${skill.id}' is not available to this agent — publish it, or share it with the agent's home space`,
     });
   }
 

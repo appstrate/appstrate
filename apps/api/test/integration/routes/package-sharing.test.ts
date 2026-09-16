@@ -1677,6 +1677,7 @@ describe("the offer is judged against the LOCKED home", () => {
       sharePackage({
         packageId: AGENT_ID,
         spaceId: other.id,
+        orgId: ctx.orgId,
         sharedBy: ctx.user.id,
         authorizeHome: () => false,
       }),
@@ -1690,10 +1691,42 @@ describe("the offer is judged against the LOCKED home", () => {
     const { created } = await sharePackage({
       packageId: AGENT_ID,
       spaceId: other.id,
+      orgId: ctx.orgId,
       sharedBy: ctx.user.id,
       authorizeHome: () => true,
     });
     expect(created).toBe(true);
+  });
+
+  // The tenant boundary is the service's own, not the route's and not the
+  // `authorizeHome` callback's: neither `package_shares` nor the pair it is
+  // keyed on carries an `org_id`, so an offer naming another organization's
+  // space has to be refused here. `authorizeHome` is forced TRUE so the test
+  // cannot pass for the wrong reason — it is the org predicate under test,
+  // not the authority above it.
+  it("refuses an offer naming a space of another organization, even with the authority granted", async () => {
+    const ctx = await createTestContext({ orgSlug: "share-org-a" });
+    const stranger = await createTestContext({ orgSlug: "share-org-b" });
+    const AGENT_ID = "@share-org-a/agent";
+    await seedPackage({
+      id: AGENT_ID,
+      orgId: ctx.orgId,
+      type: "agent",
+      draftManifest: { name: AGENT_ID, version: "0.1.0", type: "agent" },
+      draftContent: "prompt",
+    });
+
+    await expect(
+      sharePackage({
+        packageId: AGENT_ID,
+        spaceId: stranger.defaultSpaceId,
+        orgId: ctx.orgId,
+        sharedBy: ctx.user.id,
+        authorizeHome: () => true,
+      }),
+    ).rejects.toThrow();
+
+    await assertDbMissing(packageShares, eq(packageShares.packageId, AGENT_ID));
   });
 });
 
@@ -1720,6 +1753,13 @@ describe("the table has no other reader", () => {
     // `integration-pins-service.ts`, `integration-scope-resolver.ts` and
     // `me-connections.ts` conjoin `activeHereSql`, both of which need this
     // join, so a row nothing places counts for nothing there either.
+    // `package-catalog.ts` is the newest entry and the one that had to be
+    // added rather than avoided: `resolveDeclaredSkills` judges an agent's
+    // declared closure from the DECLARING package's home, so it needs the
+    // same LEFT JOIN. Resolving it on `org_id` alone was the one reader that
+    // answered for a package no route will show — and since an unresolved
+    // skill is a blocking readiness error, that answer is what let a private
+    // skill's bytes into a run's bundle (§6.9).
     expect(files).toEqual([
       "apps/api/src/lib/package-access.ts",
       "apps/api/src/services/integration-connection-resolver.ts",
@@ -1729,6 +1769,7 @@ describe("the table has no other reader", () => {
       "apps/api/src/services/integration-service.ts",
       "apps/api/src/services/me-connections.ts",
       "apps/api/src/services/package-activation.ts",
+      "apps/api/src/services/package-catalog.ts",
       "apps/api/src/services/package-items/crud.ts",
       "apps/api/src/services/package-library.ts",
       "apps/api/src/services/package-placement.ts",
