@@ -87,11 +87,9 @@ export interface McpConnectRetryOptions {
    * Hard wall-clock budget for the entire connect (including all retries
    * + final attempt). Defaults to 60s — wider than the sidecar's 30s
    * outbound upstream timeout because cold-start container pulls + boot
-   * can routinely consume 20–45s (issue #406). NOT operator-tunable: the
-   * `APPSTRATE_MCP_CONNECT_DEADLINE_MS` variable this comment used to name
-   * was parsed by `runtime-pi/env.ts` but no topology ever set it, so it is
-   * now a compiled constant there. Making it a real knob means adding the key
-   * to `SIDECAR_OPERATOR_ENV_KEYS`, not just reading it.
+   * can routinely consume 20–45s (issue #406). NOT operator-tunable — it is a
+   * compiled constant in `runtime-pi/env.ts`. Making it a real knob means
+   * adding the key to `SIDECAR_OPERATOR_ENV_KEYS`, not just reading it.
    */
   deadlineMs?: number;
   /**

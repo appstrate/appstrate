@@ -166,9 +166,9 @@ export class SubprocessTransport implements Transport {
    * load-bearing. The spawned server is a same-uid child: on Linux it
    * reads the parent's entire environment from `/proc/<ppid>/environ`
    * in one open(), and a same-uid debugger attach is the equivalent
-   * elsewhere. This comment used to claim the allowlist was "the
-   * credential isolation invariant (I3) in concrete form"; it never
-   * was, and no portable primitive reachable from Bun makes it one:
+   * elsewhere. The allowlist is not the credential isolation invariant
+   * (I3) in concrete form, and no portable primitive reachable from Bun
+   * would make it one:
    * `Bun.spawn` exposes no `uid`/`gid` option at all (passing one
    * neither errors nor takes effect), and user namespaces /
    * `PR_SET_DUMPABLE` / `hidepid` / landlock / seccomp are Linux-only

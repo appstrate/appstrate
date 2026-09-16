@@ -16,15 +16,8 @@
  * (`@appstrate/runner-pi`), the one table that also builds the base URL chat
  * and the CLI point their vendor clients at — the three used to spell the
  * convention out separately and drift silently. Adding a family is a table row
- * plus an adapter in the `adapters` map below; the mount loop needs no edit.
- *
- * This header used to claim the opposite — that "the spec explicitly resists
- * premature abstraction so each route keeps its own adapter binding instead of
- * sharing a single dispatch table" — for a while AFTER the dispatch table
- * landed. The phrase appears nowhere in `docs/`: it attributed to the spec a
- * constraint the spec does not carry, which is worse than no rationale, because
- * the next contributor reads it as one and hand-mounts a fourth route beside
- * the loop.
+ * plus an adapter in the `adapters` map below; the mount loop needs no edit, and
+ * no route is hand-mounted beside it.
  *
  * Subscription shapes are NOT served here:
  *   - OAuth-subscription models (`claude-code`, `codex`) never flow through this

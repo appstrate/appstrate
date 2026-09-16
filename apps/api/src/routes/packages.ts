@@ -2428,28 +2428,18 @@ export function createPackagesRouter() {
    * original bytes), while the skill-only fallback must rebuild the archive
    * because it synthesizes the `manifest.json` the upload lacks.
    *
-   * WRITE direction — retired/unknown `runtime_tools` ids REJECT. Both routes
-   * are author input, not content the platform already holds:
+   * WRITE direction — retired/unknown `runtime_tools` ids REJECT, passed
+   * explicitly so the choice reads as deliberate at the call site. Both routes
+   * are author input, not content the platform already holds: `/import-github`
+   * fetches hand-written source files from a repository, and the two routes
+   * share this helper.
    *
-   *   - `/import-github` fetches a directory of hand-written source files from
-   *     a repository. That is authored material by definition, and the two
-   *     routes share this helper, so consistency pins `/import` to the same
-   *     policy.
-   *   - The counter-argument for `/import` — the ZIP may be one this platform
-   *     produced via `GET /:version/download`, so rejecting makes export→import
-   *     one-way — is real but narrow. Unlike a bundle (machine-assembled, N
-   *     packages, aborts wholesale) a single uploaded file is locally
-   *     repairable: the error names the offending field and value, and the
-   *     operator can unzip, edit one line, re-zip. `POST /import-bundle` is the
-   *     sanctioned read path for re-ingesting platform-produced artifacts and
-   *     it DOES drop.
-   *   - The policy is binary: it cannot distinguish a retired id from a typo.
-   *     Choosing `"drop"` here would silently swallow `"lgo"` on the primary
-   *     hand-authoring inbound route, shipping an agent missing a tool with no
-   *     signal — the exact failure the reject default exists to prevent.
-   *
-   * Passed explicitly rather than left to the default so the choice reads as
-   * deliberate at the call site.
+   * The policy is binary — it cannot tell a retired id from a typo — so `drop`
+   * here would silently swallow `"lgo"` on the primary hand-authoring route and
+   * ship an agent missing a tool with no signal. `POST /import-bundle` is the
+   * sanctioned path for re-ingesting platform-produced artifacts, and it DOES
+   * drop; a single rejected upload is locally repairable, since the error names
+   * the offending field and value.
    */
   async function parseZipWithSkillFallback(upload: Buffer, orgSlug: string): Promise<ParsedImport> {
     const zipBytes = new Uint8Array(upload);
