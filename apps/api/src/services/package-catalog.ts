@@ -122,8 +122,6 @@ export async function resolveDeclaredSkills(
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    // The share half of `placementReadFilter` is read off this join; without
-    // it every offered skill would resolve as unreachable.
     .leftJoin(packageShares, placementShareJoin(packages.id, anchor))
     .where(
       and(inArray(packages.id, skillIds), orgOrSystemFilter(orgId), placementReadFilter(anchor)),

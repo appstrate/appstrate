@@ -1630,19 +1630,15 @@ type FileExplorerPackage = PackageFileSource & { source: string };
  * An EXPLICIT `?version=draft` is the other act, and keeps the other rule:
  * naming the working copy is an author's move, refused with
  * `403 draft_not_writable` ({@link assertDraftSelectorAllowed}). Without it
- * these two routes would be the fifth door to a draft the run, the schedule,
- * the readiness and the bundle export all close — and the loosest, since they
- * hand over every byte one file at a time.
+ * these two routes would be a fifth door to a draft the run, the schedule, the
+ * readiness and the bundle export all close.
  *
  * A system package ships its definition with the platform and owns no
  * `package_versions` rows, so `latest` would resolve to nothing: its stored
- * tree IS its published definition, and every selector but ONE reads it. The
- * exception is the named `draft`, refused a line earlier like everybody
- * else's: nobody writes a platform-shipped package, so nobody may ask for a
- * working copy it does not have. Same rule the run path applies
- * (`resolveAgentRunVersion` ignores the selector for `source === "system"`) —
- * stated here rather than inherited, because the 404 it prevents would only
- * show up on a system package's Files tab.
+ * tree IS its published definition, and every selector but the named `draft`
+ * reads it. Same rule the run path applies (`resolveAgentRunVersion` ignores
+ * the selector for `source === "system"`), stated here rather than inherited
+ * because the 404 it prevents shows up only on a system package's Files tab.
  *
  * Takes the two columns it reads rather than a whole row, because the DETAIL
  * projection asks the same question from a different query

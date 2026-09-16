@@ -364,17 +364,14 @@ export type AgentExecutionBlock = "not_placed" | "not_active";
  * (`services/registry-run-resolver.ts`, behind `POST /api/runs/remote`) and the
  * scheduler tick, which fires on its own with no request to refuse. The
  * activation half ALONE would let an ORPHAN placement execute from a cron in a
- * space every HTTP door refuses to serve it to — and a cron is the caller
- * nobody is watching.
+ * space every HTTP door refuses to serve it to.
  *
  * A VERDICT rather than a throw: each caller renders the refusal on its own
- * channel (a 404 with a code at the HTTP door, the resolver's own 404 pair, a
- * visible failed run with the schedule left ARMED at the tick), and one shared
- * `ApiError` would tell a schedule to "pick a different space". The RULE is
- * shared; the sentence is each caller's.
+ * channel — a 404 with a code at the HTTP door, the resolver's own 404 pair, a
+ * visible failed run with the schedule left ARMED at the tick.
  *
- * Both halves are read in parallel — independent rows, and the tick pays for
- * this on every fire. No `orgId` predicate of its own: `isPackageActiveHere`
+ * Both halves are read in parallel: independent rows, and the tick pays for
+ * this on every fire. No `orgId` predicate of its own — `isPackageActiveHere`
  * carries the org boundary, and every caller has already loaded the package
  * under it.
  */
@@ -855,28 +852,25 @@ export function holdsHomeAuthority(
 /**
  * Does READING this package let the caller COPY it out (plan decision 12)?
  *
- * By default yes — the behaviour of Notion, Drive and Figma, and what a reader
- * can approximate by hand anyway. An organization that sets
- * `org_settings.restrict_package_copy` narrows the three routes that hand over
- * a whole package — `POST …/fork`, `GET …/{version}/download` and
- * `GET /api/agents/{scope}/{name}/bundle` — to callers who hold `<type>:share`
- * in the SOURCE's home space. Without that key, personal spaces open "fork it
- * into mine, then share it on" to every reader, i.e. `share` would protect the
- * link and not the content.
+ * By default yes, which is what a reader can approximate by hand anyway. An
+ * organization that sets `org_settings.restrict_package_copy` narrows the three
+ * routes that hand over a whole package — `POST …/fork`,
+ * `GET …/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` — to
+ * callers who hold `<type>:share` in the SOURCE's home space. Without that key,
+ * personal spaces open "fork it into mine, then share it on" to every reader:
+ * `share` would protect the link and not the content.
  *
- * There is no owner-or-admin fallback for a homeless package, because there is
- * no such package: `packages_org_package_has_home` (drizzle `0067`) makes a
- * home mandatory, and the two rows it exempts are refused above. An owner or
- * admin governs a package by reaching its home space like anyone else (RBAC
- * spec §13.7).
+ * No owner-or-admin fallback for a homeless package, because there is no such
+ * package: `packages_org_package_has_home` (drizzle `0067`) makes a home
+ * mandatory and the two rows it exempts are refused above. An owner or admin
+ * governs a package by reaching its home space (RBAC spec §13.7).
  *
- * SKILLS are exempt in both settings: the CLI's skills sync downloads them into
- * a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`). RUNS are
- * unaffected — a run's bundle is assembled server-side and never travels as a
- * copy. SYSTEM packages are exempt too, and that is stated HERE rather than
- * left to the home rule: they are readable in every space of every
- * organization, so there is no owning space for this setting to protect, and
- * refusing one would make the key a refusal about somebody else's content.
+ * Three exemptions. SKILLS, in both settings: the CLI's skills sync downloads
+ * them into a local checkout by design (`apps/cli/src/lib/skills-sync/plan.ts`).
+ * RUNS, since a run's bundle is assembled server-side and never travels as a
+ * copy. SYSTEM packages, stated HERE rather than left to the home rule — they
+ * are readable in every space of every organization, so there is no owning
+ * space for this setting to protect.
  *
  * The setting is read UNCACHED for the same reason the SSO gate is: a security
  * gate must not answer from a TTL.

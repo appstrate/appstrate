@@ -101,11 +101,8 @@ export const spacePackages = pgTable(
  * and NOTHING else: running a package, resolving its pins and resolving its
  * credentials all ask {@link spacePackages} as well, and the recipient writes
  * that row themselves by ACTIVATING the package
- * (`POST /api/spaces/{spaceId}/packages`). That separation is the whole point
- * of a second table — an agent runs with the recipient's credentials, so
- * switching it on has to be the recipient's own act, and a state carried on
- * `space_packages` would have had to be filtered at each of its readers, where
- * one miss executes a package nobody consented to.
+ * (`POST /api/spaces/{spaceId}/packages`). RBAC spec §6.10 carries why the two
+ * acts are two tables.
  *
  * Revoking a share deletes the activation row it backs, in the same
  * transaction: the offer was the placement, so nothing survives it.

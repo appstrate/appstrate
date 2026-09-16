@@ -595,8 +595,6 @@ export async function getIntegration(
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    // `placementReadFilter` reads the share half off this LEFT JOIN; without
-    // it every offered integration would silently drop out of the answer.
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
@@ -788,7 +786,6 @@ export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSu
       draftManifest: packages.draftManifest,
     })
     .from(packages)
-    // Expected by `placementReadFilter` — see `getIntegration`.
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
