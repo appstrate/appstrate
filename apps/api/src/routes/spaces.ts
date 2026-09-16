@@ -71,7 +71,6 @@ import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
   isPackageReadableInSpace,
-  packageAccessSpaces,
   packagePermission,
   spacePackagePermission,
 } from "../lib/package-access.ts";
@@ -351,12 +350,6 @@ async function gateSpacePackageWrite(
   op: SpacePackageOp,
   opts?: {
     /**
-     * The caller's accessible spaces, when the route already walked them —
-     * `assertCatalogPackageAccess` would otherwise re-walk every space the
-     * caller can reach to answer a question the route has just answered.
-     */
-    resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>;
-    /**
      * What {@link coarseSpacePackageGate} already answered, for a route that
      * had to run step 1 early. Absent, step 1 runs here.
      */
@@ -365,7 +358,7 @@ async function gateSpacePackageWrite(
 ): Promise<PackageType> {
   const ownSpace = opts?.ownSpace ?? (await coarseSpacePackageGate(c, orgId, op));
 
-  const { type } = await assertCatalogPackageAccess(c, packageId, opts?.resolvedSpaces);
+  const { type } = await assertCatalogPackageAccess(c, packageId);
 
   // Reusing `requirePermission` rather than an inline `has` keeps the denial
   // audit hook, the 403 body and the fail-closed semantics identical to every

@@ -21,6 +21,7 @@ import { makePermissionGuard, reportPermissionDenial } from "@appstrate/core/per
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
 import { callerPermissions, type Permission } from "./permissions.ts";
@@ -169,6 +170,23 @@ export async function assertExistingPackageActivationAccess(
 }
 
 /**
+ * One space of the caller's reach, with their effective permissions in it.
+ *
+ * Written out rather than inferred from the resolver: the memo that returns it
+ * lives on the Hono context, so `AppEnv` names this type and inferring it back
+ * off the resolver would close the loop through the environment.
+ */
+export interface PackageAccessSpace {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  visibility: SpaceVisibility;
+  defaultRole: SpaceRolePreset;
+  ownerUserId: string | null;
+  permissions: ReadonlySet<string>;
+}
+
+/**
  * Resolve once for catalog listings and cross-space package operations. The org
  * role and the memberships are the CALLER's standing, which a preview replaces
  * — otherwise the catalog answers with the previewing admin's reach.
@@ -178,6 +196,36 @@ export async function packageAccessSpaces(
   orgId = c.get("orgId"),
   orgRole = callerOrgRole(c, orgId),
 ) {
+  // MEMOIZED per request, keyed on the organization asked about. Every
+  // authority and reachability decision needs this set, so a single route
+  // resolved it up to four times over; the alternative that grew instead was
+  // an optional `resolvedSpaces` parameter threaded through ten signatures,
+  // where forgetting to pass it cost a query and passing a STALE one would
+  // have cost a wrong answer. The cache lives on the Hono context, so it dies
+  // with the request and cannot outlive the standing it describes.
+  //
+  // Keyed on `orgId` because the cross-organization fork reader resolves the
+  // SOURCE org's spaces under the caller's membership there — two different
+  // answers for one request, and a single-slot cache would hand one of them to
+  // the other. `orgRole` is not part of the key: it is derived from `orgId`
+  // everywhere but the fork path, which passes the membership role it just
+  // read for that same org.
+  const cache =
+    c.get("packageAccessSpacesCache") ?? new Map<string, Promise<PackageAccessSpace[]>>();
+  if (!c.get("packageAccessSpacesCache")) c.set("packageAccessSpacesCache", cache);
+  const cached = cache.get(orgId);
+  if (cached) return cached;
+  const pending = resolvePackageAccessSpaces(c, orgId, orgRole);
+  cache.set(orgId, pending);
+  return pending;
+}
+
+/** The read itself — {@link packageAccessSpaces} is the memo in front of it. */
+async function resolvePackageAccessSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+  orgRole: OrgRole,
+): Promise<PackageAccessSpace[]> {
   const callerId = callerPersonalOwnerId(c, orgId);
   const [rows, memberships] = await Promise.all([
     db
@@ -360,12 +408,16 @@ export async function agentExecutionBlock(
 export async function assertCatalogPackageAccess(
   c: Context<AppEnv>,
   packageId: string,
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
   sourceOrgId: string = c.get("orgId"),
 ) {
   const [pkg, accessible, sharedIn] = await Promise.all([
     loadPackageRow(packageId, sourceOrgId),
-    resolvedSpaces ?? packageAccessSpaces(c),
+    // The SOURCE organization's spaces, not the caller's own: a fork may cross
+    // organizations, and the reachability it asks about is reachability THERE.
+    // `assertForkSourceAccess` primes the memo for that org under the
+    // membership role it just read, so this is a hit and not a second resolve
+    // with the wrong role.
+    packageAccessSpaces(c, sourceOrgId),
     loadPackageShares(packageId, sourceOrgId),
   ]);
   assertPackageIsReachable(packageId, pkg, sharedIn, accessible);
@@ -479,9 +531,8 @@ export async function assertPackageMutationAccess(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete",
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<PackageAccessRow> {
-  return assertHomeAuthority(c, packageId, action, resolvedSpaces);
+  return assertHomeAuthority(c, packageId, action);
 }
 
 /**
@@ -515,13 +566,12 @@ async function holdsPackageAuthority(
   c: Context<AppEnv>,
   packageId: string,
   verb: "write" | "share",
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<boolean> {
   const orgId = c.get("orgId");
   const pkg = await findPackageRow(packageId, orgId);
   if (!pkg) return false;
   if (isSystemPackageRow(pkg) || pkg.orgId !== orgId) return false;
-  const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
+  const accessible = await packageAccessSpaces(c);
   return holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, verb));
 }
 
@@ -533,21 +583,16 @@ async function holdsPackageAuthority(
  * {@link defaultDefinitionSelector} — so a route cannot invent a fourth way of
  * spelling the same refusal.
  */
-async function holdsPackageWriteAuthority(
-  c: Context<AppEnv>,
-  packageId: string,
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
-): Promise<boolean> {
-  return holdsPackageAuthority(c, packageId, "write", resolvedSpaces);
+async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string): Promise<boolean> {
+  return holdsPackageAuthority(c, packageId, "write");
 }
 
 /** The `share` half, for the bundle import that chooses instead of refusing. */
 export async function holdsPackageShareAuthority(
   c: Context<AppEnv>,
   packageId: string,
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<boolean> {
-  return holdsPackageAuthority(c, packageId, "share", resolvedSpaces);
+  return holdsPackageAuthority(c, packageId, "share");
 }
 
 /**
@@ -568,10 +613,9 @@ export async function assertDraftSelectorAllowed(
   c: Context<AppEnv>,
   packageId: string,
   selector: string | undefined | null,
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<void> {
   if (selector?.trim() !== VERSION_SELECTOR_DRAFT) return;
-  if (await holdsPackageWriteAuthority(c, packageId, resolvedSpaces)) return;
+  if (await holdsPackageWriteAuthority(c, packageId)) return;
   throw draftNotWritable(packageId);
 }
 
@@ -600,13 +644,12 @@ export async function assertDraftSelectorAllowed(
 export async function defaultDefinitionSelector(
   c: Context<AppEnv>,
   agent: { id: string; source: string },
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<{
   selector: typeof VERSION_SELECTOR_DRAFT | typeof VERSION_SELECTOR_PUBLISHED;
   writable: boolean;
 }> {
   if (agent.source === "system") return { selector: VERSION_SELECTOR_PUBLISHED, writable: false };
-  const writable = await holdsPackageWriteAuthority(c, agent.id, resolvedSpaces);
+  const writable = await holdsPackageWriteAuthority(c, agent.id);
   if (writable) return { selector: VERSION_SELECTOR_DRAFT, writable };
   const published = await getLatestVersionId(agent.id);
   return { selector: published ? VERSION_SELECTOR_PUBLISHED : VERSION_SELECTOR_DRAFT, writable };
@@ -640,13 +683,11 @@ export async function assertDependencyDraftOverridesAllowed(
   overrides: Readonly<Record<string, string>> | null | undefined,
   /** The manifest the launch will EXECUTE — a draft and a published version do not declare the same dependencies. */
   manifest: Record<string, unknown>,
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<void> {
   assertDependencyOverrideKeysDeclared(manifest, overrides);
   if (!overrides) return;
-  const accessible = resolvedSpaces ?? (await packageAccessSpaces(c));
   for (const [dependencyId, selector] of Object.entries(overrides)) {
-    await assertDraftSelectorAllowed(c, dependencyId, selector, accessible);
+    await assertDraftSelectorAllowed(c, dependencyId, selector);
   }
 }
 
@@ -682,9 +723,8 @@ export function draftNotWritable(packageId: string): ApiError {
 export async function assertPackageShareAccess(
   c: Context<AppEnv>,
   packageId: string,
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<PackageAccessRow> {
-  return assertHomeAuthority(c, packageId, "share", resolvedSpaces);
+  return assertHomeAuthority(c, packageId, "share");
 }
 
 /** The home rule itself, for each of the three verbs that ask it. */
@@ -692,12 +732,11 @@ async function assertHomeAuthority(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete" | "share",
-  resolvedSpaces?: Awaited<ReturnType<typeof packageAccessSpaces>>,
 ): Promise<PackageAccessRow> {
   const orgId = c.get("orgId");
   const [pkg, accessible] = await Promise.all([
     loadPackageRow(packageId, orgId),
-    resolvedSpaces ?? packageAccessSpaces(c),
+    packageAccessSpaces(c),
   ]);
   // The catalog read above is `orgOrSystemFilter`ed, so another org's package
   // never loads at all (404). A row whose org does not match is a SYSTEM one —
@@ -922,7 +961,7 @@ export async function assertForkSourceAccess(c: Context<AppEnv>, packageId: stri
     const orgId = c.get("orgId");
     const orgRole = callerOrgRole(c, orgId);
     const accessible = await packageAccessSpaces(c, orgId, orgRole);
-    const source = await assertCatalogPackageAccess(c, packageId, accessible);
+    const source = await assertCatalogPackageAccess(c, packageId);
     await assertPackageCopyAllowed(c, source, { orgId, accessible });
     return source;
   }
@@ -932,20 +971,19 @@ export async function assertForkSourceAccess(c: Context<AppEnv>, packageId: stri
   const membership = await getOrgMember(pkg.orgId, c.get("user").id);
   if (!membership) throw notFound(`Package '${packageId}' not found`);
   const accessible = await packageAccessSpaces(c, pkg.orgId, membership.role);
-  const source = await assertCatalogPackageAccess(c, packageId, accessible, pkg.orgId);
+  const source = await assertCatalogPackageAccess(c, packageId, pkg.orgId);
   await assertPackageCopyAllowed(c, source, { orgId: pkg.orgId, accessible });
   return source;
 }
 
 /** Shared authorization for REST and MCP bundle validation/import, before metadata or writes. */
 export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle): Promise<void> {
-  const accessible = await packageAccessSpaces(c);
   for (const [identity, pkg] of bundle.packages) {
     const parsed = parsePackageIdentity(identity);
     if (!parsed) throw invalidRequest(`Invalid package identity: ${identity}`);
     const packageId = parsed.packageId;
     if (isSystemPackage(packageId)) {
-      const source = await assertCatalogPackageAccess(c, packageId, accessible);
+      const source = await assertCatalogPackageAccess(c, packageId);
       if (identity === bundle.root)
         await assertExistingPackageActivationAccess(c, packageId, source.type);
       continue;
@@ -961,7 +999,7 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
       .where(eq(packages.id, packageId))
       .limit(1);
     if (existing?.orgId === c.get("orgId")) {
-      await assertPackageMutationAccess(c, packageId, "write", accessible);
+      await assertPackageMutationAccess(c, packageId, "write");
       if (identity === bundle.root)
         await assertExistingPackageActivationAccess(c, packageId, existing.type);
     }
@@ -1006,7 +1044,7 @@ export async function authorizeBundlePackages(c: Context<AppEnv>, bundle: Bundle
     .where(inArray(packages.id, [...outward.keys()]));
   // A reference to nothing stays the existing missing-dependency error; a
   // reference to something the caller cannot reach is hidden, as everywhere.
-  for (const { id } of known) await assertCatalogPackageAccess(c, id, accessible);
+  for (const { id } of known) await assertCatalogPackageAccess(c, id);
 }
 
 /** `@scope/name`, the shape both `packages.id` and the catalog reads are typed with. */
@@ -1079,18 +1117,15 @@ export async function assertPackageDependenciesAccessible(
     checked.add(reference.type);
     await makePermissionGuard(packagePermission(reference.type, "read"))(c, async () => {});
   }
-  const [accessible, existing] = await Promise.all([
-    packageAccessSpaces(c),
-    db
-      .select({ id: packages.id })
-      .from(packages)
-      .where(
-        inArray(
-          packages.id,
-          references.map((reference) => reference.id),
-        ),
+  const existing = await db
+    .select({ id: packages.id })
+    .from(packages)
+    .where(
+      inArray(
+        packages.id,
+        references.map((reference) => reference.id),
       ),
-  ]);
+    );
   // Readiness keeps the existing missing-dependency errors; known but inaccessible sources are hidden.
-  for (const { id } of existing) await assertCatalogPackageAccess(c, id, accessible);
+  for (const { id } of existing) await assertCatalogPackageAccess(c, id);
 }

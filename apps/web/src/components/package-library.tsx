@@ -31,7 +31,12 @@ import type { PackageType } from "@appstrate/core/validation";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "./page-states";
 import { placementIn, useSetPackageActive } from "../hooks/use-library";
-import type { LibraryPackageItem, LibraryResponse, LibrarySpace } from "../hooks/use-library";
+import type {
+  LibraryPackageItem,
+  LibraryPlacement,
+  LibraryResponse,
+  LibrarySpace,
+} from "../hooks/use-library";
 import { useSpaces } from "../hooks/use-spaces";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useRevokePackageShare } from "../hooks/use-package-shares";
@@ -66,6 +71,16 @@ const TYPE_MAP: Record<Tab, PackageType> = {
 type LibraryData = Pick<LibraryResponse, "packages" | "spaces">;
 
 /** The tab strip both views share; only the table under it differs. */
+/**
+ * An offer nobody has taken up — `via: "shared"` with no placement row behind
+ * it (RBAC spec §6.8). The server already answers both halves; this names the
+ * pair so the two components that render it cannot drift into two readings of
+ * the same cell.
+ */
+function isUntakenOffer(placement: LibraryPlacement | undefined): boolean {
+  return placement?.via === "shared" && placement.state === "none";
+}
+
 function LibraryTabs({
   data,
   title,
@@ -219,7 +234,7 @@ function ActivationCheckbox({
   const blocked = !mayPlace || !mayToggle;
   // An offer nobody has taken up: what saying yes means rides the box itself
   // and not only a page header the reader scrolled past.
-  const untakenOffer = placement?.via === "shared" && placement.state === "none";
+  const untakenOffer = isUntakenOffer(placement);
 
   const title =
     // Until `useSpaces` resolves the caller's standing is unknown, so the box
@@ -532,7 +547,7 @@ function SpacePlacements({
                             // home). It is a candidate, not an inhabitant.
                             t("library.origin.notPlaced")}
                   </span>
-                  {placement?.via === "shared" && placement.state === "none" && (
+                  {isUntakenOffer(placement) && (
                     <Badge
                       variant="outline"
                       className="px-1.5 py-0 text-[0.65rem]"

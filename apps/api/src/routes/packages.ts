@@ -1964,7 +1964,7 @@ export function createPackagesRouter() {
     // Authority in the CURRENT home first — 404 for an id the caller cannot
     // reach at all, 403 when they can see it but do not govern it. It hands
     // back the row, so the type and the old home are not read twice.
-    const pkg = await assertPackageMutationAccess(c, packageId, "write", accessible);
+    const pkg = await assertPackageMutationAccess(c, packageId, "write");
 
     const body = await readJsonBody(c, packageHomeSpaceSchema);
     const target = body.home_space_id;
@@ -2229,7 +2229,7 @@ export function createPackagesRouter() {
     const accessible = await packageAccessSpaces(c);
     // Authority first, before the body is read: a caller who may not share this
     // package learns nothing about the body's shape (or the package's existence).
-    const pkg = await assertPackageShareAccess(c, packageId, accessible);
+    const pkg = await assertPackageShareAccess(c, packageId);
     const { target } = await readJsonBody(c, shareTargetSchema);
 
     // Outside its home a package runs the LATEST PUBLISHED version, always
@@ -2365,7 +2365,7 @@ export function createPackagesRouter() {
     const target = c.req.param("target")!;
     const orgId = c.get("orgId");
     const revokeSpaces = await packageAccessSpaces(c);
-    const revokePkg = await assertPackageShareAccess(c, packageId, revokeSpaces);
+    const revokePkg = await assertPackageShareAccess(c, packageId);
 
     let spaceId: string;
     let recipientUserId: string | null = null;

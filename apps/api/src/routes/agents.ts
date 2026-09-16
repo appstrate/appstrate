@@ -160,7 +160,6 @@ async function requireBundleDependencyReadPermissions(
   bundle: Bundle,
 ): Promise<void> {
   const checked = new Set<string>();
-  const accessible = await packageAccessSpaces(c);
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const rawType = asRecord(pkg.manifest).type;
@@ -184,7 +183,7 @@ async function requireBundleDependencyReadPermissions(
       // as every route-level RBAC call site.
       await guard(c, async () => {});
     }
-    await assertCatalogPackageAccess(c, parsed.packageId, accessible);
+    await assertCatalogPackageAccess(c, parsed.packageId);
   }
 }
 
@@ -374,8 +373,7 @@ export function createAgentsRouter() {
       // Resolved ONCE and handed to both: the gate and the default selector ask
       // the same question of the same package, and each one resolving the
       // caller's spaces for itself is two full space walks per badge.
-      const accessible = await packageAccessSpaces(c);
-      await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"), accessible);
+      await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"));
       return c.json(
         await resolveAgentConnectionReadiness({
           scope: getSpaceScope(c),
@@ -390,9 +388,7 @@ export function createAgentsRouter() {
           // `defaultDefinitionSelector`. Deriving it a second way is how the
           // badge came to 404 a page that had just rendered. The service takes
           // the answer and never re-derives it.
-          version:
-            c.req.query("version") ||
-            (await defaultDefinitionSelector(c, agent, accessible)).selector,
+          version: c.req.query("version") || (await defaultDefinitionSelector(c, agent)).selector,
         }),
       );
     },
@@ -733,7 +729,7 @@ export function createAgentsRouter() {
       // the same bundle without handing it to anyone.
       const orgRole = callerOrgRole(c, orgId);
       const accessible = await packageAccessSpaces(c, orgId, orgRole);
-      const root = await assertCatalogPackageAccess(c, packageId, accessible);
+      const root = await assertCatalogPackageAccess(c, packageId);
       await assertPackageCopyAllowed(c, root, { orgId, accessible });
       // An EXPORTED draft is a draft run with the bytes handed over as well:
       // the archive carries the unpublished manifest and prompt, and `--local`
@@ -745,7 +741,7 @@ export function createAgentsRouter() {
       // published versions (`buildBundleFromAgentDraft`), so no dependency's
       // working copy leaves by this door without its own `dependency_overrides`
       // gate.
-      await assertDraftSelectorAllowed(c, packageId, useDraft ? "draft" : undefined, accessible);
+      await assertDraftSelectorAllowed(c, packageId, useDraft ? "draft" : undefined);
       const scope = getSpaceScope(c);
 
       // Omit time-varying metadata (createdAt) so two exports of the same

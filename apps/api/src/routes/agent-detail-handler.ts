@@ -178,7 +178,7 @@ export async function buildAgentDetailDto(
   const explicit = opts.version?.trim();
   // ONE read of the authority, for both halves of the decision: which view is
   // the default, and whether an explicit `draft` is the caller's to ask for.
-  const { selector: defaultSel, writable } = await defaultDefinitionSelector(c, agent, accessible);
+  const { selector: defaultSel, writable } = await defaultDefinitionSelector(c, agent);
   if (explicit === VERSION_SELECTOR_DRAFT && !writable) throw draftNotWritable(agent.id);
   const versionSel = explicit || defaultSel;
   const effective =

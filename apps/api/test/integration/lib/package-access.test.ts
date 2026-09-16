@@ -63,18 +63,35 @@ function space(id: string, permissions: string[]) {
  * set for the current space; `orgRole` and `authMethod` shape the reach
  * `packageAccessSpaces` would have resolved, which is what the home rule reads.
  */
-function caller(opts: {
-  orgRole: "owner" | "admin" | "member" | "guest";
-  permissions: string[];
-  authMethod?: string;
-}): Context<AppEnv> {
+function caller(
+  opts: {
+    orgRole: "owner" | "admin" | "member" | "guest";
+    permissions: string[];
+    authMethod?: string;
+  },
+  /**
+   * The caller's reach, seeded into the per-request memo `packageAccessSpaces`
+   * reads. It used to travel as an explicit argument through every assert;
+   * seeding the memo is how a REQUEST states it now, so the fixture and the
+   * production path agree on where that set comes from.
+   */
+  accessible?: AccessibleSpaces,
+): Context<AppEnv> {
   const values: Record<string, unknown> = {
     orgId: ctx.orgId,
     orgRole: opts.orgRole,
     authMethod: opts.authMethod ?? "session",
     permissions: new Set(opts.permissions),
+    ...(accessible
+      ? { packageAccessSpacesCache: new Map([[ctx.orgId, Promise.resolve(accessible)]]) }
+      : {}),
   };
-  return { get: (key: string) => values[key] } as unknown as Context<AppEnv>;
+  return {
+    get: (key: string) => values[key],
+    set: (key: string, value: unknown) => {
+      values[key] = value;
+    },
+  } as unknown as Context<AppEnv>;
 }
 
 const BUILDER_SKILLS = ["skills:read", "skills:write", "skills:delete"];
@@ -111,10 +128,9 @@ describe("assertPackageMutationAccess", () => {
     await seedSpacePackage(otherId, SKILL);
     const accessible: AccessibleSpaces = [space(homeId, BUILDER_SKILLS)];
     await assertPackageMutationAccess(
-      caller({ orgRole: "member", permissions: BUILDER_SKILLS }),
+      caller({ orgRole: "member", permissions: BUILDER_SKILLS }, accessible),
       SKILL,
       "write",
-      accessible,
     );
   });
 
@@ -126,10 +142,9 @@ describe("assertPackageMutationAccess", () => {
     const accessible: AccessibleSpaces = [space(otherId, BUILDER_SKILLS)];
     const refused = await refusal(
       assertPackageMutationAccess(
-        caller({ orgRole: "member", permissions: BUILDER_SKILLS }),
+        caller({ orgRole: "member", permissions: BUILDER_SKILLS }, accessible),
         SKILL,
         "write",
-        accessible,
       ),
     );
     expect(refused.status).toBe(403);
@@ -141,10 +156,9 @@ describe("assertPackageMutationAccess", () => {
     const accessible: AccessibleSpaces = [space(otherId, BUILDER_SKILLS)];
     const refused = await refusal(
       assertPackageMutationAccess(
-        caller({ orgRole: "member", permissions: BUILDER_SKILLS }),
+        caller({ orgRole: "member", permissions: BUILDER_SKILLS }, accessible),
         SKILL,
         "write",
-        accessible,
       ),
     );
     expect(refused.status).toBe(404);
@@ -166,19 +180,17 @@ describe("assertPackageMutationAccess", () => {
     for (const orgRole of ["member", "admin", "owner"] as const) {
       const refused = await refusal(
         assertPackageMutationAccess(
-          caller({ orgRole, permissions: BUILDER_SKILLS }),
+          caller({ orgRole, permissions: BUILDER_SKILLS }, without),
           SKILL,
           "write",
-          without,
         ),
       );
       expect(refused.status, `${orgRole} with no skills:write in the home`).toBe(403);
 
       await assertPackageMutationAccess(
-        caller({ orgRole, permissions: BUILDER_SKILLS }),
+        caller({ orgRole, permissions: BUILDER_SKILLS }, with_),
         SKILL,
         "write",
-        with_,
       );
     }
   });
@@ -194,10 +206,9 @@ describe("assertPackageMutationAccess", () => {
     const accessible: AccessibleSpaces = [space(homeId, ["skills:read"])];
     const refused = await refusal(
       assertPackageMutationAccess(
-        caller({ orgRole: "member", permissions: BUILDER_SKILLS }),
+        caller({ orgRole: "member", permissions: BUILDER_SKILLS }, accessible),
         SKILL,
         "delete",
-        accessible,
       ),
     );
     expect(refused.status).toBe(403);
@@ -210,10 +221,9 @@ describe("assertPackageMutationAccess", () => {
     // No `permissions` on the context at all: there is no current-space check
     // left to satisfy, which is the whole point of the home rule.
     await assertPackageMutationAccess(
-      caller({ orgRole: "member", permissions: [] }),
+      caller({ orgRole: "member", permissions: [] }, accessible),
       SKILL,
       "write",
-      accessible,
     );
   });
 });
@@ -223,9 +233,8 @@ describe("assertCatalogPackageAccess", () => {
     await assertDbCountZeroInstalls();
     const accessible: AccessibleSpaces = [space(homeId, ["skills:read"])];
     const pkg = await assertCatalogPackageAccess(
-      caller({ orgRole: "member", permissions: ["skills:read"] }),
+      caller({ orgRole: "member", permissions: ["skills:read"] }, accessible),
       SKILL,
-      accessible,
     );
     expect(pkg.id).toBe(SKILL);
   });
@@ -235,9 +244,8 @@ describe("assertCatalogPackageAccess", () => {
     const accessible: AccessibleSpaces = [space(otherId, ["skills:read"])];
     const refused = await refusal(
       assertCatalogPackageAccess(
-        caller({ orgRole: "member", permissions: ["skills:read"] }),
+        caller({ orgRole: "member", permissions: ["skills:read"] }, accessible),
         SKILL,
-        accessible,
       ),
     );
     expect(refused.status).toBe(404);
@@ -386,9 +394,8 @@ describe("assertCatalogPackageAccess — the share half of the read rule", () =>
     await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
     const accessible: AccessibleSpaces = [space(otherId, ["skills:read"])];
     const pkg = await assertCatalogPackageAccess(
-      caller({ orgRole: "member", permissions: ["skills:read"] }),
+      caller({ orgRole: "member", permissions: ["skills:read"] }, accessible),
       SKILL,
-      accessible,
     );
     expect(pkg.id).toBe(SKILL);
   });
@@ -398,9 +405,10 @@ describe("assertCatalogPackageAccess — the share half of the read rule", () =>
     const third = (await seedSpace({ orgId: ctx.orgId, name: "Third", visibility: "closed" })).id;
     const refused = await refusal(
       assertCatalogPackageAccess(
-        caller({ orgRole: "member", permissions: ["skills:read"] }),
+        caller({ orgRole: "member", permissions: ["skills:read"] }, [
+          space(third, ["skills:read"]),
+        ]),
         SKILL,
-        [space(third, ["skills:read"])],
       ),
     );
     expect(refused.status).toBe(404);
@@ -411,9 +419,8 @@ describe("assertPackageShareAccess", () => {
   it("accepts `<type>:share` in the home space", async () => {
     const accessible: AccessibleSpaces = [space(homeId, [...BUILDER_SKILLS, "skills:share"])];
     const pkg = await assertPackageShareAccess(
-      caller({ orgRole: "member", permissions: [...BUILDER_SKILLS, "skills:share"] }),
+      caller({ orgRole: "member", permissions: [...BUILDER_SKILLS, "skills:share"] }, accessible),
       SKILL,
-      accessible,
     );
     expect(pkg.id).toBe(SKILL);
   });
@@ -422,9 +429,8 @@ describe("assertPackageShareAccess", () => {
     const accessible: AccessibleSpaces = [space(homeId, BUILDER_SKILLS)];
     const refused = await refusal(
       assertPackageShareAccess(
-        caller({ orgRole: "member", permissions: BUILDER_SKILLS }),
+        caller({ orgRole: "member", permissions: BUILDER_SKILLS }, accessible),
         SKILL,
-        accessible,
       ),
     );
     expect(refused.status).toBe(403);
@@ -435,9 +441,8 @@ describe("assertPackageShareAccess", () => {
     const accessible: AccessibleSpaces = [space(otherId, [...BUILDER_SKILLS, "skills:share"])];
     const refused = await refusal(
       assertPackageShareAccess(
-        caller({ orgRole: "member", permissions: [...BUILDER_SKILLS, "skills:share"] }),
+        caller({ orgRole: "member", permissions: [...BUILDER_SKILLS, "skills:share"] }, accessible),
         SKILL,
-        accessible,
       ),
     );
     expect(refused.status).toBe(404);
@@ -451,21 +456,25 @@ describe("assertPackageShareAccess", () => {
     // answers the home's permission set, and a key that somehow held the
     // permission would be answered like any other principal.
     await seedSpacePackage(homeId, SKILL);
-    const key = () =>
-      caller({
-        orgRole: "owner",
-        permissions: [...BUILDER_SKILLS, "skills:share"],
-        authMethod: "api_key",
-      });
+    const key = (accessible: AccessibleSpaces) =>
+      caller(
+        {
+          orgRole: "owner",
+          permissions: [...BUILDER_SKILLS, "skills:share"],
+          authMethod: "api_key",
+        },
+        accessible,
+      );
 
     const refused = await refusal(
-      assertPackageShareAccess(key(), SKILL, [space(homeId, BUILDER_SKILLS)]),
+      assertPackageShareAccess(key([space(homeId, BUILDER_SKILLS)]), SKILL),
     );
     expect(refused.status).toBe(403);
 
-    await assertPackageShareAccess(key(), SKILL, [
-      space(homeId, [...BUILDER_SKILLS, "skills:share"]),
-    ]);
+    await assertPackageShareAccess(
+      key([space(homeId, [...BUILDER_SKILLS, "skills:share"])]),
+      SKILL,
+    );
   });
 });
 

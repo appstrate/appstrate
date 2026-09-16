@@ -9,7 +9,7 @@ import type { AppEnv } from "../types/index.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { caretRange } from "@appstrate/core/semver";
 import { extractDependencies } from "@appstrate/core/dependencies";
-import { assertCatalogPackageAccess, packageAccessSpaces } from "../lib/package-access.ts";
+import { assertCatalogPackageAccess } from "../lib/package-access.ts";
 import { requireOrgAgent, requireMutableAgent, requirePackageInOrg } from "../middleware/guards.ts";
 import { buildAgentDetailDto } from "./agent-detail-handler.ts";
 import { internalError, invalidRequest } from "../lib/errors.ts";
@@ -101,8 +101,7 @@ export function createUserAgentsRouter() {
       );
       const added = skillIds.filter((id) => !existingIds.has(id));
       if (added.length) {
-        const accessible = await packageAccessSpaces(c);
-        for (const skillId of added) await assertCatalogPackageAccess(c, skillId, accessible);
+        for (const skillId of added) await assertCatalogPackageAccess(c, skillId);
       }
       await updateManifestDeps(c.get("orgId"), packageId, skillIds);
 
