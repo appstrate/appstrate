@@ -1710,6 +1710,12 @@ export const packagesPaths = {
                   description:
                     "Destination space id (`spc_…`). Required and non-nullable — a package always has a home space.",
                 },
+                keep_in_previous_home: {
+                  type: "boolean",
+                  default: true,
+                  description:
+                    "Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. Answered the same way whether or not the old home held a placement row, so the act does not change meaning with a state the caller cannot see. The audit entry `package.home_space_changed` records it as `kept_in_previous_home`.",
+                },
               },
               additionalProperties: false,
             },

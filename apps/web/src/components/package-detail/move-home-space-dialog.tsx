@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { Button } from "@appstrate/ui/components/button";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
 import { Modal } from "../modal";
@@ -42,13 +43,22 @@ export function MoveHomeSpaceDialog({
   const { data: spaces } = useSpaces(open);
   const move = useMovePackageHome(type);
   const [target, setTarget] = useState("");
+  // Checked by default: that is what the move has always done, so opening this
+  // dialog and pressing Move changes nothing about what the space being left
+  // runs. Unchecking is the deliberate act, not the default one.
+  const [keepInPreviousHome, setKeepInPreviousHome] = useState(true);
 
   const writable = writableDestinations(spaces, type, homeSpaceId);
+  // The space being LEFT, named so the checkbox can say which one it is about.
+  // `home_space_id` is null when the caller cannot reach that space — but the
+  // move requires `<type>:write` THERE, so a caller who got this far can.
+  const previousHome = spaces?.find((space) => space.id === homeSpaceId);
 
   // The dialog stays mounted between openings, so the selection is cleared on
   // the way OUT — every exit goes through here (cancel, Esc, overlay, success).
   const close = () => {
     setTarget("");
+    setKeepInPreviousHome(true);
     onClose();
   };
 
@@ -56,7 +66,7 @@ export function MoveHomeSpaceDialog({
     const destination = writable.find((space) => space.id === target);
     if (!destination) return;
     move.mutate(
-      { id: packageId, homeSpaceId: destination.id },
+      { id: packageId, homeSpaceId: destination.id, keepInPreviousHome },
       {
         onSuccess: () => {
           toast.success(t("packages.moveHomeDone", { space: destination.name }));
@@ -101,6 +111,33 @@ export function MoveHomeSpaceDialog({
           {writable.length === 0 ? t("packages.moveHomeEmpty") : t("packages.moveHomeHint")}
         </p>
       </div>
+      {/*
+        The half of the act the word "move" does not carry: the space being
+        LEFT keeps the package unless this is unchecked. Rendered whether or
+        not that space currently runs it, because the answer is the same either
+        way — a dialog that appeared only for an activated package would put
+        the old asymmetry back where the user cannot see it.
+      */}
+      {previousHome ? (
+        <div className="mt-4 flex gap-3">
+          <Checkbox
+            id="move-home-keep"
+            className="mt-0.5"
+            checked={keepInPreviousHome}
+            onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}
+          />
+          <div className="space-y-1">
+            <Label htmlFor="move-home-keep" className="font-normal">
+              {t("packages.moveHomeKeep", { space: previousHome.name })}
+            </Label>
+            <p className="text-muted-foreground text-sm">
+              {keepInPreviousHome
+                ? t("packages.moveHomeKeepHint", { space: previousHome.name })
+                : t("packages.moveHomeReleaseHint", { space: previousHome.name })}
+            </p>
+          </div>
+        </div>
+      ) : null}
     </Modal>
   );
 }

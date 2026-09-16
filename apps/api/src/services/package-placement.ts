@@ -132,6 +132,9 @@ export async function isPlacedElsewhere(
  * dropped for the mirror-image reason `POST …/shares` answers
  * `share_target_is_home`: a package is not offered to the space it lives in.
  *
+ * The one space whose answer is a CHOICE rather than an invariant is the home
+ * being left: see `previousHome` below. Everything else here is forced.
+ *
  * Two callers, one shape, and the second is why this is a function rather than
  * a paragraph inside the first: `PATCH /api/packages/{scope}/{name}` moves a
  * home deliberately, and `emptyAndDeletePersonalSpace`
@@ -146,9 +149,49 @@ export async function isPlacedElsewhere(
  */
 export async function reconcilePlacementsAfterRehome(
   tx: DbOrTx,
-  params: { packageId: string; orgId: string; newHomeSpaceId: string },
+  params: {
+    packageId: string;
+    orgId: string;
+    newHomeSpaceId: string;
+    /**
+     * The home being LEFT, and what becomes of its placement — the one space
+     * whose answer is a choice rather than an invariant.
+     *
+     * Every OTHER space holding a row already holds an offer (that offer is
+     * what places it), so the backfill below only ever creates one row: the
+     * old home's, which until this call was placed by the home column itself.
+     * That is exactly the row a human is entitled to decide about, and
+     * `PATCH /api/packages/{scope}/{name}` passes their answer here.
+     *
+     * `keep: true` is the behaviour this function has always had, unchanged:
+     * the backfill above covers the old home when it holds a placement ROW,
+     * and leaves it out when it does not. That asymmetry is deliberate rather
+     * than tidy — the backfill exists to keep RUNNING what was running, so a
+     * space that had switched the package off has nothing to rescue, and
+     * writing it an offer anyway would WIDEN what that space sees on an act
+     * nobody asked to widen anything. Making the two cases uniform was tried
+     * and reverted for exactly that reason.
+     *
+     * `keep: false` withdraws the offer AND the placement row together, the
+     * pair {@link revokePackageShare} withdraws, because dropping only the
+     * offer would leave a row nothing places — the ORPHAN this module exists
+     * to keep out of the database, the residue `scripts/migration/0016`
+     * repairs, and a state `activeHereSql` refuses to honour while the row
+     * goes on carrying the space's model, proxy and stored input values.
+     *
+     * OMITTED by the personal-space sweeper, and that is the point of it being
+     * optional: the sweeper re-homes a departed author's package on nobody's
+     * request, so it has no answer to give and must keep the old behaviour —
+     * every space that was running the package goes on running it.
+     */
+    previousHome?: { spaceId: string; keep: boolean };
+  },
 ): Promise<void> {
-  const { packageId, orgId, newHomeSpaceId } = params;
+  const { packageId, orgId, newHomeSpaceId, previousHome } = params;
+  const releasing =
+    previousHome && !previousHome.keep && previousHome.spaceId !== newHomeSpaceId
+      ? previousHome.spaceId
+      : null;
 
   // The `spaces` join is the org boundary: `space_packages` carries no
   // `org_id`, and an offer must never be written for a space another
@@ -162,6 +205,8 @@ export async function reconcilePlacementsAfterRehome(
         eq(spacePackages.packageId, packageId),
         eq(spaces.orgId, orgId),
         ne(spacePackages.spaceId, newHomeSpaceId),
+        // A released old home is not backfilled — it is emptied below.
+        releasing ? ne(spacePackages.spaceId, releasing) : undefined,
       ),
     );
 
@@ -170,6 +215,17 @@ export async function reconcilePlacementsAfterRehome(
       .insert(packageShares)
       .values(orphaned.map((row) => ({ packageId, spaceId: row.spaceId, sharedBy: null })))
       .onConflictDoNothing();
+  }
+
+  // Both halves, together: an offer withdrawn while its row stands is the
+  // orphan this function exists to prevent.
+  if (releasing) {
+    await tx
+      .delete(packageShares)
+      .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, releasing)));
+    await tx
+      .delete(spacePackages)
+      .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, releasing)));
   }
 
   await tx

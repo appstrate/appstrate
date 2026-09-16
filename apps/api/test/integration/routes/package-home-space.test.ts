@@ -99,12 +99,29 @@ async function editSkill(headers: Record<string, string>) {
 }
 
 /** `homeSpaceId` is typed nullable so the schema's refusal of `null` can be asked for. */
-const move = (headers: Record<string, string>, homeSpaceId: string | null) =>
+const move = (
+  headers: Record<string, string>,
+  homeSpaceId: string | null,
+  /** Omitted sends no field at all — the server's own default is under test. */
+  keepInPreviousHome?: boolean,
+) =>
   app.request(`/api/packages/${ID}`, {
     method: "PATCH",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ home_space_id: homeSpaceId }),
+    body: JSON.stringify({
+      home_space_id: homeSpaceId,
+      ...(keepInPreviousHome === undefined ? {} : { keep_in_previous_home: keepInPreviousHome }),
+    }),
   });
+
+/** The spaces holding a `space_packages` row for the fixture package. */
+async function rowSpaceIds(): Promise<string[]> {
+  const rows = await db
+    .select({ spaceId: spacePackages.spaceId })
+    .from(spacePackages)
+    .where(eq(spacePackages.packageId, ID));
+  return rows.map((row) => row.spaceId).sort();
+}
 
 const homeOf = async () => (await getDbRow(packages, eq(packages.id, ID))).homeSpaceId;
 
@@ -755,8 +772,8 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
     expect(moved).toBeDefined();
     expect(moved!.before).toEqual({ home_space_id: null, home_owner_user_id: ctx.user.id });
     // The destination is a team space by construction now, so `after` carries
-    // its id plainly.
-    expect(moved!.after).toEqual({ home_space_id: alphaId });
+    // its id plainly, beside the choice the move made about the space it left.
+    expect(moved!.after).toEqual({ home_space_id: alphaId, kept_in_previous_home: true });
   });
 
   it("accepts a no-op PATCH of a package already homed in the caller's personal space", async () => {
@@ -1018,5 +1035,96 @@ describe("creation sets the home", () => {
     const row = await getDbRow(packages, eq(packages.id, "@homes/fresh"));
     expect(row.homeSpaceId).toBe(betaId);
     await db.delete(packages).where(eq(packages.id, "@homes/fresh"));
+  });
+});
+
+describe("what becomes of the space the move LEAVES", () => {
+  /**
+   * The half of the act the word "move" does not carry.
+   *
+   * A package born in a space is homed AND activated there, so the space it is
+   * moved OUT of holds a `space_packages` row — and the reconciliation gives
+   * that row the offer that now places it, which is why the package goes on
+   * appearing on that space's pages after a "move". That is deliberate
+   * (nothing it had scheduled stops) but it is not what the word promises, and
+   * until `keep_in_previous_home` there was no way to say otherwise.
+   *
+   * Two properties are asserted together on the `false` branch, and the second
+   * is the one that makes this more than a UI flag: the offer and the
+   * placement ROW go together. Dropping only the offer would leave a row
+   * nothing places — the orphan `scripts/migration/0016` repairs, which no
+   * page shows and no execution door honours while it goes on carrying the
+   * space's model, proxy and stored input values.
+   */
+  it("keeps the package in the old home by default — the field omitted entirely", async () => {
+    expect((await move(owner(), betaId)).status).toBe(200);
+
+    expect(await sharedSpaceIds()).toEqual([alphaId]);
+    expect(await rowSpaceIds()).toEqual([alphaId, betaId].sort());
+    expect(await skillIndexIds(alpha)).toContain(ID);
+  });
+
+  it("keeps it on an explicit `true`, exactly as the default does", async () => {
+    expect((await move(owner(), betaId, true)).status).toBe(200);
+
+    expect(await sharedSpaceIds()).toEqual([alphaId]);
+    expect(await skillIndexIds(alpha)).toContain(ID);
+  });
+
+  it("on `false`, withdraws the offer AND the placement row together", async () => {
+    expect((await move(owner(), betaId, false)).status).toBe(200);
+
+    // No offer for Alpha — and no row either, which is the half that keeps an
+    // orphan out of the table rather than merely out of a page.
+    expect(await sharedSpaceIds()).toEqual([]);
+    expect(await rowSpaceIds()).toEqual([betaId]);
+    expect(await skillIndexIds(alpha)).not.toContain(ID);
+    // Alpha cannot read it any more: it holds neither of the two placements.
+    await expectProblem(await detailOf(alpha), 404);
+    // …while the destination has it, homed and running.
+    expect(await homeOf()).toBe(betaId);
+    expect(await skillIndexIds(beta)).toContain(ID);
+  });
+
+  it("leaves an old home that was NOT running it, whatever the flag says", async () => {
+    // `keep` rescues what was RUNNING; it does not widen. A space that had
+    // switched the package off holds no row, so there is nothing to carry over
+    // and no offer is written — on `true` exactly as on `false`. Making the
+    // two cases uniform would have handed that space a placement it did not
+    // have before the move, on an act nobody asked to share anything.
+    await db
+      .delete(spacePackages)
+      .where(and(eq(spacePackages.packageId, ID), eq(spacePackages.spaceId, alphaId)));
+    expect(await rowSpaceIds()).toEqual([betaId]);
+
+    expect((await move(owner(), betaId, true)).status).toBe(200);
+
+    expect(await sharedSpaceIds()).toEqual([]);
+    await expectProblem(await detailOf(alpha), 404);
+  });
+
+  it("records the choice on the move's own audit entry", async () => {
+    expect((await move(owner(), betaId, false)).status).toBe(200);
+
+    const [entry] = await db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "package.home_space_changed"));
+    expect(entry!.after).toMatchObject({
+      home_space_id: betaId,
+      kept_in_previous_home: false,
+    });
+  });
+
+  it("refuses a non-boolean rather than coercing it", async () => {
+    await expectRejectedField(
+      await app.request(`/api/packages/${ID}`, {
+        method: "PATCH",
+        headers: { ...owner(), "Content-Type": "application/json" },
+        body: JSON.stringify({ home_space_id: betaId, keep_in_previous_home: "no" }),
+      }),
+      "keep_in_previous_home",
+    );
+    expect(await homeOf()).toBe(alphaId);
   });
 });

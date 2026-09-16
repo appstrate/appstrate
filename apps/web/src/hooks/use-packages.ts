@@ -246,16 +246,29 @@ function useMovePackageHome(type: PackageType) {
   const qc = useQueryClient();
   const cfg = PACKAGE_CONFIG[type];
   return useMutation({
-    mutationFn: async ({ id, homeSpaceId }: { id: string; homeSpaceId: string }) => {
+    mutationFn: async ({
+      id,
+      homeSpaceId,
+      keepInPreviousHome,
+    }: {
+      id: string;
+      homeSpaceId: string;
+      /** Does the space being left keep the package? Sent explicitly — the server defaults it to `true`. */
+      keepInPreviousHome: boolean;
+    }) => {
       await client.PATCH("/api/packages/{scope}/{name}", {
         params: { path: splitPackageRef(id) },
-        body: { home_space_id: homeSpaceId },
+        body: { home_space_id: homeSpaceId, keep_in_previous_home: keepInPreviousHome },
       });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.family(cfg.path) });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
+      // The space being left may have lost the package (`keepInPreviousHome:
+      // false` drops its offer AND its placement row), so its own package
+      // listing is stale too — not just this type's family.
+      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/packages"] });
     },
   });
 }

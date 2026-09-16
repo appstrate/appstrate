@@ -363,6 +363,29 @@ export const packageHomeSpaceSchema = z
     home_space_id: z.string().refine(isSpaceId, {
       message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
     }),
+    /**
+     * Does the space the package is LEAVING keep it? Default `true`, which is
+     * the move as it has always behaved: the old home keeps reading and
+     * running the package through the authorless offer
+     * `reconcilePlacementsAfterRehome` writes, so nothing it had scheduled
+     * stops.
+     *
+     * `false` completes the move instead — the old home's offer AND its
+     * placement row go, in the same transaction. It is a field rather than a
+     * second route because it is one act with one modifier: "move" answers the
+     * same way whether or not the old home happened to hold a row, which the
+     * shape without it could not (a move out of a space that never activated
+     * the package already dropped it, a move out of one that did kept it, and
+     * nothing said which was which).
+     *
+     * Asking it costs no authority beyond the move's own `<type>:write` in
+     * BOTH homes. Requiring `<type>:share` as well — the permission
+     * `DELETE …/shares/{target}` asks — would mean a builder holding `write`
+     * and not `share` could never move a package cleanly, only ever leave a
+     * copy behind; and withdrawing an access is the safe direction, which
+     * §6.9 already says when it calls revoking the lighter act.
+     */
+    keep_in_previous_home: z.boolean().optional().default(true),
   })
   .strict();
 
@@ -2016,6 +2039,13 @@ export function createPackagesRouter() {
           packageId,
           orgId,
           newHomeSpaceId: target,
+          // The one placement this act gets to decide. `locked.homeSpaceId`
+          // rather than `pkg.homeSpaceId`: a concurrent move may have changed
+          // the home under us and the branch above re-authorized against THAT
+          // row, so the space being left is the one this transaction holds.
+          ...(locked.homeSpaceId
+            ? { previousHome: { spaceId: locked.homeSpaceId, keep: body.keep_in_previous_home } }
+            : {}),
         });
         // The new home ACTIVATES it, exactly as creation does: a package lives
         // where it is written, and arriving in a space that cannot run it
@@ -2046,7 +2076,13 @@ export function createPackagesRouter() {
           previousHomeOwnerId === null
             ? { home_space_id: pkg.homeSpaceId }
             : { home_space_id: null, home_owner_user_id: previousHomeOwnerId },
-        after: { home_space_id: target },
+        // `kept_in_previous_home` is the half of this act that is NOT the home
+        // column: `false` means the space being left lost the package — its
+        // offer and its placement row both — which is a withdrawal of access
+        // and belongs in the trail beside the move that performed it. It rides
+        // on THIS event rather than a second `package.unshared`, because one
+        // act is one entry and the entry should name what did it.
+        after: { home_space_id: target, kept_in_previous_home: body.keep_in_previous_home },
       });
       // Symmetric with the HTTP door: recorded only when the destination
       // actually started running the package, and naming the act that did it —
