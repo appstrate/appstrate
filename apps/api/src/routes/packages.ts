@@ -344,7 +344,7 @@ export const packageJsonUpdateSchema = z
 export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
 
 /**
- * Body of `PATCH /api/packages/{scope}/{name}` — the package's home space,
+ * Body of `PUT /api/packages/{scope}/{name}/home` — the package's home space,
  * i.e. the space whose `<type>:write` governs it (`packages.home_space_id`).
  * REQUIRED and non-nullable: an organization's package is always homed in one
  * of its spaces (`packages_org_package_has_home`), so there is no "move it
@@ -1931,6 +1931,22 @@ export function createPackagesRouter() {
     // its message.
   }
 
+  // --- The type-agnostic act family: `/{scope}/{name}/<act>` ---
+  //
+  // `/api/packages/{scope}/{name}` is a NAMESPACE, never a resource: the
+  // package itself is read and written at `/api/packages/{type}/{scope}/{name}`,
+  // whose DTO is type-specific. What hangs off the untyped path are the acts
+  // that do not depend on the type — `home`, `shares`, `fork`, `files`,
+  // `{version}/download` — which is why none of them is a verb on the base
+  // path. A `PATCH` there would be a partial update of a namespace, and it
+  // would have no `GET` to answer for the resource it claimed to modify.
+  //
+  // ORDERING, once for the whole family: `/{scope}/{name}/:version/download`
+  // takes a PARAMETER in the slot every act above fills with a literal, so it
+  // matches `home`, `shares` and `files` too. Every literal act must therefore
+  // be registered BEFORE it. Hono matches in order; there is no specificity
+  // rule to fall back on.
+  //
   // --- Move a package to another home space ---
   //
   // Without it a package is a prisoner of the space it was born in: write
@@ -1940,7 +1956,7 @@ export function createPackagesRouter() {
   // package, the authority is the home space, which `assertPackageMutationAccess`
   // is the one reader of. It runs before the body is parsed so a caller who may
   // not touch this package learns nothing about the body's shape.
-  router.patch(`/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+  router.put(`/${SCOPED_PACKAGE_ROUTE}/home`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
 
@@ -2206,8 +2222,6 @@ export function createPackagesRouter() {
   // exactly as for a team one, with ownership standing in for the activation grant
   // there (§3.6).
   //
-  // Registered BEFORE `/{scope}/{name}/:version/download`: `:version` would
-  // otherwise match the literal segment `shares`.
 
   router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
@@ -2236,7 +2250,7 @@ export function createPackagesRouter() {
     // re-asks the authority and `share_target_is_home` against the home it
     // has LOCKED, which is necessarily after `ensurePersonalSpaceFor` has run
     // — the transaction needs the space id to lock anything. So a `user`
-    // target that loses the race against a `PATCH …/{scope}/{name}` leaves the
+    // target that loses the race against a `PUT …/{scope}/{name}/home` leaves the
     // recipient's personal space created and no offer in it. That is inert:
     // `ensurePersonalSpaceFor` is idempotent and every member is provisioned
     // one on their first space-scoped request anyway
@@ -2273,7 +2287,7 @@ export function createPackagesRouter() {
     // BOTH the authority and `share_target_is_home` are decided by
     // `sharePackage`, under the lock that holds the home still for the length of
     // the insert. `assertPackageShareAccess` above judged the home as it stood
-    // when this request arrived; a `PATCH …/{scope}/{name}` committing in
+    // when this request arrived; a `PUT …/{scope}/{name}/home` committing in
     // between moves the package to a home this caller may govern not at all, and
     // the offer would land carrying an authority nobody holds. The predicate is
     // the SAME rule that guard enforces, re-asked against the locked row.
@@ -2810,6 +2824,7 @@ export function createPackagesRouter() {
   });
 
   // --- File explorer (read-only) ---
+  // (see the ordering note at the head of this family)
   // Registered BEFORE `/:version/download` so the literal `files` segment can
   // never be captured as a version spec.
 

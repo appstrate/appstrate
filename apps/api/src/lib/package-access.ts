@@ -33,6 +33,7 @@ import {
 import { resolveSpaceRole } from "./space-role.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
+import { placementShareJoin } from "../services/package-placement.ts";
 
 const PACKAGE_RESOURCES = {
   agent: "agents",
@@ -153,10 +154,7 @@ export async function assertExistingPackageActivationAccess(
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, target)),
     )
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, target)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, target))
     .where(
       and(
         eq(packages.id, packageId),
@@ -290,10 +288,7 @@ export async function isPackageReadableInSpace(
       sharedHere: packageShares.packageId,
     })
     .from(packages)
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
     .where(and(eq(packages.id, packageId), notEphemeralFilter()))
     .limit(1);
   if (!row) return false;

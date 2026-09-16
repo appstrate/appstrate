@@ -1581,7 +1581,7 @@
         "operationId": "exportAgentBundle",
         "tags": ["Agents"],
         "summary": "Export an agent as an .afps-bundle",
-        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space (owners and admins when it has none): `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
+        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space: `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1736,7 +1736,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted means the latest published version, and returns `404 no_published_version` when nothing is published. `draft` requires WRITE authority on the package — the type's `write` permission in the package's home space, organization owner or admin when it has none — and answers `403 draft_not_writable` otherwise: a working copy runs for the people who author it, everybody else runs what they published. The run object's `version_ref` states which definition executed. Ignored for system agents."
+            "description": "Which agent definition to execute: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted means the latest published version, and returns `404 no_published_version` when nothing is published. `draft` requires WRITE authority on the package — the type's `write` permission in the package's home space — and answers `403 draft_not_writable` otherwise: a working copy runs for the people who author it, everybody else runs what they published. The run object's `version_ref` states which definition executed. Ignored for system agents."
           }
         ],
         "requestBody": {
@@ -11379,7 +11379,7 @@
                 "properties": {
                   "restrict_package_copy": {
                     "type": "boolean",
-                    "description": "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about."
+                    "description": "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about."
                   },
                   "api_version": {
                     "type": "string",
@@ -16125,12 +16125,12 @@
         }
       }
     },
-    "/api/packages/{scope}/{name}": {
-      "patch": {
+    "/api/packages/{scope}/{name}/home": {
+      "put": {
         "operationId": "movePackageHome",
         "tags": ["Packages"],
         "summary": "Move a package to another home space",
-        "description": "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
+        "description": "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PUT /api/packages/{type}/{scope}/{name}`, under its optimistic lock.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16156,6 +16156,11 @@
                   "home_space_id": {
                     "type": "string",
                     "description": "Destination space id (`spc_…`). Required and non-nullable — a package always has a home space."
+                  },
+                  "keep_in_previous_home": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. Answered the same way whether or not the old home held a placement row, so the act does not change meaning with a state the caller cannot see. The audit entry `package.home_space_changed` records it as `kept_in_previous_home`."
                   }
                 },
                 "additionalProperties": false
@@ -16201,6 +16206,16 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The destination is a personal space (`home_move_into_personal_space`). A personal space homes only what is created or forked in it — fork the package for a private copy. RFC 9457 problem+json.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "422": {
             "description": "The package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). Activating it would place an executable nothing can execute, so the act is refused whole. RFC 9457 problem+json.",
@@ -16299,7 +16314,7 @@
         "operationId": "sharePackage",
         "tags": ["Packages"],
         "summary": "Share a package with a person or a space",
-        "description": "Offer the package to a space — its AUDIENCE, never its activation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space (organization owner or admin when it has none); `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.",
+        "description": "Offer the package to a space — its AUDIENCE, never its activation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23693,7 +23708,7 @@
         "properties": {
           "restrict_package_copy": {
             "type": "boolean",
-            "description": "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space (organization owners and admins when it has none): `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about."
+            "description": "When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's skills sync downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about."
           },
           "api_version": {
             "type": "string",

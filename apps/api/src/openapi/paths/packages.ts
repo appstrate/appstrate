@@ -112,7 +112,7 @@ function versionRestoreResponseSchema(detailRef: string) {
  * `X-Space-Id` is not what authorizes them.
  */
 const PACKAGE_MUTATION_AUTHORITY =
-  " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PATCH /api/packages/{scope}/{name}`.";
+  " **Authority is the package's HOME space** (`packages.home_space_id`, RBAC spec §6.9): this route requires the package type's `write` (`delete` for a delete) THERE and nowhere else — not in the space the request is made from, which merely consumes a placement and has no say over the draft, the versions or the identity. Every package of the organization has a home; one that belongs to no team is homed in the organization's default space, which owners and admins reach like any other. An id the caller cannot READ at all answers 404 rather than 403, so this is not an existence oracle. Move the home with `PUT /api/packages/{scope}/{name}/home`.";
 
 const fileOperationsProperty = {
   type: "array",
@@ -1684,8 +1684,8 @@ export const packagesPaths = {
       },
     },
   },
-  "/api/packages/{scope}/{name}": {
-    patch: {
+  "/api/packages/{scope}/{name}/home": {
+    put: {
       operationId: "movePackageHome",
       tags: ["Packages"],
       summary: "Move a package to another home space",

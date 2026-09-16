@@ -36,15 +36,18 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { packages, packageShares } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageShare, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
-import { placementReadFilter } from "../../../src/services/package-placement.ts";
+import {
+  placementReadFilter,
+  placementShareJoin,
+} from "../../../src/services/package-placement.ts";
 import { isPackageReadableInSpace, placementGrantsRead } from "../../../src/lib/package-access.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, placedRowFilter } from "../../../src/services/space-packages.ts";
 
 getTestApp();
 
@@ -72,10 +75,7 @@ async function sqlSaysPlaced(spaceId: string, packageId: string): Promise<boolea
   const [hit] = await db
     .select({ placed: sql<boolean>`${placementReadFilter(spaceId)}` })
     .from(packages)
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
     .where(eq(packages.id, packageId))
     .limit(1);
   return hit!.placed;
@@ -86,6 +86,17 @@ async function sqlSaysPlaced(spaceId: string, packageId: string): Promise<boolea
  * with no `shareBy` writes the placement row when the package is placed and
  * throws a 404 when it is not — so "did it throw" IS that predicate's answer.
  */
+/**
+ * The UPDATE form: `placedRowFilter` is the same rule as an `EXISTS`
+ * sub-select, because drizzle's `update` has no join to hang the LEFT JOIN on.
+ * It is the one form that guards a WRITE, so a drift here is a write the rest
+ * of the platform refuses to read back.
+ */
+async function updateFilterSaysPlaced(spaceId: string, packageId: string): Promise<boolean> {
+  const rows = await db.execute(sql`select ${placedRowFilter(db, spaceId, packageId)} as placed`);
+  return (rows as unknown as { rows: { placed: boolean }[] }).rows[0]!.placed;
+}
+
 async function doorSaysPlaced(spaceId: string, packageId: string): Promise<boolean> {
   try {
     await activatePackage({ orgId: ctx.orgId, spaceId }, packageId);
@@ -101,7 +112,7 @@ beforeEach(async () => {
   elsewhere = (await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" })).id;
 });
 
-describe("the four statements of PLACED answer the same, cell for cell", () => {
+describe("the five statements of PLACED answer the same, cell for cell", () => {
   for (const source of SOURCES) {
     for (const { label: homeLabel, here } of HOMES) {
       for (const { label: offerLabel, offered } of OFFERS) {
@@ -137,19 +148,21 @@ describe("the four statements of PLACED answer the same, cell for cell", () => {
               new Set([ctx.defaultSpaceId]),
             );
           const fromDoor = await doorSaysPlaced(ctx.defaultSpaceId, id);
+          const fromUpdate = await updateFilterSaysPlaced(ctx.defaultSpaceId, id);
 
-          expect({ fromSql, fromQuery, fromMemory, fromDoor }).toEqual({
+          expect({ fromSql, fromQuery, fromMemory, fromDoor, fromUpdate }).toEqual({
             fromSql: expected,
             fromQuery: expected,
             fromMemory: expected,
             fromDoor: expected,
+            fromUpdate: expected,
           });
         });
       }
     }
   }
 
-  it("does NOT count a space_packages row as a placement, in any of the four", async () => {
+  it("does NOT count a space_packages row as a placement, in any of the five", async () => {
     // The ORPHAN — the residue `scripts/migration/0016` repairs, and the one
     // candidate that would let a space place a package nobody offered it. The
     // door is the interesting column here: it is the only form that could
@@ -176,5 +189,36 @@ describe("the four statements of PLACED answer the same, cell for cell", () => {
       ),
       fromDoor: await doorSaysPlaced(ctx.defaultSpaceId, id),
     }).toEqual({ fromSql: false, fromQuery: false, fromMemory: false, fromDoor: false });
+  });
+});
+
+describe("the join is owned, not copied", () => {
+  /**
+   * `placementReadFilter` reads its share half off a LEFT JOIN it does not
+   * write, and the failure mode of getting that join wrong is the quiet one:
+   * omitting it raises a Postgres `missing FROM-clause entry`, but joining on
+   * the PACKAGE ALONE raises nothing and turns "offered to THIS space" into
+   * "offered to any space at all" — every reader of the rule widening at once.
+   *
+   * `placementShareJoin` takes the space as a required argument, so that
+   * mistake has nowhere to live. This test is what keeps the next reader from
+   * re-introducing it by hand: the ON clause belongs to the module that owns
+   * the rule, and to nowhere else.
+   */
+  it("no source file writes the `packageShares` ON clause itself", () => {
+    const proc = Bun.spawnSync(["grep", "-rn", "eq(packageShares.packageId", "apps/api/src"]);
+    const offenders = new TextDecoder()
+      .decode(proc.stdout)
+      .split("\n")
+      .filter(Boolean)
+      // The module that OWNS the rule writes it once, by definition. The share
+      // service and the rehome reconciliation address the table directly in a
+      // WHERE — a row read or deleted by primary key, never a join feeding the
+      // filter — and `loadPackageShares` lists a package's audience.
+      .filter((line) => !line.startsWith("apps/api/src/services/package-placement.ts:"))
+      .filter((line) => !line.startsWith("apps/api/src/services/package-shares.ts:"))
+      .filter((line) => !line.includes(".where("))
+      .filter((line) => !line.includes("placementShareJoin"));
+    expect(offenders).toEqual([]);
   });
 });

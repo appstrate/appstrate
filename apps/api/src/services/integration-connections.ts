@@ -48,7 +48,7 @@ import {
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
-import { placementReadFilter } from "./package-placement.ts";
+import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
@@ -435,10 +435,7 @@ export async function resolveIntegrationActivations(
     })
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, spacePackages.packageId), eq(packageShares.spaceId, spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, spaceId),

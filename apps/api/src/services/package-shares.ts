@@ -77,7 +77,7 @@ function sharerView(row: {
  *
  * The home is re-read `FOR SHARE` and BOTH refusals decided INSIDE the write's
  * transaction, the same discipline `activatePackageWithin` applies for the same
- * reason (`services/space-packages.ts`): `PATCH /api/packages/{scope}/{name}`
+ * reason (`services/space-packages.ts`): `PUT /api/packages/{scope}/{name}/home`
  * rewrites `home_space_id` in a transaction of its own, so anything decided on
  * a row this call does not hold interleaves — the route reads home A, the move
  * commits home B, and the insert lands against a home nobody judged.
@@ -190,7 +190,7 @@ export async function revokePackageShare(params: {
   return db.transaction(async (tx) => {
     // The authority, against the LOCKED home, for the reason `sharePackage`
     // states: the route judged the home as it stood when the request arrived,
-    // and a `PATCH …/{scope}/{name}` committing in between moves the package to
+    // and a `PUT …/{scope}/{name}/home` committing in between moves the package to
     // a home this caller may govern not at all. Withdrawing an audience is a
     // lighter act than granting one — it takes access away rather than handing
     // it out — but it is the SAME authority, and one of three home-dependent

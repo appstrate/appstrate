@@ -61,7 +61,7 @@ import { actorOrSharedFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
-import { placementReadFilter } from "./package-placement.ts";
+import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -981,10 +981,7 @@ export async function isUserConnectionCreationBlocked(
     .select({ blocked: spacePackages.blockUserConnections })
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, spacePackages.packageId), eq(packageShares.spaceId, spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, spaceId),

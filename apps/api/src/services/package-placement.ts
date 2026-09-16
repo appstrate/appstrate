@@ -24,6 +24,7 @@
  */
 
 import { and, eq, isNotNull, ne, or } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 
@@ -47,9 +48,9 @@ import type { DbOrTx } from "../lib/db-helpers.ts";
  * consequence and never its source — which is why `activeHereSql` conjoins
  * THIS filter rather than trusting the row alone.
  *
- * Expects `packageShares` LEFT JOINed on (package, `spaceId`) — the share half
- * is `packageShares.packageId IS NOT NULL`, so a query that omits the join
- * silently loses it. The org boundary (`orgOrSystemFilter`) and the shadow
+ * Reads its share half off a LEFT JOIN of `packageShares`, which
+ * {@link placementShareJoin} owns — pass that as the join's ON clause and the
+ * two cannot disagree. The org boundary (`orgOrSystemFilter`) and the shadow
  * filter (`notEphemeralFilter`) are the caller's, as everywhere else.
  */
 export function placementReadFilter(spaceId: string) {
@@ -58,6 +59,36 @@ export function placementReadFilter(spaceId: string) {
     isNotNull(packageShares.packageId),
     eq(packages.homeSpaceId, spaceId),
   );
+}
+
+/**
+ * The ON clause every reader of {@link placementReadFilter} joins
+ * `packageShares` with — `(this package, THIS space)`.
+ *
+ * It exists because the two halves of that rule used to be written in two
+ * different places: the filter here, and the join hand-copied into each of the
+ * queries that use it. Getting the join wrong does not fail the way the pair
+ * was documented to, and the difference is the whole reason this function
+ * exists — both halves were measured:
+ *
+ *   - OMITTING the join entirely raises a Postgres `missing FROM-clause entry`.
+ *     Loud, immediate, impossible to ship.
+ *   - JOINING ON THE PACKAGE ALONE — `eq(packageShares.packageId, …)` without
+ *     the space — raises NOTHING. The filter then reads
+ *     `package_shares.package_id IS NOT NULL` against a row matched in ANY
+ *     space, so "offered to THIS space" silently becomes "offered to any space
+ *     at all", and every caller of the rule widens at once.
+ *
+ * So the dangerous half is the quiet one, and it fails OPEN. Taking `spaceId`
+ * as a required argument is what removes it: the narrowing cannot be forgotten
+ * because there is nowhere to forget it.
+ *
+ * `packageIdColumn` is the left-hand side because the readers join from two
+ * different tables — `packages.id` on the catalogue reads, and
+ * `spacePackages.packageId` on the ones that start from the placement row.
+ */
+export function placementShareJoin(packageIdColumn: AnyPgColumn, spaceId: string) {
+  return and(eq(packageShares.packageId, packageIdColumn), eq(packageShares.spaceId, spaceId));
 }
 
 /**
@@ -136,7 +167,7 @@ export async function isPlacedElsewhere(
  * being left: see `previousHome` below. Everything else here is forced.
  *
  * Two callers, one shape, and the second is why this is a function rather than
- * a paragraph inside the first: `PATCH /api/packages/{scope}/{name}` moves a
+ * a paragraph inside the first: `PUT /api/packages/{scope}/{name}/home` moves a
  * home deliberately, and `emptyAndDeletePersonalSpace`
  * (`services/spaces.ts`) moves one because the author left — a package still
  * running elsewhere is re-homed to the organization's DEFAULT space. The
@@ -161,7 +192,7 @@ export async function reconcilePlacementsAfterRehome(
      * what places it), so the backfill below only ever creates one row: the
      * old home's, which until this call was placed by the home column itself.
      * That is exactly the row a human is entitled to decide about, and
-     * `PATCH /api/packages/{scope}/{name}` passes their answer here.
+     * `PUT /api/packages/{scope}/{name}/home` passes their answer here.
      *
      * `keep: true` is the behaviour this function has always had, unchanged:
      * the backfill above covers the old home when it holds a placement ROW,

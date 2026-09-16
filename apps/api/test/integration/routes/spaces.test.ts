@@ -194,8 +194,8 @@ describe("Spaces API", () => {
         await seedPackage({ id: "@testorg/homed", orgId: ctx.orgId, homeSpaceId: doomed });
         await seedSpacePackage(doomed, "@testorg/homed");
 
-        const moved = await app.request("/api/packages/@testorg/homed", {
-          method: "PATCH",
+        const moved = await app.request("/api/packages/@testorg/homed/home", {
+          method: "PUT",
           headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
           body: JSON.stringify({ home_space_id: ctx.defaultSpaceId }),
         });

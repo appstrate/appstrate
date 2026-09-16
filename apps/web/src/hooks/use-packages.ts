@@ -235,7 +235,7 @@ function useDeletePackage(type: PackageType) {
 }
 
 /**
- * Move a package to another home space — `PATCH /api/packages/{scope}/{name}`.
+ * Move a package to another home space — `PUT /api/packages/{scope}/{name}/home`.
  *
  * The home is what authorizes every later edit (`packages.home_space_id`, RBAC
  * spec §6.9), and it is also a read grant: the destination gains sight of the
@@ -256,7 +256,7 @@ function useMovePackageHome(type: PackageType) {
       /** Does the space being left keep the package? Sent explicitly — the server defaults it to `true`. */
       keepInPreviousHome: boolean;
     }) => {
-      await client.PATCH("/api/packages/{scope}/{name}", {
+      await client.PUT("/api/packages/{scope}/{name}/home", {
         params: { path: splitPackageRef(id) },
         body: { home_space_id: homeSpaceId, keep_in_previous_home: keepInPreviousHome },
       });

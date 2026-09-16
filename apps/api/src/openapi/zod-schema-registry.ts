@@ -515,8 +515,8 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
 
   {
-    method: "PATCH",
-    path: "/api/packages/{scope}/{name}",
+    method: "PUT",
+    path: "/api/packages/{scope}/{name}/home",
     jsonSchema: toJsonSchema(packageHomeSpaceSchema),
     description: "Move a package to another home space",
   },

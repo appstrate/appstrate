@@ -105,8 +105,8 @@ const move = (
   /** Omitted sends no field at all — the server's own default is under test. */
   keepInPreviousHome?: boolean,
 ) =>
-  app.request(`/api/packages/${ID}`, {
-    method: "PATCH",
+  app.request(`/api/packages/${ID}/home`, {
+    method: "PUT",
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify({
       home_space_id: homeSpaceId,
@@ -518,8 +518,8 @@ describe("the home is a read grant", () => {
       draftManifest: { name: MCP, version: "0.1.0", type: "mcp-server" },
     });
 
-    const res = await app.request(`/api/packages/${MCP}`, {
-      method: "PATCH",
+    const res = await app.request(`/api/packages/${MCP}/home`, {
+      method: "PUT",
       headers: { ...owner(), "Content-Type": "application/json" },
       body: JSON.stringify({ home_space_id: gammaId }),
     });
@@ -556,7 +556,7 @@ describe("the home is a read grant", () => {
   });
 });
 
-describe("PATCH /api/packages/{scope}/{name}", () => {
+describe("PUT /api/packages/{scope}/{name}/home", () => {
   it("moves the home, and the authority moves with it", async () => {
     // The owner reaches both ends; a builder of one end alone cannot move it
     // there, which the two refusals below cover.
@@ -755,8 +755,8 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
       draftContent: CONTENT,
     });
 
-    const res = await app.request(`/api/packages/${OWN}`, {
-      method: "PATCH",
+    const res = await app.request(`/api/packages/${OWN}/home`, {
+      method: "PUT",
       headers: { ...owner(), "Content-Type": "application/json" },
       body: JSON.stringify({ home_space_id: alphaId }),
     });
@@ -795,8 +795,8 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
       draftContent: CONTENT,
     });
 
-    const res = await app.request(`/api/packages/${OWN}`, {
-      method: "PATCH",
+    const res = await app.request(`/api/packages/${OWN}/home`, {
+      method: "PUT",
       headers: { ...owner(), "Content-Type": "application/json" },
       body: JSON.stringify({ home_space_id: personal.id }),
     });
@@ -819,8 +819,8 @@ describe("PATCH /api/packages/{scope}/{name}", () => {
 
   it("rejects an unknown body field rather than dropping it", async () => {
     await expectProblem(
-      await app.request(`/api/packages/${ID}`, {
-        method: "PATCH",
+      await app.request(`/api/packages/${ID}/home`, {
+        method: "PUT",
         headers: { ...owner(), "Content-Type": "application/json" },
         body: JSON.stringify({ home_space_id: betaId, lock_version: 1 }),
       }),
@@ -1118,8 +1118,8 @@ describe("what becomes of the space the move LEAVES", () => {
 
   it("refuses a non-boolean rather than coercing it", async () => {
     await expectRejectedField(
-      await app.request(`/api/packages/${ID}`, {
-        method: "PATCH",
+      await app.request(`/api/packages/${ID}/home`, {
+        method: "PUT",
         headers: { ...owner(), "Content-Type": "application/json" },
         body: JSON.stringify({ home_space_id: betaId, keep_in_previous_home: "no" }),
       }),

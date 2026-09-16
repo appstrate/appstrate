@@ -1659,7 +1659,7 @@ describe("the offer is judged against the LOCKED home", () => {
     //
     // Why it has to: the route authorizes with `assertPackageShareAccess`
     // against the home as it stood when the request arrived, and
-    // `PATCH …/{scope}/{name}` can commit a new home in between. Judging the
+    // `PUT …/{scope}/{name}/home` can commit a new home in between. Judging the
     // insert against the read row let an offer land carrying an authority
     // nobody held in the home the package actually has.
     const ctx = await createTestContext({ orgSlug: "locked-home" });

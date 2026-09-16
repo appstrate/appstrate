@@ -27,7 +27,7 @@ import { assertSpaceInScope } from "./spaces.ts";
 import { ApiError } from "../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
-import { placementReadFilter } from "./package-placement.ts";
+import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { getVersionForDownload } from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import {
@@ -181,10 +181,7 @@ export function placedRowFilter(tx: DbOrTx, spaceId: string, packageId: string) 
     tx
       .select({ one: sql`1` })
       .from(packages)
-      .leftJoin(
-        packageShares,
-        and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
-      )
+      .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
       .where(and(eq(packages.id, packageId), placementReadFilter(spaceId))),
   );
 }
@@ -222,7 +219,7 @@ async function currentPlacement(tx: Tx, packageId: string, spaceId: string) {
  * ephemeral shadow row is never placeable.
  *
  * `FOR SHARE`, because `home_space_id` is read here and DECIDES whether the
- * placement needs an offer. The home MOVE (`PATCH /api/packages/{scope}/{name}`)
+ * placement needs an offer. The home MOVE (`PUT /api/packages/{scope}/{name}/home`)
  * rewrites that column in a transaction of its own and, in the same one,
  * back-fills the offers the spaces losing the home now need. Unlocked, the two
  * interleave into a placement nothing places: this call reads `home = A`, takes
@@ -357,7 +354,7 @@ export async function activatePackage(
  * {@link activatePackage}'s body, inside a transaction the CALLER owns — the
  * seam that keeps `space_packages` to a single writer.
  *
- * The home MOVE (`PATCH /api/packages/{scope}/{name}`) has to place the package
+ * The home MOVE (`PUT /api/packages/{scope}/{name}/home`) has to place the package
  * in its new home atomically with the move itself, and an activation that
  * opened a transaction of its own would break that atomicity. It therefore
  * calls this directly, having run {@link assertSpaceInScope} and
@@ -608,13 +605,7 @@ export async function listSpacePackages(scope: SpaceScope, type?: PackageType) {
     .select(spacePackageSelect)
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(
-      packageShares,
-      and(
-        eq(packageShares.packageId, spacePackages.packageId),
-        eq(packageShares.spaceId, scope.spaceId),
-      ),
-    )
+    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, scope.spaceId))
     .where(and(...conditions));
 }
 
@@ -630,13 +621,7 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
     .select(spacePackageSelect)
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(
-      packageShares,
-      and(
-        eq(packageShares.packageId, spacePackages.packageId),
-        eq(packageShares.spaceId, scope.spaceId),
-      ),
-    )
+    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, scope.spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, scope.spaceId),
@@ -722,10 +707,7 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, scope.spaceId)),
     )
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, scope.spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .leftJoin(
       packageDistTags,
       and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
@@ -831,10 +813,7 @@ async function listActivePackageHints<T extends PackageHint>(
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, scope.spaceId)),
     )
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, scope.spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .leftJoin(
       packageDistTags,
       and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
@@ -960,10 +939,7 @@ export async function isPackageActiveHere(scope: SpaceScope, packageId: string):
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, scope.spaceId)),
     )
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, scope.spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
         eq(packages.id, packageId),
@@ -1037,13 +1013,7 @@ export async function getSpacePackageSettings(
     })
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(
-      packageShares,
-      and(
-        eq(packageShares.packageId, spacePackages.packageId),
-        eq(packageShares.spaceId, scope.spaceId),
-      ),
-    )
+    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, scope.spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, scope.spaceId),
@@ -1113,13 +1083,7 @@ export async function getResolvedRunConfig(
     })
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(
-      packageShares,
-      and(
-        eq(packageShares.packageId, spacePackages.packageId),
-        eq(packageShares.spaceId, scope.spaceId),
-      ),
-    )
+    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, scope.spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, scope.spaceId),

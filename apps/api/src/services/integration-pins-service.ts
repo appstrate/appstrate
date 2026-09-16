@@ -68,6 +68,7 @@ import {
 } from "./integration-connection-resolver.ts";
 import type { ConnectionResolutionResult } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
+import { placementShareJoin } from "./package-placement.ts";
 
 // Canonical wire shapes live in @appstrate/shared-types so the frontend
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
@@ -208,10 +209,7 @@ export async function listAgentsConsumingIntegration(
       spacePackages,
       and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, scope.spaceId)),
     )
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, scope.spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
         eq(packages.type, "agent"),

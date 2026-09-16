@@ -19,7 +19,7 @@ import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { placementReadFilter } from "./package-placement.ts";
+import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 import { pickVersion } from "./run-launcher/db-package-catalog.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
@@ -597,10 +597,7 @@ export async function getIntegration(
     .from(packages)
     // `placementReadFilter` reads the share half off this LEFT JOIN; without
     // it every offered integration would silently drop out of the answer.
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, scope.spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
         orgOrSystemFilter(scope.orgId),
@@ -792,10 +789,7 @@ export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSu
     })
     .from(packages)
     // Expected by `placementReadFilter` — see `getIntegration`.
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, scope.spaceId)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
         orgOrSystemFilter(scope.orgId),

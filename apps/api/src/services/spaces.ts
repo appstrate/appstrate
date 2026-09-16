@@ -349,7 +349,7 @@ async function deleteSpaceInTx(
   // `ON DELETE RESTRICT`), so the row cannot follow the space out. Re-homing
   // it here would silently widen or narrow who may edit it, and deleting it
   // would destroy a catalog entry other spaces are running. Name the packages
-  // and let the caller move them: `PATCH /api/packages/{scope}/{name}`.
+  // and let the caller move them: `PUT /api/packages/{scope}/{name}/home`.
   // Inline shadow rows never appear here on their own: they carry no home at
   // all, so a run in this space cannot make it undeletable.
   const homed = await tx
@@ -758,7 +758,7 @@ export async function emptyAndDeletePersonalSpace(
           );
         }
         // `updatedAt` is deliberately NOT stamped, the same rule the manual
-        // move states (`PATCH /api/packages/{scope}/{name}`): it is the DRAFT's
+        // move states (`PUT /api/packages/{scope}/{name}/home`): it is the DRAFT's
         // timestamp, and `computeHasUnpublishedChanges` compares it against the
         // latest published version's. Re-homing changes no bytes, so stamping
         // it would report a fully-published package as having unarchived

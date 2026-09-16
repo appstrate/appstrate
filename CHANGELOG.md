@@ -265,7 +265,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   catalogue — activates nothing.
 
 - **Moving a package's home reconciles the placements it invalidates.**
-  `PATCH /api/packages/{scope}/{name}` now writes, in the same transaction as the
+  `PUT /api/packages/{scope}/{name}/home` now writes, in the same transaction as the
   move, a `package_shares` row for every space that still holds a placement row
   and is not the new home — `shared_by` NULL, because nobody offered
   it; the home did, until this call — and deletes the destination's own share,
@@ -427,7 +427,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   package is created, imported or forked in — every such path resolves one, an
   org-level MCP bearer landing on the default space — is exposed as
   `home_space_id` on package reads and on `GET /api/library`, and is moved by the
-  new `PATCH /api/packages/{scope}/{name}`, whose `home_space_id` is a REQUIRED
+  new `PUT /api/packages/{scope}/{name}/home`, whose `home_space_id` is a REQUIRED
   space id (`null` is a 400) and which requires that permission in both
   the old and the new home (an unreachable destination answers 404). A PERSONAL
   space is never a destination — 409 `home_move_into_personal_space`: a personal

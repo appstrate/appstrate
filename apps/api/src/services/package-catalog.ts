@@ -10,7 +10,7 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { isPackageReadableInSpace } from "../lib/package-access.ts";
-import { placementReadFilter } from "./package-placement.ts";
+import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 interface DbPackageRow {
   id: string;
@@ -133,10 +133,7 @@ export async function resolveDeclaredSkills(
     .from(packages)
     // The share half of `placementReadFilter` is read off this join; without
     // it every offered skill would resolve as unreachable.
-    .leftJoin(
-      packageShares,
-      and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, anchor)),
-    )
+    .leftJoin(packageShares, placementShareJoin(packages.id, anchor))
     .where(
       and(inArray(packages.id, skillIds), orgOrSystemFilter(orgId), placementReadFilter(anchor)),
     );
