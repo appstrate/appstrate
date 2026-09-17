@@ -24,7 +24,6 @@ import type { SpaceMember } from "@appstrate/shared-types";
 import { conflict, notFound } from "../lib/errors.ts";
 import { loadSpaceMember, resolveSpaceRole, toRef, toSpaceRoleWire } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
-import { assertCustomRolesFeature } from "./space-roles.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
@@ -324,11 +323,14 @@ export async function deleteSpaceMembershipsInOrg(
 }
 
 /**
- * The FK alone would accept another org's bundle, so the org is checked here.
+ * The FK alone would accept another org's bundle, so the org is checked here —
+ * a bundle from a neighbouring organization reads as "not found", never as a
+ * grantable role.
  *
- * Granting a bundle is the licensed half of the feature, not just defining one
- * — the gate comes before the lookup so the refusal is about the deployment
- * and says nothing about which `srl_` ids exist. Presets never ask.
+ * Both branches end on the same question, `assertCanGrantSpaceRole`: a caller
+ * may only hand out permissions they hold in this space. That bound is what
+ * keeps a bundle from being a privilege ladder, and it applies to a preset and
+ * a custom role identically.
  */
 async function assignmentColumns(
   orgId: string,
@@ -340,7 +342,6 @@ async function assignmentColumns(
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
-  assertCustomRolesFeature("assign");
   const [role] = await tx
     .select({
       id: spaceRoles.id,

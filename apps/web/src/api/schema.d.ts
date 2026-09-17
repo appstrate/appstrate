@@ -3798,7 +3798,7 @@ export interface paths {
         put?: never;
         /**
          * Create a custom space role
-         * @description Define an organization-scoped bundle of space-level permissions. Requires the `custom_roles` feature. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop.
+         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop.
          */
         post: operations["createRole"];
         delete?: never;
@@ -3839,14 +3839,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom space role
-         * @description Never requires the `custom_roles` feature: removing a leftover bundle is what an EE → OSS downgrade needs, and it is the one verb that only ever shrinks what a bundle reaches. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
+         * @description Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
          */
         delete: operations["deleteRole"];
         options?: never;
         head?: never;
         /**
          * Update a custom space role
-         * @description Rename, re-describe or re-scope a bundle. Requires the `custom_roles` feature. The `srl_` id never changes, so assignments follow the edit.
+         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit.
          */
         patch: operations["updateRole"];
         trace?: never;
@@ -4296,7 +4296,7 @@ export interface paths {
         put?: never;
         /**
          * Add a space member
-         * @description Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise); a `preset_role` never does.
+         * @description Grant a user an explicit role in this space, limited to permissions held by the caller. Identify the user by exactly one of userId or email (trimmed and case-normalized). The user must already be an org member (404 otherwise). An existing explicit row is refused with 409 `space_member_exists`; use PATCH to change its role. Owners and admins are refused with 409 `redundant_space_role` — they already run every space. A `custom_role_id` must name a bundle of this organization (404 otherwise); a preset and a bundle are bounded the same way.
          */
         post: operations["addSpaceMember"];
         delete?: never;
@@ -4324,7 +4324,7 @@ export interface paths {
         head?: never;
         /**
          * Change a space member's role
-         * @description Change the role of an EXISTING explicit membership row (404 when there is none). Both ends are bounded by the caller: the new role may only grant permissions they hold, and the member's CURRENT role must be one they could have granted (403 otherwise) — including when changing their own role. A `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise), so moving a holder OFF a leftover bundle and onto a preset stays available where moving another one onto it does not.
+         * @description Change the role of an EXISTING explicit membership row (404 when there is none). Both ends are bounded by the caller: the new role may only grant permissions they hold, and the member's CURRENT role must be one they could have granted (403 otherwise) — including when changing their own role. A `custom_role_id` must name a bundle of this organization (404 otherwise).
          */
         patch: operations["updateSpaceMember"];
         trace?: never;
@@ -4338,7 +4338,7 @@ export interface paths {
         };
         /**
          * List assignable space roles
-         * @description Returns presets and organization roles whose permissions are held by the caller in this space, and nothing the caller could not actually grant: where `custom_roles` is unavailable the bundles are omitted here (the org catalogue `GET /api/roles` still lists them, which is where a leftover is deleted). Requires space-members:invite, space-members:change-role, or space-settings:write.
+         * @description Returns presets and organization roles whose permissions are held by the caller in this space, and nothing the caller could not actually grant — a role reaching further than the caller does is omitted here, while the org catalogue `GET /api/roles` lists every bundle unfiltered. Requires space-members:invite, space-members:change-role, or space-settings:write.
          */
         get: operations["listAssignableSpaceRoles"];
         put?: never;
@@ -6474,15 +6474,6 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description `forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The built-in presets (admin, builder, operator, runner, viewer) stay usable, and DELETING a leftover bundle never asks for the feature. */
-        CustomRoleFeatureForbidden: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
-            };
-        };
         /** @description Resource not found */
         NotFound: {
             headers: {
@@ -6651,7 +6642,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse (bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential cannot carry a persona: only a cookie session and the CLI/instance token authenticate the user themselves; every other credential carries a ceiling of its own and no session to narrow. The other refusals reuse the statuses already documented on this operation: `403 view_as_forbidden` when the real org role is not owner/admin, the role is not grantable by the caller in that space, or a custom role is previewed where the `custom_roles` feature is off, and `404 view_as_not_found` when the space is not in the organization, the custom role does not exist, or the organization named alongside the persona is not the caller's. Those four codes are the complete set that means "drop the preview" — a plain `not_found` under an active persona is the previewed role's own wall, not a refusal of the persona. A refused preview is never answered with the caller's real permissions. */
+        /** @description The `X-View-As` role preview was refused. `invalid_view_as` — the header does not parse (bad grammar, unknown key, `space` without `role`). `view_as_unsupported` — the credential cannot carry a persona: only a cookie session and the CLI/instance token authenticate the user themselves; every other credential carries a ceiling of its own and no session to narrow. The other refusals reuse the statuses already documented on this operation: `403 view_as_forbidden` when the real org role is not owner/admin or the role is not grantable by the caller in that space, and `404 view_as_not_found` when the space is not in the organization, the custom role does not exist, or the organization named alongside the persona is not the caller's. Those four codes are the complete set that means "drop the preview" — a plain `not_found` under an active persona is the previewed role's own wall, not a refusal of the persona. A refused preview is never answered with the caller's real permissions. */
         ViewAsRefused: {
             headers: {
                 [name: string]: unknown;
@@ -6717,7 +6708,7 @@ export interface components {
          *
          *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
          *
-         *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+         *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
          *
          *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
          *
@@ -13389,7 +13380,7 @@ export interface operations {
                  *
                  *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
                  *
-                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
                  *
                  *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
                  *
@@ -15291,7 +15282,7 @@ export interface operations {
                  *
                  *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
                  *
-                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
                  *
                  *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
                  *
@@ -15630,7 +15621,7 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     role: "guest" | "member" | "admin";
-                    /** @description Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every team space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting. */
+                    /** @description Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every team space. An entry naming a `custom_role_id` must name a bundle of this organization, checked when the invitation is WRITTEN (404 otherwise) — deferring a grant is still granting. */
                     space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
@@ -15660,7 +15651,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["CustomRoleFeatureForbidden"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -15709,7 +15700,7 @@ export interface operations {
                      * @enum {string}
                      */
                     role?: "guest" | "member" | "admin";
-                    /** @description Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every team space. An entry naming a `custom_role_id` requires the `custom_roles` feature (403 `feature_unavailable` otherwise) — deferring a grant is still granting. */
+                    /** @description Space memberships in TEAM spaces, applied when the invitation is accepted. May be empty for every role — the member's own personal space is provisioned at the door, so a `role: guest` invited for a single shared package needs no grant here. Must be empty for `role: admin`, which already runs every team space. An entry naming a `custom_role_id` must name a bundle of this organization, checked when the invitation is WRITTEN (404 otherwise) — deferring a grant is still granting. */
                     space_assignments?: components["schemas"]["SpaceAssignment"][];
                 };
             };
@@ -15744,7 +15735,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["CustomRoleFeatureForbidden"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Conflict — this email already holds a pending invitation in the organization. `invitation_id` names it; edit it (PUT /api/orgs/{orgId}/invitations/{invitationId}) to change the role or add a space instead of creating a second token. */
             409: {
@@ -19214,7 +19205,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["CustomRoleFeatureForbidden"];
+            403: components["responses"]["Forbidden"];
             /** @description A role with this key already exists (`role_key_taken`) */
             409: {
                 headers: {
@@ -19339,7 +19330,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["CustomRoleFeatureForbidden"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description A role with this key already exists (`role_key_taken`) */
             409: {
@@ -20879,7 +20870,7 @@ export interface operations {
                  *
                  *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
                  *
-                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
                  *
                  *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
                  *
@@ -21063,7 +21054,7 @@ export interface operations {
                  *
                  *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
                  *
-                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
                  *
                  *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
                  *
@@ -21252,7 +21243,7 @@ export interface operations {
                  *
                  *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
                  *
-                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
                  *
                  *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
                  *
@@ -21330,7 +21321,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["CustomRoleFeatureForbidden"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description The target is an owner/admin (`redundant_space_role`) or already has an explicit role (`space_member_exists`) */
             409: {
@@ -21410,7 +21401,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["CustomRoleFeatureForbidden"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description The target is an owner or admin — an explicit space role would grant nothing */
             409: {
@@ -21440,7 +21431,7 @@ export interface operations {
                  *
                  *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.view_as`.
                  *
-                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space, or previewing a custom role where the `custom_roles` feature is off), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
                  *
                  *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
                  *

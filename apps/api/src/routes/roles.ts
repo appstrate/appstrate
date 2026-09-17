@@ -5,17 +5,16 @@
  *
  * ORG-scoped: a bundle belongs to the organization and is assignable in any of
  * its spaces, so `roles:*` is an org-level permission and this router stays
- * outside `SPACE_SCOPED_PREFIXES`. Reading is always available; DEFINING a
- * bundle is what `features.custom_roles` turns on (§9), and so is granting one
- * (`assertCustomRolesFeature`, called from the assignment paths).
+ * outside `SPACE_SCOPED_PREFIXES`.
  *
- * DELETE is deliberately NOT gated: it is the only verb that shrinks what a
- * leftover bundle reaches, and a deployment that lost the feature is exactly
- * the one that needs it.
+ * Reading is open to every org role but `guest`; DEFINING and EDITING a bundle
+ * ask `roles:write`, DELETING one asks `roles:delete` — owner and admin (§9).
+ * Those permissions are the WHOLE authorization: the platform ships custom
+ * roles in its open-source build, so no deployment-level licence sits on top.
  */
 
 import { Hono } from "hono";
-import type { Context, Next } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { assertSpaceRoleId } from "../lib/ids.ts";
@@ -25,7 +24,6 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { spaceLevelVocabulary } from "../lib/permissions.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import {
-  assertCustomRolesFeature,
   createSpaceRole,
   deleteSpaceRole,
   listSpaceRoles,
@@ -58,14 +56,6 @@ export const updateSpaceRoleSchema = z
   })
   .strict();
 
-/** Gate the authoring routes on `features.custom_roles` (`assertCustomRolesFeature`). */
-function requireCustomRolesFeature() {
-  return async (_c: Context<AppEnv>, next: Next) => {
-    assertCustomRolesFeature("define");
-    return next();
-  };
-}
-
 /** The `srl_` id a path param carries, shape-checked before any query. */
 function roleIdParam(c: Context<AppEnv>): string {
   const id = c.req.param("id")!;
@@ -75,7 +65,6 @@ function roleIdParam(c: Context<AppEnv>): string {
 
 export function createRolesRouter() {
   const router = new Hono<AppEnv>();
-  const featureGate = requireCustomRolesFeature();
 
   // MUST register before `/:id`, which would otherwise match "vocabulary".
   router.get("/vocabulary", requirePermission("roles", "read"), (c) => {
@@ -86,7 +75,7 @@ export function createRolesRouter() {
     return c.json(listResponse(await listSpaceRoles(c.get("orgId"))));
   });
 
-  router.post("/", requirePermission("roles", "write"), featureGate, async (c) => {
+  router.post("/", requirePermission("roles", "write"), async (c) => {
     const data = await readJsonBody(c, createSpaceRoleSchema);
     const role = await createSpaceRole({
       orgId: c.get("orgId"),
@@ -102,7 +91,7 @@ export function createRolesRouter() {
     return c.json(role, 201);
   });
 
-  router.patch("/:id", requirePermission("roles", "write"), featureGate, async (c) => {
+  router.patch("/:id", requirePermission("roles", "write"), async (c) => {
     const id = roleIdParam(c);
     const data = await readJsonBody(c, updateSpaceRoleSchema);
     const role = await updateSpaceRole({ orgId: c.get("orgId"), id, patch: data });
@@ -116,7 +105,6 @@ export function createRolesRouter() {
   });
 
   // Refused with a count while anyone still holds the role — see the service.
-  // No feature gate: see the module header.
   router.delete("/:id", requirePermission("roles", "delete"), async (c) => {
     const id = roleIdParam(c);
     const role = await deleteSpaceRole(c.get("orgId"), id);

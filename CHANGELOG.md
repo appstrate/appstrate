@@ -604,6 +604,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Custom space roles are open-source.** Defining a bundle, editing one,
+  granting one and previewing one no longer ask for the `custom_roles` feature
+  flag, which `@appstrate/module-ee` contributed and which the platform's own
+  `/api/roles` write routes read. The whole surface was already Apache-2.0 code
+  sitting in core; what has been deleted is the licence check over it. A
+  deployment running `MODULES=none` now defines, edits, grants and previews
+  custom roles, and `apps/api/test/integration/modules/zero-footprint.test.ts`
+  — which mounts zero modules — is where that is asserted, because those four
+  calls answered `403 feature_unavailable` before.
+
+  The presets (`admin`, `builder`, `operator`, `runner`, `viewer`) are
+  unchanged, and so is the authorization: `roles:write` and `roles:delete` are
+  owner/admin org permissions, `canGrantSpaceRole` still forbids handing out
+  permissions the caller does not hold in that space, and a bundle from another
+  organization is still not found. Those are now the WHOLE gate — an org
+  `member` is still refused, with `code: "forbidden"`.
+
+  **API:** the `feature_unavailable` refusal is gone from the platform. It had
+  exactly one producer, so the `403` of `POST`/`PATCH /api/roles`,
+  `POST`/`PATCH /api/spaces/{id}/members` and the two invitation routes is now
+  the ordinary `forbidden` response, with no `feature_unavailable` example
+  declared. A client branching on that code will never see it again; the
+  requests that raised it now succeed. `GET /api/spaces/{id}/roles` is
+  filtered by the caller's permissions alone, so it offers bundles on every
+  deployment. No migration, no stored state: the flag was computed at boot and
+  never persisted, and the change only ever widens what an existing row allows.
+
+  **Operators:** a `MODULES` list naming `@appstrate/module-ee` keeps working
+  untouched — the module declares `features: { billing: true }` and nothing
+  else. Nothing in an `.env` has to change.
+
 - **BREAKING (API): asking what an agent IS and asking whether it RUNS are two
   guards now, and only the second one refuses.** `requireAgent()` loads an agent
   by the PLACEMENT rule — homed here, offered here, or shipped with the

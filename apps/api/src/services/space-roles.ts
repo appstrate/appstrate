@@ -14,8 +14,7 @@ import { db } from "@appstrate/db/client";
 import { orgInvitations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
 import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permissions";
 import { isForeignKeyViolation, isUniqueViolation } from "../lib/db-helpers.ts";
-import { getAppConfig } from "../lib/app-config.ts";
-import { ApiError, conflict, invalidRequest, notFound } from "../lib/errors.ts";
+import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import {
   knownSpaceLevelPermissions,
@@ -51,47 +50,6 @@ export interface SpaceRoleInput {
 }
 
 const PRESET_KEYS: ReadonlySet<string> = new Set<string>(SPACE_ROLE_PRESETS);
-
-/**
- * Does this deployment define custom space roles at all (RBAC spec §9)? Read
- * per call, not captured: modules merge their features into `AppConfig` at boot.
- *
- * The predicate, not the refusal, is what the two callers share — the write
- * routes answer `feature_unavailable`, the role preview answers
- * `view_as_forbidden` (a client must recognise every persona refusal as "drop
- * the preview"). Sharing the predicate is what keeps "can this deployment do
- * custom roles" one question with one answer.
- */
-export function hasCustomRoles(): boolean {
-  return getAppConfig().features.custom_roles === true;
-}
-
-/** What a refused call was about to do, so the 403 names the act, not the flag. */
-export type CustomRoleAct = "define" | "assign";
-
-const ACT_DETAIL: Record<CustomRoleAct, string> = {
-  define: "Defining a custom space role",
-  assign: "Assigning a custom space role",
-};
-
-/**
- * {@link hasCustomRoles} as a refusal. Covers DEFINING and GRANTING a bundle —
- * either half alone is the feature. REMOVING one never asks, so a deployment
- * that loses the feature keeps exactly the verbs that shrink what leftover
- * bundles reach.
- */
-export function assertCustomRolesFeature(act: CustomRoleAct): void {
-  if (hasCustomRoles()) return;
-  throw new ApiError({
-    status: 403,
-    code: "feature_unavailable",
-    title: "Feature Unavailable",
-    detail:
-      `${ACT_DETAIL[act]} requires the \`custom_roles\` feature, contributed by a module ` +
-      "listed in `MODULES`. The built-in presets " +
-      `(${SPACE_ROLE_PRESETS.join(", ")}) are always available.`,
-  });
-}
 
 type SpaceRoleRow = typeof spaceRoles.$inferSelect;
 

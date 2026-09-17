@@ -137,7 +137,7 @@ export const parameters = {
       "carry a persona — only a cookie session and the CLI/instance token, which authenticate the " +
       "user themselves, can), `403 view_as_forbidden` " +
       "(the real org role is not owner/admin, or the role is not one the caller could grant in " +
-      "that space, or previewing a custom role where the `custom_roles` feature is off), " +
+      "that space), " +
       "`404 view_as_not_found` (the space is not in the org, the custom role does not exist, or " +
       "the organization named alongside the persona is not one the caller belongs to). A 404 " +
       "carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain " +

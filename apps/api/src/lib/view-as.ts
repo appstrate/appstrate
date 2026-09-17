@@ -45,7 +45,6 @@ import {
   type SpaceRoleRef,
 } from "./space-role.ts";
 import { canGrantSpaceRole } from "./space-role-policy.ts";
-import { hasCustomRoles } from "../services/space-roles.ts";
 import { validateSpaceInOrg } from "./space-lookup.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -254,22 +253,15 @@ async function validatePersonaSpace(
 }
 
 /**
- * Feature gate first: with `custom_roles` off there is no bundle vocabulary to
- * look in, and every refusal here carries a code the client reads as "drop it".
+ * A preset is code, so it resolves without a query; a bundle is a row, and one
+ * belonging to another organization must read as absent. The refusal carries a
+ * code the client reads as "drop the preview".
  */
 async function resolvePersonaSpaceRole(
   orgId: string,
   ref: PersonaRoleRequest,
 ): Promise<SpaceRoleRef> {
   if (ref.kind === "preset") return { kind: "preset", preset: ref.preset };
-  if (!hasCustomRoles()) {
-    throw viewAsForbidden(
-      "Previewing a custom space role requires the `custom_roles` feature, contributed by a " +
-        "module listed in `MODULES`. The " +
-        `${SPACE_ROLE_PRESETS.length} built-in presets (${SPACE_ROLE_PRESETS.join(", ")}) ` +
-        "are always previewable.",
-    );
-  }
   const [row] = await db
     .select()
     .from(spaceRoles)
