@@ -240,9 +240,12 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   const spaceId = c.req.query("spaceId");
   if (!spaceId) return null;
 
-  // Validate space belongs to org
+  // Validate space belongs to org. A 404, not the `null` that becomes a 401
+  // below: paired with the 404 the visibility split raises further down, a 401
+  // here would tell the caller which `spc_` ids exist in the org — and the SPA
+  // puts that id in the query string (RBAC spec §3.6).
   const space = await validateSpaceInOrg(spaceId, orgId);
-  if (!space) return null;
+  if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
 
   const role = member.role;
   // Set before the persona is judged: `reportPermissionDenial` names the actor from the context.

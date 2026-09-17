@@ -108,6 +108,7 @@
   "library.origin.system": "System",
   "library.badge.offered": "Offered",
   "library.badge.inactive": "Inactive",
+  "library.toggleIn": "{{package}} active in space {{space}}",
   "library.system": "System",
   "library.cannotActivate": "You do not have permission to activate this package in this space",
   "library.cannotDeactivate": "You do not have permission to deactivate this package in this space",

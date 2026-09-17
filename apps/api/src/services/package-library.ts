@@ -18,6 +18,7 @@ import {
   packagePermission,
 } from "../lib/package-access.ts";
 import { isActiveHere } from "./package-activation.ts";
+import { sharerView } from "./package-shares.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
 
@@ -156,7 +157,9 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     // `user`, so deleting the ACCOUNT clears it — but leaving the ORG clears
     // nothing, and this map is served to every owner and admin, on every row.
     // The membership join is therefore the filter, not a post-pass: a former
-    // member's name never leaves the database.
+    // member's name never leaves the database. The projection off these columns
+    // is `sharerView` (`services/package-shares.ts`), shared with
+    // `GET …/shares` so the rule has one statement and not two.
     db
       .select({
         packageId: packageShares.packageId,
@@ -181,10 +184,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   for (const row of shareRows) {
     let bySpace = offers.get(row.packageId);
     if (!bySpace) offers.set(row.packageId, (bySpace = new Map()));
-    bySpace.set(
-      row.spaceId,
-      row.sharedBy && row.sharerName ? { user_id: row.sharedBy, name: row.sharerName } : null,
-    );
+    bySpace.set(row.spaceId, sharerView(row));
   }
 
   /** packageId → spaceId → `enabled`, for the rows the caller's spaces hold. */

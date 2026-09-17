@@ -755,7 +755,28 @@ export function createAgentsRouter() {
           bundle = await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" });
           versionLabel = "draft";
         } else {
-          versionLabel = await resolveExportVersion(agent.id, versionSpec);
+          // With no `?version`, `resolveExportVersion` falls back to the
+          // `latest` dist-tag and raises the GENERIC `not_found` when nothing
+          // is published — on the wire indistinguishable from "no such agent",
+          // so the CLI tells the user to check their spelling for an agent that
+          // exists and has merely never been released. Re-raise it as the code
+          // the other execution doors already publish for exactly this
+          // condition (`services/agent-version-resolver.ts`). An EXPLICIT
+          // `?version` keeps its own 404: there the spec really does name a
+          // version that does not resolve.
+          try {
+            versionLabel = await resolveExportVersion(agent.id, versionSpec);
+          } catch (err) {
+            if (!versionSpec && err instanceof ApiError && err.status === 404) {
+              throw new ApiError({
+                status: 404,
+                code: "no_published_version",
+                title: "No Published Version",
+                detail: `Agent '${agent.id}' has no published version — publish one, or export the working copy with ?source=draft`,
+              });
+            }
+            throw err;
+          }
           bundle = await buildBundleForAgentExport(agent.id, scope, {
             versionSpec: versionLabel,
             metadata: { builder: "appstrate-platform" },

@@ -101,7 +101,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The DRAFT belongs to whoever may WRITE the package, and every executable form
   of it now says so — `403 draft_not_writable`.** A head deployment is the
   developer's, the rule Apps Script states. One predicate and one wording gate
-  all of it: `?version=draft` on `POST /api/runs`, on schedule creation and
+  all of it: `?version=draft` on `POST /api/agents/{scope}/{name}/run`, on
+  schedule creation and
   update and on `GET /api/agents/{scope}/{name}/connection-readiness`;
   `dependency_overrides: { "@acme/skill": "draft" }` on the run route, the
   remote-run route and both schedule writes, where the authority asked is the one
@@ -573,68 +574,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not billed at the vendor's rate. Rate limited to 6/min behind
   `model-provider-credentials:write`.
 
-- **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
-  out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
-  re-imported by `lib/boot.ts`, `services/input-parser.ts` and
-  `services/system-packages.ts`. `appstrate skills sync` needs the same pool
-  against the rate-limited package routes; a copy in the CLI would have been
-  the third in the repo, and the first two had already diverged on
-  abort-on-rejection.
-
-- **`appstrate skills sync` — the org's skills in Claude Code and Codex,
-  refreshed without a manual step.** Materializes every skill placed in the
-  profile's pinned space as an [Agent Skills](https://agentskills.io/specification)
-  directory, into `claude-plugin` (a complete Claude Code plugin under
-  `$XDG_DATA_HOME/appstrate/claude-plugin/`, the default), `codex`
-  (`~/.agents/skills/`) or `claude-user` (`~/.claude/skills/`). The auto-sync is
-  a Claude Code marketplace `command` source re-running the CLI once per
-  session — no server change, no hook, no daemon — so `--print-path` prints the
-  plugin directory as the only stdout line and the output is byte-deterministic.
-  Published `latest` by default (integrity-verified), `--source draft` for
-  authors. Exactly one thing is rewritten in `SKILL.md`, the frontmatter `name`,
-  so it matches the directory; an artifact published before the platform's
-  frontmatter gate is synced as authored and named once on stderr. An ownership
-  ledger keyed by target and `HOME` root makes the shared roots safe (nothing it
-  does not own is written or removed), a `mkdir` lock serializes concurrent
-  sessions, and per-skill failures never cost the plugin under `--print-path`.
-  On a fresh machine the plugin install still succeeds before the CLI is
-  connected: it gets a single `/appstrate:setup` skill naming the missing step
-  and a `SessionStart` hook that surfaces it at every session start, both
-  replaced by the organization's skills on the first connected sync.
-  Full behaviour: `apps/cli/README.md` → `appstrate skills`.
-
-- **Two release gates joined `bun run check`: `verify:release-version` and
-  `verify:env-docs`.** Both close a hole that a green check had been reporting
-  as fine.
-
-  `verify:release-version` (`scripts/verify-release-version.ts`) compares the
-  hardcoded `${APPSTRATE_VERSION:-<version>}` fallback in every shipped compose
-  file and `.env.example` against the git tag namespace. That fallback is what a
-  self-hoster gets from the documented `docker compose up -d` without exporting
-  the variable, and nothing checked it: measured at `v1.0.0-beta.53` all five
-  compose files still said `1.0.0-beta.41` — 79 sites, twelve releases stale —
-  while `.env.example` said `1.0.0-beta.51`, a third value again. The #1201
-  image-trio guard structurally cannot see this: it compares the platform, the
-  `PI_IMAGE` and the `SIDECAR_IMAGE` refs to EACH OTHER, and all three read the
-  same stale fallback, so the trio is perfectly coherent — coherently twelve
-  releases old. The gate has two arms: a FLOOR (not behind the newest `v*` tag)
-  run by `check.yml` on every PR, and an EXACT match run by the `verify-version`
-  preflight in `release.yml` that every publishing job `needs:`. The floor is
-  deliberately not an equality, so the bump PR — during which the fallback is
-  one release ahead of every tag that exists — is not the thing it fails.
-
-  `verify:env-docs` (`scripts/verify-env-docs.ts`) turns `docs/ENV.md`'s
-  "superset of the schema" claim from an assertion into a check:
-  `keys(envSchema) ⊆ rows(ENV.md)` and `keys(*.env.example) ⊆ rows(ENV.md) ∪
-INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
-  table was missing two schema keys and seven `.env.example` keys. It is a
-  completeness check only and never writes the file: the Notes column carries
-  cross-field boot rules and failure behaviour no Zod schema encodes. Three
-  vacuity floors fail the run rather than pass it when a population parses
-  empty. It cannot reach variables read straight from `process.env` — they are
-  in no schema and in no example file — which `docs/ENV.md`'s own header now
-  says out loud.
-
 - **The runtime container e2e now runs one inference turn through the BUILT
   pi + sidecar pair (#1197).** `runtime-pi/test/inference-container.e2e.test.ts`
   launches both images on a private Docker network — the agent reaching the
@@ -682,8 +621,16 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   what a space OFFERS. Switching one back on brings it back at the next sync,
   since the sync re-reads that list every time.
 
-- **`space_packages` has exactly THREE writers, and they are its three doors.**
-  Activate, deactivate, configure — nothing else inserts the row. The per-space
+- **The three doors are the only things that CREATE a `space_packages` row.**
+  Activate, deactivate, configure — nothing else inserts it. The row is deleted
+  by exactly two callers, neither of which is a door: `revokePackageShare`
+  (`services/package-shares.ts`), which drops the share and the row behind it in
+  one transaction, and the `keep: false` branch of
+  `reconcilePlacementsAfterRehome` (`services/package-placement.ts`), which
+  empties the old home a `PUT …/home {"keep_in_previous_home": false}` released.
+  And one caller UPDATES a column in place on a row that is already placed —
+  `setBlockUserConnections` (`services/integration-pins-service.ts`) writing
+  `block_user_connections`. The per-space
   integration settings route (`PATCH /api/integrations/{id}/settings`,
   `block_user_connections`) has to materialise a row for an integration the
   deployment offers with no row yet; materialising one IS activating, so it goes
@@ -722,13 +669,20 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
   survives untouched — only the attribution goes `null`, which is already the
   shape a share created by a home move carries.
 
-- **BREAKING (API): readiness judges a declared skill against the ORGANIZATION's
-  catalogue, and the message says so** — `Required skill '…' is not in this
-organization's catalog`. A declared dependency travels in the bundle of the
-  agent that declares it, so it resolves org-wide; what a space's ACTIVATION
-  governs is what that space OFFERS — the caller-context hints, the integration
-  credentials a run may reach, the type index pages. The wording it replaces
-  asserted a per-space check the resolver does not perform.
+- **BREAKING (API): readiness judges a declared skill by PLACEMENT, and the
+  message names the repair.** `resolveDeclaredSkills`
+  (`services/package-catalog.ts`) resolves the skills an agent declares through
+  `placementReadFilter` + `placementShareJoin`, anchored on the home of the
+  package that DECLARES them — the same placement rule every other read of a
+  package obeys. So a skill that is published but homed in another space, and
+  never shared with the agent's home, does not resolve, and readiness answers
+  `missing_skill`. The wording it replaces asserted an INSTALLATION (`is not
+installed`), an act that no longer exists; the message now states both
+  repairs, because publishing alone is not one of them:
+  `Required skill '…' is not available to this agent — publish it, or share it
+with the agent's home space`. What a space's ACTIVATION governs is something
+  else entirely — what that space OFFERS: the caller-context hints, the
+  integration credentials a run may reach, the type index pages.
 
 - **The AFPS §7.7 warnings are named for when they happen: `import-time`.**
   `services/integration-import-warnings.ts` and
@@ -995,6 +949,7 @@ organization's catalog`. A declared dependency travels in the bundle of the
   survives one retry, a listing a page or model cap cut short, or an empty
   intersection leave the previous list untouched — intersecting against a
   partial view would drop the candidates sitting past the cut.
+
 - **Wire change** — `POST /api/model-provider-credentials/{id}/refresh-models`
   answers `candidate_count` in place of `probed_count` (the candidates
   considered; static providers report theirs instead of 0).
@@ -1015,187 +970,6 @@ organization's catalog`. A declared dependency travels in the bundle of the
   installer pins its version anyway). The CLI names the releases it skipped
   when no `v*` one is found; `releaseUrls` no longer has a `latest/download`
   branch because nothing reaches it any more.
-
-- **BREAKING (wire): WRITING a skill whose `SKILL.md` frontmatter has no
-  `description`, or a `name` that breaks the Agent Skills naming rule, is now a 400.** The platform only required the `name` KEY to be present, so a skill
-  created with the editor's default skeleton — `name:` and `description:` both
-  blank — was accepted, published, and produced an artifact Codex rejects and
-  Claude Code never auto-invokes. AFPS §3.3 spells both fields SHOULD; the
-  platform is a PRODUCER of these artifacts and holds itself to MUST.
-
-  A `SKILL.md` is accepted only when its frontmatter declares a `name` of 1-64
-  characters of lowercase `a-z`, `0-9` and `-` with no leading, trailing or
-  consecutive hyphen ([Agent Skills
-  specification](https://agentskills.io/specification)) and a non-empty
-  `description` of at most 1024 characters — both counted in Unicode code
-  points. That `name` is the BARE skill slug (`triage`), a different namespace
-  from the `@scope/name` package id, and must be written **inline on one line**:
-  `name:\n  triage` and `name : triage` are valid YAML the platform's package
-  loader cannot read, so writing one is refused rather than frozen into a
-  version no run could load.
-
-  The frontmatter is parsed with the **`yaml` library, at the same major the
-  skill runtime uses** (`@earendil-works/pi-coding-agent` parses `SKILL.md`
-  with `yaml` 2.9), mirroring its delimiters and newline handling, so the
-  platform cannot accept a document the agent then fails to PARSE. Block
-  scalars, folded scalars, next-line values, quoted escapes, inline
-  `# comments` and CRLF all read correctly; what YAML refuses, the platform
-  refuses (`description: a: b`, `name:x`, a duplicate key, a non-mapping block,
-  a non-string field); and a leading **BOM is rejected** rather than stripped,
-  because the runtime tests `startsWith("---")` and silently drops the skill.
-  The RULES are deliberately stricter than the runtime's, which only warns on a
-  spec violation and counts UTF-16 units — being stricter costs an author one
-  edit, being looser mints an immutable artifact no agent will load. A parity
-  test (`packages/runner-pi/test/skill-frontmatter-parity.test.ts`) runs the
-  real runtime loader and asserts the asymmetry only ever points that way.
-
-  The rule lives once, in `@appstrate/afps-shared`'s `checkSkillMarkdown`,
-  declared as the `skill` entry's `validateContent` on the shared package-type
-  config and applied by every path that WRITES skill content: `POST
-/api/packages/skills`, `PUT /api/packages/skills/{scope}/{name}`, `POST
-.../versions`, `POST .../versions/{version}/restore`, `POST
-/api/packages/import` (both the AFPS and the bare-skill-ZIP fallback),
-  `/import-bundle`, `/import-github`, and the MCP module's
-  `validate_package_file` / `import_package_file`. The 400 is an ordinary
-  problem+json whose first field error carries the machine-readable reason —
-  `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`,
-  `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or
-  `skill_invalid_frontmatter_description` — so a client can tell "no
-  description" from "bad name" without parsing prose.
-
-  **READING and RE-IMPORTING existing artifacts are deliberately untouched, and
-  that is the load-bearing half.** Published versions are immutable: a skill
-  published without a description cannot be repaired in place, so gating the
-  read side would have failed every RUN of every agent depending on one.
-  `checkCompanionFiles` — which `extractRootFromAfps` and the run launcher's
-  package catalog call — therefore still asks only for a frontmatter `name`,
-  through the exact same permissive probe as before. And the rule applies to
-  the ROOT of an import only, never to a dependency copy a bundle carries.
-
-  What changes for existing data is the DRAFT — every write, and only writes. A
-  stored skill draft whose `SKILL.md` does not conform must be completed before
-  its next save or publish. **Operator step, after deploying this release:**
-  `bun scripts/migration/0007-skill-frontmatter-quote-descriptions.ts` (dry-run;
-  `--apply` to write) quotes the `description:` lines `yaml` cannot parse — 17
-  of production's 66 skills carry an unquoted `description: … : …`, which the
-  agent runtime already fails to load — and names the rest for a manual edit.
-  **Restoring a legacy published version is refused** for the same reason: a restore writes a draft. Forking is NOT gated
-  — it byte-copies an already-published artifact, so nothing new enters the
-  world. The skill editor, the publish modal and the version-restore
-  confirmation translate the server's reason codes, so the author sees the
-  missing field rather than an English `detail` — or, as the restore dialog did
-  before, nothing at all.
-
-- **Chat turns shed their fixed per-hop costs** (#1243). The preamble reads
-  (models, default space, caller context, session) run in parallel; the
-  resumable recording is coalesced (50 ms / 16 KiB) instead of one store
-  append per SSE chunk and is released ten seconds after persistence settles;
-  the final assistant message is extracted in a single pass; session
-  bookkeeping is one UPDATE per persisted message; the MCP operation index is
-  memoised per permission set; the package hints query is bounded in SQL. The
-  chat UI throttles message re-renders and polls the session list every 10 s
-  while a turn is generating (60 s idle), and the resume route clears a
-  marker whose producer died. MCP `invoke_operation` audit inserts are no
-  longer awaited on the response path: they are tracked in-process and
-  drained (5 s cap) by graceful shutdown before the DB closes. Every
-  process-local TTL cache in the platform is now an instance of
-  `@appstrate/core/cache`, whose `invalidate`/`clear` broadcast to every
-  replica over the Postgres NOTIFY channel `cache_invalidate`.
-
-- **BREAKING: the `application` entity is now `space`, everywhere, with no
-  compatibility layer** (#1227). The org-scoped container that delimits agents,
-  skills and integrations is renamed across 619 files — wire, database, headers,
-  routes, CLI, SPA and telemetry. `docs/NO_TRANSITIONAL_CODE.md` §1 forbids
-  aliases and dual-read paths, so this breaks the contract ON PURPOSE: a caller
-  still sending `X-Application-Id` or calling `/api/applications` now fails
-  loudly rather than being quietly accommodated. Verified: no `/api/applications`
-  route survives anywhere in `apps/`.
-  `app_`-prefixed ids become `spc_`; the header is `X-Space-Id`; the OTel
-  attribute is `appstrate.space.id` (the old series goes to zero without
-  erroring, so dashboards must be repointed rather than debugged).
-  `@appstrate/core` and `@appstrate/afps-runtime` both change public surface —
-  each needs a major release, and `cloud` needs a CODE change, not just a
-  version bump.
-
-  **Deploying this is a maintenance window, not a rolling deploy**, and the
-  operator steps are not optional:
-  - One replica, port closed, migrations at boot. §1 forbids the
-    expand-migrate-contract that would make a rolling deploy possible.
-  - `pg_dump -Fc` immediately before. **There is no down migration**, and
-    rolling the image back does not roll the schema back: the watermark is
-    compared by timestamp, so a reverted deploy finds nothing to apply and runs
-    old code against a renamed schema.
-  - **Two artifacts, both required.** `0053_applications_to_spaces.sql` applies
-    at boot and renames the catalog;
-    `scripts/migration/0003-application-ids-to-space-ids.sql` is run BY HAND and
-    rewrites the values. Neither is sufficient alone.
-  - Then `VALIDATE CONSTRAINT` on `webhooks_level_values`,
-    `webhooks_level_check` and `oauth_clients_level_check` — `0053` adds them
-    `NOT VALID` because the rows still hold the old value at that point.
-  - **Do NOT rewrite storage keys.** `files.storage_key`,
-    `uploads.storage_key` and `storage_deletion_jobs.storage_key` keep their
-    `app_` path segment deliberately: `0003` moves no bytes, so rewriting the
-    keys would point every row at an object that does not exist. Nothing
-    compares a storage key to a space id. New objects are written under `spc_`;
-    old ones stay where they are.
-  - Do not run `audit:storage-orphans` until verification is complete.
-  - Announce the CLI break: nothing gates an installed CLI to a version, and §1
-    forbids building such a mechanism, so users run `npm i -g appstrate@latest`
-    on the day. Open dashboard tabs must hard-refresh, and OAuth connect flows
-    in flight will fail (short Redis TTL, drainable).
-
-  Untouched, because the word means something else there: `appfile://` (it
-  encodes a `file_` id and never carried a space id), `APP_URL`, `--app-url`,
-  the turborepo `apps/` directory, the Hono `app` variable, the ~3,100
-  `application/*` MIME literals, `appp_`, and every use meaning the platform
-  itself or a third-party OAuth app registered at Google, GitHub or Discord.
-
-- **BREAKING: every remaining JSON request body is `.strict()` too — an unknown
-  key is a `400` instead of a silent strip.** The entry above closed the package
-  JSON bodies; this closes the rest of the API. `apps/api/src/routes/*.ts` went
-  from 23 `.strict()` schemas to 68 — **45 more request bodies across 16 route
-  files**: `integrations` (10), `models` (5), `organizations` and `spaces` (4
-  each), `model-provider-credentials`, `packages`, `profile` and `proxies` (3
-  each), `model-providers-oauth` (2), and one each in `agents`, `api-keys`,
-  `auth-bootstrap`, `me`, `uploads`, `user-agents` and `welcome`. All 45 are
-  top-level body schemas reached through `readJsonBody`; not one is a nested
-  object tightened by accident.
-
-  **This is a wire-contract change, not a validation tidy-up.** A client sending
-  a property the body does not model used to get its `2xx` and have the property
-  dropped on the floor. It now gets `400` `validation_failed`. The shape that
-  breaks is read-modify-write — `GET` a resource, edit one field, `PUT` the
-  whole object back — because every property of the response the update body
-  does not model is now refused BY NAME, exactly as described for the package
-  bodies above.
-
-  The OpenAPI spec follows with no second edit: `z.toJSONSchema()` emits
-  `additionalProperties: false` for a `.strict()` object, so every body wired
-  through `apps/api/src/openapi/zod-schema-registry.ts` — which is nearly all of
-  them — now advertises the refusal it enforces.
-
-- **BREAKING (API keys): five more `GET` routes enforce a read permission.**
-  Same class as the eight run and schedule reads gated in `1.0.0-beta.52`, and
-  the same reasoning: each was gated on org membership alone and enforced
-  nothing about what the caller may do.
-
-  - `GET /api/agents` → `agents:read`
-  - `GET /api/agents/{scope}/{name}/proxy` → `agents:read`
-  - `GET /api/agents/{scope}/{name}/model` → `agents:read`
-  - `GET /api/spaces/{spaceId}/packages` → `spaces:read`
-  - `GET /api/spaces/{spaceId}/packages/{scope}/{name}` → `spaces:read`
-
-  On the two agent detail routes the permission check is registered BEFORE
-  `requireAgent()` on purpose: that middleware `404`s on an unknown agent, so
-  the reverse order would answer "does this agent exist?" for a caller not
-  allowed to read agents at all.
-
-  **No dashboard user loses anything.** Every org role down to `guest` already
-  holds `agents:read` and `spaces:read` (`apps/api/src/lib/permissions.ts`), so
-  the SPA is unaffected. What changes is an ALREADY-MINTED API key scoped
-  without the matching permission: it reached these five reads through org
-  membership and now gets `403`. Both scopes are grantable to API keys — re-mint
-  the key with them.
 
 - **BREAKING (API keys): `GET /api/schedules/{id}/runs` asks for a run-read
   permission on top of `schedules:read`.** The response names schedules but
@@ -1304,96 +1078,6 @@ organization's catalog`. A declared dependency travels in the bundle of the
   keeping "try again" for a failure the server named nothing for. The shared
   wording is "Preview unavailable" / "Prévisualisation indisponible".
 
-- **BREAKING: the package JSON bodies are `.strict()` — an unknown key is a
-  `400` instead of a silent strip.** `source_code` was dropped from the package
-  contract when its last reader died with the `tool` package type, and the
-  schemas were left open, so a client still sending it got a `201` and a package
-  without it with nothing anywhere saying the field had gone. A retired name
-  must fail loudly (`docs/NO_TRANSITIONAL_CODE.md` §1) — the rule that closed
-  the four launch surfaces in #1187, and this surface was left out of it. The
-  barrier is generic and names no field: it refuses any key the body does not
-  model. Seven request bodies carry `additionalProperties: false` in the spec to
-  match — `POST /api/packages/{skills,agents,integrations}` and
-  `PUT /api/packages/{skills,agents,integrations,mcp-servers}/{scope}/{name}`.
-  Refusals answer `400` `validation_failed` blaming the field `body`.
-
-  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
-  `400`.** `packageJsonUpdateSchema` accepts three keys — `manifest`, `content`
-  and `lock_version` — and every other property of the object the matching `GET`
-  hands back is now refused BY NAME.
-
-  For agents, `GET /api/packages/agents/{scope}/{name}` answers with the
-  `AgentDetail` component's 19 properties, of which the update body accepts
-  exactly two (`content` is not among them — an agent's content comes back as
-  `prompt`). The other 17 are refused: `id`, `display_name`, `description`,
-  `source`, `scope`, `version`, `prompt`, `updatedAt`, `input`, `output`,
-  `dependencies`, `last_run`, `running_runs`, `version_count`, `forked_from`,
-  `has_unarchived_changes`, `effective_timeout_seconds`.
-
-  For skills, integrations and mcp-servers the `GET` answers with
-  `OrgPackageItemDetail`, 18 properties, of which the update body accepts three.
-  The other 15 are refused: `id`, `orgId`, `name`, `description`, `source`,
-  `created_by`, `auto_installed`, `version`, `manifest_name`, `version_count`,
-  `has_unarchived_changes`, `forked_from`, `agents`, `createdAt`, `updatedAt`.
-
-  A third-party client that does the obvious thing — `GET` the package, edit
-  `manifest`, `PUT` the object back — previously had those keys stripped and got
-  a `200`; it now gets a `400` on `id`. **Send only `manifest`, `content` and
-  `lock_version`.** In-repo callers are unaffected: the three `toWireBody`
-  implementations already send exactly that, and `useCreatePackage`'s body type
-  declared an `id?: string` no caller ever passed, removed here — a key declared
-  against a now-strict body is a `400` waiting for its first caller.
-
-  `detect:breaking` reports this as non-breaking, and that is correct about the
-  OpenAPI _document_: it does not model a request body tightening
-  `additionalProperties`, which is invisible to both it and the generated SPA
-  types. This entry is the only signal a consumer gets. Same reasoning as the
-  schedule-body entry further down, which enumerates its 15 refused fields for
-  the same reason.
-
-- **BREAKING: an AFPS integration declaring a bare auth-scheme `prefix` is
-  refused at install time.** AFPS §7.6 defines `delivery.http.prefix` as a
-  literal prepended to the rendered value — every spec example writes the
-  trailing space. Appstrate additionally accepted the bare scheme (`"Bearer"`)
-  in `Authorization` position and spliced the separator in at request time; its
-  own comment called it "this compatibility rule". The injector now concatenates
-  verbatim and inspects nothing, and validator rule (1d) rejects the bare form
-  where the manifest author can act on it, naming the replacement
-  (`Write "Bearer ".`).
-
-  **51 in-repo system integrations wrote the bare form** — 44 `Bearer`,
-  6 `Basic`, 1 `Zoho-oauthtoken` — and every one is fixed here with a patch
-  bump and a rebuilt archive, per the immutable-published-version precedent of
-  #928.
-  Without the bump the fix stays inert in production. No exact-version pin
-  references any of them.
-
-  **Operators: an org-imported or org-published integration stored before this
-  change stops resolving.** System packages are unexposed (`resolvePublishedManifest`
-  short-circuits on the in-memory registry the rebuilt archives replaced), but
-  `packages.draft_manifest` and `package_versions.manifest` hold the author's
-  bytes verbatim and are never revalidated on read, so a stored bare prefix now
-  fails `invalid_manifest` at the first read — which the route maps onto `404`,
-  presenting as a missing integration rather than a bad prefix. Apply
-  `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`; its `WHERE` is
-  exactly the condition it removes (RFC 9110 token grammar, under
-  `Authorization` or `Proxy-Authorization`, case-insensitive) and it is
-  idempotent. It deliberately does not rewrite the uploaded archive bytes, so
-  `package_versions.integrity` is untouched and the boot sync's refuse-overwrite
-  guard still holds — the archive keeps the author's original spelling, and
-  re-importing it now fails loudly at the install gate.
-
-- **Run logs: an untagged `appstrate.progress` row renders as runtime output,
-  not as model prose.** `assistant_message` is the only marker of
-  model-authored text; the run-detail log view additionally treated a data-less
-  `debug`-level progress row as agent text, "compatibility with runs emitted
-  before `assistant_message` was stamped". No in-tree emitter produces that
-  shape as agent text, and the one shape still producible from outside the tree
-  is a runner lifecycle breadcrumb by definition — so the fallback was
-  attributing a container-lifecycle line to the model. Bounded and cosmetic: for
-  runs predating the stamp, such rows now carry the runtime dot instead of the
-  speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
-
 - **Every rate limit keeps a per-process budget behind Redis.** Each limiter the
   platform builds — auth, OIDC, run, proxy — now carries a `RateLimiterMemory`
   insurance limiter of the same points and duration
@@ -1411,6 +1095,7 @@ organization's catalog`. A declared dependency travels in the bundle of the
   serving the referenced images. Existing release tags are preserved and all
   references pin verified multi-platform digests. The test fixture replaces
   `latest` with the server release already used by the Tier 3 example.
+
 - **Typing fast into a Monaco pane no longer drops characters.** The agent
   prompt editor, the package JSON tab and the new file editor fed Monaco a
   controlled `value` from React state, and `@monaco-editor/react` applies a
@@ -1421,6 +1106,7 @@ organization's catalog`. A declared dependency travels in the bundle of the
   loaded machine arrived as `prin1)`. Every authoring pane now seeds Monaco once
   (`defaultValue`) and receives text it did not type as a remount, keyed by
   what changed it (another file, a discarded draft, a re-read server copy).
+
 - **Idempotent run retries enforce current permissions and input visibility.**
   The request fingerprint includes its method, URL and body; using the same key
   for a different route or version returns `422 idempotency_conflict` without
@@ -1701,26 +1387,6 @@ progress` and emits nothing. Once a handler has run the organization is
   was bounced with `invalid_scope`. Narrow registrations stay narrow — and an
   already-registered scope-less client reads as one, so it must re-register.
 
-- **A killed `appstrate skills sync` no longer locks the next ten minutes of
-  sessions out.** Closing a Claude Code session seconds after opening it kills
-  the background sync it spawned, and the `mkdir` lock only expired by age —
-  every session in the following ten minutes reported `Another appstrate
-skills sync is running` and kept the stale plugin. The lock is now
-  `flock(2)` on `skills-sync/sync.lock` (through `bun:ffi` — Bun is the
-  runtime on every channel): the kernel releases it when the holder ends,
-  however it ends, so there is no pid to trust, no age to guess and nothing
-  left behind.
-
-- **`appstrate self-update`, `bootstrap.sh` and `bootstrap-runner.sh` no longer
-  break for the days between an npm release and the next platform tag.** The
-  `cli@`, `core@` and `afps-shared@` publish workflows each create a GitHub
-  Release, and GitHub made the newest one "latest" — so `releases/latest`
-  answered `cli@1.0.0-beta.56`, the CLI prefixed it with `v` and asked for
-  `vcli@1.0.0-beta.56/checksums.txt.minisig` (404). Every one of the 15
-  non-`v*` releases to date opened such a window. Those workflows now pass
-  `make_latest: false`, and the CLI names a non-platform `latest` tag instead
-  of building a URL from it.
-
 ### Removed
 
 - **BREAKING (API): the `?active=true` query parameter is gone from
@@ -1753,7 +1419,7 @@ skills sync is running` and kept the stale plugin. The lock is now
   be a data migration, not a code change.
 
 - **BREAKING (operators): the `package.unshared` audit field `uninstalled` is
-  gone; the field is `placement_removed`.** A revoke deletes the share and the
+  gone; the field is `placementRemoved`.** A revoke deletes the share and the
   `space_packages` row behind it in one transaction, and the entry says which of
   the two it actually removed — under the name the platform now gives that row.
 
@@ -1907,6 +1573,464 @@ skills sync is running` and kept the stale plugin. The lock is now
   module contract, replaced by `getOrgOwnerEmails` and `getOrgMembers` (see
   `packages/core/CHANGELOG.md`), so an unset billing contact now falls back to
   the org's OWNERS rather than fanning out to every administrator.
+
+### Security
+
+- **`GET /api/integrations` and its detail obey PLACEMENT, so an integration
+  homed in somebody's personal space stops being org-wide readable.** Both
+  routes filtered on "does this organization own the row?" and on nothing else:
+  no home, no share, no space at all entered the query. An integration drafted
+  in a member's PERSONAL space and offered to nobody therefore came back in
+  full — its name, its description, its `auths` with their `authorized_uris`,
+  its tool catalog — to every caller holding `integrations:read`, organization
+  owners and admins included, while `GET /api/packages/integrations` omitted
+  that very row and its detail answered 404 for the same caller. The Integrations
+  page hid it by filtering `active` in the browser, which is not a boundary: the
+  HTTP response carried it, so a network tab, an API key, the CLI or `curl` read
+  it whole. RBAC spec §3.6 states the rule the routes were missing — owners and
+  admins neither read nor write a personal space, and the home is the only
+  authority there is. Both now conjoin `placementReadFilter`, the SAME rule the
+  per-type index and the space library read, rather than a third formulation of
+  it: an integration is listed and readable when the current space HOMES it, was
+  OFFERED it, or when the deployment ships it. Placement is not activation — an
+  offer not taken up and an integration switched off both stay listed, with
+  `active: false`. Resolving a DECLARED dependency stays org-wide (§6.9), where
+  the run resolves it, through a reader that says so by name.
+
+- **A forwarded chain shorter than `TRUST_PROXY` no longer picks the client's
+  own address.** `lib/client-ip.ts` reads `X-Forwarded-For` from the RIGHT,
+  which is unspoofable while each trusted hop appends its entry. When the chain
+  carried FEWER entries than the hop count it used to clamp to the LEFTMOST
+  one — an entry no proxy wrote — so any caller could name its own IP under any
+  `TRUST_PROXY >= 1` and mint a fresh bucket per request. Every per-IP control
+  keyed on that answer, including the rate limit that is the stated defence
+  against `AUTH_BOOTSTRAP_TOKEN` brute force, the Better Auth production limiter
+  and the address recorded on sessions and audit events. A short chain now fails
+  closed: the whole forwarded set is distrusted (`X-Real-IP` included, or
+  stripping the chain would just move the hole) and the socket peer answers.
+
+  The resolved value must also **be** an IP address now. Port suffixes and
+  bracketed IPv6 normalize to the address they name; anything else is dropped.
+  That closes a one-caller denial of service: an unparseable address made
+  Better Auth's `getIP` drop _every_ caller into one shared rate-limit bucket.
+
+  **Operators:** the hop count must match the topology. `TRUST_PROXY=1` behind a
+  single reverse proxy that appends `X-Forwarded-For`; a TLS-terminating L4 load
+  balancer (AWS NLB TLS listener, GCP TCP proxy) appends nothing and is not a
+  hop. Verify too that the origin port is not reachable around the proxy — the
+  shipped compose publishes it on all host interfaces, and Docker's rules bypass
+  host firewalls.
+
+- **`TRUST_PROXY=false` refuses to boot in production behind a non-loopback
+  `APP_URL`.** The platform terminates no TLS, so that pair means a proxy is in
+  front by construction, and ignoring `X-Forwarded-For` there hands every caller
+  the proxy's own address — collapsing every per-IP rate limit and every audit
+  record into one bucket. `@appstrate/env` now rejects the combination at boot
+  instead of running degraded.
+
+  **Operators: name the hop count.** `TRUST_PROXY=1` behind a single reverse
+  proxy, `N` behind N hops you control. The self-hosting example ships `1` and
+  passes the variable through in all four of its compose files.
+
+- **A token request that identifies no client is held to the self-service
+  confinement.** `/oauth2/token` confines a self-registered (DCR / CIMD) client
+  to exactly one protected-resource audience; a request naming no client now
+  falls under the same rule rather than past it, so dropping `client_id` is not
+  a way to mint a token for the broad platform audience. `private_key_jwt` keeps
+  working: the client id is read from the `client_assertion`'s `sub` (RFC 7523
+  §3, `iss` must agree when present), unverified — the provider then verifies
+  the assertion against the row that id names, so a forged assertion naming an
+  operator-provisioned client dies on the signature check and one naming a
+  self-service client stays confined.
+
+- **Operators: run `scripts/migration/0011` after the drizzle batch carrying
+  `0057`, on any deployment that has ever accepted a self-registered client —
+  the API refuses to boot in between, and that is the intended sequence.**
+  `0057` adds `oauth_clients.self_service` and leaves it `false` on every row;
+  `0011` fills it from the `selfService` key already in `metadata`. Until it
+  runs, a self-registered client reads as operator-provisioned and its tokens
+  are not confined, so the deployment comes up only far enough to apply `0057`,
+  counts the rows still unfolded and exits naming the script; under a supervisor
+  it restarts into the same refusal. The order is therefore: deploy → the API
+  applies `0057` and exits → run `0011` against the database → restart. A
+  deployment that never accepted a self-registered client counts zero and never
+  sees the refusal. The script is idempotent, runs in one transaction, and never
+  flips a `true` back.
+
+## [1.0.0-beta.57] - 2026-09-03
+
+### Fixed
+
+- **A killed `appstrate skills sync` no longer locks the next ten minutes of
+  sessions out.** Closing a Claude Code session seconds after opening it kills
+  the background sync it spawned, and the `mkdir` lock only expired by age —
+  every session in the following ten minutes reported `Another appstrate
+skills sync is running` and kept the stale plugin. The lock is now
+  `flock(2)` on `skills-sync/sync.lock` (through `bun:ffi` — Bun is the
+  runtime on every channel): the kernel releases it when the holder ends,
+  however it ends, so there is no pid to trust, no age to guess and nothing
+  left behind.
+
+- **`appstrate self-update`, `bootstrap.sh` and `bootstrap-runner.sh` no longer
+  break for the days between an npm release and the next platform tag.** The
+  `cli@`, `core@` and `afps-shared@` publish workflows each create a GitHub
+  Release, and GitHub made the newest one "latest" — so `releases/latest`
+  answered `cli@1.0.0-beta.56`, the CLI prefixed it with `v` and asked for
+  `vcli@1.0.0-beta.56/checksums.txt.minisig` (404). Every one of the 15
+  non-`v*` releases to date opened such a window. Those workflows now pass
+  `make_latest: false`, and the CLI names a non-platform `latest` tag instead
+  of building a URL from it.
+
+## [1.0.0-beta.56] - 2026-09-03
+
+### Added
+
+- **`@appstrate/core/map-with-concurrency`** — the bounded worker pool moved
+  out of `apps/api/src/lib/map-with-concurrency.ts` into core, unchanged, and
+  re-imported by `lib/boot.ts`, `services/input-parser.ts` and
+  `services/system-packages.ts`. `appstrate skills sync` needs the same pool
+  against the rate-limited package routes; a copy in the CLI would have been
+  the third in the repo, and the first two had already diverged on
+  abort-on-rejection.
+
+- **`appstrate skills sync` — the org's skills in Claude Code and Codex,
+  refreshed without a manual step.** Materializes every skill placed in the
+  profile's pinned space as an [Agent Skills](https://agentskills.io/specification)
+  directory, into `claude-plugin` (a complete Claude Code plugin under
+  `$XDG_DATA_HOME/appstrate/claude-plugin/`, the default), `codex`
+  (`~/.agents/skills/`) or `claude-user` (`~/.claude/skills/`). The auto-sync is
+  a Claude Code marketplace `command` source re-running the CLI once per
+  session — no server change, no hook, no daemon — so `--print-path` prints the
+  plugin directory as the only stdout line and the output is byte-deterministic.
+  Published `latest` by default (integrity-verified), `--source draft` for
+  authors. Exactly one thing is rewritten in `SKILL.md`, the frontmatter `name`,
+  so it matches the directory; an artifact published before the platform's
+  frontmatter gate is synced as authored and named once on stderr. An ownership
+  ledger keyed by target and `HOME` root makes the shared roots safe (nothing it
+  does not own is written or removed), a `mkdir` lock serializes concurrent
+  sessions, and per-skill failures never cost the plugin under `--print-path`.
+  On a fresh machine the plugin install still succeeds before the CLI is
+  connected: it gets a single `/appstrate:setup` skill naming the missing step
+  and a `SessionStart` hook that surfaces it at every session start, both
+  replaced by the organization's skills on the first connected sync.
+  Full behaviour: `apps/cli/README.md` → `appstrate skills`.
+
+### Changed
+
+- **BREAKING (wire): WRITING a skill whose `SKILL.md` frontmatter has no
+  `description`, or a `name` that breaks the Agent Skills naming rule, is now a 400.** The platform only required the `name` KEY to be present, so a skill
+  created with the editor's default skeleton — `name:` and `description:` both
+  blank — was accepted, published, and produced an artifact Codex rejects and
+  Claude Code never auto-invokes. AFPS §3.3 spells both fields SHOULD; the
+  platform is a PRODUCER of these artifacts and holds itself to MUST.
+
+  A `SKILL.md` is accepted only when its frontmatter declares a `name` of 1-64
+  characters of lowercase `a-z`, `0-9` and `-` with no leading, trailing or
+  consecutive hyphen ([Agent Skills
+  specification](https://agentskills.io/specification)) and a non-empty
+  `description` of at most 1024 characters — both counted in Unicode code
+  points. That `name` is the BARE skill slug (`triage`), a different namespace
+  from the `@scope/name` package id, and must be written **inline on one line**:
+  `name:\n  triage` and `name : triage` are valid YAML the platform's package
+  loader cannot read, so writing one is refused rather than frozen into a
+  version no run could load.
+
+  The frontmatter is parsed with the **`yaml` library, at the same major the
+  skill runtime uses** (`@earendil-works/pi-coding-agent` parses `SKILL.md`
+  with `yaml` 2.9), mirroring its delimiters and newline handling, so the
+  platform cannot accept a document the agent then fails to PARSE. Block
+  scalars, folded scalars, next-line values, quoted escapes, inline
+  `# comments` and CRLF all read correctly; what YAML refuses, the platform
+  refuses (`description: a: b`, `name:x`, a duplicate key, a non-mapping block,
+  a non-string field); and a leading **BOM is rejected** rather than stripped,
+  because the runtime tests `startsWith("---")` and silently drops the skill.
+  The RULES are deliberately stricter than the runtime's, which only warns on a
+  spec violation and counts UTF-16 units — being stricter costs an author one
+  edit, being looser mints an immutable artifact no agent will load. A parity
+  test (`packages/runner-pi/test/skill-frontmatter-parity.test.ts`) runs the
+  real runtime loader and asserts the asymmetry only ever points that way.
+
+  The rule lives once, in `@appstrate/afps-shared`'s `checkSkillMarkdown`,
+  declared as the `skill` entry's `validateContent` on the shared package-type
+  config and applied by every path that WRITES skill content: `POST
+/api/packages/skills`, `PUT /api/packages/skills/{scope}/{name}`, `POST
+.../versions`, `POST .../versions/{version}/restore`, `POST
+/api/packages/import` (both the AFPS and the bare-skill-ZIP fallback),
+  `/import-bundle`, `/import-github`, and the MCP module's
+  `validate_package_file` / `import_package_file`. The 400 is an ordinary
+  problem+json whose first field error carries the machine-readable reason —
+  `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`,
+  `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or
+  `skill_invalid_frontmatter_description` — so a client can tell "no
+  description" from "bad name" without parsing prose.
+
+  **READING and RE-IMPORTING existing artifacts are deliberately untouched, and
+  that is the load-bearing half.** Published versions are immutable: a skill
+  published without a description cannot be repaired in place, so gating the
+  read side would have failed every RUN of every agent depending on one.
+  `checkCompanionFiles` — which `extractRootFromAfps` and the run launcher's
+  package catalog call — therefore still asks only for a frontmatter `name`,
+  through the exact same permissive probe as before. And the rule applies to
+  the ROOT of an import only, never to a dependency copy a bundle carries.
+
+  What changes for existing data is the DRAFT — every write, and only writes. A
+  stored skill draft whose `SKILL.md` does not conform must be completed before
+  its next save or publish. **Operator step, after deploying this release:**
+  `bun scripts/migration/0007-skill-frontmatter-quote-descriptions.ts` (dry-run;
+  `--apply` to write) quotes the `description:` lines `yaml` cannot parse — 17
+  of production's 66 skills carry an unquoted `description: … : …`, which the
+  agent runtime already fails to load — and names the rest for a manual edit.
+  **Restoring a legacy published version is refused** for the same reason: a restore writes a draft. Forking is NOT gated
+  — it byte-copies an already-published artifact, so nothing new enters the
+  world. The skill editor, the publish modal and the version-restore
+  confirmation translate the server's reason codes, so the author sees the
+  missing field rather than an English `detail` — or, as the restore dialog did
+  before, nothing at all.
+
+- **Chat turns shed their fixed per-hop costs** (#1243). The preamble reads
+  (models, default space, caller context, session) run in parallel; the
+  resumable recording is coalesced (50 ms / 16 KiB) instead of one store
+  append per SSE chunk and is released ten seconds after persistence settles;
+  the final assistant message is extracted in a single pass; session
+  bookkeeping is one UPDATE per persisted message; the MCP operation index is
+  memoised per permission set; the package hints query is bounded in SQL. The
+  chat UI throttles message re-renders and polls the session list every 10 s
+  while a turn is generating (60 s idle), and the resume route clears a
+  marker whose producer died. MCP `invoke_operation` audit inserts are no
+  longer awaited on the response path: they are tracked in-process and
+  drained (5 s cap) by graceful shutdown before the DB closes. Every
+  process-local TTL cache in the platform is now an instance of
+  `@appstrate/core/cache`, whose `invalidate`/`clear` broadcast to every
+  replica over the Postgres NOTIFY channel `cache_invalidate`.
+
+## [1.0.0-beta.55] - 2026-09-01
+
+No entries were recorded for this release. `CHANGELOG.md` is byte-identical at
+`v1.0.0-beta.54` and `v1.0.0-beta.55`, so everything below shipped in beta.54
+or earlier.
+
+## [1.0.0-beta.54] - 2026-08-28
+
+### Added
+
+- **Two release gates joined `bun run check`: `verify:release-version` and
+  `verify:env-docs`.** Both close a hole that a green check had been reporting
+  as fine.
+
+  `verify:release-version` (`scripts/verify-release-version.ts`) compares the
+  hardcoded `${APPSTRATE_VERSION:-<version>}` fallback in every shipped compose
+  file and `.env.example` against the git tag namespace. That fallback is what a
+  self-hoster gets from the documented `docker compose up -d` without exporting
+  the variable, and nothing checked it: measured at `v1.0.0-beta.53` all five
+  compose files still said `1.0.0-beta.41` — 79 sites, twelve releases stale —
+  while `.env.example` said `1.0.0-beta.51`, a third value again. The #1201
+  image-trio guard structurally cannot see this: it compares the platform, the
+  `PI_IMAGE` and the `SIDECAR_IMAGE` refs to EACH OTHER, and all three read the
+  same stale fallback, so the trio is perfectly coherent — coherently twelve
+  releases old. The gate has two arms: a FLOOR (not behind the newest `v*` tag)
+  run by `check.yml` on every PR, and an EXACT match run by the `verify-version`
+  preflight in `release.yml` that every publishing job `needs:`. The floor is
+  deliberately not an equality, so the bump PR — during which the fallback is
+  one release ahead of every tag that exists — is not the thing it fails.
+
+  `verify:env-docs` (`scripts/verify-env-docs.ts`) turns `docs/ENV.md`'s
+  "superset of the schema" claim from an assertion into a check:
+  `keys(envSchema) ⊆ rows(ENV.md)` and `keys(*.env.example) ⊆ rows(ENV.md) ∪
+INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
+  table was missing two schema keys and seven `.env.example` keys. It is a
+  completeness check only and never writes the file: the Notes column carries
+  cross-field boot rules and failure behaviour no Zod schema encodes. Three
+  vacuity floors fail the run rather than pass it when a population parses
+  empty. It cannot reach variables read straight from `process.env` — they are
+  in no schema and in no example file — which `docs/ENV.md`'s own header now
+  says out loud.
+
+### Changed
+
+- **BREAKING: the `application` entity is now `space`, everywhere, with no
+  compatibility layer** (#1227). The org-scoped container that delimits agents,
+  skills and integrations is renamed across 619 files — wire, database, headers,
+  routes, CLI, SPA and telemetry. `docs/NO_TRANSITIONAL_CODE.md` §1 forbids
+  aliases and dual-read paths, so this breaks the contract ON PURPOSE: a caller
+  still sending `X-Application-Id` or calling `/api/applications` now fails
+  loudly rather than being quietly accommodated. Verified: no `/api/applications`
+  route survives anywhere in `apps/`.
+  `app_`-prefixed ids become `spc_`; the header is `X-Space-Id`; the OTel
+  attribute is `appstrate.space.id` (the old series goes to zero without
+  erroring, so dashboards must be repointed rather than debugged).
+  `@appstrate/core` and `@appstrate/afps-runtime` both change public surface —
+  each needs a major release, and `cloud` needs a CODE change, not just a
+  version bump.
+
+  **Deploying this is a maintenance window, not a rolling deploy**, and the
+  operator steps are not optional:
+  - One replica, port closed, migrations at boot. §1 forbids the
+    expand-migrate-contract that would make a rolling deploy possible.
+  - `pg_dump -Fc` immediately before. **There is no down migration**, and
+    rolling the image back does not roll the schema back: the watermark is
+    compared by timestamp, so a reverted deploy finds nothing to apply and runs
+    old code against a renamed schema.
+  - **Two artifacts, both required.** `0053_applications_to_spaces.sql` applies
+    at boot and renames the catalog;
+    `scripts/migration/0003-application-ids-to-space-ids.sql` is run BY HAND and
+    rewrites the values. Neither is sufficient alone.
+  - Then `VALIDATE CONSTRAINT` on `webhooks_level_values`,
+    `webhooks_level_check` and `oauth_clients_level_check` — `0053` adds them
+    `NOT VALID` because the rows still hold the old value at that point.
+  - **Do NOT rewrite storage keys.** `files.storage_key`,
+    `uploads.storage_key` and `storage_deletion_jobs.storage_key` keep their
+    `app_` path segment deliberately: `0003` moves no bytes, so rewriting the
+    keys would point every row at an object that does not exist. Nothing
+    compares a storage key to a space id. New objects are written under `spc_`;
+    old ones stay where they are.
+  - Do not run `audit:storage-orphans` until verification is complete.
+  - Announce the CLI break: nothing gates an installed CLI to a version, and §1
+    forbids building such a mechanism, so users run `npm i -g appstrate@latest`
+    on the day. Open dashboard tabs must hard-refresh, and OAuth connect flows
+    in flight will fail (short Redis TTL, drainable).
+
+  Untouched, because the word means something else there: `appfile://` (it
+  encodes a `file_` id and never carried a space id), `APP_URL`, `--app-url`,
+  the turborepo `apps/` directory, the Hono `app` variable, the ~3,100
+  `application/*` MIME literals, `appp_`, and every use meaning the platform
+  itself or a third-party OAuth app registered at Google, GitHub or Discord.
+
+- **BREAKING: every remaining JSON request body is `.strict()` too — an unknown
+  key is a `400` instead of a silent strip.** The entry above closed the package
+  JSON bodies; this closes the rest of the API. `apps/api/src/routes/*.ts` went
+  from 23 `.strict()` schemas to 68 — **45 more request bodies across 16 route
+  files**: `integrations` (10), `models` (5), `organizations` and `spaces` (4
+  each), `model-provider-credentials`, `packages`, `profile` and `proxies` (3
+  each), `model-providers-oauth` (2), and one each in `agents`, `api-keys`,
+  `auth-bootstrap`, `me`, `uploads`, `user-agents` and `welcome`. All 45 are
+  top-level body schemas reached through `readJsonBody`; not one is a nested
+  object tightened by accident.
+
+  **This is a wire-contract change, not a validation tidy-up.** A client sending
+  a property the body does not model used to get its `2xx` and have the property
+  dropped on the floor. It now gets `400` `validation_failed`. The shape that
+  breaks is read-modify-write — `GET` a resource, edit one field, `PUT` the
+  whole object back — because every property of the response the update body
+  does not model is now refused BY NAME, exactly as described for the package
+  bodies above.
+
+  The OpenAPI spec follows with no second edit: `z.toJSONSchema()` emits
+  `additionalProperties: false` for a `.strict()` object, so every body wired
+  through `apps/api/src/openapi/zod-schema-registry.ts` — which is nearly all of
+  them — now advertises the refusal it enforces.
+
+- **BREAKING (API keys): five more `GET` routes enforce a read permission.**
+  Same class as the eight run and schedule reads gated in `1.0.0-beta.52`, and
+  the same reasoning: each was gated on org membership alone and enforced
+  nothing about what the caller may do.
+
+  - `GET /api/agents` → `agents:read`
+  - `GET /api/agents/{scope}/{name}/proxy` → `agents:read`
+  - `GET /api/agents/{scope}/{name}/model` → `agents:read`
+  - `GET /api/spaces/{spaceId}/packages` → `spaces:read`
+  - `GET /api/spaces/{spaceId}/packages/{scope}/{name}` → `spaces:read`
+
+  On the two agent detail routes the permission check is registered BEFORE
+  `requireAgent()` on purpose: that middleware `404`s on an unknown agent, so
+  the reverse order would answer "does this agent exist?" for a caller not
+  allowed to read agents at all.
+
+  **No dashboard user loses anything.** Every org role down to `guest` already
+  holds `agents:read` and `spaces:read` (`apps/api/src/lib/permissions.ts`), so
+  the SPA is unaffected. What changes is an ALREADY-MINTED API key scoped
+  without the matching permission: it reached these five reads through org
+  membership and now gets `403`. Both scopes are grantable to API keys — re-mint
+  the key with them.
+
+- **BREAKING: the package JSON bodies are `.strict()` — an unknown key is a
+  `400` instead of a silent strip.** `source_code` was dropped from the package
+  contract when its last reader died with the `tool` package type, and the
+  schemas were left open, so a client still sending it got a `201` and a package
+  without it with nothing anywhere saying the field had gone. A retired name
+  must fail loudly (`docs/NO_TRANSITIONAL_CODE.md` §1) — the rule that closed
+  the four launch surfaces in #1187, and this surface was left out of it. The
+  barrier is generic and names no field: it refuses any key the body does not
+  model. Seven request bodies carry `additionalProperties: false` in the spec to
+  match — `POST /api/packages/{skills,agents,integrations}` and
+  `PUT /api/packages/{skills,agents,integrations,mcp-servers}/{scope}/{name}`.
+  Refusals answer `400` `validation_failed` blaming the field `body`.
+
+  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
+  `400`.** `packageJsonUpdateSchema` accepts four keys — `manifest`, `content`,
+  `lock_version` and `operations` — and the rule for everything else is stated
+  once, as a rule rather than a list, because a list goes stale the first time a
+  response grows a field: **every property of the object the matching `GET`
+  hands back, other than those four, is refused BY NAME.**
+
+  For agents, `GET /api/packages/agents/{scope}/{name}` answers with the
+  `AgentDetail` component's 24 properties, of which the update body accepts
+  exactly two — `manifest` and `lock_version` (`content` is not among them: an
+  agent's content comes back as `prompt`). The other 22 are refused.
+
+  For skills, integrations and mcp-servers the `GET` answers with
+  `OrgPackageItemDetail`, 22 properties, of which the update body accepts three
+  — `manifest`, `content` and `lock_version`. The other 19 are refused.
+
+  A third-party client that does the obvious thing — `GET` the package, edit
+  `manifest`, `PUT` the object back — previously had those keys stripped and got
+  a `200`; it now gets a `400` on `id`. **Send only `manifest`, `content`,
+  `lock_version` and, where you mean it, `operations`.** In-repo callers are
+  unaffected: the three `toWireBody`
+  implementations already send exactly that, and `useCreatePackage`'s body type
+  declared an `id?: string` no caller ever passed, removed here — a key declared
+  against a now-strict body is a `400` waiting for its first caller.
+
+  `detect:breaking` reports this as non-breaking, and that is correct about the
+  OpenAPI _document_: it does not model a request body tightening
+  `additionalProperties`, which is invisible to both it and the generated SPA
+  types. This entry is the only signal a consumer gets. Same reasoning as the
+  schedule-body entry further down, which enumerates its 15 refused fields for
+  the same reason.
+
+- **BREAKING: an AFPS integration declaring a bare auth-scheme `prefix` is
+  refused at install time.** AFPS §7.6 defines `delivery.http.prefix` as a
+  literal prepended to the rendered value — every spec example writes the
+  trailing space. Appstrate additionally accepted the bare scheme (`"Bearer"`)
+  in `Authorization` position and spliced the separator in at request time; its
+  own comment called it "this compatibility rule". The injector now concatenates
+  verbatim and inspects nothing, and validator rule (1d) rejects the bare form
+  where the manifest author can act on it, naming the replacement
+  (`Write "Bearer ".`).
+
+  **51 in-repo system integrations wrote the bare form** — 44 `Bearer`,
+  6 `Basic`, 1 `Zoho-oauthtoken` — and every one is fixed here with a patch
+  bump and a rebuilt archive, per the immutable-published-version precedent of
+  #928.
+  Without the bump the fix stays inert in production. No exact-version pin
+  references any of them.
+
+  **Operators: an org-imported or org-published integration stored before this
+  change stops resolving.** System packages are unexposed (`resolvePublishedManifest`
+  short-circuits on the in-memory registry the rebuilt archives replaced), but
+  `packages.draft_manifest` and `package_versions.manifest` hold the author's
+  bytes verbatim and are never revalidated on read, so a stored bare prefix now
+  fails `invalid_manifest` at the first read — which the route maps onto `404`,
+  presenting as a missing integration rather than a bad prefix. Apply
+  `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`; its `WHERE` is
+  exactly the condition it removes (RFC 9110 token grammar, under
+  `Authorization` or `Proxy-Authorization`, case-insensitive) and it is
+  idempotent. It deliberately does not rewrite the uploaded archive bytes, so
+  `package_versions.integrity` is untouched and the boot sync's refuse-overwrite
+  guard still holds — the archive keeps the author's original spelling, and
+  re-importing it now fails loudly at the install gate.
+
+- **Run logs: an untagged `appstrate.progress` row renders as runtime output,
+  not as model prose.** `assistant_message` is the only marker of
+  model-authored text; the run-detail log view additionally treated a data-less
+  `debug`-level progress row as agent text, "compatibility with runs emitted
+  before `assistant_message` was stamped". No in-tree emitter produces that
+  shape as agent text, and the one shape still producible from outside the tree
+  is a runner lifecycle breadcrumb by definition — so the fallback was
+  attributing a container-lifecycle line to the model. Bounded and cosmetic: for
+  runs predating the stamp, such rows now carry the runtime dot instead of the
+  speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
+
+### Removed
 
 - **BREAKING (operators): migration `0055` drops `org_invitations.accepted_by`
   and `accepted_at` — and THE RELEASE CARRYING IT CANNOT BE ROLLED BACK.**
@@ -2108,51 +2232,6 @@ skills sync is running` and kept the stale plugin. The lock is now
 
 ### Security
 
-- **`GET /api/integrations` and its detail obey PLACEMENT, so an integration
-  homed in somebody's personal space stops being org-wide readable.** Both
-  routes filtered on "does this organization own the row?" and on nothing else:
-  no home, no share, no space at all entered the query. An integration drafted
-  in a member's PERSONAL space and offered to nobody therefore came back in
-  full — its name, its description, its `auths` with their `authorized_uris`,
-  its tool catalog — to every caller holding `integrations:read`, organization
-  owners and admins included, while `GET /api/packages/integrations` omitted
-  that very row and its detail answered 404 for the same caller. The Integrations
-  page hid it by filtering `active` in the browser, which is not a boundary: the
-  HTTP response carried it, so a network tab, an API key, the CLI or `curl` read
-  it whole. RBAC spec §3.6 states the rule the routes were missing — owners and
-  admins neither read nor write a personal space, and the home is the only
-  authority there is. Both now conjoin `placementReadFilter`, the SAME rule the
-  per-type index and the space library read, rather than a third formulation of
-  it: an integration is listed and readable when the current space HOMES it, was
-  OFFERED it, or when the deployment ships it. Placement is not activation — an
-  offer not taken up and an integration switched off both stay listed, with
-  `active: false`. Resolving a DECLARED dependency stays org-wide (§6.9), where
-  the run resolves it, through a reader that says so by name.
-
-- **A forwarded chain shorter than `TRUST_PROXY` no longer picks the client's
-  own address.** `lib/client-ip.ts` reads `X-Forwarded-For` from the RIGHT,
-  which is unspoofable while each trusted hop appends its entry. When the chain
-  carried FEWER entries than the hop count it used to clamp to the LEFTMOST
-  one — an entry no proxy wrote — so any caller could name its own IP under any
-  `TRUST_PROXY >= 1` and mint a fresh bucket per request. Every per-IP control
-  keyed on that answer, including the rate limit that is the stated defence
-  against `AUTH_BOOTSTRAP_TOKEN` brute force, the Better Auth production limiter
-  and the address recorded on sessions and audit events. A short chain now fails
-  closed: the whole forwarded set is distrusted (`X-Real-IP` included, or
-  stripping the chain would just move the hole) and the socket peer answers.
-
-  The resolved value must also **be** an IP address now. Port suffixes and
-  bracketed IPv6 normalize to the address they name; anything else is dropped.
-  That closes a one-caller denial of service: an unparseable address made
-  Better Auth's `getIP` drop _every_ caller into one shared rate-limit bucket.
-
-  **Operators:** the hop count must match the topology. `TRUST_PROXY=1` behind a
-  single reverse proxy that appends `X-Forwarded-For`; a TLS-terminating L4 load
-  balancer (AWS NLB TLS listener, GCP TCP proxy) appends nothing and is not a
-  hop. Verify too that the origin port is not reachable around the proxy — the
-  shipped compose publishes it on all host interfaces, and Docker's rules bypass
-  host firewalls.
-
 - **The sidecar's HTTP control surface is authenticated, deny-by-default.**
   Every route on the sidecar app now sits behind an `app.use("*")` middleware
   (`runtime-pi/sidecar/app.ts`) that refuses any request not presenting the
@@ -2200,42 +2279,6 @@ skills sync is running` and kept the stale plugin. The lock is now
   #1201 image-trio boot guard already refuses a deployment whose platform,
   `PI_IMAGE` and `SIDECAR_IMAGE` versions disagree, so a correctly pinned
   compose file cannot land in either state.
-
-- **`TRUST_PROXY=false` refuses to boot in production behind a non-loopback
-  `APP_URL`.** The platform terminates no TLS, so that pair means a proxy is in
-  front by construction, and ignoring `X-Forwarded-For` there hands every caller
-  the proxy's own address — collapsing every per-IP rate limit and every audit
-  record into one bucket. `@appstrate/env` now rejects the combination at boot
-  instead of running degraded.
-
-  **Operators: name the hop count.** `TRUST_PROXY=1` behind a single reverse
-  proxy, `N` behind N hops you control. The self-hosting example ships `1` and
-  passes the variable through in all four of its compose files.
-
-- **A token request that identifies no client is held to the self-service
-  confinement.** `/oauth2/token` confines a self-registered (DCR / CIMD) client
-  to exactly one protected-resource audience; a request naming no client now
-  falls under the same rule rather than past it, so dropping `client_id` is not
-  a way to mint a token for the broad platform audience. `private_key_jwt` keeps
-  working: the client id is read from the `client_assertion`'s `sub` (RFC 7523
-  §3, `iss` must agree when present), unverified — the provider then verifies
-  the assertion against the row that id names, so a forged assertion naming an
-  operator-provisioned client dies on the signature check and one naming a
-  self-service client stays confined.
-
-- **Operators: run `scripts/migration/0011` after the drizzle batch carrying
-  `0057`, on any deployment that has ever accepted a self-registered client —
-  the API refuses to boot in between, and that is the intended sequence.**
-  `0057` adds `oauth_clients.self_service` and leaves it `false` on every row;
-  `0011` fills it from the `selfService` key already in `metadata`. Until it
-  runs, a self-registered client reads as operator-provisioned and its tokens
-  are not confined, so the deployment comes up only far enough to apply `0057`,
-  counts the rows still unfolded and exits naming the script; under a supervisor
-  it restarts into the same refusal. The order is therefore: deploy → the API
-  applies `0057` and exits → run `0011` against the database → restart. A
-  deployment that never accepted a self-registered client counts zero and never
-  sees the refusal. The script is idempotent, runs in one transaction, and never
-  flips a `true` back.
 
 ## [1.0.0-beta.53] - 2026-08-26
 

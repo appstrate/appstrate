@@ -238,8 +238,14 @@ async function loadScheduleOr404(c: Context<AppEnv>, id: string, scope: SpaceSco
 // XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
 // the caller (`getActor`). Omitted at update → actor left untouched. The actor
 // can never be cleared (preserves #735: a schedule always has an identity).
+// `strictObject` BEFORE `.refine()` — `.refine()` returns a ZodPipe on which
+// `.strict()` is no longer chainable, and the enclosing bodies' own `.strict()`
+// only closes their ROOT. Without it, `{ actor: { user_id, end_user_ids } }`
+// strips the typo, the XOR below counts exactly one key and the schedule is
+// frozen onto the WRONG identity with a 201 as the only receipt — the very
+// failure {@link createScheduleSchema}'s docstring closes the root against.
 const actorSchema = z
-  .object({
+  .strictObject({
     user_id: z.string().min(1).optional(),
     end_user_id: z.string().min(1).optional(),
   })

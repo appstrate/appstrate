@@ -302,7 +302,7 @@ export const schemas = {
   SpacePackage: {
     type: "object",
     description:
-      "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the share that placed the package is revoked. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
+      "A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{target}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it.",
     // The spacePackageSelect projection emits every field unconditionally
     // (package_type/package_source come from the join). `object` is spec-only
     // (not on the SpacePackage shared type). Stored input values and their locks

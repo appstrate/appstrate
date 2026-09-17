@@ -223,6 +223,13 @@ async function validatePersonaSpace(
   // persona were asked for, the answer would be its owner's `admin`. Refusing
   // is also what keeps the preview a pure restriction — a previewing admin
   // holds nothing there to narrow (RBAC spec §3.6).
+  //
+  // Named rather than folded into the 404 above, deliberately. Collapsing it
+  // would close one more oracle, but what §3.6 hides is the PROPERTY "this id
+  // is a personal space", and reaching this branch means already holding the
+  // id — so the enumeration has no starting point to work from. Against that,
+  // the named 400 is what tells an owner why their own preview was refused.
+  // §3.6 and the two tests that pin it are the contract.
   if (space.ownerUserId !== null) {
     throw invalidViewAs(
       `Space '${space.id}' is a personal space; there is no role to preview in it.`,
@@ -257,9 +264,10 @@ async function resolvePersonaSpaceRole(
   if (ref.kind === "preset") return { kind: "preset", preset: ref.preset };
   if (!hasCustomRoles()) {
     throw viewAsForbidden(
-      "Previewing a custom space role requires the `custom_roles` feature, provided by the " +
-        "Appstrate Cloud plan (the `@appstrate/module-ee` module). The four built-in presets " +
-        "(admin, builder, operator, viewer) are always previewable.",
+      "Previewing a custom space role requires the `custom_roles` feature, contributed by a " +
+        "module listed in `MODULES`. The " +
+        `${SPACE_ROLE_PRESETS.length} built-in presets (${SPACE_ROLE_PRESETS.join(", ")}) ` +
+        "are always previewable.",
     );
   }
   const [row] = await db

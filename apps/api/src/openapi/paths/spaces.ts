@@ -38,7 +38,9 @@ export const spacesPaths = {
                         "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically.",
                     },
                   },
-                  description: "Space settings",
+                  additionalProperties: false,
+                  description:
+                    "Space settings. Written as a whole: an unknown key is a 400, never a silently dropped value that would erase the stored settings.",
                 },
               },
               additionalProperties: false,
@@ -220,7 +222,9 @@ export const spacesPaths = {
                         "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically.",
                     },
                   },
-                  description: "Space settings",
+                  additionalProperties: false,
+                  description:
+                    "Space settings. Written as a whole: an unknown key is a 400, never a silently dropped value that would erase the stored settings.",
                 },
                 visibility: {
                   type: "string",

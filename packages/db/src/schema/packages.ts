@@ -36,8 +36,14 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
  * `enabled` is sticky in both directions and the ROW always wins over the
  * deployment's default, which is what makes a system package switchable off
  * per space. Deactivating never deletes the row: it holds the configuration,
- * so switching a package off for a week costs nothing to undo. Only the revoke
- * of the share that placed the package removes it, along with the placement.
+ * so switching a package off for a week costs nothing to undo.
+ *
+ * A row is CREATED by the three activation doors (`services/space-packages.ts`)
+ * and by nothing else. It is DELETED by two acts, both of which withdraw the
+ * placement behind it in the same transaction: revoking the share
+ * (`revokePackageShare`) and moving the home out with `keep_in_previous_home:
+ * false` (`reconcilePlacementsAfterRehome`). A third writer only ever UPDATES a
+ * column in place on a row already placed (`setBlockUserConnections`).
  */
 export const spacePackages = pgTable(
   "space_packages",

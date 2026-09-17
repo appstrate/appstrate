@@ -14,7 +14,7 @@
   "detail.deleteConfirm": "Delete agent \"{{name}}\"? This will permanently remove it from the organization. It will be removed from all spaces.",
   "detail.titleModel": "Configure a model to run",
   "detail.titleEmptyPrompt": "Agent prompt is empty",
-  "detail.titleMissingSkill": "A required skill is not in this organization's catalog",
+  "detail.titleMissingSkill": "A required skill is not placed in the agent's home space",
   "detail.titleNeverPublished": "This agent has no published version. Only its author may run the working copy — ask them to publish one.",
   "detail.titleNotActive": "This agent is not active in this space. Activate it from its page to run it here.",
   "detail.deactivatedHere": "Switched off in this space",

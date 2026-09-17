@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { SPACE_ROLE_ID_PATTERN } from "../schemas.ts";
 
@@ -64,7 +65,8 @@ export const rolesPaths = {
                   type: "string",
                   pattern: "^[a-z][a-z0-9-]{0,63}$",
                   description:
-                    "Slug, unique per organization. Never one of the preset keys (`admin`, `builder`, `operator`, `viewer`).",
+                    "Slug, unique per organization. Never one of the preset keys " +
+                    `(${SPACE_ROLE_PRESETS.map((preset) => `\`${preset}\``).join(", ")}).`,
                 },
                 name: { type: "string", minLength: 1, maxLength: 100 },
                 description: { type: ["string", "null"], maxLength: 500 },

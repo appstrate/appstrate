@@ -10,8 +10,10 @@
  * No on-disk cache: a bundle is whatever the server says it is right
  * now, every invocation.
  *
- * Errors map to four user-facing codes the run command formats:
+ * Errors map to user-facing codes the run command formats:
  *   - `package_not_found`     — 404 on the agent (scope/name).
+ *   - `no_published_version`  — 404 on an agent that exists but has never
+ *                               been published.
  *   - `version_not_found`     — 404 with a payload mentioning version.
  *   - `integrity_mismatch`    — server omitted the integrity header,
  *                               or the downloaded bytes failed to verify.
@@ -27,6 +29,7 @@ export class BundleFetchError extends Error {
     public readonly code:
       | "package_not_found"
       | "package_not_active_in_space"
+      | "no_published_version"
       | "version_not_found"
       | "integrity_mismatch"
       | "bundle_fetch_failed",
@@ -98,7 +101,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   if (res.status === 404) {
     const text = await safeText(res);
     // Server-issued problem+json carries a `code` field that distinguishes
-    // the three 404 sub-cases. Parsing it here lets us surface a clearer
+    // the 404 sub-cases. Parsing it here lets us surface a clearer
     // hint than the historical "not found — verify the agent is available"
     // catch-all (which left users staring at the message wondering whether
     // their agent existed at all).
@@ -108,6 +111,16 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
         "package_not_active_in_space",
         `Package ${input.packageId} exists in your organization but is not active in the pinned space`,
         `Activate it from the dashboard, or run:\n  appstrate api -X POST /api/spaces/${input.spaceId}/packages -d '{"packageId":"${input.packageId}"}'`,
+      );
+    }
+    // The agent exists and is active — it just has no release. Say that,
+    // and say what to do about it: the generic `package_not_found` fallback
+    // below sends the user hunting for a typo in a name that is correct.
+    if (errorCode === "no_published_version") {
+      throw new BundleFetchError(
+        "no_published_version",
+        `Package ${input.packageId} has no published version`,
+        `Publish a version from the dashboard, or run the author's working copy:\n  appstrate run ${input.packageId}@draft --local`,
       );
     }
     if (/version/i.test(text) && input.spec) {

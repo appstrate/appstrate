@@ -385,7 +385,7 @@ export function createSpacesRouter() {
     const orgId = c.get("orgId");
     // Lazy repair (plan decision 4). Every membership door provisions the
     // personal space in its own transaction; this is the net for a member
-    // provisioned before the feature existed — `scripts/migration/0014` does
+    // provisioned before the feature existed — `scripts/migration/0015` does
     // them in bulk, and this makes the script optional for anyone who logs in.
     // Only for a principal that HAS one — a session, or the same human through
     // a CLI device-flow / MCP instance token (`callerPersonalOwnerId`). An API
@@ -963,8 +963,10 @@ export function createSpacesRouter() {
   // DELETE /api/spaces/:spaceId/packages/:packageId — DEACTIVATE it here.
   //
   // The placement row and every setting on it stay, so switching a package off
-  // for a week costs nothing to undo. Only revoking the share that placed it
-  // removes the row (`DELETE …/shares/{target}`).
+  // for a week costs nothing to undo. Two acts remove the row, and neither is
+  // this one: revoking the share that placed it (`DELETE …/shares/{target}`),
+  // and a home move that releases the space it left
+  // (`PUT …/home` with `keep_in_previous_home: false`).
   //
   // 204 when the space has a row, and when it has none but the package is ON by
   // the DEPLOYMENT's default — there the row is MATERIALIZED saying `false`,

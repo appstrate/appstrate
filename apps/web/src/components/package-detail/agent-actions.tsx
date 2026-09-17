@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { schemaHasFileFields } from "@appstrate/core/form";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useRuns } from "../../hooks/use-runs";
 import { useAgentMemories } from "../../hooks/use-persistence";
@@ -137,7 +139,12 @@ export function AgentActions({
         canActivate={!activeHere}
         onActivate={() => {
           if (!currentSpaceId) return;
-          setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
+          setActive.mutate(
+            { spaceId: currentSpaceId, packageId, active: true },
+            // The refusal has to be said: the optimistic cache write makes the
+            // switch look taken, and the rollback that follows is silent.
+            { onError: (err) => toast.error(getErrorMessage(err) || t("error.generic")) },
+          );
         }}
         canDeactivate={activeHere}
         onDeactivate={() =>

@@ -348,8 +348,14 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(404);
-    const body = (await res.json()) as { detail: string };
-    expect(body.detail).toContain("publish a version first");
+    const body = (await res.json()) as { code: string; detail: string };
+    // The CODE, not the wording: `apps/cli/src/commands/run/bundle-fetch.ts`
+    // branches on it, and while this route answered the generic `not_found`
+    // the CLI could not tell "never published" from "no such agent" — so
+    // `appstrate run --local` told the user to check their spelling for an
+    // agent that exists. Asserting the sentence let that through.
+    expect(body.code).toBe("no_published_version");
+    expect(body.detail).toContain("?source=draft");
   });
 
   // ── Bundle-layer failures over stored dependency artifacts ──

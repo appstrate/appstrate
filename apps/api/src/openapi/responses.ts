@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
 
 /**
@@ -56,7 +57,8 @@ export const responses = {
    */
   CustomRoleFeatureForbidden: {
     description:
-      "`forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The four built-in presets stay usable, and DELETING a leftover bundle never asks for the feature.",
+      "`forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The built-in presets " +
+      `(${SPACE_ROLE_PRESETS.join(", ")}) stay usable, and DELETING a leftover bundle never asks for the feature.`,
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -80,7 +82,8 @@ export const responses = {
               title: "Feature Unavailable",
               status: 403,
               detail:
-                "Defining a custom space role requires the `custom_roles` feature, provided by the Appstrate Cloud plan (the `@appstrate/module-ee` module).",
+                "Defining a custom space role requires the `custom_roles` feature, contributed by a module listed in `MODULES`. The built-in presets " +
+                `(${SPACE_ROLE_PRESETS.join(", ")}) are always available.`,
               instance: "urn:appstrate:request:req_2f1c6d84",
               code: "feature_unavailable",
               requestId: "req_2f1c6d84",

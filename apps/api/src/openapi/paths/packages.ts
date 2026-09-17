@@ -36,9 +36,9 @@ const PACKAGE_DETAIL_VERSION_PARAM = {
 /**
  * The refusals of a detail GET once {@link PACKAGE_DETAIL_VERSION_PARAM} is on
  * it: the `403` gains `draft_not_writable`, the `404` covers a version spec
- * that resolves to nothing, and the `422` a published archive whose primary
- * file cannot be read — the same answer the run path gives for a published
- * agent with no readable prompt.
+ * that resolves to nothing, and the `422` a published archive that cannot be
+ * read — either at all, or without the entry the type REQUIRES — the same
+ * answer the run path gives for a published agent with no readable prompt.
  */
 const PACKAGE_DETAIL_DEFINITION_RESPONSES = {
   "403": {
@@ -1714,7 +1714,7 @@ export const packagesPaths = {
                   type: "boolean",
                   default: true,
                   description:
-                    "Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. Answered the same way whether or not the old home held a placement row, so the act does not change meaning with a state the caller cannot see. The audit entry `package.home_space_changed` records it as `kept_in_previous_home`.",
+                    "Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. It governs a space that was RUNNING the package: a space that held no `space_packages` row is left behind whatever the flag says, because the backfill exists to preserve what was running and an offer written to a space that never switched the package on would widen what it sees. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.",
                 },
               },
               additionalProperties: false,
@@ -1786,7 +1786,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List the spaces a package is shared with",
       description:
-        "The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space (organization owner or admin when the package has none); a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
+        "The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

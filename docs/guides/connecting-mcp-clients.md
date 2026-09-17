@@ -150,20 +150,11 @@ otherwise get wrong.
 | `run_and_wait`       | `mcp:invoke` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
 | `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                  |
 
-**Retired tool names do NOT answer.** `list_documents`, `read_document`,
-`validate_package_document` and `import_package_document` were the pre-#1177
-spellings of `list_files`, `read_file`, `validate_package_file` and
-`import_package_file`. They were briefly kept callable-but-unlisted, then
-removed: calling one now returns `-32602 Unknown tool`, and a `document_uri`
-argument is not accepted. `document://` URIs are not parsed either — they fail
-at `parseFileUri`, in the same rejection as any other unknown scheme.
-
-The reason the aliases went is the reason they were tempting: this server
-advertises `tools: { listChanged: false }`, so a client that listed before an
-upgrade may call an old name afterwards. Keeping them answering bought that one
-client a working call at the price of a permanent second dispatch path whose
-only proof of life was its own test. **Re-list your tools after upgrading the
-platform** — that is the supported recovery, and it is one round trip.
+This server advertises `tools: { listChanged: false }`, so a client that listed
+its tools before an upgrade is never told the set moved, and a name that is no
+longer registered answers `-32602 Unknown tool`. **Re-list your tools after
+upgrading the platform** — that is the supported recovery, and it is one round
+trip.
 
 Prefer `run_and_wait` when you need a newly launched run's progress or terminal
 result. `runAgent` / `runInline` remain fully discoverable and invokable for

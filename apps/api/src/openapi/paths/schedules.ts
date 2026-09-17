@@ -143,6 +143,10 @@ export const schedulesPaths = {
                     user_id: { type: "string" },
                     end_user_id: { type: "string" },
                   },
+                  // Closed like the body around it: a typo here is stripped by
+                  // an open object, the `oneOf` still counts one key, and the
+                  // schedule freezes onto the wrong identity on every fire.
+                  additionalProperties: false,
                   oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
                 },
               },
@@ -333,6 +337,10 @@ export const schedulesPaths = {
                     user_id: { type: "string" },
                     end_user_id: { type: "string" },
                   },
+                  // Closed like the body around it: a typo here is stripped by
+                  // an open object, the `oneOf` still counts one key, and the
+                  // schedule freezes onto the wrong identity on every fire.
+                  additionalProperties: false,
                   oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
                 },
               },

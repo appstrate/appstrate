@@ -770,10 +770,10 @@ describe("PUT /api/packages/{scope}/{name}/home", () => {
         and(eq(auditEvents.action, "package.home_space_changed"), eq(auditEvents.resourceId, OWN))!,
       );
     expect(moved).toBeDefined();
-    expect(moved!.before).toEqual({ home_space_id: null, home_owner_user_id: ctx.user.id });
+    expect(moved!.before).toEqual({ homeSpaceId: null, homeOwnerUserId: ctx.user.id });
     // The destination is a team space by construction now, so `after` carries
     // its id plainly, beside the choice the move made about the space it left.
-    expect(moved!.after).toEqual({ home_space_id: alphaId, kept_in_previous_home: true });
+    expect(moved!.after).toEqual({ homeSpaceId: alphaId, keptInPreviousHome: true });
   });
 
   it("accepts a no-op PATCH of a package already homed in the caller's personal space", async () => {
@@ -1111,8 +1111,8 @@ describe("what becomes of the space the move LEAVES", () => {
       .from(auditEvents)
       .where(eq(auditEvents.action, "package.home_space_changed"));
     expect(entry!.after).toMatchObject({
-      home_space_id: betaId,
-      kept_in_previous_home: false,
+      homeSpaceId: betaId,
+      keptInPreviousHome: false,
     });
   });
 

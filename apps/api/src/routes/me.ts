@@ -61,6 +61,7 @@ import {
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
+import { canReadRuns } from "../lib/run-visibility.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { unauthorized, invalidRequest } from "../lib/errors.ts";
@@ -222,9 +223,13 @@ router.get("/integration-pins", requireSpaceContext(), async (c) => {
     return c.json(listResponse([]));
   }
   const agentPackageId = c.req.query("agent_package_id");
-  if (!agentPackageId) {
-    return c.json(listResponse([]));
-  }
+  // An omitted parameter is an empty list, not a 400 — the picker renders
+  // before it has an agent to ask about, exactly as it does for an end-user
+  // above. The DELETE below refuses instead, because deleting nothing in
+  // particular is not a coherent request. The spec is what was wrong here:
+  // it marked the parameter `required` and documented a 400 this route has
+  // never raised.
+  if (!agentPackageId) return c.json(listResponse([]));
   const scope = getSpaceScope(c);
   const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);
   return c.json(listResponse(pins));
@@ -407,6 +412,14 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const permissions = callerPermissions(c);
   const canRun = permissions.has("agents:run");
   const canReadSkills = permissions.has("skills:read");
+  // Runs and connections are enrichments like the two above, and they carry
+  // more than a hint: `recent_runs` names packages, statuses and error strings,
+  // and `connections` names the accounts attached in this space. A credential
+  // whose ceiling excludes `runs:read` is refused by `GET /api/runs`, so it
+  // must not read the same rows through this payload either. The route itself
+  // stays open — a role without runs still needs its identity and org.
+  const mayReadRuns = canReadRuns(permissions);
+  const mayReadIntegrations = permissions.has("integrations:read");
   // Resolved once for both hint listings: `home_writable` is what tells the
   // model whether a draft-only package is THIS caller's to run, and computing
   // it needs the caller's reach over every space, not the package rows.
@@ -414,15 +427,20 @@ router.get("/context", requireSpaceContext(), async (c) => {
   const homeWritable = (pkg: Parameters<typeof homeWireForCaller>[0]) =>
     homeWireForCaller(pkg, accessible).home_writable;
   const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
-    listUsableIntegrationsForActor(scope, actor),
+    mayReadIntegrations
+      ? listUsableIntegrationsForActor(scope, actor)
+      : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
     canRun
       ? listRunnableAgents(scope, { homeWritable })
       : Promise.resolve({ agents: [], truncated: false, total: 0 }),
     canReadSkills
       ? listActiveSkills(scope, { homeWritable })
       : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-    // The caller's own recent runs (actor-scoped) — no extra permission needed.
-    listRecentForActor(scope, actor),
+    // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
+    // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
+    mayReadRuns
+      ? listRecentForActor(scope, actor)
+      : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
   ]);
 
   return c.json({

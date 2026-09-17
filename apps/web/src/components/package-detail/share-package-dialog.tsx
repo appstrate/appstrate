@@ -94,6 +94,14 @@ export function SharePackageDialog({
   /** Already-offered subjects, so the pickers do not propose a no-op. */
   const offered = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
 
+  /**
+   * The home's OWNER is a no-op target as surely as the home space itself — a
+   * person resolves server-side to their personal space — but this projection
+   * cannot identify them: a personal space's owner is deliberately not named on
+   * the wire. So the picker may still offer one, and the `409
+   * share_target_is_home` branch below is what says so, in the reader's own
+   * language.
+   */
   const members = (org?.members ?? []).filter((member) => !offered.has(member.userId));
   // A share destination is a space the caller reaches that is neither the
   // package's home nor their OWN personal space: the first already has it, and
@@ -129,6 +137,14 @@ export function SharePackageDialog({
           // here and stays a toast.
           if (error instanceof ApiError && error.code === "package_has_no_version") {
             setNeedsVersion(target);
+            return;
+          }
+          // Terminal like the rest, but said in the reader's language: the
+          // server's `detail` is English, and the picker cannot always rule
+          // this target out beforehand (it never learns whose personal space
+          // another member's is).
+          if (error instanceof ApiError && error.code === "share_target_is_home") {
+            toast.error(t("packages.shareTargetIsHome"));
             return;
           }
           toast.error(getErrorMessage(error));

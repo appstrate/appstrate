@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+
 /**
  * Reusable OpenAPI parameter definitions.
  */
@@ -123,7 +125,7 @@ export const parameters = {
       "whitespace around the separators is tolerated and nothing else is:\n\n" +
       "- `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.\n" +
       "- `space` (optional) — a `spc_` space id. Must be paired with `role`.\n" +
-      "- `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. " +
+      `- \`role\` (optional) — \`preset:<${SPACE_ROLE_PRESETS.join("|")}>\` or \`custom:<srl_ id>\`. ` +
       "Must be paired with `space`.\n\n" +
       "Example: `org_role=member; space=spc_…; role=preset:viewer`.\n\n" +
       "The persona is enforced server-side: `permissions`, the space role and every listing are " +

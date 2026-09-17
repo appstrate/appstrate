@@ -58,8 +58,13 @@ export interface PackageShareView {
  * `null` too once they have left the ORGANIZATION: `shared_by` cascades to NULL
  * on account deletion but nothing clears it on a membership revocation, and
  * this view is read by everyone the package is visible to.
+ *
+ * Exported because the space library projects the same offers
+ * (`services/package-library.ts`) off its own `organizationMembers` join: two
+ * copies of this ternary is two places for "a former member is never named" to
+ * stop being true, and only one of them serves the page an owner reads.
  */
-function sharerView(row: {
+export function sharerView(row: {
   sharedBy: string | null;
   sharerName: string | null;
 }): PackageShareView["shared_by"] {
@@ -148,8 +153,11 @@ export async function sharePackage(params: {
  * Withdraw the offer, and with it the placement it backs — in ONE transaction.
  * Leaving the `space_packages` row behind would keep the package running in a
  * space that is no longer allowed to see it, which is the whole failure mode
- * the two-table split exists to prevent. This is also the ONE path that deletes
- * a placement row: deactivating keeps it, settings and all.
+ * the two-table split exists to prevent. Deactivating deletes nothing: it keeps
+ * the row, settings and all. The other act that deletes one is the twin of this
+ * one — the `keep: false` branch of `reconcilePlacementsAfterRehome`
+ * (`services/package-placement.ts`), which withdraws the same pair when a home
+ * move leaves the old home nothing.
  *
  * The offer goes FIRST, and that order is a contract rather than a preference:
  * `activatePackageWithin` locks the same two rows and takes `package_shares`
@@ -159,13 +167,26 @@ export async function sharePackage(params: {
  *
  * @returns `false` when there was no share row, which the route renders as 404.
  */
-export async function revokePackageShare(params: {
-  packageId: string;
-  spaceId: string;
-  orgId: string;
-  /** The route's own rule, asked against the home this transaction holds — see {@link sharePackage}. */
-  authorizeHome: (homeSpaceId: string | null) => boolean;
-}): Promise<false | { placementRemoved: boolean }> {
+export async function revokePackageShare(
+  params: {
+    packageId: string;
+    spaceId: string;
+    orgId: string;
+    /** The route's own rule, asked against the home this transaction holds — see {@link sharePackage}. */
+    authorizeHome: (homeSpaceId: string | null) => boolean;
+  },
+  /**
+   * Optional TEST seam, the shape the EE sweeper's `SweepHooks` already uses
+   * (`packages/module-ee/src/billing/usage-recorder.ts`). `onBeforeCommit` runs
+   * INSIDE this transaction, after BOTH deletes and before it commits, so a
+   * throw rolls the pair back and a test can observe the offer and the
+   * placement row still standing together — the one way the atomicity above is
+   * observable from outside, every other test seeing only the final state of a
+   * pass that succeeded. Production never passes it, and it is a seam rather
+   * than an extension point: nothing dispatches it.
+   */
+  opts?: { onBeforeCommit?: () => Promise<void> },
+): Promise<false | { placementRemoved: boolean }> {
   const { packageId, spaceId, orgId, authorizeHome } = params;
   // The org predicate lands in BOTH deletes' WHERE: neither table has an
   // `org_id`, so `(space_id, package_id)` alone would act on a row pointing at
@@ -214,6 +235,8 @@ export async function revokePackageShare(params: {
         ),
       )
       .returning({ packageId: spacePackages.packageId });
+    // Test-only seam — see `opts.onBeforeCommit` on the signature above.
+    if (opts?.onBeforeCommit) await opts.onBeforeCommit();
     return { placementRemoved: placementRemoved.length > 0 };
   });
 }
