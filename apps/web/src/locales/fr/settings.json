@@ -1023,7 +1023,7 @@
   "roles.emptyHint": "Définissez un ensemble de permissions d'espace propre à votre organisation.",
   "roles.permissionCount_one": "{{count}} permission",
   "roles.permissionCount_other": "{{count}} permissions",
-  "roles.customUnavailable": "Les rôles personnalisés sont disponibles sur Appstrate Cloud. Les cinq rôles intégrés restent utilisables.",
+  "roles.customUnavailable": "Les rôles personnalisés ne sont pas activés sur ce déploiement. Les {{presetCount}} rôles intégrés restent utilisables.",
   "roles.nameLabel": "Nom",
   "roles.keyLabel": "Identifiant",
   "roles.keyHint": "Identifiant unique, commençant par une lettre minuscule, puis lettres minuscules, chiffres ou tirets (64 caractères maximum).",
