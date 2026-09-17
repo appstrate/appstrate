@@ -54,12 +54,12 @@
 -- outcome. Full argument: `scripts/migration/README.md` → "Next release —
 -- `0068 … VALIDATE CONSTRAINT`".
 --
--- No issue number: there is none to cite yet — ISSUE TO OPEN, unlike `0056`'s
--- window, which is tracked as
--- https://github.com/appstrate/appstrate/issues/1275. Do not read the absence
--- as "already handled": nothing else in the drizzle tree carries this debt, and
--- the paragraph below is about a DIFFERENT question (how to read the rollout
--- state), not about whether the `VALIDATE` is still owed.
+-- Tracked as https://github.com/appstrate/appstrate/issues/1450, the way
+-- `0056`'s window is tracked as
+-- https://github.com/appstrate/appstrate/issues/1275. Nothing else in the
+-- drizzle tree carries this debt, and the paragraph below is about a DIFFERENT
+-- question (how to read the rollout state), not about whether the `VALIDATE` is
+-- still owed.
 --
 -- Which means `pg_constraint.convalidated` is NOT a rollout signal: it stays
 -- `false` for ever on an installation that never had rows to fix, and `true` on

@@ -855,13 +855,12 @@ fresh one, idempotent on replay, and on a deployment that skipped `0014` it fail
 loudly with `23514` — which is the intended failure, not an accident.
 
 **Where this debt is recorded.** In `0067`'s own header, under "THE REMAINING
-HALF", the way `0056` records its `viewer` window in its header. This page is
-not the record: it is a release runbook, and a runbook gets filed as done. There
-is **no issue number to cite — one is still to be opened**; do not read that
-absence as "already handled", and do not let `0067`'s paragraph on
-`pg_constraint.convalidated` — which is about how to READ the rollout state, not
-about whether the `VALIDATE` is still owed — close the subject in a reviewer's
-mind.
+HALF", the way `0056` records its `viewer` window in its header, and as
+https://github.com/appstrate/appstrate/issues/1450. This page is not the record:
+it is a release runbook, and a runbook gets filed as done. Do not let `0067`'s
+paragraph on `pg_constraint.convalidated` — which is about how to READ the
+rollout state, not about whether the `VALIDATE` is still owed — close the
+subject in a reviewer's mind.
 
 ### Rollback — what is actually reversible
 
