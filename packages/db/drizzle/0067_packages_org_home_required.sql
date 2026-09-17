@@ -28,6 +28,37 @@
 -- take the other half. On a fresh database there is nothing to validate and
 -- that statement is a no-op.
 --
+-- ═══ THE REMAINING HALF — `0068_packages_org_home_validate.sql` ═══
+--
+-- This file is one half of `docs/NO_TRANSITIONAL_CODE.md` §2's pattern
+-- (`ADD … NOT VALID` here, `VALIDATE` in a LATER migration), and the other half
+-- is NOT in this release. It cannot be: step 5 of the rollout applies
+-- `0063`–`0067` as one boot batch BEFORE `0014` runs, so a `VALIDATE` inside
+-- that batch would scan `packages` while every `home_space_id` is still NULL,
+-- raise `23514` and roll the whole deploy back on the very statement meant to
+-- confirm it.
+--
+-- So the debt is named here, in the file that creates it, the way `0056` names
+-- its own: the FOLLOW-UP release must carry
+-- `packages/db/drizzle/0068_packages_org_home_validate.sql`, whose only
+-- statement is
+-- `ALTER TABLE "packages" VALIDATE CONSTRAINT "packages_org_package_has_home";`.
+-- Its precondition is that `scripts/migration/0014` has committed EVERYWHERE
+-- the release will land — which the operator confirms with the runbook's own
+-- count (zero rows with `org_id IS NOT NULL AND NOT ephemeral AND
+-- home_space_id IS NULL`), never with the flag the next paragraph disqualifies.
+-- On a fresh install and on a replay it has nothing to walk; on a deployment
+-- that skipped `0014` it fails loudly with `23514`, which is the intended
+-- outcome. Full argument: `scripts/migration/README.md` → "Next release —
+-- `0068 … VALIDATE CONSTRAINT`".
+--
+-- No issue number: there is none to cite yet — ISSUE TO OPEN, unlike `0056`'s
+-- window, which is tracked as
+-- https://github.com/appstrate/appstrate/issues/1275. Do not read the absence
+-- as "already handled": nothing else in the drizzle tree carries this debt, and
+-- the paragraph below is about a DIFFERENT question (how to read the rollout
+-- state), not about whether the `VALIDATE` is still owed.
+--
 -- Which means `pg_constraint.convalidated` is NOT a rollout signal: it stays
 -- `false` for ever on an installation that never had rows to fix, and `true` on
 -- one that ran `0014`, for the same schema and the same enforcement on every

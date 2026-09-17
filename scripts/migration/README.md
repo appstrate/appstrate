@@ -8,6 +8,234 @@ See `docs/NO_TRANSITIONAL_CODE.md` for why the split exists — both halves of t
 `documents` → `files` rename were botched by ignoring it, each costing a
 production incident.
 
+## Release beta.58 — THE runbook
+
+**This is the sequence that runs, and it is the only one.** The four per-subject
+sections further down explain why each file exists and what it checks; none of
+them is a runbook of its own any more, and none of them says when to start the
+application. That is step 5 here, once, after everything.
+
+Production's `drizzle.__drizzle_migrations` watermark is **0055** (read
+2026-09-17). The twelve migrations `0056` … `0067` are ALL unapplied, and
+`packages/db/src/migrate.ts` applies the whole pending set in **one
+transaction**. There is no subset: no "`0056`–`0059` now, the rest later", no
+release that froze part of it, and no per-file `psql -f`. Everything below
+follows from that single fact, and it is what retires the old "one release or
+two" branch — see step 4c.
+
+### 1. Pre-flight — BEFORE the window
+
+Read-only against the replica (`ssh appstrate`), plus two configuration changes
+that must land before anything is stopped.
+
+**1a. Dump.** Non-negotiable, and it is the only rollback several of these
+migrations have:
+
+```sh
+docker exec <pg> pg_dump -U appstrate -d appstrate --no-owner --no-privileges \
+  -Fc -f /tmp/pre-beta58.dump
+```
+
+Restore it into a throwaway `postgres:16-alpine` and rehearse steps 3 and 4
+end to end. Every script in this release is marked UNMEASURED in the Log; this
+is what measures them.
+
+**1b. `TRUST_PROXY` — the platform REFUSES TO BOOT without it.** Production runs
+`TRUST_PROXY=false`, `NODE_ENV=production`, `APP_URL=https://app.appstrate.com`.
+`packages/env/src/index.ts` now rejects exactly that combination: a production
+`APP_URL` that is not plain-http loopback is served through a reverse proxy, and
+`TRUST_PROXY=false` there collapses every client to the proxy's own address, so
+per-IP rate limits and audit records all land in one bucket. Behind Coolify →
+Traefik the value is one hop:
+
+```
+TRUST_PROXY=1
+```
+
+Set it **in the Coolify resource's environment configuration, not in a `.env`
+file** — Coolify regenerates that file on every deploy, so a value written there
+is gone the next time. Forget it and the container fails env validation at boot
+and crash-loops: the platform never binds a port, and nothing in the loop names
+the release.
+
+**1c. `MODULES` — `@appstrate/cloud` no longer exists.** Production runs
+`MODULES=oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/cloud`.
+That last specifier resolves to nothing: there is no built-in under
+`apps/api/src/modules/` and no workspace under `packages/module-*` by that name.
+`apps/api/src/lib/modules/module-loader.ts` throws
+`Module "@appstrate/cloud" could not be loaded: …`, and every declared module is
+required, so the throw is fatal. The billing module is now in-tree and its
+specifier is `@appstrate/module-ee`:
+
+```
+MODULES=oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee
+```
+
+Same rule as 1b: in the Coolify resource configuration, not in a file. Same
+failure mode too — a crash-loop with no port bound.
+
+**1d. Counts that decide whether an extra script runs.** All four were read on
+production on 2026-09-17; re-read them, because the window is later than this
+page.
+
+| Query                                                                                                        | Measured 2026-09-17                      | Non-zero ⇒                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| duplicate pending `(org_id, email)` pairs — "Detail — RBAC rollout", point 1                                 | **0**                                    | run `0009` at step 2b                                                                                                                             |
+| duplicate un-aliased `org_models` bindings — "Detail — Duplicate model bindings", point 1                    | **1** — two rows, both `aliased = false` | **`0013` IS REQUIRED at step 2b.** Without it `0062`'s `CREATE UNIQUE INDEX` raises `23505` and rolls the whole twelve-migration transaction back |
+| the four `viewer` counts — "Detail — RBAC rollout", point 2                                                  | **0 / 0 / 0 / 0**                        | see step 4c                                                                                                                                       |
+| `oauth_clients` with `token_endpoint_auth_method IS NULL` — "Detail — OAuth-provider 1.7.3 rollout", point 1 | **0** of 10 clients                      | decide per client BEFORE the new image ships, and **keep the rows**; `0057` overwrites them and nothing reconstructs the list                     |
+
+**1e. The two accounts moved off `viewer` by hand.** The four zeros above do NOT
+mean there is nothing to repair. On 2026-09-09 two members were moved off
+`viewer` by hand, to `member`, because `guest` did not exist in the type yet;
+production holds 31 `owner`, 16 `admin` and exactly **2 `member`**, and those two
+are the accounts. `member` is strictly wider than what they had — with
+`spaces.default_role = 'operator'` it is write access in every open space — and
+`0008` cannot see them. `scripts/migration/0017-restore-handmoved-viewers.sql`
+is what repairs it, at step 4. Confirm the two pairs are still `member`:
+
+```sql
+SELECT org_id, user_id, role::text FROM org_members
+WHERE (org_id, user_id) IN (
+  ('48b0854c-6f42-406c-a3c7-bbdd285a0355', 'GlaICg7JIo1yAVuc9TzCzBZ7kUMpjU4i'),
+  ('e569c4fb-1721-4406-8cfd-9b362ecf7043', 'bSPoyUV0lTPO77jcsGODhQ3cAFclTKXV')
+);
+```
+
+Anything other than `member` → `0017` leaves that row alone and names it; read
+its notices rather than editing the file.
+
+**1f. Personal-spaces pre-flights.** Run points 2, 3 and 4 of
+"Detail — Personal spaces & sharing rollout" below — which organization packages
+`0014` has to guess a home for,
+what the two new `ON DELETE RESTRICT` edges will make undeletable, and how many
+spaces `0015` would create. The first is the only one that may need a decision
+from a package's author, so it is the one to start early.
+
+### 2. Stop the platform
+
+**2a.** Stop it. Nothing may serve traffic from here until step 5: between the
+drizzle batch and `0014`, every organization package is homeless, which locks
+every non-owner author and every API key out of their own packages; between the
+batch and `0016`, every installation outside its package's home is invisible.
+
+**2b.** Run `0013` **now**, before the batch — step 1d counted **1** duplicate
+un-aliased binding on production, so it is not optional. `0009` only if step 1d
+re-counts a non-zero (it read **0** on 2026-09-17). Both exist because `0056` and `0062` create unique indexes that a
+duplicate row makes raise `23505`, which rolls the entire twelve-migration
+transaction back.
+
+### 3. Apply the drizzle batch — all twelve, and nothing else
+
+Not by starting the application. A one-shot migrator, so a bad migration fails
+with its own exit code and log before anything binds a port:
+
+```sh
+# The `migrate` service already exists in the deployed compose
+# (examples/self-hosting/docker-compose.yml) and does exactly this:
+docker compose -f <deployed compose> run --rm migrate
+
+# Equivalently, straight at the release's image:
+docker run --rm --network <compose network> \
+  -e DATABASE_URL="postgresql://appstrate:<password>@postgres:5432/appstrate" \
+  ghcr.io/appstrate/appstrate:<APPSTRATE_VERSION> \
+  bun packages/db/src/migrate.ts
+```
+
+Two invariants, both load-bearing: the image tag MUST be the one the platform
+will run — a mismatched pair applies a migration set the running code does not
+expect — and nothing else may write the journal at the same time.
+
+`bun run db:migrate` is the ROOT script (`package.json`) and is the DEV escape
+hatch: it shells out to `drizzle-kit`, which the runtime image does not ship.
+Inside a container the entry point is `bun packages/db/src/migrate.ts`.
+
+Verify by the journal, never by "the last PR merged":
+
+```sql
+SELECT count(*) AS applied, max(created_at) AS last
+FROM drizzle.__drizzle_migrations;
+```
+
+Record the count BEFORE step 3 and check it grew by exactly **12**. A watermark
+that reports nothing pending while columns are missing is a real failure mode
+here — see `0004-oauth-resources-watermark-drift.sql`.
+
+### 4. Operator scripts — this order, all of them
+
+```sh
+for s in \
+  0008-org-viewer-to-guest \
+  0012-org-invitation-history-viewer-to-guest \
+  0017-restore-handmoved-viewers \
+  0011-oauth-clients-self-service-fold \
+  0014-packages-home-space-backfill \
+  0016-package-shares-backfill
+do
+  docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
+    -f - < "scripts/migration/$s.sql" || break
+done
+```
+
+Run them one at a time and read each one's notices; the loop above is the order,
+not a way to skip looking. What each is for, and why it sits where it does:
+
+- **`0008`, `0012`** — the `viewer` rows. Step 1d read four zeros, so both match
+  nothing. Run them anyway, as witnesses: they print counts that discriminate,
+  and `0012` additionally proves `0008` ran.
+- **`0017`** — the two hand-moved accounts of step 1e. This is the one that has
+  work to do on this database.
+- **`0011`** — `oauth_clients.self_service`, folded out of the `metadata` JSON
+  that `0057` leaves behind. **Before** step 5, not after: the API refuses to
+  boot past `0057` until this has run (`assertSelfServiceFoldApplied`,
+  `apps/api/src/lib/boot.ts`). Running it here means that refusal never fires.
+- **`0014`, `0016`, in that order** — `0014` gives every organization package a
+  home and validates `0067`'s `NOT VALID` CHECK; `0016` then reads those homes to
+  write the `package_shares` row that keeps every out-of-home installation
+  placed. `0016` opens with a guard that refuses to run before `0014`, because
+  its `<>` home test against a NULL home matches nothing and would report
+  success on an empty backfill.
+
+**4c. Why there is no "two releases" branch.** The old RBAC runbook offered
+shipping `0056` + `0008` + `0012` in one release and `0059` in the next, for a
+database still holding `viewer` rows. That branch has no artefact: since
+beta.57 the twelve migrations are all unapplied and all ship together, so no
+published image carries `0056` without `0059`, and nothing can run between them.
+It becomes reachable only from some FUTURE release that has already frozen
+`0056`–`0058` on a deployment — there is none today. On this database the hand
+move of 2026-09-09 **is** the path that was taken, and `0017` is the restore it
+always owed; it is not an alternative to the branch, it is what the branch would
+have avoided needing.
+
+### 5. Start the platform
+
+Only now. Rolling the application back alone is unsupported: the older build
+omits the now-required chat-session space (`0056`), reads a personal space as an
+ordinary private one (`0064`), and writes `home_space_id = NULL` against a CHECK
+that refuses it (`0067`). Roll forward, or restore the dump from step 1a.
+
+### 6. Validate
+
+- **Lot 0** — the home rule and the placement rule: "Personal spaces & sharing"
+  § "Validate lot 0".
+- **Lot 1** — personal spaces: same section, § "Validate lot 1".
+- **RBAC** — zero org-member `viewer`s, zero pending `viewer` invitations, zero
+  `oauth_clients.signup_role = 'viewer'` (the step 1d query, re-run; `::text` on
+  every `org_role` comparison, since the value no longer parses as one).
+- **`0017`** — both accounts read `guest` and hold one `viewer` `space_members`
+  row per team space of their organization. The re-check query is in that file's
+  header.
+- Deleted spaces or custom roles named in an OAuth signup assignment need the
+  client's configuration updated before new users can join; signup fails without
+  creating partial org/space memberships, and existing members keep
+  authenticating. Invitation acceptance keeps its skip-and-log behaviour for
+  deleted targets.
+
+### 7. Later, and only if you want to — `0015`
+
+After step 6 passes, never inside the window. See "Personal spaces & sharing"
+§ "Run `0015`".
+
 ## The split
 
 `packages/db/drizzle/*.sql` describes schema shape, is replayed on every
@@ -48,12 +276,20 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
   -f - < scripts/migration/<NNNN>-<slug>.sql
 ```
 
-## RBAC rollout (drizzle `0056`, scripts `0008` + `0009` + `0012`, drizzle `0059` — one release or two, step 3 decides)
+## Detail — RBAC rollout (drizzle `0056` + `0059`, scripts `0008` + `0009` + `0012` + `0017`)
 
-Apply all of it during the same maintenance window with application traffic stopped:
+**Not a runbook.** The order lives in "Release beta.58" above: these files are its
+step 2b (`0009`) and its step 4 (`0008`, `0012`, `0017`). What follows is what
+each one is for and which query decides whether it has work.
 
-1. Restore a production dump into a throwaway database and rehearse every step. Record the before/after counts; production volume remains unmeasured until this is done. Verify every org with chat sessions has a default space before `0056` promotes `chat_sessions.space_id` to NOT NULL.
-2. **Pre-flight — duplicate pending invitations.** `0056` creates `uq_org_invitations_pending`; a pre-existing duplicate pending pair makes that `CREATE UNIQUE INDEX` raise 23505, which rolls the whole migration back and fails boot. Count the pairs first:
+One thing to confirm on the rehearsal copy before anything else: every
+organization that has chat sessions has a default space, because `0056` promotes
+`chat_sessions.space_id` to NOT NULL and folds existing sessions onto that space.
+
+1. **Pre-flight — duplicate pending invitations.** `0056` creates
+   `uq_org_invitations_pending`; a pre-existing duplicate pending pair makes that
+   `CREATE UNIQUE INDEX` raise 23505, which rolls the whole twelve-migration
+   transaction back and fails the deploy. Count the pairs first:
 
    ```sql
    SELECT count(*) FROM (
@@ -62,9 +298,13 @@ Apply all of it during the same maintenance window with application traffic stop
    ) d;
    ```
 
-   Non-zero → run `0009-org-invitations-dedupe-pending.sql` and re-run the query until it prints 0.
+   Non-zero → run `0009-org-invitations-dedupe-pending.sql` at step 2b of the
+   runbook, and re-run the query until it prints 0. Measured 2026-09-17: **0**.
 
-3. **Pre-flight — does this release carry `0059_drop_org_viewer.sql`?** `0059` recreates `org_role` without `viewer`, and nothing can run between `0056` and it inside one release: drizzle applies the whole pending batch in one transaction and the row scripts run after it. This query decides, and it is `0059`'s own guard run by hand:
+2. **Pre-flight — the four `viewer` counts.** `0059` recreates `org_role` without
+   `viewer`, and nothing can run between `0056` and it: drizzle applies the whole
+   pending batch in one transaction and the row scripts run after it. This query
+   is `0059`'s own guard run by hand:
 
    ```sql
    SELECT
@@ -74,23 +314,80 @@ Apply all of it during the same maintenance window with application traffic stop
      (SELECT count(*) FROM oauth_clients   WHERE signup_role = 'viewer')                        AS clients;
    ```
 
-   **Four zeros** → `0008` and `0012` have nothing to do, and `0056` + `0057` + `0058` + `0059` ship together as one ordinary batch. Steps 5 and 6 are no-ops; run them anyway or skip them.
+   Every comparison is `::text` on purpose, and so is every one inside `0008`,
+   `0012` and `0017`. After `0059` the literal `'viewer'` no longer parses as an
+   `org_role`, and Postgres casts it BEFORE comparing — so a bare
+   `role = 'viewer'` raises `22P02` even against zero rows. `0059`'s own
+   "WHY THE COMPARISONS ARE `::text`" section is the authority. This matters
+   precisely because the scripts run AFTER the batch that carries `0059`.
 
-   **`members`, `pending` or `history` non-zero** → two releases. `0056` + `0008` + `0012` here, `0059` in the next one, because `0008` must READ `viewer` to compute the `space_members` rows that preserve those users' reach and cannot run before `0056` creates that table. Ship `0059` early and its guard fails the deploy — it writes no rows, so it can only refuse, never repair.
+   **Four zeros** (measured 2026-09-17) → `0008` and `0012` match nothing. Run
+   them anyway, at step 4, as witnesses: their counts discriminate and `0012`
+   additionally proves `0008` ran. Do **not** conclude there is nothing to
+   repair — see `0017` below.
 
-   **`clients` non-zero** → a different fault, and neither script clears it. `0056` section G is what flips `oauth_clients.signup_role`, and it validated a narrowed CHECK on its way out, so a surviving `viewer` means `0056` never applied here. Check the `drizzle.__drizzle_migrations` watermark — a corrupted one makes the migrator report nothing pending (see `0004-oauth-resources-watermark-drift.sql`) — before any of the steps below.
+   **`members`, `pending` or `history` non-zero** → `0008` must READ `viewer` to
+   compute the `space_members` rows that preserve those users' reach, and it
+   cannot run before `0056` creates that table. That sandwich needs a release
+   that carries `0056` without `0059`, which is a FUTURE release nobody has cut:
+   since beta.57 the twelve migrations are all unapplied and ship as one
+   transaction. On this database the counts are zero and the question is moot;
+   read "Why there is no 'two releases' branch" in the runbook before reviving
+   it.
 
-   Moving the rows off `viewer` by hand instead of running `0008` collapses the two releases into one, and costs those users their space access until it is restored: `guest` reaches nothing without an explicit `space_members` row, which is precisely what `0008` writes. Only worth it for a handful of accounts, and the restore belongs in this window, not in a follow-up.
+   **`clients` non-zero** → a different fault, and no script clears it. `0056`
+   section G is what flips `oauth_clients.signup_role`, and it validated a
+   narrowed CHECK on its way out, so a surviving `viewer` means `0056` never
+   applied here. Check the `drizzle.__drizzle_migrations` watermark — a corrupted
+   one makes the migrator report nothing pending (see
+   `0004-oauth-resources-watermark-drift.sql`) — before anything else.
 
-4. Apply pending Drizzle migrations — `0056_space_roles.sql`, `0057_oauth_provider_1_7_3.sql`, `0058_organization_deletion_reservation.sql`, `0059_drop_org_viewer.sql` when step 3 said four zeros, then `0060_runner_preset.sql`, `0061_oauth_fk_indexes.sql` and `0062_org_models_unique_binding.sql`.
-5. Run `0008-org-viewer-to-guest.sql` before starting the new application. It snapshots memberships, pending viewer invitations and legacy OAuth viewer signup clients into explicit viewer grants, preserving any existing explicit role choices. Reruns do not add later spaces: a run that commits records itself in `drizzle.migration_scripts`, and every later run skips `0008`'s own step 4 (the OAuth signup snapshot) outright — naming the OAuth signup clients whose empty snapshot its predicate still matches, and which it would otherwise have widened. Re-running `0008`'s step 4 on purpose means deleting that row by hand.
-6. Run `0012-org-invitation-history-viewer-to-guest.sql` straight after it. `0008` restricts itself to `status = 'pending'` invitations, because only those owe a `space_assignments` snapshot; `0012` maps the accepted, expired and cancelled ones — pure history — to `guest`, which `0059` needs since it cannot cast them.
-7. Check zero remaining org-member viewers, zero pending viewer invitations and zero OAuth `signup_role = 'viewer'`. `0008` additionally aborts if any captured membership, invitation or OAuth signup space is missing. Inspect the legacy OAuth snapshots against the rehearsal's pre-migration client/space inventory.
-8. Start the new application. Rolling back only the application is unsupported: the older build omits the now-required chat-session space. Roll forward or restore the coordinated backup.
+3. **`0008-org-viewer-to-guest.sql`** snapshots memberships, pending viewer
+   invitations and legacy OAuth viewer signup clients into explicit `viewer`
+   grants, preserving any existing explicit role choices. Reruns do not add later
+   spaces: a run that commits records itself in `drizzle.migration_scripts`, and
+   every later run skips `0008`'s own step 4 (the OAuth signup snapshot)
+   outright — naming the OAuth signup clients whose empty snapshot its predicate
+   still matches, and which it would otherwise have widened. Re-running that step
+   on purpose means deleting the marker row by hand. It aborts if any captured
+   membership, invitation or OAuth signup space is missing; inspect the legacy
+   OAuth snapshots against the rehearsal's pre-migration client/space inventory.
 
-Deleted spaces/custom roles in OAuth signup assignments require updating the client's configuration before new users can join; signup fails without creating partial org/space memberships. Existing members remain able to authenticate. Invitation acceptance retains its existing skip-and-log behavior for deleted targets.
+4. **`0012-org-invitation-history-viewer-to-guest.sql`** takes what `0008`
+   deliberately leaves: `0008` restricts itself to `status = 'pending'`
+   invitations, because only those owe a `space_assignments` snapshot; `0012`
+   maps the accepted, expired and cancelled ones — pure history — to `guest`,
+   which `0059` needs since it cannot cast them.
 
-## OAuth-provider 1.7.3 rollout (drizzle `0057`, script `0011`)
+5. **`0017-restore-handmoved-viewers.sql`** is the one with work to do here, and
+   it is invisible to the query in point 2. On 2026-09-09 the two `viewer`
+   members this database held were moved off the value **by hand**, to `member`,
+   because `guest` did not exist in the type yet — `0056` section A is what adds
+   it, and `0056` has never applied on production. `member` is strictly wider
+   than what they had: with `spaces.default_role = 'operator'` it is write access
+   in every open space of their organization, from the first boot of the new
+   build. `0008` cannot catch it — it selects `WHERE role::text = 'viewer'`,
+   which is now the empty set — so it runs green over those two rows and leaves
+   them as they are.
+
+   `0017` gives them the shape `0008` would have: one `space_members` row with
+   `preset_role = 'viewer'` per TEAM space of their organization, then `member` →
+   `guest`, and only while the row still reads `member`, so a decision taken
+   since 2026-09-09 is left alone and named rather than overwritten. The two
+   pairs are literals in the file; its header carries the standalone re-check and
+   the rollback.
+
+   This is the general rule, not a one-off: **moving rows off `viewer` by hand is
+   a supported way to collapse the two-release sandwich, and it always owes a
+   restore.** `guest` reaches nothing without an explicit `space_members` row,
+   which is exactly what `0008` writes for a real `viewer` and what `0017` writes
+   for a hand-moved one. The restore belongs in the same window as the rest, not
+   in a follow-up.
+
+## Detail — OAuth-provider 1.7.3 rollout (drizzle `0057`, script `0011`)
+
+**Not a runbook.** `0011` is step 4 of "Release beta.58"; the pre-flight below is
+its step 1d, and it is the one that cannot wait for the window.
 
 1. **Pre-flight, before the 1.7.3 image is deployed.** 1.7.3 reads a stored
    NULL `token_endpoint_auth_method` as `client_secret_basic` and then refuses
@@ -123,36 +420,41 @@ Deleted spaces/custom roles in OAuth signup assignments require updating the cli
    resolves to `client_secret_basic`, never to `none`, so no confidential client
    is downgraded to a public one.
 
-2. Apply pending Drizzle migrations, including `0057_oauth_provider_1_7_3.sql`.
-   Its section D drops `oauth_clients.public` and `type`; an older build still
-   serving inserts clients with those columns and fails 42703, so roll forward
-   rather than leaving both builds live.
+2. **`0057_oauth_provider_1_7_3.sql`** is part of the twelve-migration batch
+   (runbook step 3), not a batch of its own. Its section D drops
+   `oauth_clients.public` and `type`; an older build still serving inserts
+   clients with those columns and fails 42703, so roll forward rather than
+   leaving both builds live.
 
-3. Run `0011-oauth-clients-self-service-fold.sql`. `0057` adds
+3. **`0011-oauth-clients-self-service-fold.sql`.** `0057` adds
    `oauth_clients.self_service` as `false` everywhere; this sets it from the
    `metadata` JSON key `selfService`. Until it runs, every self-registered
    client reads as operator-provisioned and `/oauth2/token` does not confine its
    tokens to one protected resource.
 
-   **The API refuses to boot in between, and that is the intended sequence.**
-   Migrations apply at boot and this script does not, so the deployment comes up
-   only far enough to apply `0057`, counts the rows still unfolded and exits
-   naming this file (`assertSelfServiceFoldApplied`, `apps/api/src/lib/boot.ts`);
-   under a supervisor it restarts into the same refusal. Run the script against
-   the database, then restart. A deployment that never accepted a self-registered
-   client counts zero and never sees it.
+   **The API refuses to boot until it has run**
+   (`assertSelfServiceFoldApplied`, `apps/api/src/lib/boot.ts`): it counts the
+   rows still unfolded and exits naming this file, and under a supervisor it
+   restarts into the same refusal. The runbook's order is what makes that
+   refusal never fire — `0011` is step 4, the application starts at step 5. A
+   deployment that lets the platform boot first meets the refusal instead, and
+   the fix is the same script followed by a restart. A deployment that never
+   accepted a self-registered client counts zero and never sees it either way.
 
 4. Check the script's `to_fold_after` prints 0 and `self_service_after` grew by
    `to_fold_before`. A non-zero `unparseable_metadata` is a manual read of those
    rows, not a failure.
 
-## Personal spaces & sharing rollout (drizzle `0063` + `0064` + `0065` + `0066` + `0067`, scripts `0014` + `0016` + `0015`)
+## Detail — Personal spaces & sharing rollout (drizzle `0063` … `0067`, scripts `0014` + `0016` + `0015`)
 
-ONE release, and the five migrations apply as a single boot batch. Three
-scripts, and they do not all sit on the same side of the window: `0014` and then
-`0016` run **inside** it, in that order, and neither is optional; `0015` runs
-**after** the release is validated and is optional forever. Nothing here needs a
-new environment variable.
+**Not a runbook.** `0014` and `0016` are step 4 of "Release beta.58", in that
+order; `0015` is its step 7. What is below is the reasoning, the pre-flights and
+the validation lists the runbook points at.
+
+These five migrations are NOT a batch of their own: production's watermark is
+`0055`, so they arrive inside the same twelve-migration transaction as `0056` …
+`0062`. Nothing here needs a new environment variable — `TRUST_PROXY` and
+`MODULES` (runbook steps 1b and 1c) are owed by the release, not by these files.
 
 `0016` is second because it reads what `0014` writes. It gives every
 `space_packages` row that sits outside its package's home the `package_shares`
@@ -174,9 +476,10 @@ Read the header of each file too — it is the authority on what that file touch
 
 ### 1. Rehearse
 
-Restore a production dump into a throwaway `postgres:16-alpine` and run every
-step below against it. Record the counts; production volume is UNMEASURED for
-both scripts until this is done.
+The dump is runbook step 1a; restore it into a throwaway `postgres:16-alpine`
+and run the whole of runbook steps 3 and 4 against it, not just these three
+files. Record the counts; production volume is UNMEASURED for all three scripts
+until this is done.
 
 Synthetic rehearsal (2026-09-11): `apps/api/test/integration/db/personal-spaces-backfill.test.ts` executes all three files unchanged on PGlite and PostgreSQL 16. The home fixture covers one installation, multiple installations, no installation, an operator move and replay; the share fixture covers an installation outside its home, one inside it, a system package, a cross-tenant stray row, the ordering guard that makes `0016` abort when `0014` has not run, and replay; the personal-space fixture covers live membership, an orphan and replay. These tests validate behavior, not production volume or lock duration.
 
@@ -187,7 +490,8 @@ Synthetic rehearsal (2026-09-11): `apps/api/test/integration/db/personal-spaces-
 WRITE has to give an organization package a home, while the rows already in the
 table still have none. Between the migrations and `0014` no organization package
 has a home, so every non-owner author and **every API key** is locked out of its
-own packages — which is why step 5 stops traffic. `0014` then picks a home per
+own packages — which is why the runbook stops traffic at its step 2 and does not
+start it again until `0014` and `0016` have both run. `0014` then picks a home per
 package: one installation → that space, several → the OLDEST `installed_at`,
 none → the organization's DEFAULT space (`spaces.is_default`). Its last statement
 validates the constraint.
@@ -305,21 +609,14 @@ The commercial module counts spaces for nothing today, so there is no quota to
 breach; the number matters to a self-hosted operator who has imposed a per-space
 ceiling of their own. Skipping `0015` entirely is a supported choice.
 
-### 5. Stop the platform, migrate, run `0014` then `0016`, start
+### 5. What `0014` and `0016` print — the window itself is runbook step 4
 
-The `0008` shape, for the reason in step 2 — nothing serves traffic while the
-column exists unbackfilled, and nothing serves traffic while installations
-outside their home have no share placing them:
-
-```sh
-# stop the platform
-# apply pending Drizzle migrations ONLY: 0063 + 0064 + 0065 + 0066 + 0067, one boot batch
-docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
-  -f - < scripts/migration/0014-packages-home-space-backfill.sql
-docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
-  -f - < scripts/migration/0016-package-shares-backfill.sql
-# then bring the new version up
-```
+Both run with the platform stopped, `0014` first, for the reason in step 2:
+nothing may serve traffic while `home_space_id` exists unbackfilled, and nothing
+may serve traffic while installations outside their home have no share placing
+them. The commands, and the four other scripts that share the window, are in
+"Release beta.58" step 4 — there is no separate stop-migrate-start here, and the
+drizzle batch it follows is the full twelve, not `0063`–`0067`.
 
 `0014` prints `no_home_before` split four ways, the ambiguous list, and
 `no_home_after` — **which must be 0**: every organization package now has a home,
@@ -472,7 +769,8 @@ idempotent; a second run of either inserts nothing.
 
 ### 8. Run `0015` — later, and only if you want to
 
-After step 7 passes. Nothing is degraded while it has not run: every membership
+Runbook step 7, after its step 6 passes — never inside the window. Nothing is
+degraded while it has not run: every membership
 door creates the space, and `GET /api/spaces` repairs the caller's own. What it
 buys is the members who will not log in soon — their space exists before someone
 shares a package to them. Idempotent; a second run inserts zero rows and
@@ -484,16 +782,26 @@ shares a package to them. Idempotent; a second run inserts zero rows and
 script — is what validates it, so the drizzle tree by itself never does: a fresh
 install keeps `pg_constraint.convalidated = false` for ever, and
 `docs/NO_TRANSITIONAL_CODE.md` §2's pattern (`ADD … NOT VALID` in one migration,
-`VALIDATE` in a later one) is left half-written. It cannot be closed HERE: step 5
-applies `0063`–`0067` as one boot batch BEFORE `0014` runs, so a
-`0068 … VALIDATE CONSTRAINT` inside that batch would scan `packages` while every
-`home_space_id` is still NULL, raise `23514` and roll the whole batch back — the
-deploy failing on the very migration meant to confirm it. The FOLLOW-UP release
-must therefore carry `0068_packages_org_home_validate.sql`, whose only statement
-is `ALTER TABLE "packages" VALIDATE CONSTRAINT "packages_org_package_has_home";`.
+`VALIDATE` in a later one) is left half-written. It cannot be closed HERE:
+runbook step 3 applies the whole pending batch, `0067` included, BEFORE `0014`
+runs at step 4 — so a `0068 … VALIDATE CONSTRAINT` inside that batch would scan
+`packages` while every `home_space_id` is still NULL, raise `23514` and roll the
+whole transaction back, the deploy failing on the very migration meant to
+confirm it. The FOLLOW-UP release must therefore carry
+`0068_packages_org_home_validate.sql`, whose only statement is
+`ALTER TABLE "packages" VALIDATE CONSTRAINT "packages_org_package_has_home";`.
 By then `0014` has committed: it is a no-op on a database that ran it and on a
 fresh one, idempotent on replay, and on a deployment that skipped `0014` it fails
 loudly with `23514` — which is the intended failure, not an accident.
+
+**Where this debt is recorded.** In `0067`'s own header, under "THE REMAINING
+HALF", the way `0056` records its `viewer` window in its header. This page is
+not the record: it is a release runbook, and a runbook gets filed as done. There
+is **no issue number to cite — one is still to be opened**; do not read that
+absence as "already handled", and do not let `0067`'s paragraph on
+`pg_constraint.convalidated` — which is about how to READ the rollout state, not
+about whether the `VALIDATE` is still owed — close the subject in a reviewer's
+mind.
 
 ### Rollback — what is actually reversible
 
@@ -523,7 +831,10 @@ WHERE owner_user_id IS NOT NULL`) and accepting that what members kept private
 becomes readable by the organization's admins. Restore the coordinated backup
 instead where one exists, and prefer rolling forward.
 
-## Duplicate model bindings (script `0013`, drizzle `0062`)
+## Detail — Duplicate model bindings (script `0013`, drizzle `0062`)
+
+**Not a runbook.** The count below is runbook step 1d; `0013`, if it is needed at
+all, is runbook step 2b — with the platform stopped and before the batch.
 
 1. **Pre-flight, before any drizzle migration.** `0062` creates
    `uq_org_models_unaliased_binding`, so a database holding two un-aliased
@@ -543,8 +854,8 @@ instead where one exists, and prefer rolling forward.
 
    Zero → nothing to do; go straight to the drizzle batch.
 
-2. Non-zero → run `0013-org-models-dedupe-bindings.sql` BEFORE the drizzle
-   batch. It keeps the oldest row of each binding, repoints
+2. Non-zero → run `0013-org-models-dedupe-bindings.sql` at runbook step 2b,
+   BEFORE the drizzle batch. It keeps the oldest row of each binding, repoints
    `organizations.default_model_id`, `space_packages.model_id`,
    `package_schedules.model_id_override` and `llm_usage.model` at it, then
    deletes the younger copies — in one transaction, so no pointer is ever left
@@ -554,8 +865,8 @@ instead where one exists, and prefer rolling forward.
    moves.
 
 3. Check `duplicate_bindings_after` prints 0 and all four `dangling_*` counts
-   print 0, then apply the drizzle batch (step 4 of the RBAC rollout above,
-   which is where this release's batch is enumerated).
+   print 0, then go on to the drizzle batch — runbook step 3, which applies all
+   twelve pending migrations in one transaction, `0062` among them.
 
 4. From this release on, `POST /api/models` answers `409 model_already_added`
    (carrying `existing_model_id`) instead of minting a second row, and
@@ -581,3 +892,4 @@ instead where one exists, and prefer rolling forward.
 | 0014 | not applied | every organization package given a `home_space_id` — its ONE write-authority space (drizzle `0063` adds the column NULL everywhere, i.e. admin-only): exactly one installation → that space, several → the oldest `installed_at` **printed for review before `COMMIT`**, none → the organization's DEFAULT space (drizzle `0067` forbids a homeless organization package, and `0014` ends by `VALIDATE`ing that check); **run between the drizzle batch and bringing the new version up**, the `0008` shape; serving traffic in between costs every non-owner author and every API key write access to their own packages | unmeasured — prints the NULL-home count before and after (after must be **0**) and the ambiguous list in between                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 0015 | not applied | one personal space per existing `org_members` row (`spaces.owner_user_id`, drizzle `0064`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the space count first** — it inserts one row per membership, and nothing counts spaces for a quota today                                                                                                               | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 0016 | not applied | one `package_shares` row (`shared_by` NULL) per `space_packages` row sitting outside its package's home, so the placement rule drizzle `0066` completes — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                              | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0                                                                                                                                                                                                                                                                                                                                                                         |
+| 0017 | not applied | the 2 org members moved off `viewer` **by hand** on 2026-09-09 (to `member`, the only value available before drizzle `0056` added `guest`) given the shape `0008` writes for a real viewer: one `viewer` `space_members` row per TEAM space of their org, then `member` → `guest`. `0008` cannot see them — its `WHERE role::text = 'viewer'` is the empty set — while `member` + `spaces.default_role = 'operator'` is write access in every open space; **run inside the window, right after `0008` and `0012`**                                                                                                        | 2 pairs counted on production read-only 2026-09-17 (31 `owner` / 16 `admin` / **2 `member`** / 0 `viewer`), NOT rehearsed against a restored dump — prints the per-pair role before and after and aborts on any uncovered (user, team space) pair                                                                                                                                                                                                                                                                       |
