@@ -13,8 +13,16 @@
  *   3. OpenAPI spec has no module paths / components / tags
  *   4. The default buildAppConfig() has no module feature flags set
  *
- * If this test fails, a module has leaked into core. Do not mask it by
+ * A failure in 1-4 means a module has LEAKED INTO core. Do not mask it by
  * adding special cases here — fix the leak.
+ *
+ * And the mirror of all four, which fails for the opposite reason:
+ *
+ *   5. Custom space roles work with no module mounted (RBAC spec §9)
+ *
+ * A failure there means core has come to DEPEND ON a module — a licence gate
+ * put back over routes the Apache-2.0 platform owns. Fix the gate, not the
+ * test.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
