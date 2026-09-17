@@ -3490,7 +3490,7 @@ export interface paths {
         };
         /**
          * List the spaces a package is shared with
-         * @description The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space (organization owner or admin when the package has none); a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.
+         * @description The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.
          */
         get: operations["listPackageShares"];
         put?: never;
@@ -6322,7 +6322,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @description A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the share that placed the package is revoked. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it. */
+        /** @description A package PLACED in a space, with `enabled` and its model/proxy overrides. The row survives deactivation — every setting on it is kept — and goes away only when the placement behind it is withdrawn: the share is revoked (`DELETE /api/packages/{scope}/{name}/shares/{target}`), or the package's home moves out of the space with `keep_in_previous_home: false`. It carries no version: outside its home space a package runs its latest published version, and its draft runs for whoever can write it. */
         SpacePackage: {
             /** @enum {string} */
             object?: "space_package";
@@ -6466,7 +6466,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description `forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The four built-in presets stay usable, and DELETING a leftover bundle never asks for the feature. */
+        /** @description `forbidden` — the caller does not hold the required permission; or `feature_unavailable` — `custom_roles` is not available on this deployment, so a bundle can be neither defined nor granted. The built-in presets (admin, builder, operator, runner, viewer) stay usable, and DELETING a leftover bundle never asks for the feature. */
         CustomRoleFeatureForbidden: {
             headers: {
                 [name: string]: unknown;
@@ -6703,7 +6703,7 @@ export interface components {
          *
          *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
          *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-         *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+         *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
          *
          *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
          *
@@ -7208,7 +7208,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, or `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent. */
             403: components["responses"]["Forbidden"];
-            /** @description `agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. */
+            /** @description `agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`. */
             404: components["responses"]["NotFound"];
             /** @description The bundle cannot be assembled from stored artifacts. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY` */
             422: {
@@ -13374,7 +13374,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -15276,7 +15276,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -18326,7 +18326,7 @@ export interface operations {
                     /** @description Destination space id (`spc_…`). Required and non-nullable — a package always has a home space. */
                     home_space_id: string;
                     /**
-                     * @description Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. Answered the same way whether or not the old home held a placement row, so the act does not change meaning with a state the caller cannot see. The audit entry `package.home_space_changed` records it as `kept_in_previous_home`.
+                     * @description Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. Answered the same way whether or not the old home held a placement row, so the act does not change meaning with a state the caller cannot see. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.
                      * @default true
                      */
                     keep_in_previous_home?: boolean;
@@ -19179,7 +19179,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Slug, unique per organization. Never one of the preset keys (`admin`, `builder`, `operator`, `viewer`). */
+                    /** @description Slug, unique per organization. Never one of the preset keys (`admin`, `builder`, `operator`, `runner`, `viewer`). */
                     key: string;
                     name: string;
                     description?: string | null;
@@ -20861,7 +20861,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -20978,7 +20978,7 @@ export interface operations {
                 "application/json": {
                     /** @description Human-readable space name */
                     name: string;
-                    /** @description Space settings */
+                    /** @description Space settings. Written as a whole: an unknown key is a 400, never a silently dropped value that would erase the stored settings. */
                     settings?: {
                         /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
                         allowedRedirectDomains?: string[];
@@ -21045,7 +21045,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -21139,7 +21139,7 @@ export interface operations {
                 "application/json": {
                     /** @description Human-readable space name */
                     name?: string;
-                    /** @description Space settings */
+                    /** @description Space settings. Written as a whole: an unknown key is a 400, never a silently dropped value that would erase the stored settings. */
                     settings?: {
                         /** @description Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically. */
                         allowedRedirectDomains?: string[];
@@ -21234,7 +21234,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
@@ -21422,7 +21422,7 @@ export interface operations {
                  *
                  *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
                  *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
-                 *     - `role` (optional) — `preset:<admin|builder|operator|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
                  *
                  *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
                  *
