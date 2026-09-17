@@ -1,11 +1,18 @@
 -- 0012 — the invitations `0008` deliberately left reading `viewer`.
 --
--- Run in the same maintenance window as
--- `scripts/migration/0008-org-viewer-to-guest.sql`, right after it, and BEFORE
--- the release that carries `packages/db/drizzle/0059_drop_org_viewer.sql`.
--- `0059` recreates the `org_role` type without `viewer` and cannot cast a row
--- still holding the value; its section A refuses the deploy and names this file
--- rather than failing on the cast.
+-- Run AFTER the drizzle batch — which carries both
+-- `packages/db/drizzle/0056_space_roles.sql` and
+-- `packages/db/drizzle/0059_drop_org_viewer.sql`, in ONE transaction — in the
+-- same maintenance window as `scripts/migration/0008-org-viewer-to-guest.sql`
+-- and right after it. There is no "before `0059`" to aim at: nothing runs
+-- between the two migrations, so this file runs once the type has already lost
+-- `viewer` (which is why every comparison below is `::text` — see "WHY THE
+-- COMPARISONS ARE `::text`"). `0059` recreates the `org_role` type without
+-- `viewer` and cannot cast a row still holding the value; its section A refuses
+-- the deploy and names this file rather than failing on the cast — a refusal
+-- that fires on a database whose watermark ALREADY sat past `0056`, not here.
+-- Why there is no "two releases" branch to put this file in the middle of:
+-- `scripts/migration/README.md` → "Release beta.58" § 4c.
 --
 -- ═══ WHY `0008` LEFT THESE ═══
 --

@@ -25,8 +25,9 @@ two" branch — see step 4c.
 
 ### 1. Pre-flight — BEFORE the window
 
-Read-only against the replica (`ssh appstrate`), plus two configuration changes
-that must land before anything is stopped.
+Read-only against the replica (`ssh appstrate`), plus ONE configuration change
+that must land before anything is stopped — and one that must **not**, which is
+why 1c below is a warning rather than an action.
 
 **1a. Dump.** Non-negotiable, and it is the only rollback several of these
 migrations have:
@@ -58,21 +59,34 @@ is gone the next time. Forget it and the container fails env validation at boot
 and crash-loops: the platform never binds a port, and nothing in the loop names
 the release.
 
-**1c. `MODULES` — `@appstrate/cloud` no longer exists.** Production runs
+**1c. `MODULES` — do NOT touch it here. It is step 5.** Production runs
 `MODULES=oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/cloud`.
-That last specifier resolves to nothing: there is no built-in under
-`apps/api/src/modules/` and no workspace under `packages/module-*` by that name.
-`apps/api/src/lib/modules/module-loader.ts` throws
-`Module "@appstrate/cloud" could not be loaded: …`, and every declared module is
-required, so the throw is fatal. The billing module is now in-tree and its
-specifier is `@appstrate/module-ee`:
+Against the NEW image that last specifier resolves to nothing: there is no
+built-in under `apps/api/src/modules/` and no workspace under
+`packages/module-*` by that name. `apps/api/src/lib/modules/module-loader.ts`
+throws `Module "@appstrate/cloud" could not be loaded: …`, and every declared
+module is required, so the throw is fatal. The billing module is now in-tree and
+its specifier is `@appstrate/module-ee`.
 
-```
-MODULES=oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee
-```
+**But the new value is fatal against the build that is SERVING right now**, and
+in exactly the same way. Production runs beta.57, whose tree carries no
+`packages/module-ee` — the in-tree move ships in THIS release. Write
+`@appstrate/module-ee` into the Coolify configuration while beta.57 is up and
+the loader throws `Module "@appstrate/module-ee" could not be loaded: …` at the
+next restart or redeploy — which is not a hypothetical, because Coolify
+regenerates the `.env` from that configuration on every deploy. That is the
+crash-loop of the paragraph above, taken the other way round: env validation
+never completes, no port is bound, and nothing in the loop names the release.
+The value and the build that understands it have to arrive together, so the
+`MODULES` edit belongs at **step 5**, with the new image, and nowhere earlier.
 
-Same rule as 1b: in the Coolify resource configuration, not in a file. Same
-failure mode too — a crash-loop with no port bound.
+**Same for `CLOUD_DATABASE_URL`: it stays until step 4 is done.** The new build
+reads nothing by that name — `@appstrate/module-ee` opens `DATABASE_URL` — so
+removing it is part of the same step 5 edit and not one minute sooner. Its
+VALUE is what step 4 feeds `0010` as `EE_SOURCE_DATABASE_URL`, and it is the
+only pointer to the 31 billing accounts still sitting in `appstrate_cloud`.
+Copy it somewhere before editing anything, and delete the key only once `0010`
+has committed and refused its second run.
 
 **1d. Counts that decide whether an extra script runs.** All four were read on
 production on 2026-09-17; re-read them, because the window is later than this
@@ -119,29 +133,54 @@ tables live in the platform database. `scripts/migration/0010` is what carries
 them across, at step 4, and it is the ONLY thing that does.
 
 Counts read on production on 2026-09-17, against `appstrate_cloud` — re-read
-them, and keep the numbers: step 4's dry run prints a per-table plan that must
-match.
+them, and keep the numbers: step 4's dry run prints a per-table plan to compare
+against.
 
-| Table                    | Rows   |
-| ------------------------ | ------ |
-| `cloud_usage_records`    | 956    |
-| `cloud_billed_llm_usage` | 717    |
-| `cloud_stripe_events`    | 418    |
-| `cloud_billing_accounts` | **31** |
-| `cloud_free_tier_claims` | 18     |
-| `cloud_billing_cursor`   | 1      |
+**These numbers are ESTIMATES, and `0010` prints exact ones.** They come from
+`pg_stat_user_tables.n_live_tup`, which is what the last `ANALYZE`/autovacuum
+left behind — the planner's approximation, not a count. `0010` runs
+`SELECT count(*)` per table on both sides. A dry run that prints 957 against the
+956 below is the estimate being stale, not a row that appeared; what has to
+agree exactly is the script's OWN pair, source vs target, which is the check it
+exits non-zero on. Use the table below to recognise the shape of the data — six
+tables, one of them the 31 billing accounts — not as an equality to enforce.
+
+| Table                    | Rows (est.) |
+| ------------------------ | ----------- |
+| `cloud_usage_records`    | 956         |
+| `cloud_billed_llm_usage` | 717         |
+| `cloud_stripe_events`    | 418         |
+| `cloud_billing_accounts` | **31**      |
+| `cloud_free_tier_claims` | 18          |
+| `cloud_billing_cursor`   | 1           |
 
 ```sql
+-- volumes, ESTIMATED (this is where the table above comes from)
 SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY 2 DESC, 1;
-SELECT count(*) FROM drizzle.__drizzle_migrations;   -- must be 4
+
+-- the source's LEVEL, which is what 0010 grades: the newest stamp, not a row
+-- count. Drizzle's journal table carries `id`, `hash` and `created_at` — no
+-- tag — so the stamp is the whole identification, matched against the `when`
+-- of an entry in packages/module-ee/drizzle/migrations/meta/_journal.json.
+-- Production holds this journal; `drizzle.ee_migrations` is the one a source
+-- that already ran the renamed module would hold, and 0010 reads both.
+SELECT max(created_at) AS newest_stamp FROM drizzle.__drizzle_migrations;
 ```
 
-The journal count is what `0010` checks: **4** applied entries is
-`0003_normalize_free_subscription_status`, its `REQUIRED_SOURCE_TAG`. A source
-below it is refused. The prefix must be `cloud_*` — `0004` (billing managers)
-and `0005` (the rename to `ee_*`) ship in THIS release, so no deployment ever
-ran them against a database of its own, and a source mixing both prefixes is
-refused too.
+**`0010` does not count journal rows.** It reads the source's LEVEL: it takes
+`max(created_at)` across `drizzle.__drizzle_migrations` and `drizzle.ee_migrations`
+— whichever of the two the source holds — and looks that stamp up in the
+module's own `meta/_journal.json`, where each entry carries a `when`. A stamp
+matching no entry is refused outright ("a history this script does not know"),
+and so is a source holding neither journal, or one whose matched entry has an
+`idx` below `REQUIRED_SOURCE_IDX` — the `idx` of
+`0003_normalize_free_subscription_status`, its `REQUIRED_SOURCE_TAG`. So a
+journal with rows deleted, or re-seeded with the same tags at other stamps, is
+graded on the stamp and not on how many rows it has; counting them here tells
+you what to expect, never whether the script will accept the source. The prefix
+must be `cloud_*` — `0004` (billing managers) and `0005` (the rename to `ee_*`)
+ship in THIS release, so no deployment ever ran them against a database of its
+own, and a source mixing both prefixes is refused too.
 
 ### 2. Stop the platform
 
@@ -196,7 +235,7 @@ here — see `0004-oauth-resources-watermark-drift.sql`.
 
 **`0010` first, and it is not SQL.** It moves the commercial module's billing
 tables out of the database they had to themselves and into the platform
-database. Step 1c switches `MODULES` from `@appstrate/cloud` to
+database. Step 5a switches `MODULES` from `@appstrate/cloud` to
 `@appstrate/module-ee`; without this the module boots against SEVEN EMPTY
 `ee_*` tables it creates itself, and 31 organizations lose their billing
 account — credits, Stripe customer and subscription — while the metering cursor
@@ -210,7 +249,8 @@ EE_SOURCE_DATABASE_URL=<postgresql://…/appstrate_cloud> \
 DATABASE_URL=<postgresql://…/appstrate> \
   bun scripts/migration/0010-ee-tables-into-platform-db.ts
 
-# then, once the plan matches step 1g's counts
+# then, once the plan shows the six tables of step 1g at about its volumes
+# (those are estimates; the equality the script enforces is source vs target)
 EE_SOURCE_DATABASE_URL=… DATABASE_URL=… \
   bun scripts/migration/0010-ee-tables-into-platform-db.ts --apply
 
@@ -267,9 +307,25 @@ move of 2026-09-09 **is** the path that was taken, and `0017` is the restore it
 always owed; it is not an alternative to the branch, it is what the branch would
 have avoided needing.
 
-### 5. Start the platform
+### 5. Switch `MODULES`, then start the platform
 
-Only now. Rolling the application back alone is unsupported: the older build
+**5a. The environment edit step 1c held back.** In the Coolify resource's
+environment configuration — not in a `.env` file, which is regenerated on every
+deploy — and only now, with the new image about to run:
+
+```
+MODULES=oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee
+```
+
+`@appstrate/cloud` out, `@appstrate/module-ee` in — one edit, both halves, since
+either specifier alone is fatal to the build that does not carry it. Delete
+`CLOUD_DATABASE_URL` in the same edit: step 4 has finished with it, and nothing
+in the new build reads it. If `CLOUD_RECONCILIATION_{INTERVAL_SECONDS,REPLAY_WINDOW,BATCH_SIZE}`
+were set, re-spell them `EE_RECONCILIATION_*` here too — the old keys are
+unknown to the new schema and are dropped silently, reverting to the defaults.
+`TRUST_PROXY=1` is already in place from step 1b.
+
+**5b. Start it.** Only now. Rolling the application back alone is unsupported: the older build
 omits the now-required chat-session space (`0056`), reads a personal space as an
 ordinary private one (`0064`), and writes `home_space_id = NULL` against a CHECK
 that refuses it (`0067`). Roll forward, or restore the dump from step 1a.
@@ -514,7 +570,7 @@ the validation lists the runbook points at.
 These five migrations are NOT a batch of their own: production's watermark is
 `0055`, so they arrive inside the same twelve-migration transaction as `0056` …
 `0062`. Nothing here needs a new environment variable — `TRUST_PROXY` and
-`MODULES` (runbook steps 1b and 1c) are owed by the release, not by these files.
+`MODULES` (runbook steps 1b and 5a) are owed by the release, not by these files.
 
 `0016` is second because it reads what `0014` writes. It gives every
 `space_packages` row that sits outside its package's home the `package_shares`
@@ -526,7 +582,7 @@ refused by the run doors and by the scheduler tick — until somebody holding
 
 `0016` repairs what INHERITED data left, and that is the whole of its job: **the
 new code manufactures no such rows.** The two paths that rewrite a package's home
-— `PATCH /api/packages/{scope}/{name}` and the personal-space offboarding sweeper
+— `PUT /api/packages/{scope}/{name}/home` and the personal-space offboarding sweeper
 — both write the offers that keep every other space placed, from one shared
 function and inside their own transaction. So this script runs once, in this
 window, and nothing accumulates behind it: a second run inserts nothing, and a
@@ -603,7 +659,12 @@ ORDER BY p.id;
 
 `0014` prints this same list before its `UPDATE`: review it and `ROLLBACK`
 instead of `COMMIT` if a row looks wrong. Whatever it picks stays correctable
-afterwards with `PATCH /api/packages/{scope}/{name} {"home_space_id": …}`.
+afterwards with `PUT /api/packages/{scope}/{name}/home {"home_space_id": …}` —
+the id is REQUIRED and shape-checked (`spc_` + UUID), `null` is a 400, and a
+PERSONAL space as destination is a `409 home_move_into_personal_space`. There is
+no `PATCH` on that path: the package itself is read and written at
+`/api/packages/{type}/{scope}/{name}`, and `home` is an act hanging off the
+untyped one.
 
 `0014` prints a SECOND review block right after it — the organizations that own
 a package and have **no default space**. It must be empty. The third case has
@@ -633,7 +694,7 @@ refusals rather than cascades. Know what they will refuse:
 - **`packages.home_space_id → spaces.id`.** After `0014`, a space that homes a
   package cannot be deleted: the API answers `409 space_homes_packages` and
   names the packages, and a hand-written `DELETE FROM spaces` raises `23503`.
-  Move them first (`PATCH /api/packages/{scope}/{name}`). Any automation of
+  Move them first (`PUT /api/packages/{scope}/{name}/home`). Any automation of
   yours that deletes spaces has to move homes first from now on. Note that
   `0014` homes every package installed nowhere on the organization's DEFAULT
   space, so that space appears in the list below for every organization that had
@@ -658,7 +719,7 @@ refusals rather than cascades. Know what they will refuse:
 
 ### 4. Pre-flight — how many spaces `0015` would create
 
-Only if you intend to run `0015` (step 8). It inserts ONE `spaces` row per
+Only if you intend to run `0015` (runbook step 7, the last one). It inserts ONE `spaces` row per
 membership:
 
 ```sql
@@ -950,5 +1011,5 @@ all, is runbook step 2b — with the platform stopped and before the batch.
 | 0013 | not applied | `org_models`: keep the oldest un-aliased row per (org, credential, model), repoint `organizations.default_model_id` / `space_packages.model_id` / `package_schedules.model_id_override` / `llm_usage.model` at it and delete the younger copies, so drizzle `0062` can create `uq_org_models_unaliased_binding` — **run before the drizzle batch when the pre-flight above counts any**; a duplicate needs two `POST /api/models` for the same pair                                                                                                                                                                       | unmeasured — prints the duplicate-binding count before/after (after must be 0) and the four dangling-reference counts (all must be 0)                                                                                                                                                                                                                                                                                                                                                                                   |
 | 0014 | not applied | every organization package given a `home_space_id` — its ONE write-authority space (drizzle `0063` adds the column NULL everywhere, i.e. admin-only): exactly one installation → that space, several → the oldest `installed_at` **printed for review before `COMMIT`**, none → the organization's DEFAULT space (drizzle `0067` forbids a homeless organization package, and `0014` ends by `VALIDATE`ing that check); **run between the drizzle batch and bringing the new version up**, the `0008` shape; serving traffic in between costs every non-owner author and every API key write access to their own packages | unmeasured — prints the NULL-home count before and after (after must be **0**) and the ambiguous list in between                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 0015 | not applied | one personal space per existing `org_members` row (`spaces.owner_user_id`, drizzle `0064`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the space count first** — it inserts one row per membership, and nothing counts spaces for a quota today                                                                                                               | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0                                                                                                                                                                                                                                                                                                                                                                                                         |
-| 0016 | not applied | one `package_shares` row (`shared_by` NULL) per `space_packages` row sitting outside its package's home, so the placement rule drizzle `0066` completes — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                              | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0                                                                                                                                                                                                                                                                                                                                                                         |
+| 0016 | not applied | one `package_shares` row (`shared_by` NULL) per `space_packages` row sitting outside its package's home, so the placement rule drizzle `0063` + `0065` carry — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                         | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0                                                                                                                                                                                                                                                                                                                                                                         |
 | 0017 | not applied | the 2 org members moved off `viewer` **by hand** on 2026-09-09 (to `member`, the only value available before drizzle `0056` added `guest`) given the shape `0008` writes for a real viewer: one `viewer` `space_members` row per TEAM space of their org, then `member` → `guest`. `0008` cannot see them — its `WHERE role::text = 'viewer'` is the empty set — while `member` + `spaces.default_role = 'operator'` is write access in every open space; **run inside the window, right after `0008` and `0012`**                                                                                                        | 2 pairs counted on production read-only 2026-09-17 (31 `owner` / 16 `admin` / **2 `member`** / 0 `viewer`), NOT rehearsed against a restored dump — prints the per-pair role before and after and aborts on any uncovered (user, team space) pair                                                                                                                                                                                                                                                                       |
