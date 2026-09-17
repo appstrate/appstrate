@@ -30,10 +30,19 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { schedules } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSchedule } from "../../helpers/seed.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedPackage, seedSchedule, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
 
 /** A skill the fixture agent DECLARES and this caller writes (homed in their space). */
 const DECLARED_SKILL = "@schedbodyorg/dep-skill";
@@ -219,5 +228,180 @@ describe("PUT /api/schedules/:id — body validation", () => {
     // must stay legal on both maps.
     const res = await put({ connection_overrides: null, dependency_overrides: null });
     expect(res.status).toBe(200);
+  });
+});
+
+/**
+ * `dependency_overrides: { "@scope/skill": "draft" }` on the schedule writes —
+ * the AUTHORITY half, not the form half.
+ *
+ * The two describes above cover the FORM gate
+ * (`assertDependencyOverrideKeysDeclared`: a key the manifest does not declare
+ * is a 400) and one POSITIVE authority case (`"draft"` keyed on a skill the
+ * caller demonstrably writes → 201). Neither can tell the authority gate apart
+ * from its absence: drop `assertDependencyDraftOverridesAllowed` down to the
+ * key gate alone and every assertion up there still holds.
+ *
+ * What that drop would admit is the schedule twin of the escalation
+ * `runs-version-selection.test.ts` pins for `version_override`, and it costs
+ * strictly more here. A run executes a working copy ONCE, in front of the
+ * caller who asked for it; a schedule FREEZES the selector onto
+ * `package_schedules` and — as `routes/schedules.ts` states where it gates the
+ * write — never re-judges it at fire time. So one accepted POST means every
+ * tick, forever, runs the unpublished bytes of a package this principal may not
+ * write, under the schedule actor's credentials.
+ *
+ * The discriminating principal is the one the RBAC model actually produces: a
+ * `builder` of TEAM. They hold `schedules:write` there and write the AGENT too
+ * (it is homed in TEAM) — which is precisely what makes every refusal below
+ * attributable to the SKILL, homed in a space where they hold nothing at all.
+ */
+describe("schedule writes — `dependency_overrides` draft authority", () => {
+  let ctx: TestContext;
+  /** The SKILL's home — closed, so a role there is an explicit row and nothing else. */
+  let homeId: string;
+  /** Where the agent lives and where the schedules are written. */
+  let teamId: string;
+
+  const AGENT = "@schedauthorg/dep-authority-agent";
+  const SKILL = "@schedauthorg/dep-authority-skill";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "schedauthorg" });
+    homeId = (await seedSpace({ orgId: ctx.orgId, name: "Skill Home", visibility: "closed" })).id;
+    teamId = (await seedSpace({ orgId: ctx.orgId, name: "Team", visibility: "closed" })).id;
+
+    await seedPackage({
+      id: SKILL,
+      type: "skill",
+      orgId: ctx.orgId,
+      homeSpaceId: homeId,
+      createdBy: ctx.user.id,
+      draftManifest: { name: SKILL, version: "1.0.0", type: "skill" },
+    });
+    // DECLARED by the manifest the schedule will fire, so the key gate is
+    // satisfied and every case below is about the VALUE's authority alone.
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: teamId,
+      userId: ctx.user.id,
+      manifest: {
+        name: AGENT,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Dep Authority Agent",
+        author: "tester",
+        dependencies: { skills: { [SKILL]: "^1.0.0" } },
+      },
+    });
+  });
+
+  /** A member holding `builder` in each of `spaceIds`, and nothing anywhere else. */
+  async function builderOf(...spaceIds: string[]): Promise<Record<string, string>> {
+    const user = await createTestUser();
+    await addOrgMember(ctx.orgId, user.id, "member");
+    for (const spaceId of spaceIds) {
+      await seedSpaceMember({ spaceId, userId: user.id, presetRole: "builder" });
+    }
+    return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": teamId };
+  }
+
+  /** Writes the schedules AND the agent; holds nothing in the skill's home. */
+  const scheduleWriter = () => builderOf(teamId);
+  /** The same, plus the skill's home — so this one writes the SKILL. */
+  const skillAuthor = () => builderOf(teamId, homeId);
+
+  const postSchedule = (headers: Record<string, string>, body: Record<string, unknown>) =>
+    app.request(`/api/agents/${AGENT}/schedules`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ cron_expression: "0 9 * * 1-5", ...body }),
+    });
+
+  const put = (headers: Record<string, string>, id: string, body: Record<string, unknown>) =>
+    app.request(`/api/schedules/${id}`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  /** A schedule armed by the skill's author — the only principal allowed to freeze `draft`. */
+  async function armedSchedule(dependencyOverrides?: Record<string, string>): Promise<string> {
+    const res = await postSchedule(
+      await skillAuthor(),
+      dependencyOverrides ? { dependency_overrides: dependencyOverrides } : {},
+    );
+    expect(res.status, await res.clone().text()).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  const storedRows = () => db.select().from(schedules).where(eq(schedules.packageId, AGENT));
+
+  it("refuses a POST that freezes a `draft` override on a skill the caller cannot write", async () => {
+    const res = await postSchedule(await scheduleWriter(), {
+      dependency_overrides: { [SKILL]: "draft" },
+    });
+    expect(res.status, await res.clone().text()).toBe(403);
+    const problem = (await res.json()) as { code?: string; detail?: string };
+    expect(problem.code).toBe("draft_not_writable");
+    // The refusal has to NAME the skill: the caller writes the agent, so a
+    // message about "this package" would send them looking at the wrong one.
+    expect(problem.detail).toContain(SKILL);
+    // Nothing was armed — the refusal is the whole outcome, not a rollback.
+    expect(await storedRows()).toHaveLength(0);
+  });
+
+  it("accepts the same body from a caller who writes that skill (control)", async () => {
+    // The discriminating control: the body, the agent and the space are
+    // identical, so the 403 above is about the principal's authority over the
+    // SKILL and about nothing else in the request.
+    const res = await postSchedule(await skillAuthor(), {
+      dependency_overrides: { [SKILL]: "draft" },
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const [row] = await storedRows();
+    expect(row?.dependencyOverrides).toEqual({ [SKILL]: "draft" });
+  });
+
+  it("refuses a PUT that ADDS the `draft` override to a schedule that did not hold it", async () => {
+    const id = await armedSchedule();
+    const res = await put(await scheduleWriter(), id, {
+      dependency_overrides: { [SKILL]: "draft" },
+    });
+    expect(res.status, await res.clone().text()).toBe(403);
+    const problem = (await res.json()) as { code?: string; detail?: string };
+    expect(problem.code).toBe("draft_not_writable");
+    expect(problem.detail).toContain(SKILL);
+    const [row] = await storedRows();
+    expect(row?.dependencyOverrides ?? null).toBeNull();
+  });
+
+  it("accepts a PUT that echoes the stored `draft` override back unchanged", async () => {
+    // Without this the refusal above would be a hole, not a gate: the edit form
+    // reads the row and posts every field back, so a cron change arrives
+    // carrying the override its author already proved. A stored value is not an
+    // act — `movedDependencyOverrides` is what says so.
+    const id = await armedSchedule({ [SKILL]: "draft" });
+    const res = await put(await scheduleWriter(), id, {
+      cron_expression: "0 4 * * *",
+      dependency_overrides: { [SKILL]: "draft" },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [row] = await storedRows();
+    expect(row?.dependencyOverrides).toEqual({ [SKILL]: "draft" });
+  });
+
+  it("accepts a PUT that DROPS the `draft` override", async () => {
+    // Taking a working copy away needs no authority at all — and an operator
+    // who cannot undo a draft override is an operator who has to delete the
+    // schedule to stop it.
+    const id = await armedSchedule({ [SKILL]: "draft" });
+    const res = await put(await scheduleWriter(), id, { dependency_overrides: {} });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [row] = await storedRows();
+    expect(row?.dependencyOverrides).toEqual({});
   });
 });

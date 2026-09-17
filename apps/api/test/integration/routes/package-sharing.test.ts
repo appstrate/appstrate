@@ -38,7 +38,7 @@ import {
 } from "@appstrate/db/schema";
 import { sql } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
-import { sharePackage } from "../../../src/services/package-shares.ts";
+import { revokePackageShare, sharePackage } from "../../../src/services/package-shares.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
@@ -543,8 +543,34 @@ describe("authority — `<type>:share` in the home space", () => {
     expect(unshared.after).toEqual({
       recipientUserId: recipient.userId,
       targetKind: "user",
-      placement_removed: false,
+      // The offer was never TAKEN UP, so there was no placement row to remove.
+      // Its twin below revokes an ACTIVATED offer and reads `true` — the pair
+      // is what makes the field mean anything: asserted on one branch alone, a
+      // field hard-wired to `false` reads exactly the same.
+      placementRemoved: false,
     });
+  });
+
+  it("reports `placementRemoved: true` when the revoke DID take a placement with it", async () => {
+    // The audit entry's job is to say WHICH of the two things the act removed —
+    // the offer alone, or the offer and the installation behind it. That is the
+    // only record of the second deletion: `spacePackages` is gone by the time
+    // anybody reads the trail, so a reader asking "did this revoke stop a
+    // package that was running here" has nothing else to ask.
+    await shareWithUser(author.headers(homeId), AGENT, recipient.userId);
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
+
+    expect((await revokeShare(author.headers(homeId), AGENT, recipient.userId)).status).toBe(204);
+    const unshared = await getDbRow(auditEvents, eq(auditEvents.action, "package.unshared"));
+    // The WHOLE payload, not just the flag: the person is still what was
+    // audited, and their personal space still must not appear because the offer
+    // happened to be taken up.
+    expect(unshared.after).toEqual({
+      recipientUserId: recipient.userId,
+      targetKind: "user",
+      placementRemoved: true,
+    });
+    expect(JSON.stringify(unshared.after)).not.toContain(recipient.personalSpaceId);
   });
 
   it("records the SPACE in the audit trail of a `space` share", async () => {
@@ -837,6 +863,65 @@ describe("offered is not activated", () => {
     );
     // …and the recipient is back to not being able to run it.
     await expectProblem(await runAsRecipient(recipient), 404);
+  });
+
+  it("reverts BOTH deletes together when the revoke fails before committing", async () => {
+    // "In one transaction" is the claim, and the test above cannot check it:
+    // it reads the final state of a pass that succeeded, which is identical
+    // whether the two deletes shared a transaction or ran as two statements
+    // back to back. The same goes for every other revoke here — they assert the
+    // 204 and nothing more.
+    //
+    // What the transaction buys is the FAILURE case, and it is the expensive
+    // one: if the offer commits and the placement delete then fails, the space
+    // keeps an installed, runnable package that no offer backs any more — the
+    // orphan `services/package-activation.ts` reads as nothing at all, and that
+    // no route afterwards can clean up. So the seam throws INSIDE, after both
+    // deletes, and the assertion is that NEITHER landed.
+    expect((await takeUpOffer(recipient.headers(), AGENT)).status).toBe(201);
+
+    await expect(
+      revokePackageShare(
+        {
+          packageId: AGENT,
+          spaceId: recipient.personalSpaceId,
+          orgId: ctx.orgId,
+          authorizeHome: () => true,
+        },
+        {
+          onBeforeCommit: async () => {
+            throw new Error("injected mid-transaction failure");
+          },
+        },
+      ),
+    ).rejects.toThrow("injected mid-transaction failure");
+
+    // BOTH, deliberately: either one on its own passes while the other has
+    // committed, which is exactly the split this test exists to refuse.
+    const offers = await db
+      .select()
+      .from(packageShares)
+      .where(
+        and(
+          eq(packageShares.packageId, AGENT),
+          eq(packageShares.spaceId, recipient.personalSpaceId),
+        ),
+      );
+    expect(offers, "the offer must survive a rolled-back revoke").toHaveLength(1);
+    const placements = await db
+      .select()
+      .from(spacePackages)
+      .where(
+        and(
+          eq(spacePackages.packageId, AGENT),
+          eq(spacePackages.spaceId, recipient.personalSpaceId),
+        ),
+      );
+    expect(placements, "the placement must survive a rolled-back revoke").toHaveLength(1);
+    // And the recipient can still run it — the state is intact, not merely the rows.
+    const launched = await runAsRecipient(recipient);
+    expect(launched.status, await launched.clone().text()).toBe(201);
+    await waitForRunPipelineSettled();
   });
 
   it("answers 404 on a revoke of a target that holds no share", async () => {
@@ -1590,28 +1675,21 @@ describeRequiresPostgres("a revoke racing an install (needs a real PostgreSQL)",
       commitRevoke = resolve;
     });
 
-    // T1 — the revoke's two deletes, then HELD OPEN. This is
-    // `revokePackageShare`'s body, inlined so the transaction can be paused
-    // mid-flight; the service commits it in one go and gives no seam.
-    const revoking = db.transaction(async (tx) => {
-      await tx
-        .delete(packageShares)
-        .where(
-          and(
-            eq(packageShares.packageId, AGENT),
-            eq(packageShares.spaceId, recipient.personalSpaceId),
-          ),
-        );
-      await tx
-        .delete(spacePackages)
-        .where(
-          and(
-            eq(spacePackages.packageId, AGENT),
-            eq(spacePackages.spaceId, recipient.personalSpaceId),
-          ),
-        );
-      await gate;
-    });
+    // T1 — the revoke, HELD OPEN between its deletes and its commit through the
+    // service's own `onBeforeCommit` seam. It used to be `revokePackageShare`'s
+    // body copied out here, which paused the transaction at the cost of the
+    // thing being tested: a copy takes the two row locks whatever the service
+    // does, so the lock ORDER this test pins was the copy's, and the service
+    // could stop taking `package_shares` first without a single test moving.
+    const revoking = revokePackageShare(
+      {
+        packageId: AGENT,
+        spaceId: recipient.personalSpaceId,
+        orgId: ctx.orgId,
+        authorizeHome: () => true,
+      },
+      { onBeforeCommit: () => gate },
+    );
     await Bun.sleep(150);
 
     // T2 — the install. `SELECT … FOR UPDATE` on the share row blocks on T1's
