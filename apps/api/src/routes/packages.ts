@@ -873,9 +873,13 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
  * and an `integration` published without its optional `INTEGRATION.md` both
  * store the manifest TEXT in `draft_content`, so the published projection
  * reproduces that rather than handing back a `null` the editor would render as
- * an empty file. A REQUIRED entry has no such fallback — a published `SKILL.md`
- * the storage cannot produce is a broken artifact, and it gets the same 422 the
- * run path answers for a published agent with no readable prompt.
+ * an empty file.
+ *
+ * That fallback stands for an entry MISSING FROM AN ARCHIVE THAT OPENED, and
+ * for nothing else. An archive the storage cannot produce at all is a broken
+ * artifact for every type, and gets the same `422 version_artifact_unavailable`
+ * the run path answers for a published agent with no readable prompt — as does
+ * an archive that opened without a REQUIRED entry (`prompt.md`, `SKILL.md`).
  */
 async function loadPublishedDefinition(
   type: PackageType,
@@ -886,7 +890,29 @@ async function loadPublishedDefinition(
   if (!detail) throw notFound(`Version '${spec}' not found`);
   const m = asRecord(detail.manifest);
   const entry = PACKAGE_CONTENT_ENTRY[type];
-  const bytes = entry ? detail.content?.[entry.path] : undefined;
+  // TWO different failures, and only the first is a failure at all.
+  //
+  // `getVersionDetail` CATCHES a storage or unzip failure and answers
+  // `content: null` rather than throwing, so that null is the ONLY evidence
+  // that the published bytes could not be read — and it is type-independent.
+  // Asking the per-type entry FIRST made this 422 unreachable for the two types
+  // that have no REQUIRED entry — `integration` (`INTEGRATION.md` is optional)
+  // and `mcp-server` (no entry at all): an archive nothing could open answered
+  // 200 with the manifest text as `content` and `definition: "published"`, i.e.
+  // other bytes than the published ones, presented as the published ones.
+  if (detail.content === null) {
+    throw new ApiError({
+      status: 422,
+      code: "version_artifact_unavailable",
+      title: "Version Artifact Unavailable",
+      detail: `Published '${packageId}@${detail.version}' has no readable archive`,
+    });
+  }
+  const bytes = entry ? detail.content[entry.path] : undefined;
+  // The archive OPENED and the entry is not in it. For a REQUIRED entry that is
+  // a broken artifact and gets the same 422; for an optional one — or a type
+  // with no content entry — it is the normal published shape, and the manifest
+  // text below is the definition, exactly as `applyDraftOverlay` stores it.
   if (entry?.required && !bytes) {
     throw new ApiError({
       status: 422,
@@ -2078,17 +2104,23 @@ export function createPackagesRouter() {
         action: "package.home_space_changed",
         resourceType: "package",
         resourceId: packageId,
+        // CAMELCASE, like every other audit payload in this file and like the
+        // `package.activated` entry twelve lines below: carve-out 4m
+        // (`docs/CASING_CONVENTIONS.md`) — a SIEM indexes these keys, so they
+        // are named here on purpose and never copied from the snake_case
+        // request body. `keptInPreviousHome` is the body's
+        // `keep_in_previous_home` re-spelled for that reason.
         before:
           previousHomeOwnerId === null
-            ? { home_space_id: pkg.homeSpaceId }
-            : { home_space_id: null, home_owner_user_id: previousHomeOwnerId },
-        // `kept_in_previous_home` is the half of this act that is NOT the home
+            ? { homeSpaceId: pkg.homeSpaceId }
+            : { homeSpaceId: null, homeOwnerUserId: previousHomeOwnerId },
+        // `keptInPreviousHome` is the half of this act that is NOT the home
         // column: `false` means the space being left lost the package — its
         // offer and its placement row both — which is a withdrawal of access
         // and belongs in the trail beside the move that performed it. It rides
         // on THIS event rather than a second `package.unshared`, because one
         // act is one entry and the entry should name what did it.
-        after: { home_space_id: target, kept_in_previous_home: body.keep_in_previous_home },
+        after: { homeSpaceId: target, keptInPreviousHome: body.keep_in_previous_home },
       });
       // Symmetric with the HTTP door: recorded only when the destination
       // actually started running the package, and naming the act that did it —
@@ -2391,11 +2423,12 @@ export function createPackagesRouter() {
       resourceId: packageId,
       // The subject as the caller named it — a person for a `user` target, and
       // never the personal space it resolved to, for the reason `package.shared`
-      // states. `placement_removed` is the other half of what this act did: the
-      // offer went, and the placement row it backed went with it.
+      // states. `placementRemoved` is the other half of what this act did: the
+      // offer went, and the placement row it backed went with it. CamelCase
+      // throughout, carve-out 4m (`docs/CASING_CONVENTIONS.md`).
       after: recipientUserId
-        ? { recipientUserId, targetKind: "user", placement_removed: revoked.placementRemoved }
-        : { spaceId, targetKind: "space", placement_removed: revoked.placementRemoved },
+        ? { recipientUserId, targetKind: "user", placementRemoved: revoked.placementRemoved }
+        : { spaceId, targetKind: "space", placementRemoved: revoked.placementRemoved },
     });
     return c.body(null, 204);
   });

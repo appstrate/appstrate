@@ -6,10 +6,17 @@
  *
  * `space_packages` is the PLACEMENT's local instance: one row per (package,
  * space) carrying `enabled`, the model, the proxy and the stored input
- * settings. It is created by the first activation and never deleted again
- * except by the revoke of the share that placed it, by the package's deletion
- * or by the space's — so deactivating and reactivating keeps every setting the
- * space chose.
+ * settings. The three doors in this file are the only writers that CREATE one;
+ * deactivating is not one of them, so deactivating and reactivating keeps every
+ * setting the space chose.
+ *
+ * A row is deleted only when the placement behind it is withdrawn, by one of
+ * two acts, each inside the transaction that withdraws it: `revokePackageShare`
+ * (`services/package-shares.ts`) and the `keep: false` branch of
+ * `reconcilePlacementsAfterRehome` (`services/package-placement.ts`) — plus the
+ * cascades of the package's deletion and the space's.
+ * `setBlockUserConnections` (`services/integration-pins-service.ts`) writes here
+ * too, but only UPDATES a column in place on a row already placed.
  */
 
 import { eq, and, exists, sql } from "drizzle-orm";
@@ -600,12 +607,18 @@ function activePackagesFilter(scope: SpaceScope, type: PackageType) {
 }
 
 /**
- * ORDER BY for both listings above: system first, then by id. The tie-break is
+ * ORDER BY for EVERY package index: system first, then by id. The tie-break is
  * load-bearing — Postgres does not order rows within an equal sort key. The
  * chat renders this list (capped, via `listActivePackageHints`) into its system
  * prompt, which pi-ai emits as ONE cache block with ONE breakpoint, so a
  * reshuffle invalidates the cached prefix and the history behind it; and it
  * makes the cap stable, since which 15 of N survive is otherwise undefined.
+ *
+ * Exported for the fourth index, `listOrgItems`
+ * (`services/package-items/crud.ts`), which spelled its own order inline and
+ * so ranked the SAME active set differently from the three here. One function
+ * rather than two spellings: an index and the hints the model is handed for it
+ * must not disagree about which 15 rows come first.
  */
 function packageListingOrder() {
   return [sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`, packages.id];
@@ -623,6 +636,16 @@ function packageListingOrder() {
  * stays open either way — an author edits an agent nobody runs.
  *
  * Single query via LEFT JOIN — no N+1.
+ *
+ * The projection is what an INDEX draws a card from, and nothing else.
+ * `draft_content` in particular — the whole `prompt.md` / `SKILL.md` body, by
+ * far the largest column on the row (`services/package-items/crud.ts` says the
+ * same where it omits it) — is not on it: the one caller's mapper never read it,
+ * so every load of `GET /api/agents` was shipping K prompts out of Postgres to
+ * drop them. Neither is the `latest` dist-tag: no reader of this listing asks
+ * whether the package is published, which is why the join that produced it is
+ * gone too. The hints listing below keeps both the join and the column because
+ * its own `published` field reads them.
  */
 export async function listActivePackages(scope: SpaceScope, type: PackageType) {
   return db
@@ -630,20 +653,11 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
       id: packages.id,
       type: packages.type,
       draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
       source: packages.source,
-      // `latest` dist-tag version id — non-null iff the package has a published
-      // version. Lets callers tell published agents from draft-only ones without
-      // an N+1 (a draft-only agent must be run with `version=draft`).
-      latestVersionId: packageDistTags.versionId,
     })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
-    .leftJoin(
-      packageDistTags,
-      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
-    )
     .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder());
 }
@@ -735,8 +749,9 @@ async function listActivePackageHints<T extends PackageHint>(
       source: packages.source,
       homeSpaceId: packages.homeSpaceId,
       draftManifest: packages.draftManifest,
-      // `latest` dist-tag version id — non-null iff the package has a
-      // published version (see `listActivePackages`).
+      // `latest` dist-tag version id — non-null iff the package has a published
+      // version. Lets `published` below be answered without an N+1 (a draft-only
+      // agent must be run with `version=draft`).
       latestVersionId: packageDistTags.versionId,
       total: sql<number>`count(*) over ()`.mapWith(Number),
     })

@@ -128,7 +128,8 @@ export async function isPlacedElsewhere(
  *
  * So every space of the organization holding a row, other than the NEW home,
  * gets the share that now places it — `shared_by` NULL, because the home placed
- * it until this call and no person offered it. The destination's own share is
+ * it until this call and no person offered it — and so does the home being
+ * left, when it keeps the package, row or no row. The destination's own share is
  * dropped: a package is not offered to the space it lives in, the same rule
  * `POST …/shares` states as `share_target_is_home`. The only space whose answer
  * is a CHOICE is the home being left (`previousHome` below).
@@ -153,10 +154,16 @@ export async function reconcilePlacementsAfterRehome(
      * whose answer is a choice rather than an invariant. `PUT …/home` passes a
      * human's answer for it.
      *
-     * `keep: true` backfills that space only when it holds a placement ROW: the
-     * backfill exists to keep RUNNING what was running, so a space that had
-     * switched the package off has nothing to rescue and writing it an offer
-     * would widen what it sees.
+     * `keep: true` backfills that space UNCONDITIONALLY — whether or not it
+     * holds a placement row. The offer restores the READ placement the home was
+     * providing until this call, and that is the whole promise `PUT …/home`
+     * makes: the move answers the same way whether or not the old home happened
+     * to have activated the package. Conditioning it on a row would break that
+     * promise in exactly the case nobody can see — a package created in a space
+     * whose first version never published, and which therefore never got a row
+     * — leaving it neither homed nor offered anywhere, invisible to the space
+     * that authored it. It widens nothing: the row (absent, or present and
+     * `enabled = false`) still decides on its own what the space RUNS.
      *
      * `keep: false` withdraws the offer AND the placement row together — the
      * pair {@link revokePackageShare} withdraws — since dropping only the offer
@@ -172,6 +179,10 @@ export async function reconcilePlacementsAfterRehome(
   const { packageId, orgId, newHomeSpaceId, previousHome } = params;
   const releasing =
     previousHome && !previousHome.keep && previousHome.spaceId !== newHomeSpaceId
+      ? previousHome.spaceId
+      : null;
+  const keeping =
+    previousHome && previousHome.keep && previousHome.spaceId !== newHomeSpaceId
       ? previousHome.spaceId
       : null;
 
@@ -192,10 +203,20 @@ export async function reconcilePlacementsAfterRehome(
       ),
     );
 
-  if (orphaned.length > 0) {
+  // One element more, not one query more: the old home that KEEPS the package
+  // is backfilled whether or not the SELECT above found a row for it, because
+  // its placement came from the home column this call just rewrote and not from
+  // a row. It needs no `spaces` join to clear the org boundary — it IS the
+  // package's previous home, so it belongs to the package's organization by the
+  // same constraint that put it there. `onConflictDoNothing` makes the addition
+  // idempotent when the row was already in `orphaned`.
+  const backfill = new Set(orphaned.map((row) => row.spaceId));
+  if (keeping) backfill.add(keeping);
+
+  if (backfill.size > 0) {
     await tx
       .insert(packageShares)
-      .values(orphaned.map((row) => ({ packageId, spaceId: row.spaceId, sharedBy: null })))
+      .values([...backfill].map((spaceId) => ({ packageId, spaceId, sharedBy: null })))
       .onConflictDoNothing();
   }
 
