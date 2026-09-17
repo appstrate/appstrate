@@ -37,6 +37,7 @@ function agentRow(placements: LibraryPlacement[]): LibraryPackageItem {
     home_space_id: SPACE,
     home_writable: false,
     home_shareable: false,
+    home_deletable: false,
     placements,
   };
 }

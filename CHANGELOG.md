@@ -527,11 +527,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the agent and skill editors now refuse a caller without `agents:write` /
   `skills:write` up front, instead of opening a form whose save would answer 403. The presets stop being a
   single ladder here: `runner` and `viewer` grant things the other does not, so
-  neither is "above" the other. Migration **0060** widens the three space-role
-  CHECK constraints; it is applied automatically at boot, with no operator step.
-  One thing to check before deploying: an organization that defined a **custom
-  role keyed `runner`** must rename it first — the migration refuses rather than
-  let a bundle shadow the preset, and says so by name.
+  neither is "above" the other. Migration **0060** rewrites the three space-role
+  CHECK constraints — two widen to admit `runner`, the third narrows
+  `space_roles.key` so a custom role cannot shadow the preset — and it carries
+  no pre-flight, no guard and no `RAISE`. There is nothing to count: the preset
+  and the constraint reserving its key arrive in the same batch, so the only row
+  the narrowing could refuse — a custom role keyed `runner`, defined before the
+  key was reserved — is structurally impossible, and a guard over it would be a
+  `RAISE` no database can reach. Were one ever to exist, it surfaces as a bare
+  `23514` naming `space_roles_key_not_preset`, which is the correct failure for
+  a state nothing can produce. Applied automatically at boot, no operator step.
 
   **API consumers**: `dependencies.skills`, `dependencies.mcp_servers` and
   `forked_from` are optional on the agent DTOs from now on — a summary read
@@ -558,8 +563,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `core-providers` next to `openai-compatible`, for any self-hosted or
   third-party endpoint speaking the Anthropic Messages API (LiteLLM proxy, …).
 
-- **`POST /api/model-provider-credentials/discover`** — asks an endpoint once
-  for its listing (`GET <base_url>/models`) and returns the ids it serves,
+- **`POST /api/model-provider-credentials/discover`** — asks an endpoint for
+  its listing (`GET <base_url>/models`), follows the listing's own cursor when
+  it declares one (Anthropic `has_more` / `last_id`, Google `nextPageToken`) up
+  to 10 pages or 1000 models, and returns the ids it serves,
   each described from the fields the listing publishes (vLLM `max_model_len`,
   Mistral `capabilities`, OpenRouter `context_length` / `architecture` /
   `top_provider` / `supported_parameters`, LM Studio `max_context_length`) and,
@@ -568,8 +575,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   says which described it, `label` is catalog-only, an id in no catalog comes
   back all-null. Takes an existing `credential_id` or an inline `provider_id` +
   `api_key` (+ `base_url_override`), so the model form can list a custom
-  endpoint before its credential exists. Persists nothing, never echoes the
-  key, refuses OAuth providers (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`),
+  endpoint before its credential exists. `truncated` says when a page or model
+  cap stopped the read, so a partial view never passes for a whole one. It
+  persists no model state — no credential is created, no `available_model_ids`
+  is written — while the probe itself IS recorded in the audit trail
+  (`model_provider_credential.discovered`: the endpoint reached and what came
+  back, never the key), since it spends a key on an operator-supplied URL. It
+  never echoes the key, refuses OAuth providers
+  (`docs/architecture/SUBSCRIPTION_COMPLIANCE.md`),
   and never returns a per-token cost: an endpoint serving a vendor's model id is
   not billed at the vendor's rate. Rate limited to 6/min behind
   `model-provider-credentials:write`.
@@ -844,8 +857,9 @@ with the agent's home space`. What a space's ACTIVATION governs is something
   was a wrong name silently starting every organization on an empty free plan
   while Stripe kept charging them. The module needs PostgreSQL outright: under
   tier 0 (PGlite, no `DATABASE_URL`) it refuses to start, naming `DATABASE_URL`.
-  Its remaining variables are the four `STRIPE_*` and the three
-  `EE_RECONCILIATION_*`.
+  Its remaining variables are the four `STRIPE_*` and the four
+  `EE_RECONCILIATION_*` (`INTERVAL_SECONDS`, `BATCH_SIZE`, `REPLAY_WINDOW`,
+  `MAX_GAP_SECONDS`).
 
   **OPERATOR ACTIONS.** None of its own: this entry and the in-tree move below
   ship together, so a deployment coming from `@appstrate/cloud` has ONE upgrade
@@ -871,9 +885,14 @@ with the agent's home space`. What a space's ACTIVATION governs is something
 
   **OPERATOR ACTIONS.** One path, for a deployment coming from
   `@appstrate/cloud`; a new one needs none of it. Rehearse all of it on a
-  restored copy of both databases and note the per-table counts. In `MODULES`,
-  replace `@appstrate/cloud` with `@appstrate/module-ee`. Stop the platform (let
-  the running runs drain) and `pg_dump` the billing database as the safety net.
+  restored copy of both databases and note the per-table counts. Stop the
+  platform (let the running runs drain) and `pg_dump` the billing database as
+  the safety net. **Do not touch `MODULES` yet**: the build still in service
+  does not carry `packages/module-ee`, so naming it is fatal to that build
+  exactly as `@appstrate/cloud` is fatal to the new one — every declared module
+  is required, the loader throws, and the container crash-loops without binding
+  a port. It is swapped at the END, with the new image, and
+  `scripts/migration/README.md` step 5a is where the runbook puts it.
   Move its rows into the platform database with
   `bun scripts/migration/0010-ee-tables-into-platform-db.ts --apply`,
   `EE_SOURCE_DATABASE_URL` = the EXACT value `CLOUD_DATABASE_URL` held and
@@ -895,8 +914,10 @@ with the agent's home space`. What a space's ACTIVATION governs is something
   must read source = target on every row. Deploy, then check the boot log for
   `Module loaded` with `"id":"ee"` and `billing sweeper started`, and that
   `select count(*) from drizzle.ee_migrations` on the platform database counts
-  every file in `packages/module-ee/drizzle/migrations` (7 today). Keep
-  the old database read-only (`REVOKE`) for a week, then `DROP DATABASE`; until
+  as many entries as `packages/module-ee/drizzle/migrations/meta/_journal.json`
+  holds — read the journal rather than a number written here; it is eight today
+  (`0000_init` … `0007_bigint_cost_credits`). Keep the old database read-only
+  (`REVOKE`) for a week, then `DROP DATABASE`; until
   that drop the rollback is the previous image with `CLOUD_DATABASE_URL`
   restored, losing only writes made on the platform copy after the cutover.
 
@@ -933,18 +954,24 @@ with the agent's home space`. What a space's ACTIVATION governs is something
   a `custom` credential.
 
 - **Limits and capabilities behind one toggle, "Définir moi-même les limites
-  et capacités".** Off, a sentence states the fallback chain (row override →
-  catalog → runtime defaults: 128k context, 16k output tokens, text only, no
-  reasoning); on, every field ships, an unticked box included. On an edit,
-  toggle off or a blanked limit sends `null` and drops the stored override. The
+  et capacités".** Off, a sentence states the two ends of the fallback chain the
+  server actually walks — the catalog entry when the model is known, the runtime
+  defaults otherwise (128k context, 16k output tokens, text only, no reasoning).
+  The row override in front of them is not spelled out, because a row with an
+  override is exactly the row that opens the toggle ON. On, every field ships,
+  an unticked box included. On an edit, toggle off or a blanked limit sends
+  `null` and drops the stored override. The
   toggle opens on only when the row differs from its catalog entry, so a
   catalogued model never gets the catalog's numbers frozen as overrides. The
   "Avancé" fold and its "détection automatique du SDK" copy are removed.
 
-- **Model discovery lists the provider's models once.** `discoverAvailableModels`
-  sends ONE guarded `GET <base_url>/models` (`listServedModels`), parsed per
+- **Model discovery lists the provider's models in one guarded pass.**
+  `discoverAvailableModels` sends a guarded `GET <base_url>/models`
+  (`listServedModels`) and follows that listing's own cursor for as long as it
+  declares one — at most 10 pages or 1000 models, and `truncated` when either
+  cap cut the read short. Each page is parsed per
   `apiShape` (`{ data: [{ id }] }`, or `{ models: [{ name: "models/<id>" }] }`
-  for the Google shapes), and persists the discovery candidates present in it
+  for the Google shapes), and it persists the discovery candidates present in it
   as `available_model_ids`. An auth failure, an unreadable listing, a 429 that
   survives one retry, a listing a page or model cap cut short, or an empty
   intersection leave the previous list untouched — intersecting against a
@@ -962,13 +989,17 @@ with the agent's home space`. What a space's ACTIVATION governs is something
   keeps it correct only as long as every future workflow and every hand-made
   Release remembers the flag. The consumers now filter by tag themselves
   (drafts and prereleases skipped, as before), so a stray Release can no
-  longer point an update at assets that do not exist. Both walk pages of 30
-  (5 at most) until one holds a `v*` Release; the CLI then takes the highest
-  version on that page rather than the most recently created one, so a hotfix
-  for an older line published after a newer release is not "latest" (the shell
-  scripts keep creation order: no `sort -V` on macOS, and the rendered
-  installer pins its version anyway). The CLI names the releases it skipped
-  when no `v*` one is found; `releaseUrls` no longer has a `latest/download`
+  longer point an update at assets that do not exist. The two halves walk the
+  list differently, on purpose. The shell scripts read pages of 30 (5 at most)
+  and stop at the FIRST page holding a `v*` Release, taking it in creation
+  order — no `sort -V` on macOS, and the rendered installer pins its version
+  anyway. The CLI reads pages of 100 (2 at most) and does not stop at the first
+  page carrying a candidate: it collects every page, then takes the HIGHEST
+  version across all of them, because creation order and version order diverge
+  whenever a hotfix is cut for an older line — so the first page holding a
+  candidate can hold the lower one, and such a hotfix is not "latest". The CLI
+  names the releases it skipped when no `v*` one is found; `releaseUrls` no
+  longer has a `latest/download`
   branch because nothing reaches it any more.
 
 - **BREAKING (API keys): `GET /api/schedules/{id}/runs` asks for a run-read
@@ -1050,9 +1081,15 @@ with the agent's home space`. What a space's ACTIVATION governs is something
   exits 0.
 
 - **`EE_RECONCILIATION_INTERVAL_SECONDS=0` pauses metering only.** The
-  module's `init()` always arms its maintenance tick (300 s), so account
-  repair and cursor upkeep keep running while the sweep itself is paused; the
-  value is no longer a way to run the module with no timer at all. (#1326)
+  module's `init()` always arms its maintenance tick (300 s), so the two things
+  that tick does — the fleet-wide storage-entitlement resync and the retry of
+  Stripe cancellations left unconfirmed — keep running while the sweep itself is
+  paused; the value is no longer a way to run the module with no timer at all.
+  What the maintenance tick does NOT do is touch `ee_billing_cursor`: every
+  writer of that watermark sits on the paused path, so the watermark freezes for
+  the whole pause. Consequence to plan for: un-pausing is a resume over a gap,
+  and `assertCursorResumable` refuses to boot past
+  `EE_RECONCILIATION_MAX_GAP_SECONDS` of it. (#1326)
 
 - **`appstrate skills sync` treats a revoked organization as an empty source.**
   When `GET /api/spaces` answers 403, every skill the sync materialized from that
@@ -1160,11 +1197,15 @@ with the agent's home space`. What a space's ACTIVATION governs is something
   register OAuth client credentials…"); the catch around the hosted dispatch
   swallowed that error, and the auto-provisioning failure written to be shown
   verbatim with it. A client-side (4xx) refusal from the OAuth strategy now
-  reaches the popup with its own status and detail, and the single-use link is
+  reaches the popup with its own STATUS — and generic wording, not the
+  `ApiError`'s own detail, which names operator artefacts (a client row id,
+  `CONNECTION_ENCRYPTION_KEY`, an upstream AS's prose) on a route that carries
+  no session; the detail stays on the log line. The single-use link is
   handed back rather than burned — nothing was minted on its strength — so a
   retry once the client is registered works from the very same link instead of
   the previous second misleading "This connect link has already been used."
-  Transient and unknown failures keep the generic wording, the 502 and the burn.
+  Transient and unknown failures differ in what is left: they keep the 502 and
+  the burn, since one of them may have gone half way.
 
 - **Deleting an organization reserves the deletion before any module tears
   anything down (migration `0058`).** `DELETE /api/orgs/:orgId` checked
@@ -1349,9 +1390,13 @@ progress` and emits nothing. Once a handler has run the organization is
   (#1277).** The refresh brought `gpt-6-astra` into `openai.json`, which
   `curated-model-drift` rightly flagged as unreviewed for Codex: the vendor
   page (https://learn.chatgpt.com/docs/models) lists it as recommended for
-  ChatGPT sign-in (Pro plans and above), so it joins the Codex
-  `modelDiscoveryCandidates` and `featuredModels`, newest first. The same
-  refresh marks the whole 5.6 family `temperature: "unsupported"` on the
+  ChatGPT sign-in (Pro plans and above) — from Pro plans only, so it joins the
+  Codex `modelDiscoveryCandidates`, where a Pro subscriber picks it
+  deliberately, and stays OUT of `featuredModels`, which the platform seeds into
+  `org_models` on everyone's behalf (see "A Plus subscriber is no longer handed
+  a Pro-only Codex model" above; `PRO_PLAN_MODEL_IDS` names both such ids and a
+  test pins both halves). The same refresh marks the whole 5.6 family
+  `temperature: "unsupported"` on the
   OpenAI API, so the `resolveCatalogDefaults` test that proves the Codex
   override rejects temperature now reads `gpt-5.4`, an id the API still
   supports it on.
@@ -1384,8 +1429,17 @@ progress` and emits nothing. Once a handler has run the organization is
 - **A Dynamic Client Registration body without `scope` now yields the full
   self-service scope set (#1267).** An MCP client registering without `scope`
   got the identity scopes alone, so authorizing for `mcp:read` / `mcp:invoke`
-  was bounced with `invalid_scope`. Narrow registrations stay narrow — and an
-  already-registered scope-less client reads as one, so it must re-register.
+  was bounced with `invalid_scope`. A declared `scope` is VALIDATED against that
+  ceiling and then discarded: `persistOAuthClientRegistration` writes the whole
+  ceiling to the row either way, so a registration declaring less is advisory,
+  not a narrowing. Intersecting it back in would buy no confinement — the
+  declaration is client-controlled, a registrant wanting the ceiling re-registers
+  or edits its metadata document — while breaking every MCP client that
+  publishes a minimal `scope` and then requests what the protected resource
+  advertises. What actually bounds such a client is the ceiling itself, the
+  single-audience rule at `/oauth2/token`, the consent screen and the caller's
+  live org role. An already-registered client whose row predates this still
+  carries the identity scopes alone, so it must re-register.
 
 ### Removed
 
@@ -1527,22 +1581,51 @@ progress` and emits nothing. Once a handler has run the organization is
   `deactivatePackage`.
 
 - **BREAKING (operators): the organization role `viewer` is retired; `guest`
-  replaces it, and moving the rows is a two-file deploy in ONE maintenance
-  window.** A `viewer` was read-only everywhere; that is a space concern now, so
+  replaces it, and moving the rows is two migrations plus three scripts in ONE
+  maintenance window.** A `viewer` was read-only everywhere; that is a space concern now, so
   a former viewer becomes an org `guest` plus an explicit `viewer` role in every
   space that exists at migration time — the same reach, and it does not widen
   onto spaces created later. Mapping them to `member` instead would have handed
   them every open space's default preset, which is `operator`: write access they
   never had.
 
-  **The two files, in this order.** `packages/db/drizzle/0056_space_roles.sql`
-  applies at boot with the rest of the pending batch; then
-  `scripts/migration/0008-org-viewer-to-guest.sql` runs BY HAND, before the new
-  version serves traffic. Between them a row still reading `viewer` resolves no
-  permission set at all and every request from that user fails, so the window
-  covers both — this is not two deploys. **Rollback is one-way from `0056`**:
-  it promotes `chat_sessions.space_id` to NOT NULL and the previous build
-  inserts without it. Roll forward.
+  **The five files, in this order.** `packages/db/drizzle/0056_space_roles.sql`
+  adds `guest` to `org_role` and creates the space-role tables;
+  `packages/db/drizzle/0059_drop_org_viewer.sql` recreates `org_role` WITHOUT
+  `viewer`. Both ride the same pending batch, which is applied by a ONE-SHOT
+  MIGRATOR — deliberately not by starting the application — so a bad migration
+  fails with its own exit code before anything binds a port. Then, after that
+  batch and before the new version serves traffic, three scripts run BY HAND:
+  `scripts/migration/0008-org-viewer-to-guest.sql`,
+  `scripts/migration/0012-org-invitation-history-viewer-to-guest.sql` and
+  `scripts/migration/0017-restore-handmoved-viewers.sql`. Between the batch and
+  the scripts a row still reading `viewer` resolves no permission set at all and
+  every request from that user fails, so the window covers all of it — this is
+  not two deploys. **Rollback is one-way from `0056`**: it promotes
+  `chat_sessions.space_id` to NOT NULL and the previous build inserts without
+  it, and `0059` is one-way for the same reason. Roll forward.
+
+  **That order only works on a database with no `viewer` rows left, which is
+  what this one is.** `0059` section A raises rather than run while
+  `org_members` or `org_invitations` still carry `viewer`, and drizzle applies
+  the whole batch in one transaction — so on a database that still holds such
+  rows the batch rolls back before `0008` (which has to READ them, and cannot
+  run before `0056` creates `space_members`) ever gets its turn. Unwinding that
+  sandwich needs a release carrying `0056` without `0059`, and nobody has cut
+  one: since beta.57 the twelve migrations are all unapplied and ship together.
+  Here the four `viewer` counts read zero, so the question is moot and `0008`
+  and `0012` run as witnesses rather than as repairs.
+
+  **`0017` is the one with real work on this database**, and the four-zero
+  pre-flight is blind to it: on 2026-09-09 the two `viewer` members were moved
+  off the value BY HAND, to `member`, because `guest` did not exist in the type
+  yet. `member` is strictly wider than what they had — with
+  `spaces.default_role = 'operator'` it is write access in every open space —
+  and `0008` selects `WHERE role::text = 'viewer'`, which is now empty, so it
+  runs green straight over them. `0017` gives those two pairs the shape `0008`
+  would have, and only while the row still reads `member`. `0012` takes what
+  `0008` deliberately leaves — the accepted, expired and cancelled invitations,
+  pure history — which `0059` needs because it cannot cast them.
 
   `0008` is idempotent, runs in one transaction, and verifies by coverage
   rather than by a count that reads the same whether it worked or not: it
@@ -1554,14 +1637,16 @@ progress` and emits nothing. Once a handler has run the organization is
   skipped on every run past the first, off a marker the script writes in
   `drizzle.migration_scripts`, and names the clients it declined to widen.
 
-  **A third file can be needed first.** `0056` also creates the partial unique
-  index behind "one pending invitation per (organization, email)", and a
-  duplicate pair left by a race under earlier code fails that statement and
-  rolls the whole migration back. Count the pairs before the deploy and run
-  `scripts/migration/0009-org-invitations-dedupe-pending.sql` if there are any.
-  **The runbook, including that query, is `scripts/migration/README.md` → RBAC
-  rollout**; rehearse the whole sequence against a restored `pg_dump` copy first,
-  since the row counts are unmeasured until you do.
+  **A sixth file can be needed BEFORE the batch.** `0056` also creates the
+  partial unique index behind "one pending invitation per (organization,
+  email)", and a duplicate pair left by a race under earlier code fails that
+  statement and rolls the whole migration back. Count the pairs before the
+  deploy and run `scripts/migration/0009-org-invitations-dedupe-pending.sql` if
+  there are any — it is the one file of the six that runs ahead of the batch.
+  **The executable order, including every query above, is
+  `scripts/migration/README.md` → "Detail — RBAC rollout"**, which is what to
+  follow; this entry is the reasoning, not the runbook. Rehearse the whole
+  sequence against a restored `pg_dump` copy first.
 
   Two more consequences an operator should know about. **An API key pinned to a
   space cannot mutate a package installed in more than one space**, whatever its

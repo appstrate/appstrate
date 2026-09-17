@@ -632,6 +632,16 @@ export interface AgentDetail {
    */
   home_writable: boolean;
   /**
+   * Whether THIS caller holds `agents:delete` in the home space — the exact
+   * predicate `DELETE /api/packages/agents/{scope}/{name}` enforces, from the
+   * same server-side computation. A field of its own because `agents:delete` is
+   * an INDEPENDENT permission string: every preset that writes also deletes, so
+   * it equals {@link home_writable} for a preset-only organization, but a custom
+   * space role is an arbitrary bundle and may grant one without the other.
+   * Always emitted.
+   */
+  home_deletable: boolean;
+  /**
    * Whether THIS caller holds `agents:share` in the home space — the predicate
    * the THREE `/shares` routes that change the audience enforce (offer, list,
    * revoke), from the same server-side computation. Activating an offered
@@ -705,6 +715,14 @@ export interface OrgPackageItem extends BasePackageListItem {
    * (`homeWireForCaller`). Always emitted.
    */
   home_writable: boolean;
+  /**
+   * Whether THIS caller holds the type's `delete` in the home space — the exact
+   * predicate `DELETE /api/packages/{type}/{scope}/{name}` enforces, from the
+   * same computation. A field of its own because `<type>:delete` is an
+   * INDEPENDENT permission string a custom space role may withhold while
+   * granting `write`. Always emitted.
+   */
+  home_deletable: boolean;
   /**
    * Whether THIS caller holds the type's `share` in the home space — the
    * predicate the THREE `/shares` routes that change the audience enforce

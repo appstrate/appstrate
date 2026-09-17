@@ -36,11 +36,11 @@ const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
  * from drifting on the descriptions.
  */
 /**
- * The `home_space_id` / `home_writable` / `home_shareable` trio, on every shape
- * that carries a package's home (`AgentDetail`, `OrgPackageItem`,
- * `OrgPackageItemDetail`, `LibraryPackageList`). ONE definition: the server
- * computes all three in one place (`homeWireForCaller`), and four hand-copied
- * descriptions drifted the moment the contract changed.
+ * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
+ * group, on every shape that carries a package's home (`AgentDetail`,
+ * `OrgPackageItem`, `OrgPackageItemDetail`, `LibraryPackageList`). ONE
+ * definition: the server computes all four in one place (`homeWireForCaller`),
+ * and four hand-copied descriptions drifted the moment the contract changed.
  */
 const PACKAGE_HOME_PROPERTIES = {
   home_space_id: {
@@ -51,7 +51,12 @@ const PACKAGE_HOME_PROPERTIES = {
   home_writable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld.",
+      "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that.",
+  },
+  home_deletable: {
+    type: "boolean",
+    description:
+      "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete.",
   },
   home_shareable: {
     type: "boolean",
@@ -586,9 +591,10 @@ export const schemas = {
     // shared-type marks them optional to match). `forked_from` is optional for
     // a second reason: a summary read (`agents:run` without `agents:read`)
     // withholds the authoring history along with the manifest and the prompt.
-    // `home_space_id`/`home_writable` are NOT part of that withheld set: a
-    // summary read still has to know it may not edit, and an absent
-    // `home_writable` would read as "not answered yet" rather than "no".
+    // The home group (`home_space_id`/`home_writable`/`home_deletable`/
+    // `home_shareable`) is NOT part of that withheld set: a summary read still
+    // has to know it may not edit, and an absent boolean would read as "not
+    // answered yet" rather than "no".
     required: [
       "id",
       "source",
@@ -603,6 +609,7 @@ export const schemas = {
       "active",
       "home_space_id",
       "home_writable",
+      "home_deletable",
       "home_shareable",
     ],
     properties: {
@@ -1433,6 +1440,7 @@ export const schemas = {
       "forked_from",
       "home_space_id",
       "home_writable",
+      "home_deletable",
       "home_shareable",
     ],
     properties: {
@@ -1486,6 +1494,7 @@ export const schemas = {
       "forked_from",
       "home_space_id",
       "home_writable",
+      "home_deletable",
       "home_shareable",
       "agents",
       "definition",
@@ -2250,11 +2259,12 @@ export const schemas = {
         "description",
         "home_space_id",
         "home_writable",
+        "home_deletable",
         "home_shareable",
         "placements",
       ],
       properties: {
-        id: { type: "string", description: "Package id (`pkg_…`)." },
+        id: { type: "string", description: "Package id (`@scope/name`)." },
         type: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
         source: {
           type: "string",

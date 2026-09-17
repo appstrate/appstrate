@@ -2008,7 +2008,7 @@ export function createPackagesRouter() {
     // Conditioned on the home actually MOVING, because a package already homed
     // in the caller's own personal space is a legitimate state — creating or
     // forking there is how it got one — and a read-modify-write client that
-    // PATCHes the home it just read must get the idempotent 200 the no-op
+    // PUTs back the home it just read must get the idempotent 200 the no-op
     // below answers with, not a refusal of the state it is already in.
     if (target !== pkg.homeSpaceId && destination.ownerUserId !== null) {
       throw conflict(

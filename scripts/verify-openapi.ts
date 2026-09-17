@@ -648,16 +648,130 @@ function compareStrictnessOfObject(
   zodSchema: Record<string, unknown>,
   oaSchema: Record<string, unknown>,
   issues: string[],
+  depth = 0,
 ): void {
   const zodClosed = refusesUnknownFields(zodSchema);
   const oaClosed = refusesUnknownFields(oaSchema);
-  if (zodClosed === oaClosed) return;
 
-  issues.push(
-    zodClosed
-      ? `${prefix}Unknown fields: Zod=rejected (\`.strict()\`), OpenAPI=accepted — add \`additionalProperties: false\` to the requestBody schema`
-      : `${prefix}Unknown fields: Zod=accepted, OpenAPI=rejected (\`additionalProperties: false\`) — drop it from the requestBody schema, or make the Zod schema \`.strict()\``,
-  );
+  if (zodClosed !== oaClosed) {
+    issues.push(
+      zodClosed
+        ? `${prefix}Unknown fields: Zod=rejected (\`.strict()\`), OpenAPI=accepted — add \`additionalProperties: false\` to the requestBody schema`
+        : `${prefix}Unknown fields: Zod=accepted, OpenAPI=rejected (\`additionalProperties: false\`) — drop it from the requestBody schema, or make the Zod schema \`.strict()\``,
+    );
+  }
+
+  // Descend. `.strict()` is per-object, not inherited, so a body closed at the
+  // root says NOTHING about an object nested inside it: `{ a: { b: 1 } }` can
+  // refuse an unknown top-level key while silently accepting an unknown key
+  // under `a`. Comparing only the root is why four nested request bodies shipped
+  // open against `.strict()` Zod and this gate still reported agreement.
+  if (depth >= MAX_STRICTNESS_DEPTH) return;
+
+  const zodProps = objectProperties(zodSchema);
+  const oaProps = objectProperties(oaSchema);
+  if (zodProps && oaProps) {
+    for (const [name, zodProp] of Object.entries(zodProps)) {
+      const oaProp = oaProps[name];
+      if (!oaProp) continue; // a property-set mismatch is reported elsewhere
+      descendStrictness(`${prefix}${name}.`, zodProp, oaProp, issues, depth + 1);
+    }
+  }
+
+  // An array of objects hides the same question one level further down.
+  // Deref both sides: `items: { $ref: … }` is the common spelling, and reading
+  // the unresolved `$ref` as a schema makes every such array look OPEN.
+  const zodItems = derefSchema(zodSchema.items);
+  const oaItems = derefSchema(oaSchema.items);
+  if (zodItems && oaItems) {
+    descendStrictness(`${prefix}[].`, zodItems, oaItems, issues, depth + 1);
+  }
+}
+
+/**
+ * How deep the closure walk goes. A request body nested past this is beyond
+ * what a hand-written spec is expected to mirror faithfully, and the cap is
+ * what makes a `$ref` cycle terminate.
+ */
+const MAX_STRICTNESS_DEPTH = 8;
+
+/**
+ * A schema's `properties` map, deref'd, or `undefined` when the schema is not
+ * an object with declared properties.
+ */
+function objectProperties(
+  schema: Record<string, unknown> | undefined,
+): Record<string, Record<string, unknown>> | undefined {
+  const props = schema?.properties;
+  if (!props || typeof props !== "object") return undefined;
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [name, value] of Object.entries(props as Record<string, unknown>)) {
+    const obj = derefSchema(value);
+    if (obj) out[name] = obj;
+  }
+  return out;
+}
+
+/** Resolve a `$ref` to its target, or return the schema unchanged. */
+function derefSchema(value: unknown): Record<string, unknown> | undefined {
+  const obj = asSchemaObject(value);
+  if (!obj) return undefined;
+  if (typeof obj.$ref === "string") return resolveRef(obj.$ref) ?? undefined;
+  return obj;
+}
+
+/**
+ * Recurse into one pair of nested schemas, unions included.
+ *
+ * Anything that is not comparable on BOTH sides is SKIPPED rather than
+ * reported: a nested union whose branch counts disagree, or a `$ref` that does
+ * not resolve, is a shape question the property comparison already owns, and
+ * turning it into a strictness finding here would be noise on top of it.
+ */
+function descendStrictness(
+  prefix: string,
+  zodSchema: Record<string, unknown>,
+  oaSchema: Record<string, unknown>,
+  issues: string[],
+  depth: number,
+): void {
+  // `oneOf` alongside own `properties` is a REFINEMENT, not a union of shapes:
+  // `SpaceAssignment` declares its properties and its closure at the top level
+  // and uses `oneOf: [{required:[a]},{required:[b]}]` only to say "exactly one
+  // of these two". Reading that as a union skips the object entirely — which
+  // is what made the first version of this walk find nothing. So: if BOTH
+  // sides declare their own properties, compare the object itself. A genuine
+  // discriminated union carries no top-level properties and still falls
+  // through to the per-branch comparison below.
+  if (declaresOwnProperties(zodSchema) && declaresOwnProperties(oaSchema)) {
+    compareStrictnessOfObject(prefix, zodSchema, oaSchema, issues, depth);
+    return;
+  }
+
+  const zodBranches = unionBranches(zodSchema);
+  const oaBranches = unionBranches(oaSchema);
+  if (zodBranches && oaBranches) {
+    if (zodBranches.length !== oaBranches.length) return;
+    for (let i = 0; i < zodBranches.length; i++) {
+      compareStrictnessOfObject(
+        `${prefix}oneOf[${i}] `,
+        zodBranches[i]!,
+        oaBranches[i]!,
+        issues,
+        depth,
+      );
+    }
+    return;
+  }
+  if (zodBranches || oaBranches) return;
+
+  compareStrictnessOfObject(prefix, zodSchema, oaSchema, issues, depth);
+}
+
+/** Does the schema declare properties of its own (rather than only branches)? */
+function declaresOwnProperties(schema: Record<string, unknown> | undefined): boolean {
+  const props = schema?.properties;
+  return !!props && typeof props === "object" && Object.keys(props).length > 0;
 }
 
 function getOpenApiRequestBodySchema(

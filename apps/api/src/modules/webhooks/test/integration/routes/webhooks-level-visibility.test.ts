@@ -248,12 +248,20 @@ describe("GET /api/webhooks — org-level rows need org-webhooks:read", () => {
       ((await onFake.json()) as { detail: string }).detail,
     );
 
-    // Discriminator: the two ids ARE distinguishable to a caller the guard
-    // admits, so the single answer above is the guard's doing and not an
-    // accident of both spaces being unreachable.
+    // Discriminator. It used to be that the two ids were distinguishable to a
+    // caller the guard admits — a private space answered 404 and a nonexistent
+    // one 403 — which proved the single answer above was the guard's doing.
+    // That split WAS the oracle: for an org admin, who enters every team space,
+    // a 404 meant "this id is somebody's personal space". Both are 404 now, so
+    // the discriminator has to rest on something that is not an id's existence.
+    //
+    // It rests on reach instead: a space the admin CAN enter answers 201, one
+    // they cannot answers 404. The guard confines, it does not refuse
+    // everything — which is what the assertions above would otherwise pass for.
     const writer = await asRole("admin");
+    expect((await create(writer, currentCtx!.defaultSpaceId)).status).toBe(201);
     expect((await create(writer, hidden.id)).status).toBe(404);
-    expect((await create(writer, fakeSpaceId)).status).toBe(403);
+    expect((await create(writer, fakeSpaceId)).status).toBe(404);
   });
 
   it("a lookup failure that is not a miss stays a 500 for the same caller", async () => {

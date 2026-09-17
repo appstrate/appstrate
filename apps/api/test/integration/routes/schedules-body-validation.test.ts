@@ -49,7 +49,7 @@ const DECLARED_SKILL = "@schedbodyorg/dep-skill";
 /** A second declared skill, for the value cases that need a non-`draft` spec. */
 const DECLARED_OTHER = "@schedbodyorg/dep-other";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import { seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
+import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 
 const app = getTestApp();
 
@@ -394,6 +394,21 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     expect(row?.dependencyOverrides).toEqual({ [SKILL]: "draft" });
   });
 
+  it("does not re-ask authority when only `version_override` moves over a stored `draft` override", async () => {
+    // The neighbouring invariant, under the patch shape that now re-judges the
+    // map's FORM. Moving `version_override` makes the route look at the whole
+    // effective map again — it must look at it as a KEY question only. This
+    // caller writes the AGENT (so the selector itself is theirs to move) but
+    // holds nothing in the skill's home, so a route that re-judged the stored
+    // `draft` entry's authority would answer 403 here.
+    const id = await armedSchedule({ [SKILL]: "draft" });
+    const res = await put(await scheduleWriter(), id, { version_override: "draft" });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [row] = await storedRows();
+    expect(row?.versionOverride).toBe("draft");
+    expect(row?.dependencyOverrides).toEqual({ [SKILL]: "draft" });
+  });
+
   it("accepts a PUT that DROPS the `draft` override", async () => {
     // Taking a working copy away needs no authority at all — and an operator
     // who cannot undo a draft override is an operator who has to delete the
@@ -403,5 +418,159 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     expect(res.status, await res.clone().text()).toBe(200);
     const [row] = await storedRows();
     expect(row?.dependencyOverrides).toEqual({});
+  });
+});
+
+/**
+ * The FORM half of `dependency_overrides` on `PUT /api/schedules/:id`, when the
+ * thing that moves is not the map but the MANIFEST under it.
+ *
+ * "A key means something" is decided against the EFFECTIVE manifest — the
+ * definition the fire path will execute — so `version_override` is the other
+ * half of that pair. Gated on the map's own delta, the form check was skipped
+ * by a patch that re-points the row at a definition declaring different
+ * dependencies, and the row stayed ARMED with a map that can no longer be
+ * honoured: `freezeRunSpawnDependencies` raises the same 400 at every tick,
+ * forever, with nothing but a failure record to show for it. That is the exact
+ * silent-permanent-failure shape `assertScheduleTargetValid` exists to refuse,
+ * and it has to be refused at the WRITE.
+ *
+ * The AUTHORITY half is deliberately not exercised here: no value below is
+ * `draft`, so the only rule any of these bodies can trip is the key gate.
+ */
+describe("PUT /api/schedules/:id — `dependency_overrides` keys vs. a MOVED manifest", () => {
+  let ctx: TestContext;
+
+  /** Published declares the skill; the author then dropped it from the DRAFT. */
+  const DRIFTED = "@scheddriftorg/drifted-agent";
+  /** Published and draft both declare it — the discriminating control. */
+  const STABLE = "@scheddriftorg/stable-agent";
+  const SKILL = "@scheddriftorg/drift-skill";
+
+  function agentManifest(id: string, declaresSkill: boolean): Record<string, unknown> {
+    return {
+      name: id,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Drift Agent",
+      author: "tester",
+      ...(declaresSkill ? { dependencies: { skills: { [SKILL]: "^1.0.0" } } } : {}),
+    };
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "scheddriftorg" });
+    await seedPackage({
+      id: SKILL,
+      type: "skill",
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      draftManifest: { name: SKILL, version: "1.0.0", type: "skill" },
+    });
+    await seedDivergedAgent({
+      id: DRIFTED,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      published: agentManifest(DRIFTED, true),
+      draft: agentManifest(DRIFTED, false),
+    });
+    await seedSchedulableAgent({
+      id: STABLE,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: agentManifest(STABLE, true),
+    });
+  });
+
+  /**
+   * A schedule armed against the PUBLISHED definition, pinning the skill that
+   * definition declares. `version_override` is left unset on purpose: that is
+   * the published selector, and it is what the PUT below moves.
+   */
+  async function armSchedule(agentRef: string): Promise<string> {
+    const res = await app.request(`/api/agents/${agentRef}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cron_expression: "0 9 * * 1-5",
+        dependency_overrides: { [SKILL]: "^1.0.0" },
+      }),
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  const put = (id: string, body: Record<string, unknown>) =>
+    app.request(`/api/schedules/${id}`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("refuses a PUT that moves only `version_override` onto a definition the stored keys no longer fit", async () => {
+    const id = await armSchedule(DRIFTED);
+    // Not one entry of the map moves — the patch never mentions it. What moves
+    // is the manifest the map is judged against, and under the DRAFT the
+    // pinned skill is not a declared dependency at all.
+    const res = await put(id, { version_override: "draft" });
+    expect(res.status, await res.clone().text()).toBe(400);
+    const problem = (await res.json()) as { code?: string; detail?: string };
+    expect(problem.code).toBe("invalid_request");
+    // Naming the key is the whole value of refusing here rather than at the
+    // tick: the author has to know WHICH pin their draft edit orphaned.
+    expect(problem.detail).toContain(SKILL);
+    // Still armed on the selector it was written with — a refused patch
+    // applies nothing.
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, id));
+    expect(row?.versionOverride ?? null).toBeNull();
+  });
+
+  it("refuses the same move when the body ECHOES the unchanged map back", async () => {
+    // The edit form posts every field, so this is the shape the refusal above
+    // actually arrives in. `movedDependencyOverrides` returns an empty delta
+    // for it too, which is precisely why the form half cannot hang off that
+    // delta.
+    const id = await armSchedule(DRIFTED);
+    const res = await put(id, {
+      version_override: "draft",
+      dependency_overrides: { [SKILL]: "^1.0.0" },
+    });
+    expect(res.status, await res.clone().text()).toBe(400);
+    expect(((await res.json()) as { detail?: string }).detail).toContain(SKILL);
+  });
+
+  it("accepts the identical PUT when the target definition still declares the key (control)", async () => {
+    // Same body, same caller, same stored map — only the DRAFT manifest
+    // differs. Without this the refusals above would be satisfied by a route
+    // that simply rejects `version_override: "draft"`.
+    const id = await armSchedule(STABLE);
+    const res = await put(id, { version_override: "draft" });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, id));
+    expect(row?.versionOverride).toBe("draft");
+    expect(row?.dependencyOverrides).toEqual({ [SKILL]: "^1.0.0" });
+  });
+
+  it("leaves a patch that touches neither half alone (control)", async () => {
+    // The drifted row must still be operable: `{enabled:false}` names no
+    // selector and no map, so it judges nothing and switches the misfiring
+    // schedule off. An operator who cannot disable it can only delete it.
+    const id = await armSchedule(DRIFTED);
+    const res = await put(id, { enabled: false });
+    expect(res.status, await res.clone().text()).toBe(200);
+  });
+
+  it("accepts a patch that CLEARS the map onto the drifted definition (control)", async () => {
+    // Dropping the orphaned pin is the fix, so it cannot be refused by the
+    // very gate that reported the problem: the effective map is empty and
+    // judges nothing.
+    const id = await armSchedule(DRIFTED);
+    const res = await put(id, { version_override: "draft", dependency_overrides: null });
+    expect(res.status, await res.clone().text()).toBe(200);
   });
 });

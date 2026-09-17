@@ -370,6 +370,24 @@ describe("attachmentDisposition", () => {
     );
   });
 
+  it("neutralises CR and LF, so the header cannot be split into a second one", () => {
+    // The one property here that is a VULNERABILITY rather than a formatting
+    // nicety: a raw CR/LF in the quoted-string ends the header and starts
+    // whatever the name says next. It used to be covered only by an
+    // integration test that wrote a file named `we"ird\r\nname.txt` — a name
+    // `isSafeArchivePath` now refuses, because CR/LF in a package path breaks
+    // the `.afps` reader and every consumer's run. Refusing the path is the
+    // stronger guarantee, but it is a DIFFERENT one, and it must not be the
+    // reason this stops being checked: `attachmentDisposition` serves names
+    // from sources a path rule does not govern.
+    const disposition = attachmentDisposition('we"ird\r\nname.txt');
+    expect(disposition).toBe(
+      "attachment; filename=\"we_ird__name.txt\"; filename*=UTF-8''we%22ird%0D%0Aname.txt",
+    );
+    expect(disposition).not.toContain("\r");
+    expect(disposition).not.toContain("\n");
+  });
+
   it("falls back to `download` only when the ASCII form is EMPTY, not merely scrubbed", () => {
     // A non-ASCII name still leaves one `_` per character, which is truthy — the
     // fallback is for an empty input, and the ext-value stays authoritative.

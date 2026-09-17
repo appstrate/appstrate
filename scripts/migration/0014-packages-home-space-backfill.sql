@@ -33,8 +33,11 @@
 -- import has no meaningful first. The script PRINTS those package ids, with
 -- their candidate space, BEFORE the UPDATE; review them, and `ROLLBACK`
 -- instead of `COMMIT` if any looks wrong. Whatever it picks stays correctable
--- afterwards: `PATCH /api/packages/{scope}/{name} {"home_space_id": …}` moves a
--- package, and an owner or admin can always run it.
+-- afterwards: `PUT /api/packages/{scope}/{name}/home {"home_space_id": …}`
+-- moves a package, and an owner or admin can always run it. That is the ONLY
+-- move route — there is no `PATCH` on the package path — and `home_space_id` is
+-- required there: `null` is a 400, and a personal space as destination is a
+-- `409 home_move_into_personal_space`.
 --
 -- Idempotent: every WHERE is exactly `home_space_id IS NULL`, the condition
 -- this removes, so a second run matches zero rows — including for a package an

@@ -578,6 +578,35 @@ describe("validateNewPath", () => {
     expect(validateNewPath(tree, "double//slash.md")).toBe("invalid");
     expect(validateNewPath(tree, "back\\slash.md")).toBe("invalid");
     expect(validateNewPath(tree, "__MACOSX/x.md")).toBe("invalid");
+    // A drive prefix is absolute on the extraction target while every segment
+    // reads as relative.
+    expect(validateNewPath(tree, "C:/notes.md")).toBe("invalid");
+    // `./x` and `x` name one file; only one survives extraction.
+    expect(validateNewPath(tree, "./notes.md")).toBe("invalid");
+    expect(validateNewPath(tree, "a/./b.md")).toBe("invalid");
+  });
+
+  /**
+   * This dialog must refuse exactly what the write route refuses — a shape it
+   * lets through is answered by a `400` after a round trip, and, worse, a shape
+   * the route stores but a DOWNSTREAM reader refuses is answered by a `200`
+   * here and by a broken run in every package that depends on it.
+   *
+   * Nothing is restated locally to get that: {@link validateNewPath} calls
+   * `isSafeArchivePath` itself. These rows are the regression pin on the
+   * delegation, for the two rules the predicate used to be missing.
+   */
+  it("refuses the shapes a downstream reader refuses, not just the traversal ones", () => {
+    // Comma and CR/LF are signature-RECORD delimiters in the `.afps` reader.
+    expect(validateNewPath(tree, "a,b.md")).toBe("invalid");
+    expect(validateNewPath(tree, "sales,2024.csv")).toBe("invalid");
+    expect(validateNewPath(tree, "a\nb.md")).toBe("invalid");
+    expect(validateNewPath(tree, "a\rb.md")).toBe("invalid");
+    // `__proto__` cannot be renamed or deleted once stored, and cannot be an
+    // own key of a plain-object file map at all.
+    expect(validateNewPath(tree, "__proto__")).toBe("invalid");
+    expect(validateNewPath(tree, "__proto__/x.md")).toBe("invalid");
+    expect(validateNewPath(tree, "docs/__proto__/x.md")).toBe("invalid");
   });
 
   it("refuses the manifest, which is authored through the package PUT", () => {

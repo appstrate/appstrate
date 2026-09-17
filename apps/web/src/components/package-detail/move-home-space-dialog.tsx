@@ -22,8 +22,8 @@ import { writableDestinations } from "../../lib/package-home";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
- * Move a package's home space — the counterpart of `PATCH
- * /api/packages/{scope}/{name}`, and the only way out of the 409 a space
+ * Move a package's home space — the counterpart of `PUT
+ * /api/packages/{scope}/{name}/home`, and the only way out of the 409 a space
  * deletion answers when it still homes packages.
  */
 export function MoveHomeSpaceDialog({

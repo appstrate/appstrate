@@ -3,13 +3,13 @@
 --
 -- Run INSIDE the window, right after `0014` — the shape `0008` uses, for the
 -- same reason: nothing should serve traffic between the drizzle batch and this
--- file. From the release carrying `0066` on, a package is readable from a space
--- through exactly two placements, its HOME and a `package_shares` row (RBAC
--- spec §6.9, §6.10); an installation is no longer one. Every `space_packages`
--- row that sits outside its package's home therefore needs the share row the
--- new rule reads, or the package disappears from that space at the first
--- request — still installed, still running for a schedule, invisible on every
--- page — until somebody with `share` authority offers it again.
+-- file. From the release carrying `0063` and `0065` on, a package is readable
+-- from a space through exactly two placements, its HOME and a `package_shares`
+-- row (RBAC spec §6.9, §6.10); an installation is no longer one. Every
+-- `space_packages` row outside its package's home therefore needs the share
+-- row the new rule reads, or the package disappears from that space at the
+-- first request — still installed, still running for a schedule, invisible on
+-- every page — until somebody with `share` authority offers it again.
 --
 --   stop the platform → run migrations only → run 0014 → run THIS script →
 --   bring the new version up.

@@ -42,6 +42,7 @@ import { revokePackageShare, sharePackage } from "../../../src/services/package-
 import { db, truncateAll } from "../../helpers/db.ts";
 import { assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
+import { grepFiles } from "../../helpers/source-grep.ts";
 import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import {
   addOrgMember,
@@ -1812,8 +1813,12 @@ describe("the table has no other reader", () => {
   it("names `package_shares` only in the share service, the library and the readers of the placement rule", async () => {
     // The two-table split is only worth anything while this stays true: a
     // reader on an execution path would run a package nobody consented to.
-    const proc = Bun.spawnSync(["grep", "-rl", "packageShares", "apps/api/src", "packages/db/src"]);
-    const files = new TextDecoder().decode(proc.stdout).split("\n").filter(Boolean).sort();
+    // Roots are resolved against the helper's own file: the root suite does
+    // not own `process.cwd()`, and a relative root reads as "no file names it"
+    // from anywhere else — which is the shape of compliance.
+    const files = grepFiles("packageShares", ["apps/api/src", "packages/db/src"], {
+      expectMatch: ["apps/api/src/services/package-shares.ts"],
+    });
     // The share ROUTES reach the table through `services/package-shares.ts`,
     // and every rehome writes its offers through
     // `services/package-placement.ts`; these are every file that names it. The

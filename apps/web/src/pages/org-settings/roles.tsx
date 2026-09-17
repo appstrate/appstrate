@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
@@ -54,8 +55,8 @@ export function OrgSettingsRolesPage() {
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
-  // Defining bundles is the gated half; the four presets ship with the
-  // platform and stay usable without the feature.
+  // Defining bundles is the gated half; the presets ship with the platform
+  // (`SPACE_ROLE_PRESETS`) and stay usable without the feature.
   const customRolesEnabled = !!features.custom_roles;
   const canWrite = customRolesEnabled && can("roles:write");
   const canDelete = customRolesEnabled && can("roles:delete");
@@ -100,7 +101,12 @@ export function OrgSettingsRolesPage() {
     <>
       {!customRolesEnabled && (
         <Alert className="mb-4">
-          <AlertDescription>{t("roles.customUnavailable")}</AlertDescription>
+          {/* The preset COUNT is derived, never typed out: the presets are a
+              constant of `@appstrate/core`, and a fifth one (`runner`) already
+              made a hand-written "four" wrong once. */}
+          <AlertDescription>
+            {t("roles.customUnavailable", { presetCount: SPACE_ROLE_PRESETS.length })}
+          </AlertDescription>
         </Alert>
       )}
 

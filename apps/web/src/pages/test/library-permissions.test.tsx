@@ -73,6 +73,7 @@ function packageRow(
     home_space_id: null,
     home_writable: false,
     home_shareable: false,
+    home_deletable: false,
     placements,
     ...overrides,
   };

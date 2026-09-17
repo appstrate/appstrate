@@ -741,6 +741,20 @@ describe("applyFileOperations — the refusals", () => {
       "./notes.md",
       "a/./b.md",
       "C:/x.md",
+      // A comma or a CR/LF is a signature-RECORD delimiter in the `.afps`
+      // reader. A `200` here published a package whose every consuming run
+      // then died in `sanitizeEntries` with `ARCHIVE_INVALID`.
+      "a,b.md",
+      "sales,2024.csv",
+      "a\nb.md",
+      "a\rb.md",
+      // `__proto__` was already refused here and NOT by `isSafeArchivePath`,
+      // so a ZIP import could store an entry this route could never afterwards
+      // rename or delete. The predicate now refuses it too — these rows pin
+      // that the two agree rather than one covering for the other.
+      "__proto__",
+      "__proto__/x.md",
+      "docs/__proto__/x.md",
     ]) {
       expectRefusal(
         () => apply({ "SKILL.md": SKILL }, [{ op: "write", path, bytes: encoder.encode("x") }]),

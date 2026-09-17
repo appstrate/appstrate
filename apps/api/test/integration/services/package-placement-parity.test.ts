@@ -42,10 +42,12 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { packages, packageShares } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { grepFiles, REPO_ROOT } from "../../helpers/source-grep.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageShare, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import {
@@ -280,17 +282,19 @@ describe("the joins are owned, not copied", () => {
   function handWrittenOnClauses(table: string, owners: string[]): string[] {
     const needle = `eq(${table}.packageId`;
     const enclosing = /\.(leftJoin|innerJoin|rightJoin|fullJoin|where|having|on)\(/g;
-    const listed = Bun.spawnSync(["grep", "-rl", needle, "apps/api/src"]);
-    const files = new TextDecoder()
-      .decode(listed.stdout)
-      .split("\n")
-      .filter(Boolean)
-      .filter((file) => !owners.includes(file))
-      .sort();
+    // The POSITIVE CONTROL matters more here than anywhere else in the suite:
+    // this guard reports its verdict as an EMPTY list, so a search that
+    // returned nothing — a needle somebody renamed, a cwd the root suite moved
+    // out from under `grep` — reads exactly like "no file writes the clause by
+    // hand". `package-placement.ts` owns the rule and must always match, so
+    // asking for it turns a silent nothing into a failure.
+    const files = grepFiles(needle, ["apps/api/src"], {
+      expectMatch: ["apps/api/src/services/package-placement.ts"],
+    }).filter((file) => !owners.includes(file));
 
     const offenders: string[] = [];
     for (const file of files) {
-      const text = readFileSync(file, "utf8");
+      const text = readFileSync(resolve(REPO_ROOT, file), "utf8");
       for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
         const before = text.slice(0, at);
         enclosing.lastIndex = 0;

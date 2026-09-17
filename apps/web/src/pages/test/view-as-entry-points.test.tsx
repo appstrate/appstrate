@@ -18,6 +18,7 @@
 import { describe, it, expect, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import type { OrgRole } from "@appstrate/shared-types";
+import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import type { components } from "../../api/client.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -264,7 +265,7 @@ describe("custom-role gating on the roles page", () => {
     expect(html).toContain("Responsable assistance");
     expect(html).toContain("Modifier");
     expect(html).toContain("Supprimer");
-    expect(html).not.toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
+    expect(html).not.toContain("Les rôles personnalisés ne sont pas activés sur ce déploiement.");
   });
 
   it("says why and offers nothing to write when the feature is off, presets included", () => {
@@ -274,11 +275,16 @@ describe("custom-role gating on the roles page", () => {
         customRoles: [custom],
       }),
     );
-    expect(html).toContain("Les rôles personnalisés sont disponibles sur Appstrate Cloud.");
+    expect(html).toContain("Les rôles personnalisés ne sont pas activés sur ce déploiement.");
+    // The COUNT is interpolated from `SPACE_ROLE_PRESETS`, so assert the
+    // rendered number and the absence of the raw placeholder: asserting the
+    // sentence alone would pass with `{{presetCount}}` printed verbatim.
+    expect(html).toContain(`Les ${SPACE_ROLE_PRESETS.length} rôles intégrés restent utilisables.`);
+    expect(html).not.toContain("{{presetCount}}");
     expect(html).not.toContain('data-testid="create-role-button"');
     expect(html).not.toContain("Modifier");
     expect(html).not.toContain("Supprimer");
-    // The four presets stay listed and usable — the feature gates authoring.
+    // The presets stay listed and usable — the feature gates authoring.
     expect(html).toContain("Rôles intégrés");
   });
 

@@ -1306,7 +1306,7 @@ const canonicalRunsPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            'Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. The refusal precedes resolution, so `stage: "draft"` on an id that does not exist also answers 403 rather than 404 — deliberately: the same answer for "not yours" and "not there" is what keeps this route from confirming which packages an organization holds. Omit `stage` and an unknown id answers 404 as usual.',
+            'Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/RunAdmissionConflict" },
