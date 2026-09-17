@@ -44,23 +44,24 @@ export async function assertSpaceAssignmentsValid(
 
   const spaceIds = [...new Set(assignments.map((a) => a.space_id))];
   const liveSpaces = await tx
-    .select({ id: spaces.id, ownerUserId: spaces.ownerUserId })
+    .select({ id: spaces.id })
     .from(spaces)
-    .where(and(eq(spaces.orgId, orgId), inArray(spaces.id, spaceIds)));
+    .where(
+      and(
+        eq(spaces.orgId, orgId),
+        inArray(spaces.id, spaceIds),
+        // A personal space belongs to one member and takes no others (RBAC
+        // spec §3.6), so it is never assignable. EXCLUDED here rather than
+        // special-cased below, exactly as {@link applySpaceAssignments} does on
+        // the write side: naming one then takes the "not found" path, so an
+        // invitation author cannot tell a personal space apart from an id that
+        // does not exist — which is the whole point of §3.6.
+        isNull(spaces.ownerUserId),
+      ),
+    );
   const found = new Set(liveSpaces.map((row) => row.id));
   const missingSpace = spaceIds.find((id) => !found.has(id));
   if (missingSpace) throw notFound(`Space '${missingSpace}' not found in this organization`);
-  // A personal space belongs to one member and takes no others (RBAC spec
-  // §3.6), so it is never assignable — an invitation or an SSO signup policy
-  // naming one is a configuration error, refused where it is written rather
-  // than silently dropped when the member arrives.
-  const personal = liveSpaces.find((row) => row.ownerUserId !== null);
-  if (personal) {
-    throw invalidRequest(
-      `Space '${personal.id}' is a personal space and cannot be assigned to anyone`,
-      param,
-    );
-  }
 
   const roleIds = [
     ...new Set(assignments.map((a) => a.custom_role_id).filter((id): id is string => Boolean(id))),

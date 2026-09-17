@@ -54,7 +54,11 @@ import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import type { ActorScope, SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
-import { getPackageDisplayName } from "../lib/package-helpers.ts";
+import {
+  getPackageDisplayName,
+  notEphemeralFilter,
+  orgOrSystemFilter,
+} from "../lib/package-helpers.ts";
 import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor } from "@appstrate/connect";
@@ -2847,15 +2851,30 @@ export async function readIntegrationAuth(
  * Verify the package exists and is actually an integration before the
  * integration-scoped routes act on it, so the "wrong type" error surface is
  * uniform across them.
+ *
+ * The catalogue rule is the one its three peers read — `listIntegrations` and
+ * `getIntegration` (`services/integration-service.ts`) and `findPackageRow`
+ * (`lib/package-access.ts`) — not a fourth wording of it: org-or-system, not
+ * ephemeral, and PLACED in the calling space. It runs BEFORE the
+ * placement-aware reader, so anything it accepts that the reader would hide
+ * leaks through the type refusal: without `placementReadFilter` a member could
+ * learn, by naming ids, that `@org/secret` exists and is an `agent` — a package
+ * homed in somebody else's PERSONAL space (RBAC spec §3.6). An id this space
+ * cannot reach now falls on the `!row` branch, i.e. the 404 of an id that does
+ * not exist, and `wrong_package_type` survives only for a package actually
+ * placed here.
  */
 export async function assertIsIntegration(scope: SpaceScope, packageId: string): Promise<void> {
   const [row] = await db
     .select({ type: packages.type })
     .from(packages)
+    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
         eq(packages.id, packageId),
-        sql`(${packages.orgId} = ${scope.orgId} OR ${packages.source} = 'system')`,
+        orgOrSystemFilter(scope.orgId),
+        notEphemeralFilter(),
+        placementReadFilter(scope.spaceId),
       ),
     )
     .limit(1);

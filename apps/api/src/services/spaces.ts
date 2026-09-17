@@ -26,7 +26,11 @@ import {
 
 type SpaceRow = InferSelectModel<typeof spaces>;
 
-export const spaceSettingsSchema = z.object({
+// `.strictObject`, not `.object`: `settings` is written as a TOTAL replacement
+// (`updateSpace` below), so a stripped unknown key is not ignored — it erases
+// the stored value. A snake_case spelling of `allowedRedirectDomains` has to be
+// a 400, never a silent wipe of the configured domain list.
+export const spaceSettingsSchema = z.strictObject({
   allowedRedirectDomains: z.array(z.string()).max(20).optional(),
 });
 
@@ -175,7 +179,12 @@ export async function getSpace(orgId: string, spaceId: string) {
     .where(scopedWhere(spaces, { orgId, extra: [eq(spaces.id, spaceId)] }))
     .limit(1);
 
-  if (!space) throw notFound("Space not found");
+  // Worded exactly as `assertSpaceInScope` below and as `requireSpaceFromParam`
+  // / `applySpacePermissions`: the four administrative routes reading this
+  // function also 404 on a space they may not see, and two different sentences
+  // would tell the caller which of the two it was — i.e. that the id exists
+  // (RBAC spec §3.6).
+  if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
   return space;
 }
 

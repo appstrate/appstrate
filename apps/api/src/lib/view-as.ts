@@ -222,11 +222,12 @@ async function validatePersonaSpace(
   // A personal space has exactly one member and no role to preview: whatever
   // persona were asked for, the answer would be its owner's `admin`. Refusing
   // is also what keeps the preview a pure restriction — a previewing admin
-  // holds nothing there to narrow (RBAC spec §3.6).
+  // holds nothing there to narrow. Refused as a space that does NOT EXIST,
+  // byte for byte the refusal above, because a distinct "this is a personal
+  // space" would name the one property §3.6 hides from exactly this caller
+  // everywhere else (RBAC spec §3.6).
   if (space.ownerUserId !== null) {
-    throw invalidViewAs(
-      `Space '${space.id}' is a personal space; there is no role to preview in it.`,
-    );
+    throw viewAsNotFound(`Space '${requested.spaceId}' not found in this organization`);
   }
   const role = await resolvePersonaSpaceRole(orgId, requested.role);
   // Grantability against what the real caller holds THERE, the same rule that gates handing
@@ -257,9 +258,10 @@ async function resolvePersonaSpaceRole(
   if (ref.kind === "preset") return { kind: "preset", preset: ref.preset };
   if (!hasCustomRoles()) {
     throw viewAsForbidden(
-      "Previewing a custom space role requires the `custom_roles` feature, provided by the " +
-        "Appstrate Cloud plan (the `@appstrate/module-ee` module). The four built-in presets " +
-        "(admin, builder, operator, viewer) are always previewable.",
+      "Previewing a custom space role requires the `custom_roles` feature, contributed by a " +
+        "module listed in `MODULES`. The " +
+        `${SPACE_ROLE_PRESETS.length} built-in presets (${SPACE_ROLE_PRESETS.join(", ")}) ` +
+        "are always previewable.",
     );
   }
   const [row] = await db
