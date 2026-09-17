@@ -54,6 +54,15 @@ interface PackageActionsDropdownProps {
    */
   homeWritable?: boolean;
   /**
+   * `home_deletable` off the same read: whether this caller holds the type's
+   * `delete` in the home space. Gates "Supprimer" on its own, because
+   * `<type>:delete` is an independent permission string and `DELETE` enforces
+   * it in its own right — a custom space role granting `write` without it made
+   * the item appear and 403 on click. `undefined` while the detail is loading,
+   * which reads as "no".
+   */
+  homeDeletable?: boolean;
+  /**
    * `home_shareable` off the same read: whether this caller holds the type's
    * `share` in the home space. Gates "Share…" on its own — a custom role may
    * grant `write` without it, or it without `write` (RBAC spec §6.10).
@@ -120,6 +129,7 @@ export function PackageActionsDropdown({
   isHistoricalVersion,
   homeSpaceId,
   homeWritable,
+  homeDeletable,
   homeShareable,
   downloadVersion,
   onDownload,
@@ -164,9 +174,12 @@ export function PackageActionsDropdown({
   // `agents:run` runner) does not hold. Without this the items 403 on click.
   const canRead = can(`${resource}:read`);
   const isMutable = canWrite && !isBuiltIn && !isHistoricalVersion && isOwned;
-  // Same verdict: `<type>:delete` and `<type>:write` travel together in every
-  // preset, and the server checks delete in its own right anyway.
-  const canDelete = canWrite;
+  // Its own verdict, not `canWrite`'s: `DELETE` enforces `<type>:delete`, an
+  // INDEPENDENT permission string, and a custom space role is an arbitrary
+  // bundle — one granting `write` without `delete` used to render a Supprimer
+  // item that 403s on click. The two travel together in every preset, so this
+  // narrows nothing for a preset-only organization.
+  const canDelete = homeDeletable === true;
   // Its own verdict, not `canWrite`'s: sharing is a third verb on the home
   // space, and a system package answers `false` (it is already readable
   // everywhere, and the route refuses it).

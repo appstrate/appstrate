@@ -55,6 +55,7 @@ interface LibraryPackage {
   description: string;
   home_space_id: string | null;
   home_writable: boolean;
+  home_deletable: boolean;
   home_shareable: boolean;
   placements: Placement[];
 }
@@ -270,9 +271,9 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       id: row.id,
       type: row.type,
       source: row.source,
-      // ONE contract for the trio, computed server-side (RBAC spec §6.9,
+      // ONE contract for the home group, computed server-side (RBAC spec §6.9,
       // §6.10): the home's id only when this caller reaches that space, and the
-      // write and share verdicts themselves.
+      // write, delete and share verdicts themselves.
       ...home,
       name: typeof m.display_name === "string" ? m.display_name : row.id,
       description: typeof m.description === "string" ? m.description : "",

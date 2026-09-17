@@ -3288,7 +3288,7 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
-            "description": "Insufficient permissions — including `draft_not_writable` when `stage: \"draft\"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. The refusal precedes resolution, so `stage: \"draft\"` on an id that does not exist also answers 403 rather than 404 — deliberately: the same answer for \"not yours\" and \"not there\" is what keeps this route from confirming which packages an organization holds. Omit `stage` and an unknown id answers 404 as usual."
+            "description": "Insufficient permissions — including `draft_not_writable` when `stage: \"draft\"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and \"not yours\" and \"not there\" must read the same. The 403 therefore only concerns a package the caller can already reach."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -9505,7 +9505,7 @@
         "operationId": "refreshModelProviderCredentialModels",
         "tags": ["Model Provider Credentials"],
         "summary": "Discover the models this credential serves",
-        "description": "Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked once for its model listing (`GET <base_url>/models`) and the discovery candidates present in that listing are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing or an empty intersection leaves the previously persisted list untouched.",
+        "description": "Discovers the models a credential serves. For API-key providers this is empirical: the credential's provider is asked for its model listing (`GET <base_url>/models`) — a listing that declares a next page is followed to its end, under a page cap, a model cap and a per-page byte budget — and the discovery candidates present in that listing are persisted as `available_model_ids`. For `offline`-validation providers (subscription: codex, claude-code) this is a no-op that reports the current list: NO upstream call is made and NOTHING is persisted, because their served set is derived from the provider definition and the pricing catalog on every read. Real per-model availability is validated at the first run on the Pi engine. Synchronous; rate limited to 6 requests per minute. On the listing path an auth failure, an unreadable listing, a listing cut short by one of those caps, or an empty intersection leaves the previously persisted list untouched; a `429` from the provider is replayed once before the attempt is abandoned.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -9539,11 +9539,11 @@
                     "outcome": {
                       "type": "string",
                       "enum": ["ok", "auth_failed", "nothing_verified", "no_candidates"],
-                      "description": "`ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, or no candidate appeared in it; previous list kept. `no_candidates` — provider resolves no discovery candidate."
+                      "description": "`ok` — list resolved (persisted on the listing path; derived, nothing written, for `offline`-validation providers). `auth_failed` — credential rejected upstream, nothing persisted. `nothing_verified` — the listing could not be read, it was read but cut short by the page, model or byte cap (intersecting against a partial view would drop candidates sitting past it), or no candidate appeared in it; a provider `429` is replayed once before the read counts as failed. Previous list kept. `no_candidates` — provider resolves no discovery candidate."
                     },
                     "candidate_count": {
                       "type": "integer",
-                      "description": "Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path spends one request whatever the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that."
+                      "description": "Number of discovery candidates the provider declares, after dedupe and cap — the same meaning on both paths. Not a request count: the listing path's requests are bounded by the listing's own pagination, not by the candidate count, and `offline`-validation providers (codex, claude-code) spend none. Not a count of what is served either: `available_model_ids` carries that."
                     },
                     "available_model_ids": {
                       "type": ["array", "null"],
@@ -14560,7 +14560,8 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/Forbidden",
+            "description": "Insufficient permissions — the package type's `read`, or `package_copy_restricted` under `restrict_package_copy`, which narrows this route to callers holding the package type's `share` in its HOME space. That is what the setting means — the ZIP is a COPY leaving the platform, so reading the package and taking it away are two different permissions here, exactly as on `fork` and on the agent `bundle` route. Skills and system packages are exempt."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -14645,6 +14646,7 @@
                       "forked_from": null,
                       "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "home_writable": true,
+                      "home_deletable": true,
                       "home_shareable": true,
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
@@ -16516,7 +16518,8 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "$ref": "#/components/responses/Forbidden",
+            "description": "Insufficient permissions — the source package type's read in its organization and its write in the destination space, or `package_copy_restricted` when the SOURCE organization sets `restrict_package_copy`, which narrows forking to callers holding the source package type's `share` in its HOME space. That is what the setting means — a fork is a COPY leaving the space that owns it, exactly as on `download` and on the agent `bundle` route. The setting read is the SOURCE organization's, since it is the source's content being protected. Skills and system packages are exempt."
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -22955,6 +22958,7 @@
                         "description": "Sorts incoming Gmail threads into priority buckets.",
                         "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                         "home_writable": true,
+                        "home_deletable": true,
                         "home_shareable": true,
                         "placements": [
                           {
@@ -22986,6 +22990,7 @@
                         "description": "Google Mail OAuth integration.",
                         "home_space_id": null,
                         "home_writable": false,
+                        "home_deletable": false,
                         "home_shareable": false,
                         "placements": [
                           {
@@ -23122,6 +23127,7 @@
                         "description": "Sorts incoming Gmail threads into priority buckets.",
                         "home_space_id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                         "home_writable": true,
+                        "home_deletable": true,
                         "home_shareable": true,
                         "placements": [
                           {
@@ -23153,6 +23159,7 @@
                         "description": "Google Mail OAuth integration.",
                         "home_space_id": null,
                         "home_writable": false,
+                        "home_deletable": false,
                         "home_shareable": false,
                         "placements": [
                           {
@@ -24076,6 +24083,7 @@
           "active",
           "home_space_id",
           "home_writable",
+          "home_deletable",
           "home_shareable"
         ],
         "properties": {
@@ -24278,7 +24286,11 @@
           },
           "home_writable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that."
+          },
+          "home_deletable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete."
           },
           "home_shareable": {
             "type": "boolean",
@@ -25126,6 +25138,7 @@
           "forked_from",
           "home_space_id",
           "home_writable",
+          "home_deletable",
           "home_shareable"
         ],
         "properties": {
@@ -25183,7 +25196,11 @@
           },
           "home_writable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that."
+          },
+          "home_deletable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete."
           },
           "home_shareable": {
             "type": "boolean",
@@ -25215,6 +25232,7 @@
           "forked_from",
           "home_space_id",
           "home_writable",
+          "home_deletable",
           "home_shareable",
           "agents",
           "definition"
@@ -25286,7 +25304,11 @@
           },
           "home_writable": {
             "type": "boolean",
-            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
+            "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that."
+          },
+          "home_deletable": {
+            "type": "boolean",
+            "description": "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete."
           },
           "home_shareable": {
             "type": "boolean",
@@ -26310,13 +26332,14 @@
             "description",
             "home_space_id",
             "home_writable",
+            "home_deletable",
             "home_shareable",
             "placements"
           ],
           "properties": {
             "id": {
               "type": "string",
-              "description": "Package id (`pkg_…`)."
+              "description": "Package id (`@scope/name`)."
             },
             "type": {
               "type": "string",
@@ -26340,7 +26363,11 @@
             },
             "home_writable": {
               "type": "boolean",
-              "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, `DELETE`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld."
+              "description": "Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that."
+            },
+            "home_deletable": {
+              "type": "boolean",
+              "description": "Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete."
             },
             "home_shareable": {
               "type": "boolean",

@@ -31,6 +31,7 @@ import {
   seedPackageVersion,
   seedSpace,
   seedSpaceMember,
+  seedSpaceRole,
 } from "../../helpers/seed.ts";
 import {
   createFakeOrchestrator,
@@ -923,6 +924,67 @@ describe("the home on the wire", () => {
       body: JSON.stringify({ content: `${CONTENT} edited`, lock_version: row.lockVersion }),
     });
     expect(write.status, await write.clone().text()).toBe(403);
+  });
+
+  /**
+   * The write and delete verdicts together — read apart from {@link homeWire}
+   * because they are the pair that has to be able to DISAGREE.
+   */
+  async function writeDeleteWire(
+    headers: Record<string, string>,
+  ): Promise<{ home_writable: boolean; home_deletable: boolean }> {
+    const res = await app.request(`/api/packages/skills/${ID}`, { headers });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as { home_writable: boolean; home_deletable: boolean };
+    return { home_writable: body.home_writable, home_deletable: body.home_deletable };
+  }
+
+  /**
+   * A member of the HOME space holding exactly `permissions` there — a custom
+   * `space_roles` bundle, which is the only shape that can carry one package
+   * verb without its neighbour. The presets cannot: every one that writes also
+   * deletes and shares.
+   */
+  async function customRoleInAlpha(permissions: string[]): Promise<Record<string, string>> {
+    const user = await createTestUser();
+    await addOrgMember(ctx.orgId, user.id, "guest");
+    const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
+    await seedSpaceMember({
+      spaceId: alphaId,
+      userId: user.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+    return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": alphaId };
+  }
+
+  const deleteSkill = (headers: Record<string, string>) =>
+    app.request(`/api/packages/skills/${ID}`, { method: "DELETE", headers });
+
+  it("answers `false` for delete to a role holding `write` without `skills:delete`", async () => {
+    // `skills:delete` is an INDEPENDENT permission string, enforced in its own
+    // right by `requirePackageInOrg("delete")`. While the SPA gated its
+    // Supprimer item on `home_writable`, this caller was shown a button that
+    // 403s on click — the exact outcome the projection exists to prevent.
+    const headers = await customRoleInAlpha(["skills:read", "skills:write"]);
+    expect(await writeDeleteWire(headers)).toEqual({
+      home_writable: true,
+      home_deletable: false,
+    });
+    const res = await deleteSkill(headers);
+    expect(res.status, await res.clone().text()).toBe(403);
+  });
+
+  it("answers `true` for delete to a role holding both — the positive control", async () => {
+    // Without this case the one above would pass on a field that is constantly
+    // `false`, which is not the contract: `home_deletable` must DISCRIMINATE.
+    const headers = await customRoleInAlpha(["skills:read", "skills:write", "skills:delete"]);
+    expect(await writeDeleteWire(headers)).toEqual({
+      home_writable: true,
+      home_deletable: true,
+    });
+    const res = await deleteSkill(headers);
+    expect(res.status, await res.clone().text()).toBe(204);
   });
 
   it("carries both on the per-type list", async () => {

@@ -739,9 +739,9 @@ async function assertHomeAuthority(
 }
 
 /**
- * The two `home_*` fields EVERY package read emits — one contract, computed
- * once, for `AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail` and the
- * library listing.
+ * The `home_*` fields EVERY package read emits — one contract, computed once,
+ * for `AgentDetail`, `OrgPackageItem`, `OrgPackageItemDetail` and the library
+ * listing.
  *
  * `home_space_id` is the home's id **only when the caller reaches that space**,
  * and `null` otherwise. The raw column cannot go on the wire: a package homed in
@@ -749,12 +749,19 @@ async function assertHomeAuthority(
  * for, and emitting its home would hand each of them the id of a space §3.6
  * says does not exist for them. `null` means "not a space you can see".
  *
- * `home_writable` is `assertPackageMutationAccess`'s WHOLE rule, not just its
- * home half: a SYSTEM package is refused there before the home is consulted, so
- * it answers `false` here too, however much authority the caller holds —
- * otherwise the SPA renders a button that 403s on click. It is computed for the
- * type's `write`; the SPA gates delete and move on it too, and the server still
- * checks `<type>:delete` in its own right.
+ * `home_writable` is `assertPackageMutationAccess`'s WHOLE rule for `write`, not
+ * just its home half: a SYSTEM package is refused there before the home is
+ * consulted, so it answers `false` here too, however much authority the caller
+ * holds — otherwise the SPA renders a button that 403s on click.
+ *
+ * `home_deletable` is the same answer for the type's `delete`, and it is a field
+ * of its own for the reason the field above exists at all: `<type>:delete` is an
+ * INDEPENDENT permission string (`@appstrate/core/permissions`), enforced in its
+ * own right by `requirePackageInOrg("delete")`. Every preset that writes also
+ * deletes, so nothing narrows for a preset-only organization — but a custom
+ * space role is an arbitrary bundle, and one holding `write` without `delete`
+ * read as "may delete" for as long as the SPA gated its Supprimer item on
+ * `home_writable`.
  *
  * `home_shareable` is the same answer for the type's `share` (RBAC spec §6.10),
  * a field of its own because a custom role may hold one verb without the other.
@@ -762,16 +769,22 @@ async function assertHomeAuthority(
 export function homeWireForCaller(
   pkg: { type: PackageType; source: string; homeSpaceId: string | null },
   accessible: Awaited<ReturnType<typeof packageAccessSpaces>>,
-): { home_space_id: string | null; home_writable: boolean; home_shareable: boolean } {
+): {
+  home_space_id: string | null;
+  home_writable: boolean;
+  home_deletable: boolean;
+  home_shareable: boolean;
+} {
   const reached =
     pkg.homeSpaceId !== null && accessible.some((space) => space.id === pkg.homeSpaceId);
   const system = isSystemPackageRow(pkg);
+  const holds = (action: "write" | "delete" | "share") =>
+    !system && holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, action));
   return {
     home_space_id: reached ? pkg.homeSpaceId : null,
-    home_writable:
-      !system && holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "write")),
-    home_shareable:
-      !system && holdsHomeAuthority(pkg, accessible, packagePermission(pkg.type, "share")),
+    home_writable: holds("write"),
+    home_deletable: holds("delete"),
+    home_shareable: holds("share"),
   };
 }
 
