@@ -3,7 +3,11 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { connectionOverridesSchema, dependencyOverridesSchema } from "../lib/launch-schemas.ts";
+import {
+  assertDependencyOverrideKeysDeclared,
+  connectionOverridesSchema,
+  dependencyOverridesSchema,
+} from "../lib/launch-schemas.ts";
 import {
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
@@ -137,6 +141,11 @@ function draftSelectorMoved(patched: string | null | undefined, stored: string |
  * because the form posts the whole map back. A key whose value is unchanged was
  * already proven at the write that introduced it; a key this patch DROPS takes
  * a draft away, which needs no authority at all.
+ *
+ * AUTHORITY ONLY. Whether a key names a declared dependency at all is a
+ * property of the map and the EFFECTIVE manifest together, and `version_override`
+ * moves that manifest under a map nothing touched — so the form half is gated
+ * on the pair, not on this delta. Do not re-attach it here.
  */
 function movedDependencyOverrides(
   patched: Readonly<Record<string, string>> | null | undefined,
@@ -553,19 +562,45 @@ export function createSchedulesRouter() {
       });
     }
 
-    // A patch that ADDS or CHANGES a dependency override proves the authority
-    // for it, on its own gate: unlike the pair above, a dependency draft is
-    // judged package by package. The keys this patch leaves where they were
-    // are the row's own, already proven at the write that introduced them.
+    // `dependency_overrides` is judged in two halves, and they do NOT share a
+    // trigger.
+    //
+    // FORM — "does this key name a dependency the manifest declares?" — is a
+    // property of the (map, effective manifest) PAIR, and `version_override`
+    // moves the manifest. A patch sending `{version_override:"draft"}` alone
+    // re-points the row at a definition that may no longer declare the skill
+    // the stored map pins, so the map has to be re-judged against the new
+    // target even though not one of its entries moved. Gated on `movedDeps`
+    // it was not: the row answered 200 and then 400-ed in
+    // `freezeRunSpawnDependencies` at every tick, forever, exactly the silent
+    // permanent failure `assertScheduleTargetValid` exists to prevent. So the
+    // form half runs whenever EITHER half of the pair moves, over the WHOLE
+    // effective map — the one the row will replay, not the patch's delta.
+    //
+    // AUTHORITY — "may I pin `draft` on that package?" — stays on the moving
+    // entries only, judged package by package by `movedDependencyOverrides`:
+    // re-sending a stored selector is not asking for it again, and a key this
+    // patch DROPS takes a draft away.
+    const effectiveDependencyOverrides =
+      data.dependency_overrides !== undefined
+        ? data.dependency_overrides
+        : existing.dependency_overrides;
     const movedDeps = movedDependencyOverrides(
       data.dependency_overrides,
       existing.dependency_overrides,
     );
-    if (movedDeps && Object.keys(movedDeps).length > 0) {
+    if (
+      (data.version_override !== undefined || data.dependency_overrides !== undefined) &&
+      effectiveDependencyOverrides &&
+      Object.keys(effectiveDependencyOverrides).length > 0
+    ) {
       // The manifest the keys are judged against is the one this row will
       // FIRE, so a patch that only moves the dependency map still resolves it —
       // adding an override changes what the schedule executes, and that is the
-      // half of a patch that has to prove itself.
+      // half of a patch that has to prove itself. Already resolved above
+      // whenever `version_override` is part of the patch (same condition gates
+      // the input pair), so this second lookup only happens for a patch that
+      // touches the map alone.
       let target = effectiveAgent;
       if (!target) {
         const agentForDeps = await getPackage(existing.packageId, scope.orgId);
@@ -574,11 +609,16 @@ export function createSchedulesRouter() {
         if (!agentForDeps) throw notFound(`Agent '${existing.packageId}' not found`);
         target = (await resolveAgentRunVersion(agentForDeps, nextVersionOverride)).agent;
       }
-      await assertDependencyDraftOverridesAllowed(
-        c,
-        movedDeps,
-        target.manifest as unknown as Record<string, unknown>,
-      );
+      const targetManifest = target.manifest as unknown as Record<string, unknown>;
+      assertDependencyOverrideKeysDeclared(targetManifest, effectiveDependencyOverrides);
+      if (movedDeps && Object.keys(movedDeps).length > 0) {
+        // Re-runs the key gate over the moving subset — a subset of the map
+        // just cleared, so it can only pass. Kept whole rather than reaching
+        // for `assertDraftSelectorAllowed` directly: the form-before-authority
+        // ordering is stated inside that helper and no caller should be able
+        // to order the two wrong.
+        await assertDependencyDraftOverridesAllowed(c, movedDeps, targetManifest);
+      }
     }
 
     // Reject a `model_id_override` that references no real model (no-op when
