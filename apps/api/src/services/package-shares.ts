@@ -235,9 +235,7 @@ export async function revokePackageShare(
         ),
       )
       .returning({ packageId: spacePackages.packageId });
-    // Test-only seam: throw here to prove the two deletes revert TOGETHER — the
-    // atomicity above is otherwise unobservable from outside, every test seeing
-    // only the final state of a pass that succeeded.
+    // Test-only seam — see `opts.onBeforeCommit` on the signature above.
     if (opts?.onBeforeCommit) await opts.onBeforeCommit();
     return { placementRemoved: placementRemoved.length > 0 };
   });

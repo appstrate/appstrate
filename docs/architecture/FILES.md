@@ -255,7 +255,7 @@ The platform MCP server (`apps/api/src/modules/mcp/`) surfaces files to external
 
 ## Compatibility surface
 
-**Nothing survives.** The rename shipped with a read alias on every wire-visible spelling; all of them have since been removed. The four below were the last to go, argued for on the strongest ground available — that a RELEASED build had written a value into a place the current build still reads:
+**Nothing survives.** The rename shipped with a read alias on every wire-visible spelling; all of them have since been removed. The four below were the last to go, and ONE of them — the `run_logs` `event: "document"` row — was argued on the strongest ground available: a RELEASED build had written that value into a place the current build still reads. The other three have no data behind them at all, as the paragraph under the table says; they are written down only to record what is refused:
 
 | Retired spelling                                                                     | Canonical                 | How it goes, and what it costs                                                                                                                                                                                         |
 | ------------------------------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

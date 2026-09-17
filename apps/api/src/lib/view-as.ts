@@ -225,11 +225,11 @@ async function validatePersonaSpace(
   // holds nothing there to narrow (RBAC spec §3.6).
   //
   // Named rather than folded into the 404 above, deliberately. Collapsing it
-  // would close one more oracle, but reaching this branch means already holding
-  // the space's id, and an id is the one thing §3.6 never puts on the wire — so
-  // there is nothing here to enumerate FROM. Against that, the named 400 is
-  // what tells an owner why their own preview was refused. §3.6 and the two
-  // tests that pin it are the contract.
+  // would close one more oracle, but what §3.6 hides is the PROPERTY "this id
+  // is a personal space", and reaching this branch means already holding the
+  // id — so the enumeration has no starting point to work from. Against that,
+  // the named 400 is what tells an owner why their own preview was refused.
+  // §3.6 and the two tests that pin it are the contract.
   if (space.ownerUserId !== null) {
     throw invalidViewAs(
       `Space '${space.id}' is a personal space; there is no role to preview in it.`,

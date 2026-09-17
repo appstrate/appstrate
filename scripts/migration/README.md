@@ -112,6 +112,37 @@ what the two new `ON DELETE RESTRICT` edges will make undeletable, and how many
 spaces `0015` would create. The first is the only one that may need a decision
 from a package's author, so it is the one to start early.
 
+**1g. The billing database that has to move.** The deployment runs
+`@appstrate/cloud` against a database of its own, `appstrate_cloud`, named by
+`CLOUD_DATABASE_URL`. `@appstrate/module-ee` does not open a second URL: its
+tables live in the platform database. `scripts/migration/0010` is what carries
+them across, at step 4, and it is the ONLY thing that does.
+
+Counts read on production on 2026-09-17, against `appstrate_cloud` — re-read
+them, and keep the numbers: step 4's dry run prints a per-table plan that must
+match.
+
+| Table                    | Rows   |
+| ------------------------ | ------ |
+| `cloud_usage_records`    | 956    |
+| `cloud_billed_llm_usage` | 717    |
+| `cloud_stripe_events`    | 418    |
+| `cloud_billing_accounts` | **31** |
+| `cloud_free_tier_claims` | 18     |
+| `cloud_billing_cursor`   | 1      |
+
+```sql
+SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY 2 DESC, 1;
+SELECT count(*) FROM drizzle.__drizzle_migrations;   -- must be 4
+```
+
+The journal count is what `0010` checks: **4** applied entries is
+`0003_normalize_free_subscription_status`, its `REQUIRED_SOURCE_TAG`. A source
+below it is refused. The prefix must be `cloud_*` — `0004` (billing managers)
+and `0005` (the rename to `ee_*`) ship in THIS release, so no deployment ever
+ran them against a database of its own, and a source mixing both prefixes is
+refused too.
+
 ### 2. Stop the platform
 
 **2a.** Stop it. Nothing may serve traffic from here until step 5: between the
@@ -163,6 +194,32 @@ here — see `0004-oauth-resources-watermark-drift.sql`.
 
 ### 4. Operator scripts — this order, all of them
 
+**`0010` first, and it is not SQL.** It moves the commercial module's billing
+tables out of the database they had to themselves and into the platform
+database. Step 1c switches `MODULES` from `@appstrate/cloud` to
+`@appstrate/module-ee`; without this the module boots against SEVEN EMPTY
+`ee_*` tables it creates itself, and 31 organizations lose their billing
+account — credits, Stripe customer and subscription — while the metering cursor
+restarts from zero. Worse, it is then unrecoverable by this script: `0010` is
+idempotent BY REFUSAL, and a target already holding billing rows is refused for
+good.
+
+```sh
+# dry run first — it prints a per-table plan and changes nothing
+EE_SOURCE_DATABASE_URL=<postgresql://…/appstrate_cloud> \
+DATABASE_URL=<postgresql://…/appstrate> \
+  bun scripts/migration/0010-ee-tables-into-platform-db.ts
+
+# then, once the plan matches step 1g's counts
+EE_SOURCE_DATABASE_URL=… DATABASE_URL=… \
+  bun scripts/migration/0010-ee-tables-into-platform-db.ts --apply
+
+# and again without --apply: the second run MUST refuse. A refusal here is the
+# receipt that the first one committed.
+```
+
+Then the SQL ones:
+
 ```sh
 for s in \
   0008-org-viewer-to-guest \
@@ -181,8 +238,11 @@ Run them one at a time and read each one's notices; the loop above is the order,
 not a way to skip looking. What each is for, and why it sits where it does:
 
 - **`0008`, `0012`** — the `viewer` rows. Step 1d read four zeros, so both match
-  nothing. Run them anyway, as witnesses: they print counts that discriminate,
-  and `0012` additionally proves `0008` ran.
+  nothing on THIS database, and their printed counts are therefore all zero —
+  which is what a run that did nothing prints too. **They do not discriminate
+  here**; they are run because a fresh count is cheaper than assuming step 1d
+  still holds, not because their output proves anything. Neither reads the
+  other's marker.
 - **`0017`** — the two hand-moved accounts of step 1e. This is the one that has
   work to do on this database.
 - **`0011`** — `oauth_clients.self_service`, folded out of the `metadata` JSON

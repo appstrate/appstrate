@@ -375,11 +375,11 @@ export const packageHomeSpaceSchema = z
      * second route because it is one act with one modifier.
      *
      * The flag governs a space that was RUNNING the package. A space that held
-     * no placement row is LEFT either way, whatever the flag says
+     * no `space_packages` row is LEFT either way, whatever the flag says
      * (`reconcilePlacementsAfterRehome` backfills from `space_packages`): the
      * backfill exists to keep running what was running, and writing an offer to
-     * a space that had switched the package off — or never switched it on —
-     * would widen what that space sees rather than preserve it.
+     * a space that never switched the package on would widen what that space
+     * sees rather than preserve it.
      *
      * Asking it costs no authority beyond the move's own `<type>:write` in
      * BOTH homes. Requiring `<type>:share` as well — the permission

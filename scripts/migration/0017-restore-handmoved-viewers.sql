@@ -108,14 +108,36 @@
 --     ('e569c4fb-1721-4406-8cfd-9b362ecf7043', 'bSPoyUV0lTPO77jcsGODhQ3cAFclTKXV')
 --   );
 --
--- ROLLBACK: reversible, unlike `0056` and `0064`. Put the two rows back where
--- the hand move left them and drop the grants this file wrote:
+-- ROLLBACK: reversible for the rows THIS file wrote, and for those only — which
+-- is the whole of it, unlike `0056` and `0064`. Step 2 is deliberately
+-- `ON CONFLICT DO NOTHING`, so a `space_members` row an administrator had
+-- already added by hand survives it untouched; those are the rows step 1 counts
+-- under `v_existing`, and a blanket delete over `preset_role = 'viewer'` would
+-- destroy them too — overwriting exactly the decision this file promises never
+-- to overwrite.
+--
+-- `space_members` carries no provenance column of its own (`0056` section D:
+-- `space_id`, `user_id`, `preset_role`, `custom_role_id`, `added_by`,
+-- `created_at`), so the discriminant is `added_by IS NULL` — step 2 leaves it
+-- NULL on purpose, a hand-added row names its granter — narrowed by a
+-- `created_at` floor the operator SUBSTITUTES with the timestamp this file
+-- actually committed at. Both halves are needed: `added_by` is
+-- `ON DELETE SET NULL`, so a hand-added row whose granter has since been
+-- deleted from the organization also reads NULL.
 --
 --   UPDATE org_members SET role = 'member'
---    WHERE (org_id, user_id) IN (('48b0854c-…', 'GlaICg7…'), ('e569c4fb-…', 'bSPoyUV…'));
+--    WHERE (org_id, user_id) IN (
+--      ('48b0854c-6f42-406c-a3c7-bbdd285a0355', 'GlaICg7JIo1yAVuc9TzCzBZ7kUMpjU4i'),
+--      ('e569c4fb-1721-4406-8cfd-9b362ecf7043', 'bSPoyUV0lTPO77jcsGODhQ3cAFclTKXV')
+--    );
 --   DELETE FROM space_members sm USING spaces s
 --    WHERE s.id = sm.space_id AND sm.preset_role = 'viewer'
---      AND (s.org_id, sm.user_id) IN (('48b0854c-…', 'GlaICg7…'), ('e569c4fb-…', 'bSPoyUV…'));
+--      AND sm.added_by IS NULL
+--      AND sm.created_at >= '<the timestamptz this file committed at>'
+--      AND (s.org_id, sm.user_id) IN (
+--        ('48b0854c-6f42-406c-a3c7-bbdd285a0355', 'GlaICg7JIo1yAVuc9TzCzBZ7kUMpjU4i'),
+--        ('e569c4fb-1721-4406-8cfd-9b362ecf7043', 'bSPoyUV0lTPO77jcsGODhQ3cAFclTKXV')
+--      );
 --
 -- Only do that knowing what it restores: `member` + `spaces.default_role =
 -- 'operator'` is write access in every open space of those organizations.

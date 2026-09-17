@@ -32,11 +32,13 @@
 --
 -- This file is one half of `docs/NO_TRANSITIONAL_CODE.md` §2's pattern
 -- (`ADD … NOT VALID` here, `VALIDATE` in a LATER migration), and the other half
--- is NOT in this release. It cannot be: step 5 of the rollout applies
--- `0063`–`0067` as one boot batch BEFORE `0014` runs, so a `VALIDATE` inside
--- that batch would scan `packages` while every `home_space_id` is still NULL,
--- raise `23514` and roll the whole deploy back on the very statement meant to
--- confirm it.
+-- is NOT in this release. It cannot be: step 3 of the rollout applies the twelve
+-- pending migrations, `0067` among them, through a one-shot migrator — NOT by
+-- starting the application — and `scripts/migration/0014` runs after it, at
+-- step 4, with the platform still stopped. A `VALIDATE` inside that batch would
+-- therefore scan `packages` while every `home_space_id` is still NULL, raise
+-- `23514` and roll the whole deploy back on the very statement meant to confirm
+-- it.
 --
 -- So the debt is named here, in the file that creates it, the way `0056` names
 -- its own: the FOLLOW-UP release must carry
