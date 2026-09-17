@@ -133,8 +133,14 @@ export const CreateRemoteRunBodySchema = z
         (snap) => !snap || JSON.stringify(snap).length <= CONTEXT_SNAPSHOT_MAX_BYTES,
         `contextSnapshot exceeds ${CONTEXT_SNAPSHOT_MAX_BYTES} bytes`,
       ),
+    // Closed like the root: this body already carries `contextSnapshot` in
+    // camelCase by carve-out, so `sink: { ttlSeconds }` is the confusion the
+    // shape invites. Open, that typo is stripped while `body.sink` stays
+    // truthy, the run silently takes REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS (2h)
+    // and a long run's events are refused in flight — while the SAME field
+    // misspelt on `POST /api/runs/{id}/sink/extend` is a 400.
     sink: z
-      .object({
+      .strictObject({
         ttl_seconds: z.number().int().positive().max(86400).optional(),
       })
       .optional(),

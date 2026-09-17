@@ -121,6 +121,15 @@ const sidecarLaunchSpecSchema = z.looseObject({
 // ---------------------------------------------------------------------------
 // Request bodies
 // ---------------------------------------------------------------------------
+//
+// `strictObject`, unlike the platform-type mirrors above: these are the
+// daemon's OWN wire contract, not a pass-through of a core shape, so an
+// unknown key is a caller mistake and must be a 400 rather than a silent
+// drop. `{ opts: { skip_sidecar: true } }` on an open object is the shape of
+// that failure — the field is stripped, `skipSidecar` reads undefined, the
+// sidecar starts although the caller asked to skip it, and the answer is 200.
+// The nested option objects are closed for the same reason; the loose mirrors
+// above are deliberately NOT, per the note on them.
 
 /**
  * Safe run-identifier charset. A runId reaches the daemon filesystem
@@ -137,9 +146,9 @@ const sidecarLaunchSpecSchema = z.looseObject({
  */
 export const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,127}$/;
 
-export const createBoundaryBodySchema = z.object({
+export const createBoundaryBodySchema = z.strictObject({
   runId: z.string().min(1).regex(RUN_ID_RE, "runId contains unsafe characters"),
-  opts: z.object({ skipSidecar: z.boolean().optional() }).optional(),
+  opts: z.strictObject({ skipSidecar: z.boolean().optional() }).optional(),
 });
 
 /**
@@ -159,30 +168,30 @@ export class BoundaryExistsError extends Error {
   }
 }
 
-export const removeBoundaryBodySchema = z.object({
+export const removeBoundaryBodySchema = z.strictObject({
   boundary: isolationBoundarySchema,
 });
 
-export const createSidecarBodySchema = z.object({
+export const createSidecarBodySchema = z.strictObject({
   runId: z.string().min(1),
   boundary: isolationBoundarySchema,
   spec: sidecarLaunchSpecSchema,
 });
 
-export const createWorkloadBodySchema = z.object({
+export const createWorkloadBodySchema = z.strictObject({
   spec: workloadSpecSchema,
   boundary: isolationBoundarySchema,
 });
 
-export const handleBodySchema = z.object({
+export const handleBodySchema = z.strictObject({
   handle: workloadHandleSchema,
 });
 
-export const stopWorkloadBodySchema = z.object({
+export const stopWorkloadBodySchema = z.strictObject({
   handle: workloadHandleSchema,
 });
 
-export const logsBodySchema = z.object({
+export const logsBodySchema = z.strictObject({
   handle: workloadHandleSchema,
   /**
    * Lines already received — the daemon skips that many lines so a
@@ -191,7 +200,7 @@ export const logsBodySchema = z.object({
   skip: z.number().int().nonnegative().default(0),
 });
 
-export const stopRunBodySchema = z.object({
+export const stopRunBodySchema = z.strictObject({
   runId: z.string().min(1),
 });
 

@@ -1240,6 +1240,9 @@ const canonicalRunsPaths = {
                         "Requested sink lifetime in seconds. Clamped to REMOTE_RUN_SINK_MAX_TTL_SECONDS (default 24h).",
                     },
                   },
+                  // Closed like the `source` variants above: a stripped
+                  // `ttlSeconds` silently falls back to the 2h default.
+                  additionalProperties: false,
                 },
               },
             },
