@@ -152,65 +152,84 @@ export function createWebhooksRouter() {
   }
 
   // POST /api/webhooks — create a webhook (returns secret once)
-  router.post("/api/webhooks", rateLimit(10), idempotency(), async (c) => {
-    const orgId = c.get("orgId");
-    const data = await readJsonBody(c, createWebhookSchema);
+  //
+  // The coarse grant is proved BEFORE `idempotency()`, as on every other mount
+  // (`/api/oauth/clients`, `/api/end-users`, `/api/runs/remote`) and as
+  // `middleware/idempotency.ts` states: "Authorization belongs before this
+  // middleware". A cached replay returns the stored response WITHOUT reaching
+  // the handler, and the cache key is `idem:{orgId}:{spaceId}:{key}` — it
+  // carries no caller identity. With the check only inside the handler, any
+  // member of the same org and space who replayed the creating request's
+  // `Idempotency-Key` with the same body was handed the response, and this
+  // route's response is the one that carries the webhook SECRET.
+  //
+  // The per-`level` verdict stays in the handler: it reads the BODY's space,
+  // which no middleware has parsed yet.
+  router.post(
+    "/api/webhooks",
+    rateLimit(10),
+    requireAnyPermission(ANY_WEBHOOK_WRITE),
+    idempotency(),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const data = await readJsonBody(c, createWebhookSchema);
 
-    // The BODY's space decides the permission. A caller with no webhook authority
-    // anywhere gets one 403 for every failure, so the route is not a space oracle.
-    if (data.level === "space") {
-      assertSpaceId(data.spaceId, "spaceId");
-      try {
-        await assertSpaceBelongsToOrg(data.spaceId, orgId);
-        await enterSpaceContext(c, data.spaceId);
-      } catch (err) {
-        await requireAnyPermission(ANY_WEBHOOK_WRITE)(c, async () => {});
-        throw err;
+      // The BODY's space decides the permission. A caller with no webhook authority
+      // anywhere gets one 403 for every failure, so the route is not a space oracle.
+      if (data.level === "space") {
+        assertSpaceId(data.spaceId, "spaceId");
+        try {
+          await assertSpaceBelongsToOrg(data.spaceId, orgId);
+          await enterSpaceContext(c, data.spaceId);
+        } catch (err) {
+          await requireAnyPermission(ANY_WEBHOOK_WRITE)(c, async () => {});
+          throw err;
+        }
       }
-    }
-    await assertWebhookPermission(c, data.level, "write");
+      await assertWebhookPermission(c, data.level, "write");
 
-    // API keys cannot create org-level webhooks (would span foreign spaces)
-    // and cannot create space-level webhooks targeting another space.
-    const isApiKey = c.get("authMethod") === "api_key";
-    if (isApiKey) {
-      if (data.level !== "space") {
-        throw forbidden("API keys cannot create org-level webhooks");
+      // API keys cannot create org-level webhooks (would span foreign spaces)
+      // and cannot create space-level webhooks targeting another space.
+      const isApiKey = c.get("authMethod") === "api_key";
+      if (isApiKey) {
+        if (data.level !== "space") {
+          throw forbidden("API keys cannot create org-level webhooks");
+        }
+        if (data.spaceId !== c.get("spaceId")) {
+          throw forbidden("API key scope does not include this space");
+        }
       }
-      if (data.spaceId !== c.get("spaceId")) {
-        throw forbidden("API key scope does not include this space");
-      }
-    }
 
-    const result = await createWebhook(
-      data.level === "org"
-        ? {
-            level: "org",
-            scope: { orgId },
-            url: data.url,
-            events: data.events,
-            packageId: data.packageId,
-            payloadMode: data.payloadMode,
-            enabled: data.enabled,
-          }
-        : {
-            level: "space",
-            scope: { orgId, spaceId: data.spaceId },
-            url: data.url,
-            events: data.events,
-            packageId: data.packageId,
-            payloadMode: data.payloadMode,
-            enabled: data.enabled,
-          },
-    );
-    await recordAuditFromContext(c, {
-      action: "webhook.created",
-      resourceType: "webhook",
-      resourceId: result.id,
-      after: { url: data.url, events: data.events, level: data.level },
-    });
-    return c.json(result, 201);
-  });
+      const result = await createWebhook(
+        data.level === "org"
+          ? {
+              level: "org",
+              scope: { orgId },
+              url: data.url,
+              events: data.events,
+              packageId: data.packageId,
+              payloadMode: data.payloadMode,
+              enabled: data.enabled,
+            }
+          : {
+              level: "space",
+              scope: { orgId, spaceId: data.spaceId },
+              url: data.url,
+              events: data.events,
+              packageId: data.packageId,
+              payloadMode: data.payloadMode,
+              enabled: data.enabled,
+            },
+      );
+      await recordAuditFromContext(c, {
+        action: "webhook.created",
+        resourceType: "webhook",
+        resourceId: result.id,
+        after: { url: data.url, events: data.events, level: data.level },
+      });
+      return c.json(result, 201);
+    },
+  );
 
   // GET /api/webhooks[?spaceId=...&all=true] — list webhooks visible to the caller
   router.get("/api/webhooks", rateLimit(300), requireAnyPermission(ANY_WEBHOOK_READ), async (c) => {

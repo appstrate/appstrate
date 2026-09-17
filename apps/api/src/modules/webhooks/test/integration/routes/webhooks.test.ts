@@ -359,6 +359,68 @@ describe("Webhooks API", () => {
     });
   });
 
+  describe("the idempotency cache is not a way past the permission", () => {
+    // The cache key is `idem:{orgId}:{spaceId}:{key}` — it carries no caller
+    // identity — and a cached replay returns the stored response WITHOUT
+    // reaching the handler. So whatever proves the grant has to run BEFORE
+    // `idempotency()`, which is what every other mount does. This route's
+    // response is the one that carries the webhook SECRET.
+    it("403s a member replaying the creator's key, instead of handing back the secret", async () => {
+      const key = "11111111-2222-3333-4444-555555555555";
+      const body = JSON.stringify(webhookPayload());
+
+      const created = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: {
+          ...authHeaders(ctx),
+          "Content-Type": "application/json",
+          "Idempotency-Key": key,
+        },
+        body,
+      });
+      expect(created.status).toBe(201);
+      const secret = ((await created.json()) as { secret?: string }).secret;
+      expect(typeof secret).toBe("string");
+
+      // Same org, same space, same key, byte-identical body — no webhook grant.
+      const asMember = await memberContext(ctx, "member");
+      const replayed = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: {
+          ...authHeaders(asMember),
+          "Content-Type": "application/json",
+          "Idempotency-Key": key,
+        },
+        body,
+      });
+      expect(replayed.status).toBe(403);
+      expect(await replayed.text()).not.toContain(secret!);
+    });
+
+    it("still replays to the creator — the guard confines, it does not disable", async () => {
+      // The positive control: without it the test above would pass with
+      // idempotency broken outright.
+      const key = "66666666-7777-8888-9999-000000000000";
+      const body = JSON.stringify(webhookPayload());
+      const send = () =>
+        app.request("/api/webhooks", {
+          method: "POST",
+          headers: {
+            ...authHeaders(ctx),
+            "Content-Type": "application/json",
+            "Idempotency-Key": key,
+          },
+          body,
+        });
+
+      const first = await send();
+      expect(first.status).toBe(201);
+      const replay = await send();
+      expect(replay.status).toBe(201);
+      expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+    });
+  });
+
   describe("API key space scope (issue #172 extension)", () => {
     async function setupCrossSpaceFixture() {
       const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Webhook Other Space" });
