@@ -209,14 +209,18 @@ export const mePaths = {
         {
           name: "agent_package_id",
           in: "query",
-          required: true,
+          required: false,
           schema: { type: "string" },
-          description: "Agent package id whose pins to list.",
+          description:
+            "Agent package id whose pins to list. Omitted, the list is empty — " +
+            "the picker renders before it has an agent to ask about. The DELETE " +
+            "below requires it, because deleting nothing in particular is not a " +
+            "coherent request.",
         },
       ],
       responses: {
         "200": {
-          description: "Member pins for the agent",
+          description: "Member pins for the agent, or an empty list when no agent was named",
           content: {
             "application/json": {
               schema: {
@@ -244,7 +248,6 @@ export const mePaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

@@ -372,11 +372,14 @@ export const packageHomeSpaceSchema = z
      *
      * `false` completes the move instead — the old home's offer AND its
      * placement row go, in the same transaction. It is a field rather than a
-     * second route because it is one act with one modifier: "move" answers the
-     * same way whether or not the old home happened to hold a row, which the
-     * shape without it could not (a move out of a space that never activated
-     * the package already dropped it, a move out of one that did kept it, and
-     * nothing said which was which).
+     * second route because it is one act with one modifier.
+     *
+     * The flag governs a space that was RUNNING the package. A space that held
+     * no placement row is LEFT either way, whatever the flag says
+     * (`reconcilePlacementsAfterRehome` backfills from `space_packages`): the
+     * backfill exists to keep running what was running, and writing an offer to
+     * a space that had switched the package off — or never switched it on —
+     * would widen what that space sees rather than preserve it.
      *
      * Asking it costs no authority beyond the move's own `<type>:write` in
      * BOTH homes. Requiring `<type>:share` as well — the permission

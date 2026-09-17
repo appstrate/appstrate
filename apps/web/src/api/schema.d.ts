@@ -13246,9 +13246,9 @@ export interface operations {
     };
     listMyIntegrationPins: {
         parameters: {
-            query: {
-                /** @description Agent package id whose pins to list. */
-                agent_package_id: string;
+            query?: {
+                /** @description Agent package id whose pins to list. Omitted, the list is empty — the picker renders before it has an agent to ask about. The DELETE below requires it, because deleting nothing in particular is not a coherent request. */
+                agent_package_id?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -13261,7 +13261,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Member pins for the agent */
+            /** @description Member pins for the agent, or an empty list when no agent was named */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -13279,7 +13279,6 @@ export interface operations {
                     };
                 };
             };
-            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -18326,7 +18325,7 @@ export interface operations {
                     /** @description Destination space id (`spc_…`). Required and non-nullable — a package always has a home space. */
                     home_space_id: string;
                     /**
-                     * @description Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. Answered the same way whether or not the old home held a placement row, so the act does not change meaning with a state the caller cannot see. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.
+                     * @description Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. It governs a space that was RUNNING the package: a space that held no `space_packages` row is left behind whatever the flag says, because the backfill exists to preserve what was running and an offer written to a space that never switched the package on would widen what it sees. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.
                      * @default true
                      */
                     keep_in_previous_home?: boolean;

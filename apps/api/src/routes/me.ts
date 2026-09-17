@@ -223,12 +223,13 @@ router.get("/integration-pins", requireSpaceContext(), async (c) => {
     return c.json(listResponse([]));
   }
   const agentPackageId = c.req.query("agent_package_id");
-  // Same refusal as the DELETE below: the parameter is `required` in the spec,
-  // so an omitted one is the documented 400, not an empty list that reads like
-  // "this agent has no pins".
-  if (!agentPackageId) {
-    throw invalidRequest("agent_package_id query param is required");
-  }
+  // An omitted parameter is an empty list, not a 400 — the picker renders
+  // before it has an agent to ask about, exactly as it does for an end-user
+  // above. The DELETE below refuses instead, because deleting nothing in
+  // particular is not a coherent request. The spec is what was wrong here:
+  // it marked the parameter `required` and documented a 400 this route has
+  // never raised.
+  if (!agentPackageId) return c.json(listResponse([]));
   const scope = getSpaceScope(c);
   const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);
   return c.json(listResponse(pins));

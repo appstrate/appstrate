@@ -222,12 +222,18 @@ async function validatePersonaSpace(
   // A personal space has exactly one member and no role to preview: whatever
   // persona were asked for, the answer would be its owner's `admin`. Refusing
   // is also what keeps the preview a pure restriction — a previewing admin
-  // holds nothing there to narrow. Refused as a space that does NOT EXIST,
-  // byte for byte the refusal above, because a distinct "this is a personal
-  // space" would name the one property §3.6 hides from exactly this caller
-  // everywhere else (RBAC spec §3.6).
+  // holds nothing there to narrow (RBAC spec §3.6).
+  //
+  // Named rather than folded into the 404 above, deliberately. Collapsing it
+  // would close one more oracle, but reaching this branch means already holding
+  // the space's id, and an id is the one thing §3.6 never puts on the wire — so
+  // there is nothing here to enumerate FROM. Against that, the named 400 is
+  // what tells an owner why their own preview was refused. §3.6 and the two
+  // tests that pin it are the contract.
   if (space.ownerUserId !== null) {
-    throw viewAsNotFound(`Space '${requested.spaceId}' not found in this organization`);
+    throw invalidViewAs(
+      `Space '${space.id}' is a personal space; there is no role to preview in it.`,
+    );
   }
   const role = await resolvePersonaSpaceRole(orgId, requested.role);
   // Grantability against what the real caller holds THERE, the same rule that gates handing
