@@ -14,7 +14,7 @@
   "detail.deleteConfirm": "Supprimer définitivement l'agent \"{{name}}\" de l'organisation ? Il sera retiré de tous les espaces.",
   "detail.titleModel": "Configurez un modèle pour exécuter",
   "detail.titleEmptyPrompt": "Le prompt de l'agent est vide",
-  "detail.titleMissingSkill": "Un skill requis n'est pas dans le catalogue de l'organisation",
+  "detail.titleMissingSkill": "Un skill requis n'est pas placé dans l'espace d'origine de l'agent",
   "detail.titleNeverPublished": "Cet agent n'a aucune version publiée. Seul son auteur peut lancer la copie de travail ; demandez-lui de publier une version.",
   "detail.titleNotActive": "Cet agent n'est pas actif dans cet espace. Activez-le depuis sa page pour pouvoir le lancer ici.",
   "detail.deactivatedHere": "Désactivé dans cet espace",

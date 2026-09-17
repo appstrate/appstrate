@@ -253,6 +253,12 @@ function ActivationCheckbox({
     <Checkbox
       checked={active}
       disabled={blocked || pending}
+      // The accessible name identifies the CELL, and never moves with the
+      // refusal: a `<button role="checkbox">` takes its name from nothing else
+      // here, the space is named only in a header cell nothing links it to, and
+      // `title` is a reason, not a name. Without this every row announces four
+      // "checkbox, not checked" and no query by role+name can reach one.
+      aria-label={t("library.toggleIn", { space: space.name, package: pkg.name })}
       title={title}
       onCheckedChange={() => {
         if (blocked) return;
@@ -436,17 +442,38 @@ function PlacementMap({
                     )}
                   </div>
                 </TableCell>
-                {spaces.map((space) => (
-                  <TableCell key={space.id} className="text-center">
-                    <ActivationCheckbox
-                      pkg={pkg}
-                      type={type}
-                      space={space}
-                      grants={grants}
-                      setActive={setActive}
-                    />
-                  </TableCell>
-                ))}
+                {spaces.map((space) => {
+                  // An offer nobody has taken up and a placement somebody
+                  // switched OFF are the same unchecked box, and they ask for
+                  // opposite decisions — renew the offer, or respect the
+                  // refusal. `SpacePlacements` names them beside its own
+                  // switch; the map says it in the same words, because a reason
+                  // that only surfaces on hover is not read in a table scan.
+                  const placement = placementIn(pkg, space.id);
+                  return (
+                    <TableCell key={space.id} className="text-center">
+                      <span className="inline-flex items-center justify-center gap-1.5">
+                        <ActivationCheckbox
+                          pkg={pkg}
+                          type={type}
+                          space={space}
+                          grants={grants}
+                          setActive={setActive}
+                        />
+                        {isUntakenOffer(placement) && (
+                          <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
+                            {t("library.badge.offered")}
+                          </Badge>
+                        )}
+                        {placement?.state === "inactive" && (
+                          <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
+                            {t("library.badge.inactive")}
+                          </Badge>
+                        )}
+                      </span>
+                    </TableCell>
+                  );
+                })}
               </TableRow>
             );
           })}

@@ -565,6 +565,7 @@
   "packages.shareSpaceHint": "Members of that space will see the package and may activate it there. Editing it stays with its home space.",
   "packages.shareSubmit": "Share",
   "packages.shareDone": "Package shared.",
+  "packages.shareTargetIsHome": "This package already lives in that space — there is nothing to share there.",
   "packages.shareCurrent": "Current shares",
   "packages.shareEmpty": "This package is not shared with anyone.",
   "packages.shareWithPerson": "{{name}} (personal space)",

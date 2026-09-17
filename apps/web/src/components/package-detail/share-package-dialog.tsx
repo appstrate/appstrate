@@ -21,6 +21,7 @@ import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { splitPackageRef } from "../../lib/package-paths";
+import { useAuth } from "../../hooks/use-auth";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useCreateVersion } from "../../hooks/use-packages";
@@ -74,6 +75,7 @@ export function SharePackageDialog({
   canPublish: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const { user: currentUser } = useAuth();
   const orgId = useCurrentOrgId();
   const { data: shares, isLoading } = usePackageShares(packageId, open);
   const { data: spaces } = useSpaces(open);
@@ -94,7 +96,22 @@ export function SharePackageDialog({
   /** Already-offered subjects, so the pickers do not propose a no-op. */
   const offered = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
 
-  const members = (org?.members ?? []).filter((member) => !offered.has(member.userId));
+  /**
+   * The home's OWNER is a no-op target as surely as the home space itself: a
+   * person resolves server-side to their personal space, and offering a package
+   * to the space it already lives in is `409 share_target_is_home`.
+   *
+   * A personal space's owner is deliberately not named on the wire — and does
+   * not have to be: such a space is reached by its owner ALONE, so a home space
+   * this caller can enter and that is `personal` is this caller's own. That is
+   * the one member to drop, and the only one this projection can identify.
+   */
+  const homeSpace = (spaces ?? []).find((candidate) => candidate.id === homeSpaceId);
+  const homeOwnerId =
+    homeSpace?.personal && homeSpace.access === "member" ? currentUser?.id : undefined;
+  const members = (org?.members ?? []).filter(
+    (member) => !offered.has(member.userId) && member.userId !== homeOwnerId,
+  );
   // A share destination is a space the caller reaches that is neither the
   // package's home nor their OWN personal space: the first already has it, and
   // the second is reached by activating it, not by offering it to yourself.
@@ -129,6 +146,14 @@ export function SharePackageDialog({
           // here and stays a toast.
           if (error instanceof ApiError && error.code === "package_has_no_version") {
             setNeedsVersion(target);
+            return;
+          }
+          // Terminal like the rest, but said in the reader's language: the
+          // server's `detail` is English, and the picker cannot always rule
+          // this target out beforehand (it never learns whose personal space
+          // another member's is).
+          if (error instanceof ApiError && error.code === "share_target_is_home") {
+            toast.error(t("packages.shareTargetIsHome"));
             return;
           }
           toast.error(getErrorMessage(error));

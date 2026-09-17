@@ -441,7 +441,16 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 canActivate={isActiveInCurrentSpace === false}
                 onActivate={() => {
                   if (!currentSpaceId) return;
-                  setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
+                  setActive.mutate(
+                    { spaceId: currentSpaceId, packageId, active: true },
+                    // Same as the DEACTIVATE path below: the optimistic write
+                    // shows the switch taken and its rollback says nothing, so
+                    // the server's refusal is reported here or nowhere.
+                    {
+                      onError: (err) =>
+                        toast.error(err instanceof Error ? err.message : t("error.generic")),
+                    },
+                  );
                 }}
                 canDeactivate={isActiveInCurrentSpace === true}
                 onDeactivate={() => {
