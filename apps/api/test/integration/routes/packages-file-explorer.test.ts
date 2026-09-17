@@ -833,18 +833,36 @@ describe("package file explorer", () => {
     });
 
     it("sanitizes a hostile file name into the Content-Disposition header", async () => {
+      // The name carries a quote — which would break out of the quoted-string —
+      // and is still a LEGAL package path. It used to carry a backslash and
+      // `\r\n` as well; both are refused now, the backslash for a Windows
+      // separator and CR/LF because CR/LF in
+      // a package path breaks the `.afps` reader and with it every consumer's
+      // run, so such a file can no longer be written at all. That refusal is
+      // the stronger guarantee, and the case below asserts it — but it is a
+      // different property from header escaping, which `attachmentDisposition`
+      // owns and `packages/core/test/naming.test.ts` still pins against CR/LF.
       await uploadPackageFiles("agents", ctx.orgId, id, {
-        'we"ird\r\nname.txt': encoder.encode("x"),
+        'we"ird name.txt': encoder.encode("x"),
       });
 
-      const res = await fetchContent(ctx, id, 'we"ird\r\nname.txt');
+      const res = await fetchContent(ctx, id, 'we"ird name.txt');
       expect(res.status).toBe(200);
       const disposition = res.headers.get("Content-Disposition")!;
       expect(disposition).not.toContain("\r");
       expect(disposition).not.toContain("\n");
       expect(disposition).toBe(
-        `attachment; filename="we_ird__name.txt"; filename*=UTF-8''we%22ird%0D%0Aname.txt`,
+        `attachment; filename="we_ird name.txt"; filename*=UTF-8''we%22ird%20name.txt`,
       );
+    });
+
+    it("never serves a name carrying CR or LF, because none can be written", async () => {
+      // The positive control for the case above: the hostile name it dropped is
+      // not merely untested now, it is unreachable.
+      await uploadPackageFiles("agents", ctx.orgId, id, {
+        'we"ird\r\nname.txt': encoder.encode("x"),
+      });
+      expect((await fetchContent(ctx, id, 'we"ird\r\nname.txt')).status).toBe(404);
     });
 
     it("404s an unknown path", async () => {
