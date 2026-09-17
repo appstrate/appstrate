@@ -6,7 +6,7 @@
  * A POST /api/runs/inline request creates a transient `packages` row with
  * `ephemeral = true`, then feeds it through the existing run pipeline. The
  * shadow row is hidden from every user-facing catalog query
- * (notEphemeralFilter), never installed in spaces, and eventually
+ * (notEphemeralFilter), never placed in a space, and eventually
  * compacted (manifest/prompt NULLed) by the retention worker.
  *
  * Shadow IDs use the reserved `@inline/r-<hex>` format so they remain
@@ -77,6 +77,13 @@ export async function insertShadowPackage(params: InsertShadowPackageParams): Pr
     await db.insert(packages).values({
       id,
       orgId,
+      // No home — the `ephemeral` half of `packages_org_package_has_home`, the
+      // constraint that otherwise requires every organization package to have
+      // one. `home_space_id` exists to say who may WRITE a package through the
+      // package routes, and a shadow row is never reachable from them; a home
+      // would only make the run's space undeletable until the compaction sweep
+      // removes the row (`ON DELETE RESTRICT`).
+      homeSpaceId: null,
       type: "agent",
       source: "local",
       ephemeral: true,

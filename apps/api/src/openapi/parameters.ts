@@ -174,15 +174,4 @@ export const parameters = {
     description: "Package name",
     schema: { type: "string" },
   },
-  PackageActiveFilter: {
-    name: "active",
-    in: "query" as const,
-    required: false,
-    description:
-      "When `true`, narrows the list to packages installed and enabled in the current " +
-      "space — system packages with no install row drop out. Integrations are the one " +
-      "exception: they are filtered on effective activation, so an environment-provided " +
-      "system integration stays listed even though it has no install row.",
-    schema: { type: "string", enum: ["true"] as const },
-  },
 } as const;

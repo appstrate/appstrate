@@ -394,6 +394,7 @@ function listedSpace(
     settings: {},
     visibility: "open",
     default_role: "operator",
+    personal: false,
     access: "member",
     role: { kind: "preset", key: "operator", name: "operator" },
     permissions: [],

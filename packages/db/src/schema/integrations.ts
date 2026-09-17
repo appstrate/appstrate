@@ -193,7 +193,8 @@ export const integrationConnections = pgTable(
  *     the old global UNIQUE).
  *
  * Lifecycle: created by admin (or auto-provisioned via DCR), optionally
- * rotated, deleted when the integration is uninstalled (FK cascade).
+ * rotated, deleted when the placement is removed (FK cascade on
+ * `space_packages`).
  */
 export const integrationOauthClients = pgTable(
   "integration_oauth_clients",

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import { getPackageLibrary } from "../services/package-library.ts";
 import type { Context, Next } from "hono";
 import { z } from "zod";
 import {
@@ -20,8 +21,13 @@ import { ApiError, forbidden, invalidRequest, internalError, notFound } from "..
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { listResponse } from "../lib/list-response.ts";
+import { toISO } from "../lib/date-helpers.ts";
 import {
+  assertSpaceAdminAct,
+  convertPersonalSpaceToTeam,
   createSpace,
+  emptyAndDeletePersonalSpace,
+  ensurePersonalSpaceFor,
   isSpaceVisibleTo,
   listSpacesForPrincipal,
   getSpace,
@@ -38,6 +44,7 @@ import {
 } from "../services/space-members.ts";
 import {
   callerOrgRole,
+  callerPersonalOwnerId,
   callerSpaceMember,
   effectiveInSpace,
   personaFor,
@@ -52,17 +59,18 @@ import {
 import { applySpacePermissions } from "../middleware/space-context.ts";
 import { validateSpaceInOrg } from "../lib/space-lookup.ts";
 import {
-  installPackage,
-  uninstallPackage,
-  listInstalledPackages,
-  getInstalledPackage,
-  updateInstalledPackage,
+  activatePackage,
+  deactivatePackage,
+  listSpacePackages,
+  getSpacePackage,
+  updateSpacePackage,
   getResolvedRunConfig,
-  getCatalogPackageType,
 } from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import {
   assertCatalogPackageAccess,
+  assertPackageShareAccess,
+  isPackageReadableInSpace,
   packagePermission,
   spacePackagePermission,
 } from "../lib/package-access.ts";
@@ -73,6 +81,7 @@ import {
   toAssignment,
 } from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
+import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { hasCustomRoles, listSpaceRoles } from "../services/space-roles.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
@@ -85,8 +94,16 @@ import {
 
 /**
  * The wire shape every space response carries: the row plus the CALLER's
- * standing in it. `SpaceObject` requires all five, so a route that returned
+ * standing in it. `SpaceObject` requires all six, so a route that returned
  * only the row would answer a body its own contract refuses.
+ *
+ * `personal` replaces `owner_user_id` on the wire on purpose: the SPA needs to
+ * know THAT a space is somebody's personal space (to pin it, to hide the
+ * Members tab, to lock visibility), never whose — and it renders its own
+ * translated label rather than the stored `"Mon espace"`. `orphaned_at` is
+ * added only for owners and admins, the only callers who see an orphaned
+ * personal space at all and the only ones with an act to perform on it
+ * (RBAC spec §3.6).
  */
 function spaceWireForCaller(
   c: Context<AppEnv>,
@@ -95,12 +112,18 @@ function spaceWireForCaller(
     createdBy: string | null;
     visibility: SpaceVisibility;
     defaultRole: SpaceRolePreset;
+    ownerUserId: string | null;
+    orphanedAt: Date | null;
   },
   role: SpaceRoleRef | null,
 ) {
+  const orgRole = callerOrgRole(c);
+  const administers = orgRole === "owner" || orgRole === "admin";
   return {
     object: "space" as const,
     ...toSpaceWire(space),
+    personal: space.ownerUserId !== null,
+    ...(administers ? { orphaned_at: toISO(space.orphanedAt) } : {}),
     access: role ? ("member" as const) : ("none" as const),
     role: toSpaceRoleWire(role),
     permissions: [...effectiveInSpace(c, role)].sort(),
@@ -111,16 +134,44 @@ function spaceWireForCaller(
  * Project a Drizzle space row onto the wire shape. The DB columns are
  * `created_by` / `default_role`; the Drizzle TS fields are `createdBy` /
  * `defaultRole` and the wire contract (SpaceObject) is snake_case for both, so
- * both are renamed here.
+ * both are renamed here. `ownerUserId` / `orphanedAt` are dropped and replaced
+ * by what {@link spaceWireForCaller} computes from them.
  */
-function toSpaceWire<T extends { createdBy: string | null; defaultRole: SpaceRolePreset }>(
+function toSpaceWire<
+  T extends {
+    createdBy: string | null;
+    defaultRole: SpaceRolePreset;
+    ownerUserId: string | null;
+    orphanedAt: Date | null;
+  },
+>(
   space: T,
-): Omit<T, "createdBy" | "defaultRole"> & {
+): Omit<T, "createdBy" | "defaultRole" | "ownerUserId" | "orphanedAt"> & {
   created_by: string | null;
   default_role: SpaceRolePreset;
 } {
-  const { createdBy, defaultRole, ...rest } = space;
+  const {
+    createdBy,
+    defaultRole,
+    ownerUserId: _ownerUserId,
+    orphanedAt: _orphanedAt,
+    ...rest
+  } = space;
   return { ...rest, created_by: createdBy, default_role: defaultRole };
+}
+
+/**
+ * Who is acting, for {@link assertSpaceAdminAct}: the principal's
+ * PERSONAL-SPACE identity, `null` for a principal that owns none.
+ *
+ * `callerPersonalOwnerId` and not `c.get("user").id`, because the question the
+ * helper asks — "is this space the caller's own" — has to be answered the same
+ * way here as on every other route. An API key carries its creator's authority
+ * but not their privacy, so reading the creator's id made `DELETE` answer a
+ * named 409 on the creator's personal space while every other route 404s on it.
+ */
+function callerFor(c: Context<AppEnv>) {
+  return { userId: callerPersonalOwnerId(c), orgRole: callerOrgRole(c) };
 }
 
 export const createSpaceSchema = z
@@ -160,19 +211,26 @@ export const updateSpaceMemberSchema = exactlyOneRole(z.object({ ...spaceRoleAss
 // /api/agents/{scope}/{name}/input-settings` is their single write path,
 // because it is the only one that validates them against
 // `manifest.input.schema` and enforces `assertLockedFieldsSatisfiable`.
-export const installPackageSchema = z
+export const activatePackageSchema = z
   .object({
     packageId: z.string().min(1),
   })
   .strict();
 
+// No `version_id`: a placement carries no version. Which bytes a space runs is
+// decided per launch — the published `latest`, or the draft for whoever can
+// write the package — not frozen on the row.
+//
+// No `enabled` either: activation is its own act, with its own pair of doors
+// (`POST` / `DELETE` on this collection), so the placement rule and the offer
+// that may have to be created with it are stated once instead of twice. The
+// schema is `.strict()`, so a body still sending either field is a 400 rather
+// than a silent no-op.
 export const updatePackageSchema = z
   .object({
     generationConfig: modelGenerationSettingsSchema.nullable().optional(),
     modelId: z.string().nullable().optional(),
     proxyId: z.string().nullable().optional(),
-    version_id: z.number().int().nullable().optional(),
-    enabled: z.boolean().optional(),
   })
   .strict();
 
@@ -199,58 +257,112 @@ function requireSpaceFromParam(param: "id" | "spaceId") {
 // ─── Space packages: the permission is per PACKAGE TYPE ────────────────
 //
 // `spaces:write` is ORG-level — the catalog verb that creates and deletes
-// spaces. Gating install/config/uninstall on it meant a space admin could not
-// install an agent into the space they run, while anyone who could create a
-// space could install into every space in the org. The permission that fits is
-// the space-level string for the type being installed, which is also what the
-// per-type package routes already use (`routes/packages.ts` → `ROUTE_CONFIGS`).
+// spaces — so gating activate/configure/deactivate on it would stop a space
+// admin activating an agent in the space they run while letting anyone who can
+// create a space activate one everywhere. The fit is the space-level string for
+// the TYPE being activated, which the per-type package routes already use.
 //
-// `agents:configure` rather than `agents:write`: installing does not author the
-// agent, it configures which space runs it — the same distinction the catalog
-// already draws between writing an agent and configuring one.
-type SpacePackageOp = "install" | "configure" | "uninstall";
+// `agents:configure` rather than `agents:write`: activating does not author the
+// agent, it decides which space runs it.
+//
+// The permission STRINGS keep the spelling their role rows carry
+// (`integrations:install` / `integrations:uninstall`): those are data in
+// `space_roles` and in every API key's scope list, and renaming a grant is a
+// migration of rows, not of code.
+type SpacePackageOp = "activate" | "configure" | "deactivate";
+
+/**
+ * Step 1 of {@link gateSpacePackageWrite}, callable on its own.
+ *
+ * It needs no package id — that is the whole point — so a route whose id
+ * travels in the BODY runs it BEFORE parsing that body, and a caller with no
+ * authority over this space gets the 403 rather than a 400 about a payload they
+ * were never entitled to submit. Returns the personal-space exemption so the
+ * second half does not recompute it.
+ */
+async function coarseSpacePackageGate(
+  c: Context<AppEnv>,
+  orgId: string,
+  op: SpacePackageOp,
+): Promise<boolean> {
+  const owner = c.get("space")?.ownerUserId ?? null;
+  const ownSpace =
+    op !== "configure" && owner !== null && owner === callerPersonalOwnerId(c, orgId);
+  if (!ownSpace) {
+    const alternatives = (["agent", "skill", "integration", "mcp-server"] as const).map((type) =>
+      spacePackagePermission(type, op),
+    );
+    await requireAnyPermission(alternatives)(c, async () => {});
+  }
+  return ownSpace;
+}
 
 /**
  * Gate a space-package write and resolve the package's type, in the order that
  * keeps 403 and 404 independent of each other.
  *
- *   1. **Coarse gate, before any catalog read.** A caller holding none of the
- *      four strings this op can require is refused without the row ever being
- *      looked up, so it cannot tell an installed package from a package the org
- *      does not have. This is the step that stops the route being an
- *      enumeration oracle.
- *   2. **Catalog lookup**, with the org/system predicate — a package the org
- *      cannot see reads as absent, exactly as it does for the reader.
+ *   1. **Coarse gate, before any catalog read**
+ *      ({@link coarseSpacePackageGate}). A caller holding none of the four
+ *      strings this op can require is refused without the row being looked up,
+ *      so the route is not an enumeration oracle.
+ *   2. **Catalog lookup**, through `assertCatalogPackageAccess` — the same
+ *      reachability rule the READ routes obey, for all three ops, so `POST`,
+ *      `DELETE` and `PUT` cannot be told apart by their refusals. Two different
+ *      `detail` strings here (org-visible but unreachable vs nonexistent) would
+ *      be an existence oracle over the whole catalogue.
  *   3. **Exact gate** for the resolved type.
  *
- * A residue remains at step 3 and is accepted: a caller holding `skills:write`
- * but not `agents:configure` still tells an existing agent (403) from a missing
- * one (404). That is inherent to gating per type, and it is a much narrower
- * disclosure than "any authenticated space member can enumerate the catalog".
+ * A residue at step 3 is accepted: a caller holding `skills:write` but not
+ * `agents:configure` still tells an existing agent (403) from a missing one
+ * (404). Inherent to gating per type, and far narrower than letting any space
+ * member enumerate the catalog.
+ *
+ * ONE exception, and it is the whole authorization story of a PERSONAL space
+ * (RBAC spec §3.6): in the caller's OWN personal space the `activate` /
+ * `deactivate` grants are not required — ownership is the authorization. A
+ * `guest` holds only `operator` there, which carries none of them, so requiring
+ * them would mean a recipient could never take up a package offered to them.
+ * Both gates are skipped together; the CATALOG read is not, so an unreachable
+ * package stays a 404 in their own space too, and the offer is re-checked under
+ * a row lock inside `activatePackage`. `configure` keeps its grant even there:
+ * choosing a model spends the organization's LLM budget.
  */
 async function gateSpacePackageWrite(
   c: Context<AppEnv>,
   orgId: string,
   packageId: string,
   op: SpacePackageOp,
+  opts?: {
+    /**
+     * What {@link coarseSpacePackageGate} already answered, for a route that
+     * had to run step 1 early. Absent, step 1 runs here.
+     */
+    ownSpace?: boolean;
+  },
 ): Promise<PackageType> {
-  const alternatives = (["agent", "skill", "integration", "mcp-server"] as const).map((type) =>
-    spacePackagePermission(type, op),
-  );
-  await requireAnyPermission(alternatives)(c, async () => {});
+  const ownSpace = opts?.ownSpace ?? (await coarseSpacePackageGate(c, orgId, op));
 
-  const type =
-    op === "install"
-      ? (await assertCatalogPackageAccess(c, packageId)).type
-      : await getCatalogPackageType(orgId, packageId);
-  if (!type) throw notFound(`Package '${packageId}' not found in organization catalog`);
+  const { type } = await assertCatalogPackageAccess(c, packageId);
 
   // Reusing `requirePermission` rather than an inline `has` keeps the denial
   // audit hook, the 403 body and the fail-closed semantics identical to every
   // other RBAC call site — the move `requirePackageReadPermission` makes in
   // `routes/packages.ts`. An unmapped type fails CLOSED.
-  await makePermissionGuard(spacePackagePermission(type, op))(c, async () => {});
+  if (!ownSpace) await makePermissionGuard(spacePackagePermission(type, op))(c, async () => {});
   return type;
+}
+
+/** snake_case on the wire, camelCase in the service that counted them. */
+function toSweepWire(
+  spaceId: string,
+  counts: { rehomedPackages: number; deletedPackages: number },
+): SpaceSweepResult {
+  return {
+    object: "space_sweep",
+    space_id: spaceId,
+    rehomed_packages: counts.rehomedPackages,
+    deleted_packages: counts.deletedPackages,
+  };
 }
 
 export function createSpacesRouter() {
@@ -259,13 +371,34 @@ export function createSpacesRouter() {
   router.use("/:id", pinnedSpaceScopeGuard);
   router.use("/:spaceId/*", pinnedSpaceScopeGuard);
 
+  router.get(
+    "/:spaceId/library",
+    requireSpaceFromParam("spaceId"),
+    requirePermission("spaces", "read"),
+    async (c) => {
+      return c.json(await getPackageLibrary(c, c.req.param("spaceId")));
+    },
+  );
+
   // GET /api/spaces — list spaces the caller reaches (RBAC spec §6.3)
   router.get("/", requirePermission("spaces", "read"), async (c) => {
     const orgId = c.get("orgId");
+    // Lazy repair (plan decision 4). Every membership door provisions the
+    // personal space in its own transaction; this is the net for a member
+    // provisioned before the feature existed — `scripts/migration/0014` does
+    // them in bulk, and this makes the script optional for anyone who logs in.
+    // Only for a principal that HAS one — a session, or the same human through
+    // a CLI device-flow / MCP instance token (`callerPersonalOwnerId`). An API
+    // key or an end-user must not create one for the key's creator behind
+    // their back. `ensurePersonalSpace` reads before it writes, so the common
+    // case costs one indexed lookup and no row lock.
+    const personalOwnerId = callerPersonalOwnerId(c);
+    if (personalOwnerId) await ensurePersonalSpaceFor(orgId, personalOwnerId);
     const entries = await listSpacesForPrincipal(
       orgId,
       callerOrgRole(c),
       c.get("user").id,
+      personalOwnerId,
       personaMemberships(personaFor(c, orgId)),
     );
     // A credential PINNED to a space never enumerates its siblings: it sees the
@@ -305,7 +438,7 @@ export function createSpacesRouter() {
       // The creator holds org-level `spaces:write`, i.e. owner or admin, so
       // the resolver answers preset `admin` without any row — and no row is
       // written, per RBAC spec §6.3.
-      const role = resolveSpaceRole(callerOrgRole(c), space, null);
+      const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c));
       return c.json(spaceWireForCaller(c, space, role), 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -328,7 +461,12 @@ export function createSpacesRouter() {
       const orgRole = callerOrgRole(c);
       // One PK lookup, not the whole membership set: a single-space read has
       // exactly one row to find.
-      const role = resolveSpaceRole(orgRole, space, await callerSpaceMember(c, orgId, space.id));
+      const role = resolveSpaceRole(
+        orgRole,
+        space,
+        await callerSpaceMember(c, orgId, space.id),
+        callerPersonalOwnerId(c),
+      );
       if (!isSpaceVisibleTo(orgRole, space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }
@@ -398,6 +536,10 @@ export function createSpacesRouter() {
     const spaceId = c.req.param("id")!;
 
     try {
+      // 404 vs 409 for a personal space, decided where all three
+      // administrative acts decide it — a 409 on somebody else's LIVE personal
+      // space would confirm that the id is one (RBAC spec §3.6).
+      assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "delete");
       await deleteSpace(orgId, spaceId);
       await recordAuditFromContext(c, {
         action: "space.deleted",
@@ -413,6 +555,59 @@ export function createSpacesRouter() {
       });
       throw internalError();
     }
+  });
+
+  // ─── Personal spaces: the two administrative acts (RBAC spec §3.6) ──
+  //
+  // Owners and admins do not read or write a personal space. Both acts apply to
+  // an ORPHANED one only — the 30-day window after its owner left — and what
+  // separates 404 from 409 on either is `assertSpaceAdminAct`, the one place
+  // that decision is made for all three routes.
+  //
+  // Both are audited and both refuse an API KEY: a key holds `spaces:write`
+  // and `spaces:delete` legitimately (it provisions spaces headlessly), but
+  // converting somebody's personal space is a decision about a person, not an
+  // automation step — the same line `POST /api/spaces` draws. The guard is on
+  // the transport, so a human's OAuth dashboard or instance token does reach
+  // them; it is their own credential by another carrier.
+
+  // POST /api/spaces/:id/convert-to-team — the transfer.
+  router.post("/:id/convert-to-team", requirePermission("spaces", "write"), async (c) => {
+    if (c.get("authMethod") === "api_key") {
+      throw forbidden("API keys cannot convert a personal space");
+    }
+    const orgId = c.get("orgId");
+    const spaceId = c.req.param("id")!;
+    assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "convert-to-team");
+    const space = await convertPersonalSpaceToTeam(orgId, spaceId);
+    await recordAuditFromContext(c, {
+      action: "space.converted_to_team",
+      resourceType: "space",
+      resourceId: space.id,
+    });
+    // The caller now holds `admin` here through their org role, so the
+    // projection is the ordinary one.
+    const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c));
+    return c.json(spaceWireForCaller(c, space, role));
+  });
+
+  // POST /api/spaces/:id/sweep-now — run the offboarding routine immediately,
+  // instead of waiting for the rest of the 30-day window.
+  router.post("/:id/sweep-now", requirePermission("spaces", "delete"), async (c) => {
+    if (c.get("authMethod") === "api_key") {
+      throw forbidden("API keys cannot delete a personal space");
+    }
+    const orgId = c.get("orgId");
+    const spaceId = c.req.param("id")!;
+    assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "sweep");
+    const counts = await emptyAndDeletePersonalSpace(orgId, spaceId);
+    await recordAuditFromContext(c, {
+      action: "space.swept",
+      resourceType: "space",
+      resourceId: spaceId,
+      after: counts,
+    });
+    return c.json(toSweepWire(spaceId, counts));
   });
 
   // ─── Space members (RBAC spec §6.4) ────────────────────────────────
@@ -539,7 +734,9 @@ export function createSpacesRouter() {
     const member = await getOrgMember(orgId, userId);
     assertCanGrantSpaceRole(
       permissions,
-      member ? resolveSpaceRole(member.role, space, null) : null,
+      // The target's standing, so the caller id is THEIRS — a personal space
+      // resolves `admin` for its owner and nothing for anyone else.
+      member ? resolveSpaceRole(member.role, space, null, userId) : null,
     );
     if (
       !(await removeSpaceMember({
@@ -561,12 +758,12 @@ export function createSpacesRouter() {
     // The row was just deleted, so this can only find one an admin re-added
     // concurrently; the org role is what usually answers.
     const after = member
-      ? resolveSpaceRole(member.role, space, await loadSpaceMember(space.id, userId))
+      ? resolveSpaceRole(member.role, space, await loadSpaceMember(space.id, userId), userId)
       : null;
     return c.json({ access_after: after ? "implicit" : "none" });
   });
 
-  // ─── Space Packages (install/uninstall/config) ─────────────────────
+  // ─── Space packages (activate / deactivate / configure) ────────────
 
   // Guard: resolve the PATH space and the caller's role in it, once for all
   // /:spaceId/packages/* routes. These are space-scoped by their path, not by
@@ -575,7 +772,7 @@ export function createSpacesRouter() {
   router.use("/:spaceId/packages/*", requireSpaceFromParam("spaceId"));
   router.use("/:spaceId/packages", requireSpaceFromParam("spaceId"));
 
-  // GET /api/spaces/:spaceId/packages — list installed packages.
+  // GET /api/spaces/:spaceId/packages — list this space's placements.
   // The `router.use` guards above only prove the space belongs to the org;
   // `spaces:read` is the read twin of the `spaces:write` the mutating routes
   // carry, and matches this route being package-type agnostic.
@@ -583,27 +780,94 @@ export function createSpacesRouter() {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
-    const rows = await listInstalledPackages({ orgId, spaceId: spaceId }, type);
+    const rows = await listSpacePackages({ orgId, spaceId: spaceId }, type);
     const readable = rows.filter((row) =>
       c.get("permissions")?.has(packagePermission(row.package_type, "read")),
     );
     return c.json(listResponse(readable.map((row) => ({ object: "space_package", ...row }))));
   });
 
-  // POST /api/spaces/:spaceId/packages — install a package
+  // POST /api/spaces/:spaceId/packages — ACTIVATE a package here. THE door, for
+  // a team space and a personal one alike, and for all four package types:
+  // there is no per-type activation route beside it.
+  //
+  // Idempotent by construction: the placement row is upserted, so a second
+  // activation answers with the same body instead of a 409 and brings back
+  // every setting the space had chosen. 201 when this call put the package on,
+  // 200 when it already was — which covers a system integration, on with no row.
+  //
+  // When the package is neither HOMED nor SHARED here, this route can CREATE
+  // the share — but only for a caller holding `<type>:share` in its home
+  // (`assertPackageShareAccess`: 404 unreachable, 403 reachable but not theirs
+  // to hand out). Activating is therefore not a way around `share`. An API key
+  // never carries it, so a key activates the already-placed and nothing else.
   router.post("/:spaceId/packages", async (c) => {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("spaceId")!;
+    const scope = { orgId, spaceId };
 
-    const data = await readJsonBody(c, installPackageSchema);
-    await gateSpacePackageWrite(c, orgId, data.packageId, "install");
+    // Coarse gate FIRST, before the body is even parsed: it asks nothing about
+    // the package, so a caller holding none of the four activation grants is
+    // refused with the 403 the gate exists to give rather than a 400 about the
+    // shape of a payload they were never entitled to send.
+    const ownSpace = await coarseSpacePackageGate(c, orgId, "activate");
+    const data = await readJsonBody(c, activatePackageSchema);
+    await gateSpacePackageWrite(c, orgId, data.packageId, "activate", { ownSpace });
 
-    await installPackage({ orgId, spaceId: spaceId }, data.packageId);
-    const row = await getInstalledPackage({ orgId, spaceId: spaceId }, data.packageId);
-    return c.json({ object: "space_package", ...row }, 201);
+    // Read first, to decide whether the caller must ALSO prove `<type>:share`.
+    // The authoritative check is `activatePackage`'s, under the share row's
+    // lock, in the transaction that writes: a revoke racing this read makes the
+    // activation refuse rather than commit a placement nothing backs.
+    const placed = await isPackageReadableInSpace(spaceId, data.packageId);
+    let activation;
+    if (placed) {
+      activation = await activatePackage(scope, data.packageId);
+    } else {
+      await assertPackageShareAccess(c, data.packageId);
+      activation = await activatePackage(scope, data.packageId, { shareBy: c.get("user").id });
+    }
+    // Whether this call is what put the package ON — the activation rule read
+    // before the write. A package the deployment already switches on with no
+    // row at all (a system package, an integration named by
+    // `SYSTEM_INTEGRATIONS`) was active before the click and stays active
+    // after it: the row it gains records a decision that changes nothing.
+    const turnedOn = !activation.wasActive;
+    // The AUDIENCE changed — recorded off what the transaction actually wrote,
+    // not off the read above: a concurrent activation may have put the offer in
+    // first, and an entry naming an act that did not happen is worse than no
+    // entry.
+    //
+    // `targetKind: "space"` because that is what was named: this route takes a
+    // space id, never a person (a personal space's id stays off the wire, and
+    // it is not on this one either — it is the space the caller is already
+    // acting in).
+    if (activation.shared) {
+      await recordAuditFromContext(c, {
+        action: "package.shared",
+        resourceType: "package",
+        resourceId: data.packageId,
+        after: { spaceId, targetKind: "space" },
+      });
+    }
+    // Only a call that actually turned the package ON is an activation worth
+    // recording: a repeat says nothing new, and the audit trail of a toggle is
+    // unreadable when every poll writes to it.
+    if (turnedOn) {
+      await recordAuditFromContext(c, {
+        action: "package.activated",
+        resourceType: "package",
+        resourceId: data.packageId,
+        after: { spaceId },
+      });
+    }
+    // 201 says this call turned the package on; 200 says it was already on.
+    // The body is the row the TRANSACTION wrote, not a re-read: a second SELECT
+    // would describe whatever state the table is in when it lands, which under
+    // concurrency is somebody else's act.
+    return c.json({ object: "space_package", ...activation.placement }, turnedOn ? 201 : 200);
   });
 
-  // GET /api/spaces/:spaceId/packages/:packageId — get installed package detail
+  // GET /api/spaces/:spaceId/packages/:packageId — one placement, in detail
   router.get(
     `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
     requirePermission("spaces", "read"),
@@ -611,16 +875,16 @@ export function createSpacesRouter() {
       const spaceId = c.req.param("spaceId")!;
       const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      const row = await getInstalledPackage({ orgId, spaceId: spaceId }, packageId);
+      const row = await getSpacePackage({ orgId, spaceId: spaceId }, packageId);
       // A row the caller may not read reads as absent, exactly as the list
       // route omits it. Answering 403 instead would turn this route into a
       // package-type oracle for a role that cannot see the row at all.
       if (!row || !c.get("permissions")?.has(packagePermission(row.package_type, "read"))) {
         throw new ApiError({
           status: 404,
-          code: "package_not_installed",
-          title: "Package Not Installed",
-          detail: `Package '${packageId}' is not installed in this space`,
+          code: "package_not_placed",
+          title: "Package Not Placed",
+          detail: `Package '${packageId}' is not placed in this space`,
         });
       }
       return c.json({ object: "space_package", ...row });
@@ -633,18 +897,25 @@ export function createSpacesRouter() {
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+
+    // Gate FIRST — before the body is parsed, and before any read of the
+    // placement row. The id is in the PATH here, so the whole gate can run
+    // ahead of the payload: a caller with no authority gets the 403 without
+    // learning whether the package is placed here, and without a validation
+    // error standing in for it. `requirePlacement` below turns a missing row
+    // into the 404, and only a caller who passed the gate can see it.
+    //
+    // ONE gate, always `configure`: this route chooses how an already-placed
+    // package runs, and nothing else. Activation left it when it got its own
+    // pair of doors, so an empty body is gated exactly like a full one and can
+    // never be a free existence probe.
+    await gateSpacePackageWrite(c, orgId, packageId, "configure");
     const data = await readJsonBody(c, updatePackageSchema);
 
-    // Gate FIRST, unconditionally: the type comes from the catalog, not from
-    // the association row, so a caller with no authority never learns whether
-    // the package is installed. `requireInstalled` below turns a missing row
-    // into the 404, and only a caller who passed the gate can see it.
-    await gateSpacePackageWrite(c, orgId, packageId, "configure");
-
-    const installed = await getInstalledPackage(scope, packageId);
+    const placement = await getSpacePackage(scope, packageId);
     let generationConfig = data.generationConfig;
-    if (installed && (data.modelId !== undefined || generationConfig !== undefined)) {
-      const effectiveModelId = data.modelId !== undefined ? data.modelId : installed.modelId;
+    if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
+      const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
       const explicitModel =
         data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
       const selectedModel =
@@ -659,55 +930,77 @@ export function createSpacesRouter() {
       } else if (
         generationConfig === undefined &&
         data.modelId !== undefined &&
-        installed.generationConfig
+        placement.generationConfig
       ) {
         // Reconcile only when `modelId` is part of THIS patch: re-clamping
         // stored settings is a response to the selected model possibly
         // having changed, and a patch that never mentions `modelId` cannot
-        // change it. Without the conjunct a `{ enabled: false }` patch would
+        // change it. Without the conjunct a patch naming only the proxy would
         // silently rewrite `generation_config` on a request that never named
         // it.
         generationConfig = reconcileModelGenerationSettings(
-          installed.generationConfig,
+          placement.generationConfig,
           selectedModel?.generation,
         );
       }
     }
 
-    const { version_id, generationConfig: _generationConfig, ...rest } = data;
+    const { generationConfig: _generationConfig, ...rest } = data;
     void _generationConfig;
-    // `requireInstalled` — this route updates an EXISTING association; a
-    // packageId that is not installed (or not visible to the org) is a 404,
-    // never an implicit install via upsert.
-    await updateInstalledPackage(
+    // `requirePlacement` — this route updates an EXISTING placement; a
+    // packageId that is not placed here (or not visible to the org) is a 404,
+    // never an implicit activation via upsert.
+    await updateSpacePackage(
       scope,
       packageId,
-      {
-        ...rest,
-        ...(generationConfig !== undefined ? { generationConfig } : {}),
-        versionId: version_id,
-      },
-      { requireInstalled: true },
+      { ...rest, ...(generationConfig !== undefined ? { generationConfig } : {}) },
+      { requirePlacement: true },
     );
-    const updated = await getInstalledPackage(scope, packageId);
+    const updated = await getSpacePackage(scope, packageId);
     return c.json({ object: "space_package", ...updated });
   });
 
-  // DELETE /api/spaces/:spaceId/packages/:packageId — uninstall
+  // DELETE /api/spaces/:spaceId/packages/:packageId — DEACTIVATE it here.
+  //
+  // The placement row and every setting on it stay, so switching a package off
+  // for a week costs nothing to undo. Only revoking the share that placed it
+  // removes the row (`DELETE …/shares/{target}`).
+  //
+  // 204 when the space has a row, and when it has none but the package is ON by
+  // the DEPLOYMENT's default — there the row is MATERIALIZED saying `false`,
+  // the sticky opt-out. That default is the activation rule's, not a reading of
+  // `source`: a `system`-provenance integration this deployment does NOT offer
+  // is off already and falls into the case below. 404 for anything else with no
+  // row — an offer nobody has taken up is not on, and writing the row would
+  // turn it into "switched off", a decision its recipient never made.
   router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const scope = { orgId, spaceId: spaceId };
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    await gateSpacePackageWrite(c, orgId, packageId, "uninstall");
-    await uninstallPackage(scope, packageId);
+    await gateSpacePackageWrite(c, orgId, packageId, "deactivate");
+    const { changed } = await deactivatePackage(scope, packageId);
+    // Symmetric with `package.activated`: only a call that actually switched
+    // the package off is worth recording. A repeat says nothing new, and the
+    // same argument that keeps the other door quiet applies here — a log full
+    // of no-op deactivations is a log nobody can read a real one out of.
+    if (changed) {
+      await recordAuditFromContext(c, {
+        action: "package.deactivated",
+        resourceType: "package",
+        resourceId: packageId,
+        after: { spaceId },
+      });
+    }
     return c.body(null, 204);
   });
 
   // GET /api/spaces/:spaceId/packages/:scope/:name/run-config —
-  // single source of truth for the per-space config, model/proxy override,
-  // and version pin. Consumed by the CLI to reproduce a UI run without
-  // hand-stitching three separate calls.
+  // single source of truth for the per-space config and the model/proxy
+  // override. Consumed by the CLI to reproduce a UI run without hand-stitching
+  // three separate calls. It carries no version: the space selects no
+  // definition, so a run without an explicit selector is the latest published
+  // one wherever it is launched from.
   router.get(
     `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}/run-config`,
     requirePermission("agents", "read"),
@@ -719,9 +1012,9 @@ export function createSpacesRouter() {
       if (!resolved) {
         throw new ApiError({
           status: 404,
-          code: "package_not_installed",
-          title: "Package Not Installed",
-          detail: `Package '${packageId}' is not installed in this space`,
+          code: "package_not_placed",
+          title: "Package Not Placed",
+          detail: `Package '${packageId}' is not placed in this space`,
         });
       }
       return c.json(resolved);

@@ -25,6 +25,7 @@ import { RunFilesTab } from "../components/run-files-tab";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-files";
 import { isPublishedFileLogEvent } from "../lib/files";
+import { replayVersion } from "../lib/version-selector";
 import { RunRow } from "../components/run-row";
 import { RunCostReadout } from "../components/run-cost-readout";
 import { ContextGaugeReadout } from "../components/run-context-gauge";
@@ -67,6 +68,12 @@ export function RunDetailPage() {
   const spaceId = useCurrentSpaceId();
   const { can, ready: permissionsReady } = usePermissions();
   const canReadAgent = can("agents:read");
+  // A run PROVES the agent was active here once; it does not prove it still is.
+  // Deactivating is an ordinary, reversible gesture now, so "Relancer" answers
+  // to the same gate as the detail page's Run button and the card's launcher —
+  // said before the click rather than collected as a 404 after it. The verdict
+  // rides this very response (`AgentDetail.active`), resolved for the space the
+  // page is read from; the Re-run control renders only once it has landed.
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -274,12 +281,11 @@ export function RunDetailPage() {
           onClose={() => setInputOpen(false)}
           agent={agent}
           onSubmit={(input) => {
-            // Re-run the SAME definition the original run executed:
-            // `version_ref` is "draft" or a concrete semver. Pre-#636 this
-            // passed version_label, which silently re-ran the published
-            // version for runs that had executed a dirty draft.
+            // Re-run the SAME definition the original run executed, as far as
+            // this caller may: `version_ref` is "draft" or a concrete semver,
+            // and only an author replays a draft (see `replayVersion`).
             runAgent.mutate(
-              { input, version: run.version_ref },
+              { input, version: replayVersion(run.version_ref, agent.home_writable) },
               { onSuccess: () => setInputOpen(false) },
             );
           }}
@@ -363,14 +369,35 @@ export function RunDetailPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={!permissionsReady || runAgent.isPending}
+                    // Two refusals the launcher would otherwise discover by
+                    // round trip, in the order the detail page names them:
+                    // switched off HERE (the cure is one page away), then
+                    // nothing published and the working copy is not this
+                    // reader's — a re-run resolves the latest published
+                    // version and there is none.
+                    disabled={
+                      !permissionsReady ||
+                      runAgent.isPending ||
+                      !agent.active ||
+                      (agent.definition === "draft" && !agent.home_writable)
+                    }
+                    title={
+                      !agent.active
+                        ? t("detail.titleNotActive")
+                        : agent.definition === "draft" && !agent.home_writable
+                          ? t("detail.titleNeverPublished")
+                          : undefined
+                    }
                     onClick={() => {
                       if (canReadAgent) {
                         setInputOpen(true);
                       } else {
                         // The API conceals resolved input from runners. Replay
                         // that snapshot server-side, preserving its parameters.
-                        runAgent.mutate({ rerun_from: run.id, version: run.version_ref });
+                        runAgent.mutate({
+                          rerun_from: run.id,
+                          version: replayVersion(run.version_ref, agent.home_writable),
+                        });
                       }
                     }}
                   >

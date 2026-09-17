@@ -4,7 +4,7 @@
  * Default space vs custom space access E2E tests.
  *
  * Verifies that the default space has implicit access to all org packages,
- * while custom spaces only see explicitly installed packages.
+ * while a custom space sees only what has been placed there.
  * Also verifies per-space config isolation.
  */
 
@@ -13,18 +13,15 @@ import {
   createAgent,
   createAgentWithInputSchema,
   createSpace,
-  installPackageInSpace,
-  uninstallPackageFromSpace,
+  activatePackageInSpace,
+  deactivatePackageInSpace,
 } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
 
 test.describe("Default space vs custom space access", () => {
-  test("Default space lists only auto-installed agents (created via its context)", async ({
-    apiClient,
-    orgContext,
-  }) => {
+  test("Default space lists the agents authored in it", async ({ apiClient, orgContext }) => {
     const scope = `@${orgContext.org.orgSlug}`;
-    // Agents created via apiClient (default space context) are auto-installed in the default space
+    // Creating a package activates it at its home, which is this space.
     await createAgent(apiClient, scope, `agent-def-1-${Date.now()}`);
     await createAgent(apiClient, scope, `agent-def-2-${Date.now()}`);
     await createAgent(apiClient, scope, `agent-def-3-${Date.now()}`);
@@ -36,7 +33,7 @@ test.describe("Default space vs custom space access", () => {
     expect(orgAgents.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("Custom space lists only installed agents", async ({
+  test("Custom space lists only the agents placed there", async ({
     request,
     apiClient,
     orgContext,
@@ -50,9 +47,9 @@ test.describe("Default space vs custom space access", () => {
     await createAgent(apiClient, scope, agent2Name);
     await createAgent(apiClient, scope, agent3Name);
 
-    // Create custom space and install only agent1
+    // Create a custom space and place only agent1 in it
     const customSpace = await createSpace(orgOnlyClient, `Custom-${Date.now()}`);
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agent1Name}`);
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agent1Name}`);
 
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
@@ -69,51 +66,57 @@ test.describe("Default space vs custom space access", () => {
     expect(agentIds).not.toContain(`${scope}/${agent3Name}`);
   });
 
-  test("Install agent makes it visible in custom space", async ({
+  test("Activating an agent makes it visible in a custom space", async ({
     request,
     apiClient,
     orgContext,
     orgOnlyClient,
   }) => {
     const scope = `@${orgContext.org.orgSlug}`;
-    const agentName = `agent-install-${Date.now()}`;
+    const agentName = `agent-activate-${Date.now()}`;
     await createAgent(apiClient, scope, agentName);
 
-    const customSpace = await createSpace(orgOnlyClient, `Install-${Date.now()}`);
+    const customSpace = await createSpace(orgOnlyClient, `Activate-${Date.now()}`);
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
       orgId: orgContext.org.orgId,
       spaceId: customSpace.id,
     });
 
-    // Before install — not visible
+    // Before — not placed here, so not visible
     let res = await customClient.get("/agents");
     let body = await res.json();
     let ids = (body.data ?? []).map((a: { id: string }) => a.id);
     expect(ids).not.toContain(`${scope}/${agentName}`);
 
-    // Install
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
+    // Activate: the one door, which also shares it out of its home
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
 
-    // After install — visible
+    // After — visible
     res = await customClient.get("/agents");
     body = await res.json();
     ids = (body.data ?? []).map((a: { id: string }) => a.id);
     expect(ids).toContain(`${scope}/${agentName}`);
   });
 
-  test("Uninstall agent hides it from custom space", async ({
+  test("Deactivating an agent drops it from the index without hiding it from a reader", async ({
     request,
     apiClient,
     orgContext,
     orgOnlyClient,
   }) => {
+    // Listing and reading are two different rules. The index answers "what runs
+    // here", so it follows the ACTIVATION and the row leaves it — the same rule
+    // the launch routes check, so the two can never disagree. READING follows
+    // the placement, which a switch does not touch (the activation shared the
+    // agent into this space, and a share is not revoked by a switch), so the
+    // detail, the model and the readiness all still answer 200.
     const scope = `@${orgContext.org.orgSlug}`;
-    const agentName = `agent-uninstall-${Date.now()}`;
+    const agentName = `agent-deactivate-${Date.now()}`;
     await createAgent(apiClient, scope, agentName);
 
-    const customSpace = await createSpace(orgOnlyClient, `Uninstall-${Date.now()}`);
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
+    const customSpace = await createSpace(orgOnlyClient, `Deactivate-${Date.now()}`);
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
 
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
@@ -121,23 +124,60 @@ test.describe("Default space vs custom space access", () => {
       spaceId: customSpace.id,
     });
 
-    // Before uninstall — visible
-    let res = await customClient.get("/agents");
-    let body = await res.json();
-    let ids = (body.data ?? []).map((a: { id: string }) => a.id);
-    expect(ids).toContain(`${scope}/${agentName}`);
+    const listed = async () => {
+      const res = await customClient.get("/agents");
+      const body = await res.json();
+      return (body.data ?? []).some((a: { id: string }) => a.id === `${scope}/${agentName}`);
+    };
 
-    // Uninstall
-    await uninstallPackageFromSpace(orgOnlyClient, customSpace.id, scope, agentName);
+    expect(await listed()).toBe(true);
 
-    // After uninstall — gone
-    res = await customClient.get("/agents");
-    body = await res.json();
-    ids = (body.data ?? []).map((a: { id: string }) => a.id);
-    expect(ids).not.toContain(`${scope}/${agentName}`);
+    await deactivatePackageInSpace(orgOnlyClient, customSpace.id, scope, agentName);
+
+    expect(await listed()).toBe(false);
+    // Reading is not running, and the switch does not touch the first: the
+    // agent loads, its model reads back, and the readiness read REPORTS the
+    // blockage inside a 200 instead of hiding the panel that explains it.
+    for (const read of [
+      await customClient.get(`/packages/agents/${scope}/${agentName}`),
+      await customClient.get(`/agents/${scope}/${agentName}/model`),
+      await customClient.get(`/agents/${scope}/${agentName}/connection-readiness`),
+    ]) {
+      expect(read.status(), await read.text()).toBe(200);
+    }
+    const readiness = await customClient.get(`/agents/${scope}/${agentName}/connection-readiness`);
+    const readinessBody = await readiness.json();
+    expect(readinessBody.blocks_run).toBe(true);
+    expect((readinessBody.errors as Array<{ code: string }>).map((error) => error.code)).toContain(
+      "agent_not_active",
+    );
+    // The execution doors add `requireActiveAgent()` behind that same lookup, so
+    // they answer with one voice: an agent this space READS but has switched
+    // off is named apart from one it cannot see at all. Both are 404 — the
+    // status never leaks the catalogue — but only this one carries the cure.
+    for (const refusal of [
+      await customClient.post(`/agents/${scope}/${agentName}/run`, {}),
+      await customClient.get(`/agents/${scope}/${agentName}/bundle`),
+    ]) {
+      expect(refusal.status(), await refusal.text()).toBe(404);
+      const body = await refusal.json();
+      expect(body.code).toBe("agent_not_active_in_space");
+      expect(body.detail).toContain("but not active there");
+      expect(body.detail).toContain(`POST /api/spaces/${customSpace.id}/packages`);
+    }
+    // CONTROL: an agent this space holds no placement for stays opaque — the
+    // named code is about the SWITCH, never about existence.
+    const unknown = await customClient.post(`/agents/${scope}/no-such-agent-here/run`, {});
+    expect(unknown.status()).toBe(404);
+    expect((await unknown.json()).code).toBe("agent_not_found");
+
+    // And back on, through the same door: the settings the row carried are
+    // still there because the row never went away.
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
+    expect(await listed()).toBe(true);
   });
 
-  test("Agent detail accessible from default space for auto-installed agent", async ({
+  test("Agent detail accessible from the space that homes the agent", async ({
     apiClient,
     orgContext,
   }) => {
@@ -149,7 +189,7 @@ test.describe("Default space vs custom space access", () => {
     expect(res.status()).toBe(200);
   });
 
-  test("Agent detail NOT accessible from custom space when not installed", async ({
+  test("Agent detail NOT accessible from a space the agent is not placed in", async ({
     request,
     apiClient,
     orgContext,
@@ -166,7 +206,7 @@ test.describe("Default space vs custom space access", () => {
       spaceId: customSpace.id,
     });
 
-    // Custom space without this agent installed should get 404
+    // A custom space the agent was never placed in should get 404
     const res = await customClient.get(`/packages/agents/${scope}/${agentName}`);
     expect(res.status()).toBe(404);
   });
@@ -185,7 +225,7 @@ test.describe("Default space vs custom space access", () => {
     });
 
     const customSpace = await createSpace(orgOnlyClient, `CfgIso-${Date.now()}`);
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
 
     const customClient = createApiClient(request, {
       cookie: orgContext.auth.cookie,
@@ -219,15 +259,19 @@ test.describe("Default space vs custom space access", () => {
     expect(detailB.input?.values?.mode).toBe("custom-space-value");
   });
 
-  test("Installed packages list is per-space", async ({ apiClient, orgContext, orgOnlyClient }) => {
+  test("The list of packages placed in a space is per-space", async ({
+    apiClient,
+    orgContext,
+    orgOnlyClient,
+  }) => {
     const scope = `@${orgContext.org.orgSlug}`;
     const agentName = `agent-pkg-list-${Date.now()}`;
     await createAgent(apiClient, scope, agentName);
 
     const customSpace = await createSpace(orgOnlyClient, `PkgList-${Date.now()}`);
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
+    await activatePackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
 
-    // Custom space's installed packages should contain the agent
+    // The custom space's package list should contain the agent
     const res = await orgOnlyClient.get(`/spaces/${customSpace.id}/packages?type=agent`);
     expect(res.status()).toBe(200);
     const body = await res.json();
@@ -235,22 +279,27 @@ test.describe("Default space vs custom space access", () => {
     expect(ids).toContain(`${scope}/${agentName}`);
   });
 
-  test("Cannot install the same package twice in a custom space", async ({
+  test("Activating the same package twice is the same state, not a conflict", async ({
     apiClient,
     orgContext,
     orgOnlyClient,
   }) => {
+    // "Make it active here" is a state, so saying it twice says nothing new:
+    // the first call creates the placement (201), the second finds it and
+    // answers 200 with the same resource.
     const scope = `@${orgContext.org.orgSlug}`;
     const agentName = `agent-dup-${Date.now()}`;
     await createAgent(apiClient, scope, agentName);
 
-    const customSpace = await createSpace(orgOnlyClient, `DupInstall-${Date.now()}`);
-    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${agentName}`);
-
-    // Second install should conflict
-    const res = await orgOnlyClient.post(`/spaces/${customSpace.id}/packages`, {
+    const customSpace = await createSpace(orgOnlyClient, `DupActivate-${Date.now()}`);
+    const first = await orgOnlyClient.post(`/spaces/${customSpace.id}/packages`, {
       packageId: `${scope}/${agentName}`,
     });
-    expect(res.status()).toBe(409);
+    expect(first.status(), await first.text()).toBe(201);
+
+    const again = await orgOnlyClient.post(`/spaces/${customSpace.id}/packages`, {
+      packageId: `${scope}/${agentName}`,
+    });
+    expect(again.status(), await again.text()).toBe(200);
   });
 });

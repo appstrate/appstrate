@@ -488,6 +488,7 @@ export const mePaths = {
                         "description",
                         "takes_input",
                         "published",
+                        "home_writable",
                         "source",
                       ],
                       properties: {
@@ -505,10 +506,17 @@ export const mePaths = {
                         published: {
                           type: "boolean",
                           description:
-                            "True when the agent has a published version (or is a system agent). " +
-                            "Run it via `runAgent` with `version` omitted. When false the agent is " +
-                            "draft-only — run it with `version=draft` (omitting `version` would 404 " +
-                            "`no_published_version`).",
+                            "True when the agent has a published version (or is a system agent) — " +
+                            "run it via `runAgent` with `version` omitted. False means draft-only: " +
+                            "omitting `version` answers 404 `no_published_version`.",
+                        },
+                        home_writable: {
+                          type: "boolean",
+                          description:
+                            "Whether THIS caller may write the agent, i.e. whether its draft is " +
+                            "theirs to run with `version=draft` (403 `draft_not_writable` " +
+                            "otherwise). Read with `published`: false/false is an agent this " +
+                            "caller cannot execute at all until its author publishes one.",
                         },
                         source: { type: "string", enum: ["system", "local"] },
                       },
@@ -539,6 +547,7 @@ export const mePaths = {
                         "description",
                         "version",
                         "published",
+                        "home_writable",
                         "source",
                       ],
                       properties: {
@@ -558,8 +567,15 @@ export const mePaths = {
                           type: "boolean",
                           description:
                             "True when the skill has a published version (or is a system skill). " +
-                            "When false the skill is draft-only — pin it for a run via " +
-                            "`dependency_overrides` with `draft`.",
+                            "False means draft-only: a manifest range can select nothing, and only " +
+                            "`dependency_overrides` with `draft` reaches its working copy.",
+                        },
+                        home_writable: {
+                          type: "boolean",
+                          description:
+                            "Whether THIS caller may write the skill, i.e. whether its draft is " +
+                            "theirs to run — `dependency_overrides` with `draft` answers 403 " +
+                            "`draft_not_writable` otherwise.",
                         },
                         source: { type: "string", enum: ["system", "local"] },
                       },
@@ -572,7 +588,7 @@ export const mePaths = {
                   },
                   skills_total: {
                     type: "integer",
-                    description: "Total installed skills before the cap.",
+                    description: "Total active skills before the cap.",
                   },
                 },
               },
@@ -599,6 +615,7 @@ export const mePaths = {
                     description: "Sorts and labels incoming email.",
                     takes_input: false,
                     published: true,
+                    home_writable: false,
                     source: "system",
                   },
                 ],
@@ -611,6 +628,7 @@ export const mePaths = {
                     description: "Multi-source web search and synthesis.",
                     version: "1.2.0",
                     published: true,
+                    home_writable: false,
                     source: "system",
                   },
                 ],

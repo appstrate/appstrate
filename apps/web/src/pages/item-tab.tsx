@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Wrench, Plug } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { ImportModal } from "../components/import-modal";
+import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePackageList, type PackageType } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";
 import { packageNewPath } from "../lib/package-paths";
@@ -64,7 +65,7 @@ export function ItemTab({
         isLoading={isLoading}
         emoji={presentation.emoji}
         emptyMessage={t("packages.emptyItems", { type: typeLabel })}
-        emptyHint={t("packages.emptyItemsHint", { type: typeLabel })}
+        emptyHint={<SpaceLibraryHint type={type} />}
         emptyIcon={presentation.emptyIcon}
         extraActions={
           <>

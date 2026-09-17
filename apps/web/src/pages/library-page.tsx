@@ -1,190 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { toast } from "sonner";
-import { Package } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { PackageType } from "@appstrate/core/validation";
-import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
-import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
-import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
-import { useSpaces } from "../hooks/use-spaces";
-import { PACKAGE_PERMISSIONS } from "../lib/package-permissions";
-import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Badge } from "@appstrate/ui/components/badge";
-
-const TABS = ["agents", "skills", "integrations"] as const;
-type Tab = (typeof TABS)[number];
-
-const TYPE_MAP: Record<Tab, PackageType> = {
-  agents: "agent",
-  skills: "skill",
-  integrations: "integration",
-};
-
-const DETAIL_PATH_MAP: Record<string, string> = {
-  agent: "/agents",
-  skill: "/skills",
-  integration: "/integrations",
-};
+import { PackageLibrary, SpacePackageLibrary } from "../components/package-library";
+import { LoadingState, ErrorState } from "../components/page-states";
+import { useLibrary, useSpaceLibrary } from "../hooks/use-library";
 
 export function LibraryPage() {
   const { t } = useTranslation();
   const { data, isLoading, error } = useLibrary();
-  const [activeTab, setActiveTab] = useTabWithHash(TABS, "agents");
-
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
-  if (!data) return null;
-
-  return (
-    <div className="p-6">
-      <PageHeader title={t("library.title")} />
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
-        <TabsList>
-          {TABS.map((tab) => (
-            <TabsTrigger key={tab} value={tab}>
-              {t(`library.tab.${tab}`)}
-              <span className="text-muted-foreground ml-1.5 text-xs">
-                {data.packages[TYPE_MAP[tab]]?.length ?? 0}
-              </span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        {TABS.map((tab) => (
-          <TabsContent key={tab} value={tab}>
-            <LibraryMatrix
-              packages={data.packages[TYPE_MAP[tab]] ?? []}
-              spaces={data.spaces}
-              type={TYPE_MAP[tab]}
-            />
-          </TabsContent>
-        ))}
-      </Tabs>
-    </div>
-  );
+  return data ? <PackageLibrary data={data} title={t("library.title")} /> : null;
 }
 
-function LibraryMatrix({
-  packages: pkgs,
-  spaces,
-  type,
-}: {
-  packages: LibraryPackageItem[];
-  spaces: LibrarySpace[];
-  type: PackageType;
-}) {
+export function SpacePackagesPage() {
   const { t } = useTranslation();
-  const { data: accessibleSpaces } = useSpaces();
-  const toggle = useTogglePackageInstall();
-  const permissionsBySpace = new Map(accessibleSpaces?.map((s) => [s.id, s.permissions]));
-  const { install: installPermission, uninstall: uninstallPermission } = PACKAGE_PERMISSIONS[type];
-  // Every column targets a different space. Installation state chooses the
-  // operation; the target space's effective set decides whether it is allowed.
-  const canToggle = (spaceId: string, installed: boolean) =>
-    permissionsBySpace
-      .get(spaceId)
-      ?.includes(installed ? uninstallPermission : installPermission) ?? false;
-  // Agents/skills treat a "system" package as globally available (locked on,
-  // can't toggle). Integrations are different: they must be activated per
-  // space even when system-sourced, so their system rows stay toggleable.
-  const lockSystem = type !== "integration";
-
-  if (pkgs.length === 0) {
-    return <EmptyState message={t("library.empty")} icon={Package} />;
-  }
-
-  const handleToggle = (pkg: LibraryPackageItem, spaceId: string, installed: boolean) => {
-    if (lockSystem && pkg.source === "system") return;
-    if (!canToggle(spaceId, installed)) return;
-    toggle.mutate(
-      { spaceId, packageId: pkg.id, installed },
-      {
-        onError: (err) => {
-          toast.error(err instanceof Error ? err.message : t("error.generic"));
-        },
-      },
-    );
-  };
-
-  const basePath = DETAIL_PATH_MAP[type] ?? "/agents";
-
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="min-w-[200px]">{t("library.column.package")}</TableHead>
-          {spaces.map((space) => (
-            <TableHead key={space.id} className="text-center">
-              <span className="text-xs">{space.name}</span>
-              {space.isDefault && (
-                <Badge variant="outline" className="ml-1 px-1 py-0 text-[0.6rem]">
-                  default
-                </Badge>
-              )}
-            </TableHead>
-          ))}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {pkgs.map((pkg) => (
-          <TableRow key={pkg.id}>
-            <TableCell>
-              <div className="flex items-center gap-2">
-                <Link to={`${basePath}/${pkg.id}`} className="font-medium hover:underline">
-                  {pkg.name}
-                </Link>
-                {pkg.source === "system" && (
-                  <Badge variant="secondary" className="px-1.5 py-0 text-[0.6rem]">
-                    {t("library.system")}
-                  </Badge>
-                )}
-              </div>
-              {pkg.description && (
-                <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
-                  {pkg.description}
-                </p>
-              )}
-            </TableCell>
-            {spaces.map((space) => {
-              const installed = pkg.installed_in.includes(space.id);
-              const systemAlwaysActive = lockSystem && pkg.source === "system";
-              const blocked = !canToggle(space.id, installed);
-              // Until `useSpaces` resolves the caller's standing is unknown, so the
-              // box is disabled without claiming a missing permission.
-              const missingPermission = accessibleSpaces !== undefined && blocked;
-              // Two different reasons the box cannot be clicked.
-              const title = systemAlwaysActive
-                ? t("library.systemAlwaysActive")
-                : missingPermission
-                  ? t(installed ? "library.cannotUninstall" : "library.cannotInstall")
-                  : undefined;
-              return (
-                <TableCell key={space.id} className="text-center">
-                  <Checkbox
-                    checked={systemAlwaysActive || installed}
-                    disabled={systemAlwaysActive || blocked}
-                    title={title}
-                    onCheckedChange={() => handleToggle(pkg, space.id, installed)}
-                  />
-                </TableCell>
-              );
-            })}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
+  const { data, isLoading, error } = useSpaceLibrary();
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  return data ? <SpacePackageLibrary data={data} title={t("library.spaceTitle")} /> : null;
 }

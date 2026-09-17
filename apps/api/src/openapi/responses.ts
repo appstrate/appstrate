@@ -6,6 +6,14 @@ import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */
 export const responses = {
+  VersionArtifactUnavailable: {
+    description:
+      "The selected published agent has no readable prompt archive (`version_artifact_unavailable`). The working copy is never substituted.",
+    headers: REQUEST_ID_ONLY_HEADERS,
+    content: {
+      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+    },
+  },
   Unauthorized: {
     description: "Missing or invalid authentication",
     headers: {

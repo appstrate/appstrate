@@ -82,6 +82,58 @@ describe("formatCallerContext", () => {
     expect(out).toContain("no default — you must select tools explicitly");
   });
 
+  it("tells a draft-only agent apart by whether THIS caller may run its draft", () => {
+    // `published: false` alone does not say "run it with version=draft": the
+    // run route reserves the draft to whoever may WRITE the agent, so telling
+    // the model otherwise buys a 403 loop. The two rows below differ ONLY in
+    // `home_writable`, so the contrast is that flag and nothing else.
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      agents: [
+        {
+          package_id: "@acme/mine",
+          display_name: "Mine",
+          takes_input: false,
+          published: false,
+          home_writable: true,
+        },
+        {
+          package_id: "@acme/theirs",
+          display_name: "Theirs",
+          takes_input: false,
+          published: false,
+          home_writable: false,
+        },
+      ],
+    });
+    expect(out).toContain("`@acme/mine` — Mine (takes input: no; draft only, yours to run");
+    expect(out).toContain("`@acme/theirs` — Theirs (takes input: no; draft only, not runnable");
+    // The one the caller cannot write must not be advertised as runnable.
+    const theirs = out.split("\n").find((line) => line.includes("@acme/theirs"))!;
+    expect(theirs).not.toContain("version=draft");
+  });
+
+  it("says nothing about the draft for a PUBLISHED agent", () => {
+    // The negative control: the suffix is about the draft, not about authorship
+    // — an author of a published agent gets the plain line.
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      agents: [
+        {
+          package_id: "@acme/shipped",
+          display_name: "Shipped",
+          takes_input: true,
+          published: true,
+          home_writable: true,
+        },
+      ],
+    });
+    expect(out).toContain("`@acme/shipped` — Shipped (takes input: yes)");
+    expect(out).not.toContain("draft only");
+  });
+
   it("states explicitly when the user has no connected integrations", () => {
     const out = formatCallerContext({
       user: { name: "Ada", email: "ada@acme.com" },

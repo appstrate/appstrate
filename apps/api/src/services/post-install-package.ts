@@ -18,6 +18,12 @@ export async function postInstallPackage(params: {
   content: string;
   files: Record<string, Uint8Array>;
   zipBuffer: Buffer;
+  /**
+   * Home space for a row this call has to CREATE (a skill the bundle brought
+   * along) — the importing space, which owns what it imports. An existing
+   * package keeps the home it already has: an install never moves a package.
+   */
+  homeSpaceId: string;
   /** Preserve the caller's creation intent: a concurrent insertion must conflict. */
   create: boolean;
   draftManifest?: Record<string, unknown>;
@@ -45,6 +51,7 @@ export async function postInstallPackage(params: {
         type: packageType,
         content,
         createdBy: userId,
+        homeSpaceId: params.homeSpaceId,
         manifest: params.draftManifest ?? manifest,
         files,
       })

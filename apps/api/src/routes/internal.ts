@@ -459,7 +459,7 @@ export function createInternalRouter() {
 
   /**
    * Pin: the running agent must declare this integration in
-   * `dependencies.integrations` AND it must be installed in the run's
+   * `dependencies.integrations` AND it must be ACTIVE in the run's
    * space. Same guard used by /mcp-server-bundle and the
    * /integration-credentials endpoints to keep a leaked run token from
    * enumerating integration secrets across the org.
@@ -491,10 +491,10 @@ export function createInternalRouter() {
       throw notFound(`Integration '${packageId}' is not a dependency of the running agent`);
     }
     // Same activation rule as the spawn resolver / agent readiness (single
-    // source of truth): an installed-and-enabled row OR a system integration
+    // source of truth): an enabled row OR a system integration
     // auto-active with no row. A disabled row stays inactive.
     if (!(await isIntegrationActive(packageId, run.spaceId))) {
-      throw notFound(`Integration '${packageId}' is not installed in this space`);
+      throw notFound(`Integration '${packageId}' is not active in this space`);
     }
   }
 
@@ -642,7 +642,7 @@ export function createInternalRouter() {
   // mcp-server package via `source.server.name`; the sidecar fetches that
   // package's bundle here before spawning a runner. Authorised by the same
   // Bearer run-token as the credentials surface; additionally verifies the
-  // run's agent declares an installed integration that references this
+  // run's agent declares an ACTIVE integration that references this
   // mcp-server, so a leaked run token can't enumerate arbitrary server source.
   //
   // An ephemeral CONNECT run (`runAt: "link"` connect.tool login) reaches this
@@ -765,7 +765,7 @@ export function createInternalRouter() {
   /**
    * Authorise an mcp-server bundle fetch: the running agent must declare at
    * least one integration (in `dependencies.integrations`) that (a) is
-   * installed in the run's space AND (b) references this mcp-server via
+   * active in the run's space AND (b) references this mcp-server via
    * `source.server.name`. This keeps a leaked run token from enumerating
    * arbitrary server source across the org.
    */
@@ -791,7 +791,7 @@ export function createInternalRouter() {
     const deps = asRecord(asRecord(effective.manifest).dependencies);
     const integrations = asRecord(deps.integrations);
     for (const integrationId of Object.keys(integrations)) {
-      // Same activation rule as everywhere else (installed-and-enabled row, or
+      // Same activation rule as everywhere else (an enabled row, or
       // system integration auto-active with no row); skip inactive ones.
       if (!(await isIntegrationActive(integrationId, run.spaceId))) continue;
       // Read the integration manifest AT the version frozen for this run
@@ -826,7 +826,7 @@ export function createInternalRouter() {
  * the bare status (`doRefresh` in `integration-credentials-source.ts`) and
  * would mislabel a gone definition as a dead connection. `404` is what this
  * same endpoint already returns for "that integration is not a dependency of
- * the running agent" / "not installed", so reusing it for a deleted agent
+ * the running agent" / "not active", so reusing it for a deleted agent
  * would put two unrelated causes behind one status — the illegibility this
  * whole path exists to remove (the pre-existing `notFound("Agent not
  * found")` was exactly that). Keeping one status and splitting the code

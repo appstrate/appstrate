@@ -19,7 +19,7 @@ import {
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { schedulesPaths } from "../../../src/openapi/paths/schedules.ts";
 import { responses } from "../../../src/openapi/responses.ts";
 
@@ -69,7 +69,7 @@ describe("Schedules API", () => {
 
     it("returns schedules for the org", async () => {
       const fid = agentId("sched-agent");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -105,6 +105,7 @@ describe("Schedules API", () => {
       const fid = agentId("input-sched");
       const agent = await seedAgent({
         id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
         draftManifest: {
@@ -244,7 +245,12 @@ describe("Schedules API", () => {
   describe("POST /api/agents/:scope/:name/schedules", () => {
     it("creates a schedule for an agent", async () => {
       const fid = agentId("cron-agent");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -271,7 +277,12 @@ describe("Schedules API", () => {
 
     it("rejects invalid cron expression", async () => {
       const fid = agentId("bad-cron");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -287,7 +298,12 @@ describe("Schedules API", () => {
 
     it("rejects generation settings unsupported by the overridden model", async () => {
       const fid = agentId("unsupported-generation");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
       const credential = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
@@ -324,7 +340,12 @@ describe("Schedules API", () => {
     // absence — and these two cases are what pin it on the schedule surfaces.
     it("names the generation_config_override field when no model resolves at all", async () => {
       const fid = agentId("sched-no-model");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -357,7 +378,12 @@ describe("Schedules API", () => {
 
     it("accepts a flat connection_overrides map on create and round-trips it", async () => {
       const fid = agentId("co-create");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const overrides = { "@runorg/svc": "conn_abc123" };
@@ -377,7 +403,12 @@ describe("Schedules API", () => {
 
     it("rejects the legacy nested connection_overrides shape with 400", async () => {
       const fid = agentId("co-nested");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -395,7 +426,12 @@ describe("Schedules API", () => {
 
     it("updates connection_overrides via PUT and round-trips the flat map", async () => {
       const fid = agentId("co-update");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      const agent = await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
@@ -422,7 +458,7 @@ describe("Schedules API", () => {
   describe("PUT /api/schedules/:id", () => {
     it("updates schedule name and cron", async () => {
       const fid = agentId("upd-agent");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
@@ -450,7 +486,7 @@ describe("Schedules API", () => {
 
     it("reconciles the generation override when the model changes", async () => {
       const fid = agentId("reconcile-generation");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
@@ -482,7 +518,7 @@ describe("Schedules API", () => {
     // Update half of the same pin — see the create-route case above.
     it("names the generation_config_override field when no model resolves at all", async () => {
       const fid = agentId("sched-update-no-model");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
@@ -509,7 +545,12 @@ describe("Schedules API", () => {
   describe("actor selection (#738)", () => {
     it("creates a schedule pinned to another org member", async () => {
       const fid = agentId("actor-member");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
       const other = await createTestUser();
       await addOrgMember(ctx.orgId, other.id, "member");
@@ -532,7 +573,12 @@ describe("Schedules API", () => {
 
     it("creates a schedule pinned to an end-user", async () => {
       const fid = agentId("actor-eu");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
       const eu = await seedEndUser({
         orgId: ctx.orgId,
@@ -559,7 +605,12 @@ describe("Schedules API", () => {
 
     it("defaults the actor to the caller when omitted", async () => {
       const fid = agentId("actor-default");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -575,7 +626,12 @@ describe("Schedules API", () => {
 
     it("rejects a user_id that is not an org member", async () => {
       const fid = agentId("actor-foreign");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
       const stranger = await createTestUser();
 
@@ -593,7 +649,12 @@ describe("Schedules API", () => {
 
     it("rejects an unknown end_user_id with 400 (not 404)", async () => {
       const fid = agentId("actor-bad-eu");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -610,7 +671,12 @@ describe("Schedules API", () => {
 
     it("rejects an empty actor object with 400", async () => {
       const fid = agentId("actor-empty");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -624,7 +690,7 @@ describe("Schedules API", () => {
 
     it("keeps connection_overrides when the actor is unchanged on update", async () => {
       const fid = agentId("actor-same");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
@@ -650,7 +716,12 @@ describe("Schedules API", () => {
 
     it("rejects both user_id and end_user_id together", async () => {
       const fid = agentId("actor-both");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -667,7 +738,7 @@ describe("Schedules API", () => {
 
     it("re-points the actor on update and resets connection_overrides", async () => {
       const fid = agentId("actor-upd");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       await publish(fid);
       const other = await createTestUser();
       await addOrgMember(ctx.orgId, other.id, "member");
@@ -694,7 +765,7 @@ describe("Schedules API", () => {
 
     it("leaves the actor untouched when update omits it", async () => {
       const fid = agentId("actor-keep");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
@@ -719,7 +790,7 @@ describe("Schedules API", () => {
   describe("DELETE /api/schedules/:id", () => {
     it("deletes a schedule", async () => {
       const fid = agentId("del-agent");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -740,7 +811,7 @@ describe("Schedules API", () => {
   describe("GET /api/schedules/:id", () => {
     it("returns a single schedule by id", async () => {
       const fid = agentId("get-sched");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -775,7 +846,11 @@ describe("Schedules API", () => {
     it("returns 404 for schedule belonging to another org", async () => {
       const otherCtx = await createTestContext();
       const fid = `@${otherCtx.org.slug}/other-agent`;
-      const agent = await seedAgent({ id: fid, orgId: otherCtx.orgId });
+      const agent = await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: otherCtx.orgId,
+      });
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: otherCtx.orgId,
@@ -794,7 +869,7 @@ describe("Schedules API", () => {
   describe("GET /api/schedules/:id/runs", () => {
     it("returns runs for a schedule", async () => {
       const fid = agentId("exec-sched");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -827,7 +902,7 @@ describe("Schedules API", () => {
 
     it("returns empty array when no runs exist", async () => {
       const fid = agentId("empty-exec");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      const agent = await seedAgent({ id: fid, homeSpaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -960,8 +1035,13 @@ describe("Schedules API", () => {
 
     it("404s a never-published agent at the write, exactly as POST …/run does", async () => {
       const fid = agentId("never-published");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
 
       const res = await post(fid, {});
 
@@ -1002,14 +1082,27 @@ describe("Schedules API", () => {
       for (const [label, op] of writes) {
         expect(Object.keys(op.responses), label).toContain("404");
         // The SAME component on both, which is what stops them drifting apart
-        // again: an inline description on one is a second source of truth.
-        expect(op.responses["404"], label).toEqual({
-          $ref: "#/components/responses/NoPublishedVersion",
-        });
+        // again: the publish cause is stated once, in the component.
+        expect(op.responses["404"].$ref, label).toBe("#/components/responses/NoPublishedVersion");
         // …and the cause the invalid-timezone refusal answers with, which POST
         // never declared either.
         expect(op.responses["400"].description, label).toContain("timezone");
       }
+
+      // Where the two writes legitimately DIFFER. Creating a schedule is an
+      // execution decision and mounts `requireActiveAgent()`, so its 404 has
+      // two more causes; `PUT /api/schedules/{id}` takes a schedule id, mounts
+      // no agent lookup at all, and must not claim refusals it cannot raise —
+      // that is the CONTROL half of this assertion.
+      //
+      // A sibling `description` REPLACES the component's in every renderer, so
+      // POST's has to be complete: it must still name the publish cause it is
+      // overriding, or the contract loses it on this operation.
+      const createDescription = writes[0]![1].responses["404"].description as string;
+      expect(createDescription).toContain("no_published_version");
+      expect(createDescription).toContain("agent_not_found");
+      expect(createDescription).toContain("agent_not_active_in_space");
+      expect(writes[1]![1].responses["404"].description).toBeUndefined();
 
       // The component the two `$ref`s resolve to actually names the code…
       expect(responses.NoPublishedVersion.description).toContain("no_published_version");
@@ -1049,8 +1142,13 @@ describe("Schedules API", () => {
     describe("a legacy schedule on a never-published agent", () => {
       async function seedLegacy(name: string): Promise<string> {
         const fid = agentId(name);
-        const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-        await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
+        const agent = await seedAgent({
+          id: fid,
+          homeSpaceId: ctx.defaultSpaceId,
+          orgId: ctx.orgId,
+          createdBy: ctx.user.id,
+        });
+        await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
         const schedule = await seedSchedule({
           packageId: agent.id,
           orgId: ctx.orgId,
@@ -1115,7 +1213,12 @@ describe("Schedules API", () => {
   describe("timezone is refused at the write", () => {
     it("rejects an unknown zone with 400 on create", async () => {
       const fid = agentId("tz-create");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -1131,7 +1234,12 @@ describe("Schedules API", () => {
 
     it("accepts a real zone and actually schedules it (control)", async () => {
       const fid = agentId("tz-ok");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -1149,7 +1257,12 @@ describe("Schedules API", () => {
 
     it("rejects an unknown zone with 400 on update", async () => {
       const fid = agentId("tz-update");
-      const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      const agent = await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
@@ -1172,7 +1285,12 @@ describe("Schedules API", () => {
 
     it("still blames cron_expression for a bad expression (control)", async () => {
       const fid = agentId("tz-bad-cron");
-      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await seedAgent({
+        id: fid,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+      });
       await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {

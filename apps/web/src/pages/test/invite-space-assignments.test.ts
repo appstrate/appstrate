@@ -1,55 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The invite form's cross-field rules between the org role and the per-space
- * assignments.
+ * The invite form's cross-field rule between the org role and the per-space
+ * assignments, and the list each role actually sends.
  *
- * They are pure functions so the validity half can be a react-hook-form
- * `Controller` `validate` rule, letting RHF own the error lifecycle; an error
- * set on an unregistered field name is never cleared. What is pinned here is
- * the verdict itself, and the list each role actually sends.
+ * There is only one rule left, and it is a transform rather than a verdict:
+ * `admin` sends nothing. The "a guest must name a space" rule is gone on both
+ * sides — every membership provisions the member's own personal space (RBAC
+ * spec §3.6), so a guest invited for one shared package needs no team grant.
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  assignmentsFor,
-  toSpaceAssignments,
-  validateSpaceAssignments,
-} from "../../lib/space-assignments.ts";
+import { assignmentsFor, toSpaceAssignments } from "../../lib/space-assignments.ts";
 
-const MESSAGE = "pick at least one space";
 const ONE = [{ space_id: "spc_1", preset_role: "operator" as const }];
-
-describe("validateSpaceAssignments", () => {
-  it("refuses a guest with no assignment", () => {
-    expect(validateSpaceAssignments("guest", [], MESSAGE)).toBe(MESSAGE);
-  });
-
-  it("accepts a guest once one space is assigned", () => {
-    expect(validateSpaceAssignments("guest", ONE, MESSAGE)).toBe(true);
-  });
-
-  it("refuses a guest whose only row is still half-filled", () => {
-    // A row is added space-first; until it carries a role it produces no wire
-    // assignment, so it must not satisfy the rule either.
-    expect(
-      validateSpaceAssignments(
-        "guest",
-        toSpaceAssignments([{ space_id: "spc_1", role: "" }]),
-        MESSAGE,
-      ),
-    ).toBe(MESSAGE);
-  });
-
-  it("accepts a member with no assignment — they fall back to the open spaces", () => {
-    expect(validateSpaceAssignments("member", [], MESSAGE)).toBe(true);
-  });
-
-  it("accepts an admin either way — they run every space and the list is dropped", () => {
-    expect(validateSpaceAssignments("admin", [], MESSAGE)).toBe(true);
-    expect(validateSpaceAssignments("admin", ONE, MESSAGE)).toBe(true);
-  });
-});
 
 describe("assignmentsFor", () => {
   it("drops an admin's rows", () => {

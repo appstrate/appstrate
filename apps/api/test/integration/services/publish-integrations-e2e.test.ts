@@ -32,7 +32,7 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   apiIntegrationManifest,
@@ -132,6 +132,7 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
+      homeSpaceId: ctx.defaultSpaceId,
       draftManifest: localIntegrationManifest({
         name: INTEG,
         version: "1.0.0",
@@ -140,7 +141,7 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
         tools_policy: { search: {} },
       }),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -175,6 +176,7 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
+      homeSpaceId: ctx.defaultSpaceId,
       draftManifest: apiIntegrationManifest({
         name: INTEG,
         version: "1.0.0",
@@ -182,7 +184,7 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
         auths: API_KEY_AUTH,
       }),
     });
-    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx, INTEG);
 
     const specs = await publishAndResolve(ctx, "@e2eorg/agent-api", INTEG, "api_call");

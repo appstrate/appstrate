@@ -121,7 +121,7 @@ export const schedulesPaths = {
                 version_override: {
                   type: "string",
                   description:
-                    "Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). The pinned definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is pinned.",
+                    "Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected.",
                 },
                 connection_overrides: {
                   type: "object",
@@ -132,7 +132,7 @@ export const schedulesPaths = {
                 dependency_overrides: {
                   type: "object",
                   description:
-                    'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire.',
+                    'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. A `draft` entry requires WRITE authority on THAT dependency, proved at THIS write (`403 draft_not_writable` naming it) and never re-checked at fire time — the authority belongs to the principal who wrote the schedule, frozen exactly as `connection_overrides` are. A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
                   additionalProperties: { type: "string" },
                 },
                 actor: {
@@ -203,11 +203,21 @@ export const schedulesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — including `draft_not_writable` when `version_override` is `draft` and the caller cannot WRITE the agent, or a `dependency_overrides` entry is `draft` on a dependency they cannot WRITE (the message names it). Authority is checked at this write; the scheduler does not re-check at fire time.",
+        },
         // Shared with `PUT /api/schedules/{id}`: both writes resolve the
         // manifest the schedule will FIRE, so both refuse a never-published
-        // agent with `no_published_version`.
-        "404": { $ref: "#/components/responses/NoPublishedVersion" },
+        // agent with `no_published_version`. Arming a schedule is an execution
+        // decision, so this door also carries the activation refusal — LISTING
+        // an agent's schedules does not.
+        "404": {
+          $ref: "#/components/responses/NoPublishedVersion",
+          description:
+            "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`).",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -301,7 +311,7 @@ export const schedulesPaths = {
                 version_override: {
                   type: ["string", "null"],
                   description:
-                    "Version selector (`draft` | `published` | version spec). Pass `null` to clear (falls back to the default `published` — latest published version; the working copy is opt-in via `draft` only).",
+                    "Version selector (`draft` | `published` | version spec). Pass `null` to clear (back to the latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent, but only when this patch MOVES the selector: re-sending the value the row already holds decides nothing and is never refused, so a member editing the cron of someone else's draft schedule is not asked for an authority the request does not exercise.",
                 },
                 connection_overrides: {
                   type: ["object", "null"],
@@ -312,7 +322,7 @@ export const schedulesPaths = {
                 dependency_overrides: {
                   type: ["object", "null"],
                   description:
-                    'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create.',
+                    'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. WRITE authority is proved per KEY and only for the keys this patch MOVES: a `draft` entry whose value the row already holds was proved at the write that introduced it, and re-sending it decides nothing.',
                   additionalProperties: { type: "string" },
                 },
                 actor: {
@@ -355,7 +365,11 @@ export const schedulesPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Insufficient permissions — including `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged.",
+        },
         // Two causes, both on this one response: `loadScheduleOr404` runs
         // first (unknown schedule id — the dominant 404 here), and a patch
         // carrying `input` or `version_override` additionally runs the same

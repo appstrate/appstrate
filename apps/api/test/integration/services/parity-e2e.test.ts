@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { persistRunEvent } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { createReducerSink } from "@appstrate/afps-runtime/sinks";
@@ -35,8 +35,13 @@ describe("Parity E2E — full adapter stack", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext();
-    await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
+    await seedAgent({
+      id: agentId,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const run = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,

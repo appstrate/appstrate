@@ -278,11 +278,10 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // — read it from there instead of re-querying the user table on every
     // session-backed request.
     //
-    // This used to say "and `cookieCache` is disabled", which is no longer
-    // true in the absolute: it is an operator knob
+    // `cookieCache` is an operator knob
     // (`AUTH_SESSION_COOKIE_CACHE_SECONDS`, `packages/db/src/auth.ts`),
     // defaulting to off. Nothing here depends on which way it is set — the
-    // cached cookie carries the same declared fields — but the fallback
+    // cached cookie carries the same declared fields — and the fallback
     // below is what keeps the read correct either way.
     //
     // Fall back to the user-table lookup only

@@ -20,7 +20,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedSpace, seedInstalledPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
 import { integrationConnections } from "@appstrate/db/schema";
@@ -200,6 +200,7 @@ describe("Me API (/api/me)", () => {
       await seedPackage({
         id: "@ctx/triage",
         orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
         draftManifest: {
           name: "@ctx/triage",
           version: "0.1.0",
@@ -209,14 +210,22 @@ describe("Me API (/api/me)", () => {
           input: { schema: { type: "object", properties: { folder: { type: "string" } } } },
         },
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/triage");
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/triage");
 
       // Installed but disabled in the space → must NOT appear.
-      await seedPackage({ id: "@ctx/disabled", orgId: ctx.orgId });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/disabled", { enabled: false });
+      await seedPackage({
+        id: "@ctx/disabled",
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/disabled", { enabled: false });
 
       // Owned by the org but NOT installed in this space → must NOT appear.
-      await seedPackage({ id: "@ctx/uninstalled", orgId: ctx.orgId });
+      await seedPackage({
+        id: "@ctx/uninstalled",
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+      });
 
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
@@ -249,6 +258,7 @@ describe("Me API (/api/me)", () => {
         id: "@ctx/web-research",
         orgId: ctx.orgId,
         type: "skill",
+        homeSpaceId: ctx.defaultSpaceId,
         draftManifest: {
           name: "@ctx/web-research",
           version: "1.2.0",
@@ -257,14 +267,24 @@ describe("Me API (/api/me)", () => {
           description: "Searches the web.",
         },
       });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/web-research");
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/web-research");
 
       // Installed but disabled in the space → must NOT appear.
-      await seedPackage({ id: "@ctx/skill-disabled", orgId: ctx.orgId, type: "skill" });
-      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/skill-disabled", { enabled: false });
+      await seedPackage({
+        id: "@ctx/skill-disabled",
+        orgId: ctx.orgId,
+        type: "skill",
+        homeSpaceId: ctx.defaultSpaceId,
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/skill-disabled", { enabled: false });
 
       // Owned by the org but NOT installed in this space → must NOT appear.
-      await seedPackage({ id: "@ctx/skill-uninstalled", orgId: ctx.orgId, type: "skill" });
+      await seedPackage({
+        id: "@ctx/skill-uninstalled",
+        orgId: ctx.orgId,
+        type: "skill",
+        homeSpaceId: ctx.defaultSpaceId,
+      });
 
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
@@ -371,6 +391,63 @@ describe("Me API (/api/me)", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: Group[] };
       expect(body.data.find((g) => g.source_id === "@conn/secret")).toBeUndefined();
+    });
+
+    // `reused_by_agents` is a claim about RUNS, so it counts the agents the
+    // space is ACTIVE for — not the `space_packages` rows it happens to hold.
+    it("counts only the agents the space RUNS in reused_by_agents", async () => {
+      const ctx = await createTestContext({ orgSlug: "reuse-org" });
+      const INTEGRATION = "@conn/reuse";
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+        userId: ctx.user.id,
+      });
+
+      const declaring = (id: string): Record<string, unknown> => ({
+        name: id,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: id,
+        dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+      });
+
+      for (const [id, home, enabled] of [
+        ["@reuse/runs-here", ctx.defaultSpaceId, true],
+        ["@reuse/switched-off", ctx.defaultSpaceId, false],
+      ] as const) {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "agent",
+          homeSpaceId: home,
+          draftManifest: declaring(id),
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, id, { enabled });
+      }
+      // ORPHAN: a row here, homed elsewhere, offered to nobody.
+      const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+      await seedPackage({
+        id: "@reuse/orphan",
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: elsewhere.id,
+        draftManifest: declaring("@reuse/orphan"),
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@reuse/orphan");
+
+      const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{
+          source_id: string;
+          connections: Array<{ reused_by_agents: number }>;
+        }>;
+      };
+      const group = body.data.find((g) => g.source_id === INTEGRATION);
+      expect(group?.connections[0]?.reused_by_agents).toBe(1);
     });
 
     it("returns 401 without authentication", async () => {

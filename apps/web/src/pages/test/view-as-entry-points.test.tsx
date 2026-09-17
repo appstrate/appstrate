@@ -59,6 +59,7 @@ function space(): components["schemas"]["SpaceObject"] {
     settings: {},
     visibility: "open",
     default_role: "viewer",
+    personal: false,
     access: "member",
     role: null,
     permissions: ["space-members:read", "space-members:invite"],

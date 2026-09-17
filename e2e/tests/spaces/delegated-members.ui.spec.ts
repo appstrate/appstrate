@@ -352,12 +352,17 @@ test("an operator's runs page and run detail hold only its own runs", async ({
   });
   expect(model.status()).toBe(201);
 
+  // No `?version=` selector: an operator holds `agents:run` and no
+  // `agents:write`, so the draft is not theirs to launch (`403
+  // draft_not_writable`). An omitted selector runs the version
+  // `POST /packages/agents` published at creation — which is what these two
+  // launch, and all this test needs is that each run exists and is theirs.
   async function launch(member: AuthResult, agent: string): Promise<string> {
     const res = await createApiClient(request, {
       cookie: member.cookie,
       orgId: browserCtx.org.orgId,
       spaceId,
-    }).post(`/agents/${scope}/${agent}/run?version=draft`, {});
+    }).post(`/agents/${scope}/${agent}/run`, {});
     expect(res.status()).toBe(201);
     return (await res.json()).id;
   }

@@ -343,7 +343,7 @@ function projectConnectionsUsed(
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
   return {
     ...runRowToWireDto(r.run),
-    // Resolved input includes editor-imposed values. Current installation locks
+    // Resolved input includes editor-imposed values. The placement's current locks
     // cannot protect historical values after an unlock or reinstall, so readers
     // without agents:read get no registered-agent input. Inline input is entirely
     // caller-provided. Storage remains complete for execution and server-side rerun.
@@ -1327,6 +1327,40 @@ export async function getRunningRunsForPackage(
   visibility?: SQL,
 ): Promise<number> {
   return countActiveRunsForPackage(db, scope, packageId, visibility);
+}
+
+/**
+ * Single definition of "this container has live runs", for the DELETIONS that
+ * must refuse while one is executing: an organization
+ * (`reserveOrgDeletion` / `deleteOrganization`) and a space (`deleteSpace`).
+ * Both cascade-drop `runs`/`run_logs`, so removing the parent while a run is
+ * live rips the rows out from under a running container.
+ *
+ * ONE function, and one status set, because the pre-flight and the
+ * in-transaction backstop of each deletion must agree exactly: a pre-flight
+ * with a narrower set lets a caller past a check the transaction then refuses,
+ * which is the precise failure the pre-flight exists to prevent (for the org,
+ * after the destructive `onOrgDelete` handlers have already run).
+ *
+ * `handle` accepts the base client (pre-flight, own snapshot) or an open
+ * transaction (backstop, seeing the transaction's locks). Omit `spaceId` for
+ * the whole organization.
+ */
+export async function countInProgressRuns(
+  handle: Db | DbTx,
+  scope: OrgScope & { spaceId?: string },
+): Promise<number> {
+  const [row] = await handle
+    .select({ inProgressCount: count() })
+    .from(runs)
+    .where(
+      scopedWhere(runs, {
+        orgId: scope.orgId,
+        ...(scope.spaceId !== undefined ? { spaceId: scope.spaceId } : {}),
+        extra: [inArray(runs.status, [...activeRunStatusValues])],
+      }),
+    );
+  return row?.inProgressCount ?? 0;
 }
 
 /**

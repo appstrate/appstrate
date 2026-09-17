@@ -11,11 +11,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { seedPackage, seedPackageShare, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { attachConnectOffers } from "../../../src/services/connect/preflight-connect-offer.ts";
+import { isUserConnectionCreationBlocked } from "../../../src/services/integration-connection-resolver.ts";
 import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
 import type { IntegrationManifestCache } from "../../../src/services/integration-service.ts";
 import type { ResolutionFieldError } from "../../../src/lib/errors.ts";
@@ -64,12 +65,13 @@ describe("attachConnectOffers — block_user_connections", () => {
     ctx = await createTestContext({ orgSlug: "offers" });
     await seedPackage({
       id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
       draftManifest: oauthManifest() as unknown as Record<string, unknown>,
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
     await db
       .update(spacePackages)
       .set({ blockUserConnections: true })
@@ -111,5 +113,43 @@ describe("attachConnectOffers — block_user_connections", () => {
       space_id: ctx.defaultSpaceId,
       package_id: INTEGRATION,
     });
+  });
+});
+
+/**
+ * The gate reads the flag off a `space_packages` row, and a row only speaks
+ * for a space the package is PLACED in — but it must NOT require `enabled`: a
+ * lock recorded on an integration the space later switched off is still the
+ * space's own decision.
+ */
+describe("isUserConnectionCreationBlocked — the row must be placed", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "blocked" });
+  });
+
+  it("ignores an ORPHAN row's flag, and honours a placed one with the switch off", async () => {
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    await seedPackage({
+      id: INTEGRATION,
+      homeSpaceId: elsewhere.id,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: oauthManifest() as unknown as Record<string, unknown>,
+    });
+    // A row here, homed elsewhere, offered to nobody: no placement, no say.
+    await seedSpacePackage(ctx.defaultSpaceId, INTEGRATION, { blockUserConnections: true });
+    expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, INTEGRATION)).toBe(false);
+
+    // The offer places it. The lock now holds — even switched OFF.
+    await seedPackageShare(ctx.defaultSpaceId, INTEGRATION);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEGRATION, {
+      enabled: false,
+      blockUserConnections: true,
+    });
+    expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, INTEGRATION)).toBe(true);
   });
 });

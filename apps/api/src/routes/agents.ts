@@ -19,15 +19,14 @@ import { validateAgainstSchema } from "../services/schema.ts";
 import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import {
-  listAccessiblePackages,
-  updateInstalledPackage,
-  getInstalledPackageSettings,
-  hasPackageAccess,
+  listActivePackages,
+  updateSpacePackage,
+  getSpacePackageSettings,
 } from "../services/space-packages.ts";
-import { getPackage } from "../services/package-catalog.ts";
+import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
-import { requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
@@ -52,6 +51,9 @@ import {
 import {
   agentReadIsSummary,
   assertCatalogPackageAccess,
+  assertDraftSelectorAllowed,
+  assertPackageCopyAllowed,
+  defaultDefinitionSelector,
   packageAccessSpaces,
   requireAgentRead,
 } from "../lib/package-access.ts";
@@ -133,11 +135,12 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * Authorize the DEPENDENCY bytes an export is about to hand out.
  *
  * `agents:read` covers the root agent, whose files the export narrows to
- * `manifest.json` + `prompt.md`. Dependencies are a different surface: both
- * catalogs put a dependency's ENTIRE stored file map into the archive
- * (`DraftPackageCatalog.fetch` reads `downloadPackageFiles` whole,
- * `DbPackageCatalog.fetch` extracts the whole published artifact). A bundle
- * carrying a skill therefore hands out exactly the bytes
+ * `manifest.json` + `prompt.md`. Dependencies are a different surface: the
+ * catalog puts a dependency's ENTIRE stored file map into the archive
+ * (`DbPackageCatalog.fetch` extracts the whole published artifact — the same
+ * catalog for a `?source=draft` export as for a published one, since only the
+ * ROOT of a draft export is a working copy). A bundle carrying a skill
+ * therefore hands out exactly the bytes
  * `GET /api/packages/{scope}/{name}/files[/content]` serves — and #1123/#1124
  * settled that those need `skills:read`, resolved per package TYPE rather than
  * one blanket scope. Without this guard the export is a looser door to the same
@@ -156,7 +159,6 @@ async function requireBundleDependencyReadPermissions(
   bundle: Bundle,
 ): Promise<void> {
   const checked = new Set<string>();
-  const accessible = await packageAccessSpaces(c);
   for (const [identity, pkg] of bundle.packages) {
     if (identity === bundle.root) continue;
     const rawType = asRecord(pkg.manifest).type;
@@ -180,7 +182,7 @@ async function requireBundleDependencyReadPermissions(
       // as every route-level RBAC call site.
       await guard(c, async () => {});
     }
-    await assertCatalogPackageAccess(c, parsed.packageId, accessible);
+    await assertCatalogPackageAccess(c, parsed.packageId);
   }
 }
 
@@ -192,9 +194,14 @@ export function createAgentsRouter() {
     const scope = getSpaceScope(c);
     const summaryOnly = agentReadIsSummary(c);
 
-    // Single query: system packages + installed packages via LEFT JOIN
+    // Single query: the activation rule (`activeHereSql` — placed here AND
+    // switched on, or a system agent with no row) via LEFT JOIN. This page
+    // answers "what can I launch here?", so every row on it is launchable;
+    // an agent merely placed here, offered or switched off, lives on the
+    // space library instead (`GET /api/spaces/{spaceId}/library`), which
+    // carries its origin, its state and the switch.
     const [rows, runningCounts] = await Promise.all([
-      listAccessiblePackages(scope, "agent"),
+      listActivePackages(scope, "agent"),
       getRunningRunCounts(scope, runVisibilityFilter(c)),
     ]);
 
@@ -245,8 +252,16 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     requireAgent(),
     async (c) => {
-      const agent = c.get("package");
-
+      const scope = getSpaceScope(c);
+      const loaded = c.get("package");
+      // The manifest whose input schema these values must satisfy: the DRAFT
+      // for an author who can write this agent — they are editing it — and the
+      // latest published version for anybody else configuring an agent they
+      // merely operate. The same selector the detail page rendered and the
+      // readiness badge judged (`defaultDefinitionSelector`), so the editor
+      // never validates against a definition the form did not show.
+      const { selector: version } = await defaultDefinitionSelector(c, loaded);
+      const { agent } = await resolveAgentRunVersion(loaded, version);
       const body = await readJsonBody(c, agentInputSettingsSchema);
       const schema = asJSONSchemaObject(
         agent.manifest.input?.schema ?? { type: "object" as const, properties: {} },
@@ -293,8 +308,7 @@ export function createAgentsRouter() {
       // AND unsatisfiable — every run would fail and nobody could see why.
       assertLockedFieldsSatisfiable(schema, body.locked_fields, values);
 
-      const scope = getSpaceScope(c);
-      await updateInstalledPackage(scope, agent.id, {
+      await updateSpacePackage(scope, agent.id, {
         inputSettings: { values, locked: body.locked_fields },
       });
 
@@ -330,8 +344,7 @@ export function createAgentsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
-      const spaceId = c.get("spaceId");
-      const { proxyId } = await getInstalledPackageSettings(spaceId, agent.id);
+      const { proxyId } = await getSpacePackageSettings(getSpaceScope(c), agent.id);
 
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
@@ -343,11 +356,11 @@ export function createAgentsRouter() {
   //
   // Same resolver, same pinned manifests as the run-kickoff 412 — but not the
   // whole kickoff gate: readiness also refuses an integration that is not
-  // installed/enabled in the space and excludes those ids from the resolver
-  // (`skipIntegrationIds`). This endpoint runs no install/enable gate, so such
+  // active in the space and excludes those ids from the resolver
+  // (`skipIntegrationIds`). This endpoint runs no activation gate, so such
   // an integration surfaces here as a connection problem. Adding the skip alone
   // would make it worse (the item would drop out of `blocks_run` while the run
-  // still refuses it); closing the gap means giving this DTO the install/enable
+  // still refuses it); closing the gap means giving this DTO the activation
   // verdict too — a wire change to the Connexions tab. The kickoff remains the
   // authority; this is what the badge renders.
   router.get(
@@ -356,6 +369,10 @@ export function createAgentsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
+      // Resolved ONCE and handed to both: the gate and the default selector ask
+      // the same question of the same package, and each one resolving the
+      // caller's spaces for itself is two full space walks per badge.
+      await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"));
       return c.json(
         await resolveAgentConnectionReadiness({
           scope: getSpaceScope(c),
@@ -364,7 +381,13 @@ export function createAgentsRouter() {
           // Drives `can_add_connection`: the same exemption the connect route
           // applies, so the badge cannot promise what the mutation refuses.
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
-          version: c.req.query("version"),
+          // The ROUTER decides which definition readiness judges, and it is
+          // EXACTLY the one the detail page rendered: an explicit selector (a
+          // `draft` one only for a caller who may write the agent), else
+          // `defaultDefinitionSelector`. Deriving it a second way is how the
+          // badge came to 404 a page that had just rendered. The service takes
+          // the answer and never re-derives it.
+          version: c.req.query("version") || (await defaultDefinitionSelector(c, agent)).selector,
         }),
       );
     },
@@ -380,7 +403,7 @@ export function createAgentsRouter() {
       const scope = getSpaceScope(c);
       const data = await readJsonBody(c, proxyIdSchema);
 
-      await updateInstalledPackage(scope, agent.id, { proxyId: data.proxyId });
+      await updateSpacePackage(scope, agent.id, { proxyId: data.proxyId });
 
       await recordAuditFromContext(c, {
         action: "agent.proxy_updated",
@@ -390,8 +413,8 @@ export function createAgentsRouter() {
       });
 
       // Return the bare proxy-setting resource — same shape and read path
-      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/proxy (#657).
-      const { proxyId } = await getInstalledPackageSettings(scope.spaceId, agent.id);
+      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/proxy (#657).
+      const { proxyId } = await getSpacePackageSettings(scope, agent.id);
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
   );
@@ -401,8 +424,7 @@ export function createAgentsRouter() {
   // run will resolve to, and the body carries no manifest and no prompt.
   router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgentRead, requireAgent(), async (c) => {
     const agent = c.get("package");
-    const spaceId = c.get("spaceId");
-    const { modelId, generationConfig } = await getInstalledPackageSettings(spaceId, agent.id);
+    const { modelId, generationConfig } = await getSpacePackageSettings(getSpaceScope(c), agent.id);
 
     return c.json({ modelId, generation: generationConfig });
   });
@@ -418,7 +440,7 @@ export function createAgentsRouter() {
       const data = await readJsonBody(c, modelIdSchema);
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
-      const current = await getInstalledPackageSettings(scope.spaceId, agent.id);
+      const current = await getSpacePackageSettings(scope, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
@@ -435,7 +457,7 @@ export function createAgentsRouter() {
         );
       }
 
-      await updateInstalledPackage(scope, agent.id, {
+      await updateSpacePackage(scope, agent.id, {
         modelId: data.modelId,
         ...(generation !== undefined ? { generationConfig: generation } : {}),
       });
@@ -448,11 +470,8 @@ export function createAgentsRouter() {
       });
 
       // Return the bare model-setting resource — same shape and read path
-      // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/model (#657).
-      const { modelId, generationConfig } = await getInstalledPackageSettings(
-        scope.spaceId,
-        agent.id,
-      );
+      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/model (#657).
+      const { modelId, generationConfig } = await getSpacePackageSettings(scope, agent.id);
       return c.json({ modelId, generation: generationConfig });
     },
   );
@@ -651,30 +670,30 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/bundle — export the agent as an .afps-bundle
   // (multi-package archive with pinned versions of every transitive dep).
   //
-  // We deliberately don't use `requireAgent()` here: that middleware folds
-  // "doesn't exist in org" and "exists in org but not installed in space"
-  // into a single opaque 404. The CLI's run-by-id flow needs to tell the
-  // two cases apart so it can prompt the user to install rather than
-  // suggest the package is mistyped. Inline check below distinguishes
-  // them via `agent_not_installed_in_space`.
+  // An EXECUTION door despite the verb: the bundle is what the CLI runs, so it
+  // mounts `requireActiveAgent()` like the other two. That middleware is what
+  // tells "not placed here" from "placed but switched off", which is the
+  // distinction the CLI's run-by-id flow needs to prompt for an activation
+  // rather than suggest a typo — and it lives there, once, so the three doors
+  // answer this agent the same way.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
     requirePermission("agents", "read"),
+    requireAgent(),
+    requireActiveAgent(),
     async (c) => {
       const scopeParam = c.req.param("scope")!;
       const nameParam = c.req.param("name")!;
       const packageId = `${scopeParam}/${nameParam}`;
       const orgId = c.get("orgId");
-      const spaceId = c.get("spaceId")!;
       const versionSpec = c.req.query("version") ?? null;
       const sourceQuery = c.req.query("source");
-      // `source=draft` mirrors the dashboard "Run" button: bundle the
-      // agent's current draft state instead of a published version. The
-      // CLI's run-by-id flow uses it so `appstrate run @scope/agent`
-      // works on never-published agents — same UX as clicking Run in
-      // the UI. Default stays `published` so the existing dashboard
-      // export flow (download a published archive) is unchanged.
+      // `source=draft` exports the agent's current draft state instead of a
+      // published version, for the authors who own that working copy: the CLI
+      // asks for it on an explicit `@draft` spec so a never-published agent can
+      // still be run locally. Default stays `published`, which is what every
+      // other caller — and every omitted selector — resolves to.
       // `version=…` is mutually exclusive with `source=draft`.
       if (sourceQuery && sourceQuery !== "draft" && sourceQuery !== "published") {
         throw new ApiError({
@@ -694,25 +713,31 @@ export function createAgentsRouter() {
         });
       }
 
-      const agent = await getPackage(packageId, orgId);
-      if (!agent) {
-        throw new ApiError({
-          status: 404,
-          code: "agent_not_found",
-          title: "Agent Not Found",
-          detail: `Agent '${packageId}' not found in this organization`,
-        });
-      }
-      if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
-        throw new ApiError({
-          status: 404,
-          code: "agent_not_installed_in_space",
-          title: "Agent Not Installed",
-          detail:
-            `Agent '${packageId}' exists in this organization but is not installed in space '${spaceId}'. ` +
-            `Install it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
-        });
-      }
+      const agent = c.get("package");
+      // A bundle is the agent AND every transitive dependency's stored files in
+      // one archive the caller walks away with — a COPY leaving the platform,
+      // which is what `org_settings.restrict_package_copy` governs (RBAC spec
+      // §6.10). Read + active is not enough: without this gate a restricted
+      // organization's `download` refusal is one `--local` run away from being
+      // pointless. Gated on the ROOT agent only (dependencies keep their own
+      // read-scope gate below), with skills and system packages exempt inside
+      // the helper. The consequence is deliberate: `appstrate run @scope/agent
+      // --local` answers 403 `package_copy_restricted` there. A SERVER-side run
+      // is unaffected; it assembles the same bundle without handing it over.
+      const accessible = await packageAccessSpaces(c);
+      const root = await assertCatalogPackageAccess(c, packageId);
+      await assertPackageCopyAllowed(c, root, { orgId, accessible });
+      // An EXPORTED draft is a draft run with the bytes handed over as well:
+      // the archive carries the unpublished manifest and prompt, and `--local`
+      // executes them on the caller's machine. Refusing `?version=draft` on the
+      // run route while serving the same definition here would make that 403 a
+      // formality, so the one predicate that says who owns a working copy
+      // decides both (403 `draft_not_writable`). It gates the ROOT, which is
+      // the only draft the archive carries: the closure resolves against
+      // published versions (`buildBundleFromAgentDraft`), so no dependency's
+      // working copy leaves by this door without its own `dependency_overrides`
+      // gate.
+      await assertDraftSelectorAllowed(c, packageId, useDraft ? "draft" : undefined);
       const scope = getSpaceScope(c);
 
       // Omit time-varying metadata (createdAt) so two exports of the same
@@ -730,7 +755,7 @@ export function createAgentsRouter() {
           bundle = await buildBundleFromAgentDraft(agent, scope, { builder: "appstrate-platform" });
           versionLabel = "draft";
         } else {
-          versionLabel = await resolveExportVersion(agent.id, scope, versionSpec);
+          versionLabel = await resolveExportVersion(agent.id, versionSpec);
           bundle = await buildBundleForAgentExport(agent.id, scope, {
             versionSpec: versionLabel,
             metadata: { builder: "appstrate-platform" },

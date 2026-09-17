@@ -63,6 +63,16 @@ export type AppEnv = {
     /** Role the caller holds in `space`, set by `applySpacePermissions`. */
     spaceRole?: import("../lib/space-role.ts").SpaceRoleRef;
     /**
+     * Per-request memo of `packageAccessSpaces`, keyed by organization — the
+     * caller's reach, which every authority and reachability decision reads, so
+     * one route asking it several times resolves it once. Owned by
+     * `lib/package-access.ts`; nothing else writes it.
+     */
+    packageAccessSpacesCache?: Map<
+      string,
+      Promise<import("../lib/package-access.ts").PackageAccessSpace[]>
+    >;
+    /**
      * Validated role preview: the persona whose reach answers this request
      * instead of the caller's own (`lib/view-as.ts`), set before any
      * `permissions` write. `user` and `orgRole` stay REAL — a persona restricts

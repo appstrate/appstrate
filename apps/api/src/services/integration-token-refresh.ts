@@ -57,7 +57,7 @@ interface IntegrationRefreshResult {
   /**
    * `true` when {@link scopesGranted} is non-null AND strictly narrower
    * than the connection's previously-stored `scopesGranted`. The IdP
-   * has shrunk the grant — caller should re-check installed agents'
+   * has shrunk the grant — caller should re-check the space's agents'
    * required scopes and flip `needsReconnection` if the shrink dropped
    * the actor below the minimum required set.
    *

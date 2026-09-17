@@ -16,7 +16,7 @@ import * as jose from "jose";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
-import { prefixedId } from "../../../../../lib/ids.ts";
+import { prefixedId } from "@appstrate/db/ids";
 
 const originalAppUrl = process.env.APP_URL;
 let jwksServer: ReturnType<typeof Bun.serve> | null = null;

@@ -78,7 +78,7 @@ export function ScheduleEditPage() {
         persistedModelId={deps.persistedModelId}
         persistedGenerationConfig={deps.persistedGenerationConfig}
         persistedProxyId={deps.persistedProxyId}
-        persistedVersion={deps.persistedVersion}
+        homeWritable={deps.homeWritable}
         packageId={schedule.packageId}
         agentIntegrations={deps.agentIntegrations}
         blockedMessage={deps.hasFileInputs ? t("schedule.fileInputBlocked") : undefined}

@@ -28,7 +28,13 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedPackage,
+  seedPackageShare,
+  seedPackageVersion,
+  seedRun,
+} from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 import {
   writeConnectRunGrant,
@@ -45,7 +51,7 @@ import {
 } from "../../helpers/integration-manifests.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { db } from "../../helpers/db.ts";
 import { integrationConnections } from "@appstrate/db/schema";
@@ -120,7 +126,8 @@ describe("/internal/* — connect-run grant authorization", () => {
       }),
     });
     if (installed) {
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+      await seedPackageShare(ctx.defaultSpaceId, id);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
   }
 
@@ -171,6 +178,7 @@ describe("/internal/* — connect-run grant authorization", () => {
     // ALLOW of its own to defend. It never declares OTHER_INTEGRATION.
     await seedAgent({
       id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
       draftManifest: {
@@ -183,7 +191,7 @@ describe("/internal/* — connect-run grant authorization", () => {
         integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedIntegrationPackage(INTEGRATION, MCP_SERVER, true);
     await seedIntegrationPackage(OTHER_INTEGRATION, OTHER_SERVER, true);
     await seedServer(MCP_SERVER, SERVER_VERSION, SERVER_BYTES);

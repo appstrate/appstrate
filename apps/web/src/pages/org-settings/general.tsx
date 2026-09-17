@@ -175,6 +175,51 @@ export function OrgSettingsGeneralPage() {
         </>
       )}
 
+      {can("org:settings") && (
+        <div className="border-border bg-card mb-4 rounded-lg border p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold">{t("orgSettings.restrictCopyTitle")}</h3>
+              <span className="text-muted-foreground text-sm">
+                {t("orgSettings.restrictCopyDesc")}
+              </span>
+            </div>
+            <Button
+              variant={orgSettings?.restrict_package_copy ? "default" : "outline"}
+              disabled={updateSettingsMutation.isPending}
+              onClick={() =>
+                updateSettingsMutation.mutate(
+                  {
+                    params: { path: { orgId: currentOrg.id } },
+                    body: { restrict_package_copy: !orgSettings?.restrict_package_copy },
+                  },
+                  {
+                    onSuccess: (data) => {
+                      toast.success(
+                        data.restrict_package_copy
+                          ? t("orgSettings.restrictCopyEnabled")
+                          : t("orgSettings.restrictCopyDisabled"),
+                      );
+                    },
+                    onError: (err) => {
+                      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
+                    },
+                  },
+                )
+              }
+            >
+              {updateSettingsMutation.isPending ? (
+                <Spinner />
+              ) : orgSettings?.restrict_package_copy ? (
+                t("orgSettings.restrictCopyDisable")
+              ) : (
+                t("orgSettings.restrictCopyEnable")
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {can("org:settings") && features.oidc && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">

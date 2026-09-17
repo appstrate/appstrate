@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { defaultRunVersion } from "../lib/version-selector";
 import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
@@ -27,6 +28,21 @@ import type { AgentDetail } from "@appstrate/shared-types";
 const MissingConnectionsModal = lazy(() =>
   import("./missing-connections-modal").then((m) => ({ default: m.MissingConnectionsModal })),
 );
+
+/**
+ * True when there is nothing this caller could launch: the package has no
+ * published version (`definition === "draft"` is all the detail route could
+ * render) and the working copy is not theirs to run. A launch would send no
+ * selector and the server would answer `404 no_published_version` — the same
+ * verdict, reached after a round trip and rendered as a toast.
+ *
+ * `undefined` while the detail is in flight, which reads as "runnable": the
+ * button is already pending then, and guessing the refusal would grey out a
+ * launch that is very likely fine.
+ */
+function isNeverPublishedForReader(detail: AgentDetail | undefined): boolean {
+  return !!detail && detail.definition === "draft" && !detail.home_writable;
+}
 
 interface RunAgentButtonProps {
   packageId: string;
@@ -63,12 +79,6 @@ export function RunAgentButton({
 }: RunAgentButtonProps) {
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
-  // The inline run button is an editor affordance: absent a pinned historical
-  // version (current/editor view → `version` undefined), it runs the working
-  // copy. That intent is made EXPLICIT here as `draft` — the transport hook no
-  // longer defaults, so this is the single place the editor's draft choice
-  // lives. A historical-version view passes its exact version through verbatim.
-  const runVersion = version ?? "draft";
   const runAgent = useRunAgent(packageId);
   const [inputOpen, setInputOpen] = useState(false);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
@@ -108,14 +118,27 @@ export function RunAgentButton({
   } = usePackageDetail("agent", providedDetail ? undefined : packageId, { enabled: false });
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
+  // Draft for whoever authors the package, no selector at all for everyone
+  // else — see `defaultRunVersion`.
+  const runVersion = version ?? defaultRunVersion(detail?.home_writable);
 
   /** Start the run: open the input modal when the agent declares input, else fire directly. */
   const startRun = (agentDetail: AgentDetail) => {
+    // The deferred-fetch path reaches here with a detail the disabled state
+    // never saw (list pages render this button without one). Same verdict,
+    // said the same way, rather than a 404 toast that names no cause.
+    if (isNeverPublishedForReader(agentDetail)) {
+      toast.error(t("detail.titleNeverPublished"));
+      return;
+    }
     const agentHasInput =
       !!agentDetail.input?.schema?.properties &&
       Object.keys(agentDetail.input.schema.properties).length > 0;
     if (!agentHasInput) {
-      runAgent.mutate({ version: runVersion }, { onError: onRunError });
+      runAgent.mutate(
+        { version: version ?? defaultRunVersion(agentDetail.home_writable) },
+        { onError: onRunError },
+      );
       return;
     }
     setInputOpen(true);
@@ -146,8 +169,16 @@ export function RunAgentButton({
     runAgent.reset();
   };
 
+  const neverPublished = isNeverPublishedForReader(detail);
   const isPending = isFetching || runAgent.isPending;
-  const isDisabled = disabled || isPending;
+  const isDisabled = disabled || isPending || neverPublished;
+  // Two different reasons the button is dead; the caller's own reason wins
+  // only when there is nothing to launch at all to say first.
+  const blockedTitle = neverPublished
+    ? t("detail.titleNeverPublished")
+    : disabled
+      ? disabledTitle
+      : undefined;
 
   if (!can("agents:run")) return null;
 
@@ -170,7 +201,7 @@ export function RunAgentButton({
           variant={variant}
           onClick={handleClick}
           disabled={isDisabled}
-          title={disabled ? disabledTitle : t("detail.run")}
+          title={blockedTitle ?? t("detail.run")}
           className="relative"
         >
           {isPending ? <Spinner /> : t("detail.run")}
@@ -183,7 +214,7 @@ export function RunAgentButton({
           className={`relative ${className ?? ""}`}
           onClick={handleClick}
           disabled={isDisabled}
-          title={disabled ? disabledTitle : t("detail.run")}
+          title={blockedTitle ?? t("detail.run")}
         >
           {isPending ? <Spinner /> : <Play size={14} />}
           {warningDot}

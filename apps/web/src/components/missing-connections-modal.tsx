@@ -31,19 +31,32 @@ import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/us
  * re-deriving an affordance from the static 412 payload (the previous code
  * filtered must_choose candidates down to the 412's `candidate_connection_ids`,
  * which dropped connections needing reconnection and so disagreed with the tab
- * dropdown). Only structural failures (integration not active, package missing)
- * keep a plain message: no connection pick can fix them.
+ * dropdown). Only structural failures — the integration is not active here, or
+ * its package is missing, mistyped or unloadable — keep a plain message: no
+ * connection pick can fix them.
  */
 
 export interface MissingIntegrationFieldError {
   field: string; // `integrations.{packageId}` (integration-level — auth_key lives on the candidate row)
+  /**
+   * The codes the server puts on an `integrations.*` item: the four verdicts
+   * `collectAgentReadinessErrors` raises about the integration PACKAGE
+   * (`agent-readiness.ts`) and the connection verdicts
+   * `integration-connection-resolver.ts` raises about the accounts behind it.
+   * `| string` keeps an unlisted one rendering its server message rather than
+   * crashing the row — it is not licence to adapt a shape nothing emits.
+   */
   code:
     | "not_connected"
     | "needs_reconnection"
     | "insufficient_scopes"
     | "must_choose_connection"
-    | "package_not_found"
-    | "not_installed_or_invalid_manifest"
+    | "auth_key_mismatch"
+    | "pinned_connection_unavailable"
+    | "override_connection_unavailable"
+    | "integration_not_found"
+    | "integration_wrong_type"
+    | "integration_invalid_manifest"
     | "integration_not_active"
     | string;
   title?: string;
@@ -68,12 +81,19 @@ export interface MissingIntegrationFieldError {
  */
 type ConnectionOverridesMap = Record<string, string>;
 
-/** Codes that no connection pick can fix — surfaced as a plain message, no picker. */
+/**
+ * Codes that no connection pick can fix — surfaced as a plain message, no
+ * picker. They are exactly the four the readiness pass raises about the
+ * integration PACKAGE, before any account is looked at: the declared package is
+ * absent, is not an integration, has a manifest that will not load, or is not
+ * active in this space. Connecting an account changes none of them.
+ */
 function isStructuralCode(code: string): boolean {
   return (
     code === "integration_not_active" ||
-    code === "package_not_found" ||
-    code === "not_installed_or_invalid_manifest"
+    code === "integration_not_found" ||
+    code === "integration_wrong_type" ||
+    code === "integration_invalid_manifest"
   );
 }
 

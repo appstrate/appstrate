@@ -46,10 +46,9 @@ export interface InMemoryCatalogOptions {
  * reference {@link PackageCatalog} implementation, and the one every
  * bundle-build test resolves against.
  *
- * It is NOT what the platform runs on. This doc used to claim it backed inline
- * runs, "composed in front of the org registry catalog"; that never shipped.
- * `apps/api/src/services/inline-run.ts` writes the posted payload to a hidden
- * shadow package row and `RunPackageCatalog`
+ * It is NOT what the platform runs on, and in particular it does not back
+ * inline runs. `apps/api/src/services/inline-run.ts` writes the posted payload
+ * to a hidden shadow package row and `RunPackageCatalog`
  * (`apps/api/src/services/run-launcher/run-package-catalog.ts`) hand-rolls the
  * DB↔draft routing, with owner tracking and a loud throw when a draft override
  * misses — semantics a first-non-null fallback chain cannot express.

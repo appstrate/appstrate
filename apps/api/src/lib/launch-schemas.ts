@@ -38,6 +38,8 @@
  */
 
 import { z } from "zod";
+import { collectOverridableDependencyIds } from "@appstrate/core/dependencies";
+import { ApiError } from "./errors.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
 
 /**
@@ -75,3 +77,39 @@ export const dependencyOverridesSchema = z
     (m) => Object.values(m).every(isValidDependencyOverride),
     '`dependency_overrides` values must be "draft" or a valid version spec (semver range or dist-tag)',
   );
+
+/**
+ * Refuse a `dependency_overrides` KEY that names nothing the effective
+ * manifest declares — `400`, naming the offending key.
+ *
+ * The rule the schema above cannot state: which ids are legal depends on the
+ * agent, not on the shape of the map, so it needs the resolved manifest and
+ * cannot be a Zod refinement. It lives HERE, at the wire boundary, rather than
+ * only in `freezeRunSpawnDependencies` deep on the run hot path, because every
+ * caller that gates AUTHORITY over a `draft` entry sits between the two: with
+ * the key gate downstream, a typo in a dependency id comes back as "you may not
+ * write that package" instead of "there is no such dependency here", sending
+ * its reader after a grant they do not need. FORM comes first — whether the key
+ * means anything at all is decided before whose it is — on every surface that
+ * launches or schedules a run.
+ *
+ * The manifest must be the EFFECTIVE one — the definition the launch will
+ * actually execute — because a draft and a published version declare different
+ * dependencies, and judging against the wrong one either refuses a legal
+ * override or admits a dead one.
+ */
+export function assertDependencyOverrideKeysDeclared(
+  manifest: Record<string, unknown>,
+  overrides: Readonly<Record<string, string>> | null | undefined,
+): void {
+  if (!overrides) return;
+  const declared = collectOverridableDependencyIds(manifest);
+  const unknownKey = Object.keys(overrides).find((key) => !declared.has(key));
+  if (unknownKey === undefined) return;
+  throw new ApiError({
+    status: 400,
+    code: "invalid_request",
+    title: "Bad Request",
+    detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill or integration dependency of this agent`,
+  });
+}

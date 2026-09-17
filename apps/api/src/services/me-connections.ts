@@ -16,10 +16,11 @@
  *     connections in other orgs/spaces ({@link MeConnectionAuthority}).
  */
 
-import { db, toRows } from "@appstrate/db/client";
+import { db } from "@appstrate/db/client";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   spacePackages,
+  packageShares,
   integrationConnections,
   organizationMembers,
   organizations,
@@ -30,7 +31,13 @@ import { actorFilter, type Actor } from "../lib/actor.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
-import { getPackageDisplayName } from "../lib/package-helpers.ts";
+import {
+  getPackageDisplayName,
+  notEphemeralFilter,
+  orgOrSystemFilter,
+} from "../lib/package-helpers.ts";
+import { activeHereSql } from "./package-activation.ts";
+import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 
 /**
  * The authority boundary of the credential presented on `/api/me/connections`.
@@ -48,6 +55,17 @@ import { getPackageDisplayName } from "../lib/package-helpers.ts";
  */
 export type MeConnectionAuthority =
   { kind: "user_global" } | { kind: "space_scoped"; orgId: string; spaceId: string };
+
+/**
+ * The integration ids ONE agent's draft manifest declares, projected as a
+ * `text[]` — so the reuse count below never pulls a whole `draft_manifest`
+ * across the wire, and needs no LATERAL join outside the query builder.
+ */
+const declaredIntegrationIds = sql<string[]>`ARRAY(
+  SELECT jsonb_object_keys(
+    COALESCE(${packages.draftManifest} -> 'dependencies' -> 'integrations', '{}'::jsonb)
+  )
+)`;
 
 /**
  * Fetch every integration_connections row owned by the actor, joined with
@@ -129,43 +147,46 @@ async function listAllActorIntegrationConnections(
     });
   }
 
-  // Count installed agents per (space, integration) that declare this
-  // integration in their dependencies. One scan over the unique (space, pkg)
-  // pairs the user has connections to — single round trip.
+  // Count the agents each space RUNS that declare this integration in their
+  // dependencies — "reused by N agents" is a statement about runs, so the
+  // question is the ONE activation rule ({@link activeHereSql}) and not the
+  // presence of a `space_packages` row: a deactivated agent, and an ORPHAN row
+  // naming a package the space has lost, execute nowhere and reuse nothing.
   //
-  // Use explicit `IN (...)` with `sql.join` instead of `= ANY(${arr})`:
-  // when Drizzle's sql-template binds a JS array, postgres.js wraps it as a
-  // single text param ("a,b,c") so PG sees `ANY('a,b,c')` and errors out.
-  // `sql.join` expands each element to its own parameter — round-trip safe
-  // with both PGlite and postgres-js.
-  const uniqueSpaceIds = [...new Set(rows.map((r) => r.spaceId))];
+  // That rule is per-space, so this is ONE query per space the caller holds a
+  // connection in (never per connection, never per integration), written in
+  // the query builder so the predicate is CONJOINED rather than hand-copied
+  // into SQL — a hand copy is the drift this rule exists to remove.
+  const spaceOrg = new Map(rows.map((r) => [r.spaceId, r.orgId]));
+  const wantedPackageIds = new Set(uniquePackageIds);
   const reuseCount = new Map<string, number>();
-  if (uniqueSpaceIds.length > 0 && uniquePackageIds.length > 0) {
-    const spaceIdList = sql.join(
-      uniqueSpaceIds.map((id) => sql`${id}`),
-      sql`, `,
+  if (wantedPackageIds.size > 0) {
+    const perSpace = await Promise.all(
+      [...spaceOrg].map(async ([spaceId, orgId]) => {
+        const agents = await db
+          .select({ integrationIds: declaredIntegrationIds })
+          .from(packages)
+          .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
+          .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
+          .where(
+            and(
+              eq(packages.type, "agent"),
+              orgOrSystemFilter(orgId),
+              notEphemeralFilter(),
+              activeHereSql(spaceId),
+            ),
+          );
+        return { spaceId, agents };
+      }),
     );
-    const pkgIdList = sql.join(
-      uniquePackageIds.map((id) => sql`${id}`),
-      sql`, `,
-    );
-    const countRows = toRows<{ space_id: string; integration_id: string; agent_count: number }>(
-      await db.execute(sql`
-        SELECT ap.space_id,
-               keys.integ AS integration_id,
-               COUNT(*)::int AS agent_count
-        FROM ${spacePackages} ap
-        INNER JOIN ${packages} p ON p.id = ap.package_id AND p.type = 'agent'
-        INNER JOIN LATERAL jsonb_object_keys(
-          COALESCE(p.draft_manifest -> 'dependencies' -> 'integrations', '{}'::jsonb)
-        ) AS keys(integ) ON TRUE
-        WHERE ap.space_id IN (${spaceIdList})
-          AND keys.integ IN (${pkgIdList})
-        GROUP BY ap.space_id, keys.integ
-      `),
-    );
-    for (const r of countRows) {
-      reuseCount.set(`${r.space_id}|${r.integration_id}`, r.agent_count);
+    for (const { spaceId, agents } of perSpace) {
+      for (const agent of agents) {
+        for (const integrationId of agent.integrationIds ?? []) {
+          if (!wantedPackageIds.has(integrationId)) continue;
+          const key = `${spaceId}|${integrationId}`;
+          reuseCount.set(key, (reuseCount.get(key) ?? 0) + 1);
+        }
+      }
     }
   }
 

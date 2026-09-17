@@ -46,7 +46,7 @@ describe("fetchBundleForRun — happy path", () => {
     const fetchImpl = stubFetch({
       headers: {
         "X-Bundle-Integrity": FAKE_BUNDLE_SRI,
-        "X-Bundle-Version": "draft",
+        "X-Bundle-Version": "1.0.0",
         "Content-Disposition": 'attachment; filename="system-hello.afps-bundle.zip"',
       },
       capture,
@@ -67,25 +67,63 @@ describe("fetchBundleForRun — happy path", () => {
     // `kind: "registry"` body it posts to /api/runs/remote.
     // Without this, attribution would have to fall back to fingerprint
     // reconciliation server-side.
-    expect(result.version).toBe("draft");
-    expect(result.stage).toBe("draft");
+    expect(result.version).toBe("1.0.0");
+    expect(result.stage).toBe("published");
 
     // Literal `@` — encodeURIComponent would produce `%40system`, which the
     // Hono server route `:scope{@[^/]+}` rejects as 404. The CLI's URL
     // builder leaves scope/name unencoded (they're regex-validated to a
     // strict charset upstream).
     //
-    // `?source=draft` mirrors the dashboard Run button: a never-published
-    // agent (or one with uncommitted edits) must run from its current
-    // draft on both surfaces. Pin the query param so a regression silently
-    // flipping back to "published only" doesn't reintroduce the
-    // `no_published_version` UX gap.
-    expect(capture.url).toBe(
-      "https://app.example.com/api/agents/@system/hello/bundle?source=draft",
-    );
+    // No `source` query at all: an id nobody put a spec on runs the latest
+    // published version, like every other surface. Pin the absence — the
+    // working copy belongs to whoever can write the package, and reaching
+    // it by default is exactly the drift this asserts against.
+    expect(capture.url).toBe("https://app.example.com/api/agents/@system/hello/bundle");
     expect(capture.headers?.get("Authorization")).toBe("Bearer ask_test");
     expect(capture.headers?.get("X-Space-Id")).toBe("spc_1");
     expect(capture.headers?.get("X-Org-Id")).toBe("org_1");
+  });
+
+  it("asks for the draft only when the caller spelled `@draft`", async () => {
+    const capture: { url?: string; headers?: Headers } = {};
+    const fetchImpl = stubFetch({
+      headers: { "X-Bundle-Integrity": FAKE_BUNDLE_SRI, "X-Bundle-Version": "draft" },
+      capture,
+    });
+    const result = await fetchBundleForRun({
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      spaceId: "spc_1",
+      packageId: "@scope/agent",
+      spec: "draft",
+      fetchImpl,
+    });
+    // `draft` is a reserved selector, not a dist-tag: it travels as
+    // `?source=`, never as `?version=` (which resolves semver/ranges/tags).
+    expect(capture.url).toBe("https://app.example.com/api/agents/@scope/agent/bundle?source=draft");
+    expect(result.stage).toBe("draft");
+    expect(result.version).toBe("draft");
+  });
+
+  it("spells `@published` as the explicit published source", async () => {
+    const capture: { url?: string; headers?: Headers } = {};
+    const fetchImpl = stubFetch({
+      headers: { "X-Bundle-Integrity": FAKE_BUNDLE_SRI, "X-Bundle-Version": "2.0.0" },
+      capture,
+    });
+    const result = await fetchBundleForRun({
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      spaceId: "spc_1",
+      packageId: "@scope/agent",
+      spec: "published",
+      fetchImpl,
+    });
+    expect(capture.url).toBe(
+      "https://app.example.com/api/agents/@scope/agent/bundle?source=published",
+    );
+    expect(result.stage).toBe("published");
   });
 
   it("threads the spec into the version query parameter", async () => {
@@ -117,7 +155,7 @@ describe("fetchBundleForRun — happy path", () => {
         status: 200,
         headers: new Headers({
           "X-Bundle-Integrity": FAKE_BUNDLE_SRI,
-          "X-Bundle-Version": "draft",
+          "X-Bundle-Version": "1.0.0",
         }),
       });
     }) as unknown as typeof fetch;
@@ -213,19 +251,19 @@ describe("fetchBundleForRun — errors", () => {
     });
   });
 
-  it("maps 404 `agent_not_installed_in_space` to package_not_installed_in_space with install hint", async () => {
+  it("maps 404 `agent_not_active_in_space` to package_not_active_in_space with an activation hint", async () => {
     // The bundle route distinguishes "doesn't exist in org" from "exists
-    // in org but not installed in space" via the `code` field on the
+    // in org but not active in space" via the `code` field on the
     // problem+json body. The CLI surfaces a different message for each so
-    // users hit "install it" instead of "is the spelling right?".
+    // users hit "activate it" instead of "is the spelling right?".
     const fetchImpl = stubFetch({
       status: 404,
       body: JSON.stringify({
         type: "about:blank",
-        title: "Agent Not Installed",
+        title: "Agent Not Active",
         status: 404,
-        code: "agent_not_installed_in_space",
-        detail: "Agent '@me/x' exists in this organization but is not installed",
+        code: "agent_not_active_in_space",
+        detail: "Agent '@me/x' is placed in space 'spc_test' but not active there.",
       }),
     });
     await expect(
@@ -239,7 +277,7 @@ describe("fetchBundleForRun — errors", () => {
       }),
     ).rejects.toMatchObject({
       name: "BundleFetchError",
-      code: "package_not_installed_in_space",
+      code: "package_not_active_in_space",
       hint: expect.stringContaining("/api/spaces/spc_test/packages"),
     });
   });

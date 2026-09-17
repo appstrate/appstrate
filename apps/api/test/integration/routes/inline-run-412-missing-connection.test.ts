@@ -42,7 +42,7 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/space-packages.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { readConnectToken } from "../../../src/services/connect/connect-session.ts";
@@ -266,6 +266,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     async function seedOauthIntegration() {
       await seedPackage({
         id: OAUTH_INTEGRATION,
+        homeSpaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         type: "integration",
         source: "local",
@@ -276,7 +277,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         version: "1.0.0",
         manifest: oauthManifest(),
       });
-      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
     }
 
     async function launch(path: string, headers: Record<string, string>) {

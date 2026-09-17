@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New action `share` on the `agents`, `skills`, `mcp-servers` and `integrations` resources of `CoreResources` (`@appstrate/core/permissions`), hence the permission strings `agents:share`, `skills:share`, `mcp-servers:share` and `integrations:share`. It offers a package to another space — its AUDIENCE (`package_shares`), never its activation, which stays the recipient's own act on `space_packages`. `CORE_RESOURCE_ACTIONS` mirrors it, so `SPACE_LEVEL_PERMISSIONS` and the custom-role validator pick the four strings up on their own; the platform grants them to the `admin` and `builder` presets (both derived from the catalog) and to no API key. A module with an exhaustive `Record<CoreAction<"agents">, …>` gains a key.
+
+- New optional member `restrict_package_copy: boolean` on `orgSettingsSchema` (`@appstrate/core/permissions`), default absent = `false`. When an organization sets it, forking a package and downloading a published version require `<type>:share` in the source package's home space; skills are exempt (the CLI's skills sync is a local copy by design). `OrgSettings` (`z.infer`, re-exported from `@appstrate/shared-types`) widens by one optional field.
+
 - New subpath `@appstrate/core/package-file-operations`: `applyFileTreeOperations`,
   `isProtectedPackageFile`, `PackageFileWriteError`, `PackageFileWriteErrorCode`
   and `FileTreeOperation`. The browser and API share ordered file operations,

@@ -17,6 +17,15 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 
+/**
+ * The space the reads are made FROM. Both functions are placement-scoped
+ * (RBAC spec §3.6/§6.9): they answer for one space, and a fixture homed by
+ * `seedPackage` with no explicit home lands in exactly this one.
+ */
+function scopeOf(ctx: TestContext): { orgId: string; spaceId: string } {
+  return { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+}
+
 function validIntegrationManifest(name = "@official/gmail"): Record<string, unknown> {
   return localIntegrationManifest({
     name,
@@ -45,7 +54,7 @@ describe("integration-service", () => {
 
   describe("getIntegration", () => {
     it("returns null when no row matches", async () => {
-      const out = await getIntegration(ctx.orgId, "@nothing/here");
+      const out = await getIntegration(scopeOf(ctx), "@nothing/here");
       expect(out).toBeNull();
     });
 
@@ -57,7 +66,7 @@ describe("integration-service", () => {
         type: "integration",
         draftManifest: manifest,
       });
-      const out = await getIntegration(ctx.orgId, "@official/gmail");
+      const out = await getIntegration(scopeOf(ctx), "@official/gmail");
       expect(out).not.toBeNull();
       expect(out!.id).toBe("@official/gmail");
       expect(out!.manifest.display_name).toBe("Gmail");
@@ -73,7 +82,7 @@ describe("integration-service", () => {
         type: "integration",
         draftManifest: manifest,
       });
-      const out = await getIntegration(ctx.orgId, "@official/system-int");
+      const out = await getIntegration(scopeOf(ctx), "@official/system-int");
       expect(out).not.toBeNull();
       expect(out!.source).toBe("system");
     });
@@ -86,7 +95,7 @@ describe("integration-service", () => {
         type: "integration",
         draftManifest: validIntegrationManifest("@other/secret"),
       });
-      const out = await getIntegration(ctx.orgId, "@other/secret");
+      const out = await getIntegration(scopeOf(ctx), "@other/secret");
       expect(out).toBeNull();
     });
 
@@ -99,7 +108,7 @@ describe("integration-service", () => {
         type: "integration",
         draftManifest: { type: "integration", name: "@official/broken" },
       });
-      const out = await getIntegration(ctx.orgId, "@official/broken");
+      const out = await getIntegration(scopeOf(ctx), "@official/broken");
       expect(out).toBeNull();
     });
 
@@ -109,14 +118,14 @@ describe("integration-service", () => {
         orgId: ctx.orgId,
         type: "agent",
       });
-      const out = await getIntegration(ctx.orgId, "@official/agent-x");
+      const out = await getIntegration(scopeOf(ctx), "@official/agent-x");
       expect(out).toBeNull();
     });
   });
 
   describe("listIntegrations", () => {
     it("returns an empty array when no integrations exist", async () => {
-      const out = await listIntegrations(ctx.orgId);
+      const out = await listIntegrations(scopeOf(ctx));
       expect(out).toEqual([]);
     });
 
@@ -134,7 +143,7 @@ describe("integration-service", () => {
         type: "integration",
         draftManifest: validIntegrationManifest("@official/b"),
       });
-      const out = await listIntegrations(ctx.orgId);
+      const out = await listIntegrations(scopeOf(ctx));
       expect(out.length).toBe(2);
       const ids = out.map((r) => r.id).sort();
       expect(ids).toEqual(["@official/a", "@official/b"]);
@@ -157,7 +166,7 @@ describe("integration-service", () => {
         type: "integration",
         draftManifest: validIntegrationManifest("@official/int"),
       });
-      const out = await listIntegrations(ctx.orgId);
+      const out = await listIntegrations(scopeOf(ctx));
       expect(out.length).toBe(1);
       expect(out[0]!.id).toBe("@official/int");
     });
@@ -175,7 +184,7 @@ describe("integration-service", () => {
         type: "integration",
         draftManifest: { type: "integration", name: "@official/broken" },
       });
-      const out = await listIntegrations(ctx.orgId);
+      const out = await listIntegrations(scopeOf(ctx));
       expect(out.length).toBe(1);
       expect(out[0]!.id).toBe("@official/good");
     });
@@ -188,7 +197,7 @@ describe("integration-service", () => {
         type: "integration",
         draftManifest: validIntegrationManifest("@other/leak"),
       });
-      const out = await listIntegrations(ctx.orgId);
+      const out = await listIntegrations(scopeOf(ctx));
       expect(out).toEqual([]);
     });
   });

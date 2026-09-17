@@ -1,0 +1,41 @@
+-- An organization's package is ALWAYS homed in one of that organization's
+-- spaces (RBAC spec §6.9).
+--
+-- WHY. `packages.home_space_id` is the one write authority: holding
+-- `<type>:write` THERE is what authorizes editing, publishing, renaming and
+-- deleting a package. A homeless organization package is therefore a package
+-- nobody in the organization can author — the state `scripts/migration/0014`
+-- exists to end, and the one this refuses to let any writer re-create. The
+-- organization's DEFAULT space is the home of the packages that belong to no
+-- team: owners and admins reach it like every other space, a builder of the
+-- default holds the write there, and so does an API key pinned to the default
+-- carrying `<type>:write` — that is what a default space is for.
+--
+-- The two exceptions are NAMED rather than tolerated. A SYSTEM package
+-- (`org_id IS NULL`) is a delivery, not a residency: the deployment ships it
+-- readable in every space of every organization, so no single space owns it.
+-- An `ephemeral` row is an inline run's shadow manifest, unreachable from
+-- every package route; giving it a home would only make the run's space
+-- undeletable until the compaction sweep removes it (`ON DELETE RESTRICT`).
+--
+-- NOT VALID, deliberately. Production arrives at this batch with
+-- `home_space_id` NULL on every row — `0063` adds the column, and
+-- `scripts/migration/0014` fills it in the stopped window BETWEEN the
+-- migrations and the new build. A validating constraint would abort the batch
+-- before `0014` ever ran. `NOT VALID` governs every INSERT and UPDATE from the
+-- moment it is added, which is the half that matters here, and `0014` ends with
+-- `ALTER TABLE packages VALIDATE CONSTRAINT packages_org_package_has_home;` to
+-- take the other half. On a fresh database there is nothing to validate and
+-- that statement is a no-op.
+--
+-- Which means `pg_constraint.convalidated` is NOT a rollout signal: it stays
+-- `false` for ever on an installation that never had rows to fix, and `true` on
+-- one that ran `0014`, for the same schema and the same enforcement on every
+-- write. The signal to read is the count the runbook gives — zero rows with
+-- `org_id IS NOT NULL AND NOT ephemeral AND home_space_id IS NULL`.
+--
+-- ROLLBACK: `ALTER TABLE "packages" DROP CONSTRAINT "packages_org_package_has_home";`
+-- A previous build writes `home_space_id = NULL` on the home move and in the
+-- personal-space sweeper, so it needs the constraint gone.
+
+ALTER TABLE "packages" ADD CONSTRAINT "packages_org_package_has_home" CHECK ("packages"."org_id" IS NULL OR "packages"."ephemeral" OR "packages"."home_space_id" IS NOT NULL) NOT VALID;
