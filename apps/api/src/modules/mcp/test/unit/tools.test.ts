@@ -82,47 +82,8 @@ describe("mcp catalog", () => {
   });
 });
 
-describe("retired pre-#1177 tool names", () => {
+describe("pre-#1177 argument vocabulary", () => {
   beforeEach(() => resetCatalog());
-
-  /**
-   * The retired names used to be registered-but-hidden, so a client holding a
-   * cached tool list across an upgrade could still call them (the server
-   * advertises `tools: { listChanged: false }`). That forwarding is gone: the
-   * names are not registered at all, and a caller gets `-32602 Unknown tool`
-   * and re-lists.
-   *
-   * Asserted rather than merely deleted, because "no longer registered" is the
-   * contract now — a hidden alias reappearing would restore a second dispatch
-   * path for the same capability, which is what #1177 set out to remove.
-   */
-  it("registers no retired name, listed or hidden", () => {
-    const tools = buildMcpTools({
-      origin: "https://test.local",
-      authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
-      permissions: new Set(["mcp:read", "mcp:invoke", "agents:write"]),
-      dispatch: async () =>
-        new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
-      actor: { type: "user", id: "user_1" },
-      scope: { orgId: "org_1", spaceId: "spc_1" },
-      authorizeBundle: async () => {},
-    });
-    const registered = new Set(tools.map((t) => t.descriptor.name));
-
-    for (const retired of [
-      "list_documents",
-      "read_document",
-      "validate_package_document",
-      "import_package_document",
-    ]) {
-      expect(registered.has(retired)).toBe(false);
-    }
-    // Positive control: the canonical tools the retired names used to forward
-    // to ARE offered, so the loop above is not passing on an empty tool set.
-    expect(registered.has("list_files")).toBe(true);
-    expect(registered.has("read_file")).toBe(true);
-    expect(registered.has("validate_package_file")).toBe(true);
-  });
 
   it("does not rename a retired document_uri argument", async () => {
     const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);

@@ -15,8 +15,6 @@ export const LEDGER_LIST_MAX_LIMIT = 1000;
  * glob `packages/module-<id>/src/env.ts` and load it through a COMPUTED `import()` — a
  * literal specifier would be an Apache-2.0 file naming this package, which
  * `verify-module-isolation.ts` refuses.
- *
- * @gateImport
  */
 export const eeEnvSchema = z
   .object({

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The four shipped presets plus the org's own bundles (RBAC spec §3.3, §6.2).
+ * The shipped presets ({@link SPACE_ROLE_PRESETS}) plus the org's own bundles
+ * (RBAC spec §3.3, §6.2).
  *
  * Presets are constants projected onto the bundle wire shape, so one listing
  * answers "what can I assign here"; their `null` id is what makes them
@@ -86,8 +87,8 @@ export function assertCustomRolesFeature(act: CustomRoleAct): void {
     code: "feature_unavailable",
     title: "Feature Unavailable",
     detail:
-      `${ACT_DETAIL[act]} requires the \`custom_roles\` feature, provided by the ` +
-      "Appstrate Cloud plan (the `@appstrate/module-ee` module). The built-in presets " +
+      `${ACT_DETAIL[act]} requires the \`custom_roles\` feature, contributed by a module ` +
+      "listed in `MODULES`. The built-in presets " +
       `(${SPACE_ROLE_PRESETS.join(", ")}) are always available.`,
   });
 }
