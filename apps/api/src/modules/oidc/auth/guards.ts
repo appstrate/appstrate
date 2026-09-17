@@ -239,23 +239,10 @@ function clientIdFromAssertion(assertion: string): string | null {
 }
 
 /**
- * Extract the `client_id` a token request is acting on: the parsed body, the
- * `client_assertion` (`private_key_jwt` may name the client nowhere else), or
- * the HTTP Basic auth header (`client_secret_basic`).
- *
- * Trusting the assertion unverified is safe because the provider then verifies
- * it against the row this id names: an assertion naming an instance client
- * clears the caller's gate and dies on the signature check, and one naming a
- * self-service client stays confined.
- *
- * `null` identifies nothing, and callers hold it to the STRICTEST rule they
- * enforce — declining to name a client must never be a way around a
- * confinement.
+ * The client id an HTTP Basic credential names (`client_secret_basic`), or
+ * `null` when the header is absent or not decodable.
  */
-function extractClientId(body: TokenRequestBody, request: Request | undefined): string | null {
-  if (typeof body.client_id === "string" && body.client_id.length > 0) return body.client_id;
-  if (typeof body.client_assertion === "string")
-    return clientIdFromAssertion(body.client_assertion);
+function clientIdFromBasicAuth(request: Request | undefined): string | null {
   const authHeader = request?.headers.get("authorization");
   if (!authHeader || !authHeader.toLowerCase().startsWith("basic ")) return null;
   try {
@@ -273,6 +260,50 @@ function extractClientId(body: TokenRequestBody, request: Request | undefined): 
   } catch {
     return null;
   }
+}
+
+/**
+ * Extract the `client_id` a token request is acting on — the id the PROVIDER
+ * will authenticate as, not merely one the request mentions.
+ *
+ * The distinction is the whole point. `extractClientCredentials` in
+ * `@better-auth/oauth-provider` resolves in this order: `client_assertion`,
+ * then the HTTP Basic header, then `body.client_id`. It does NOT compare
+ * `body.client_id` against the Basic header, and
+ * `normalizeClientAuthenticationParameters` refuses Basic + `client_secret`
+ * but ACCEPTS Basic + `client_id`. So a gate that read the body first read a
+ * different client than the one being authenticated: presenting
+ * `Authorization: Basic <self-service client>` with `client_id=<anything>` in
+ * the body resolved to an id with no row, `isSelfServiceClient` answered
+ * `false` for the absent row, and the audience confinement below never
+ * applied — the self-service client minted on the platform audience, which is
+ * exactly what that confinement exists to refuse. A DCR registration that
+ * names no `token_endpoint_auth_method` defaults to `client_secret_basic` and
+ * is issued a secret, so the precondition is the ordinary registration path.
+ *
+ * Hence: same order as the provider, and a DISAGREEMENT between two sources is
+ * fatal rather than silently resolved — `null`, which callers hold to the
+ * STRICTEST rule they enforce. Declining to name a client, and naming two,
+ * must both be dead ends rather than ways around a confinement.
+ *
+ * Trusting the assertion unverified is safe because the provider then verifies
+ * it against the row this id names: an assertion naming an instance client
+ * clears the caller's gate and dies on the signature check, and one naming a
+ * self-service client stays confined.
+ */
+function extractClientId(body: TokenRequestBody, request: Request | undefined): string | null {
+  const fromAssertion =
+    typeof body.client_assertion === "string" ? clientIdFromAssertion(body.client_assertion) : null;
+  const fromBasic = clientIdFromBasicAuth(request);
+  const fromBody =
+    typeof body.client_id === "string" && body.client_id.length > 0 ? body.client_id : null;
+
+  // Provider order, most authoritative first.
+  const named = [fromAssertion, fromBasic, fromBody].filter((id): id is string => id !== null);
+  if (named.length === 0) return null;
+  // Two sources naming two clients is not a request this gate can judge.
+  if (named.some((id) => id !== named[0])) return null;
+  return named[0]!;
 }
 
 /**
