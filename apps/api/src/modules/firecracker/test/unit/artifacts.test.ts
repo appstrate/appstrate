@@ -242,6 +242,10 @@ describe("ensureGuestArtifacts — install", () => {
     });
   });
 
+  // `latest/download` is retained HERE on purpose (see the `assetUrl` doc in
+  // `runner/artifacts.ts`): unpinned is a supported mode, and the trust anchor
+  // is the Ed25519-signed manifest, not the URL. This test pins that decision so
+  // a sweep of residual `latest/download` sites does not silently undo it.
   it("hits the `latest` URL when no version is pinned and a versioned URL when pinned", async () => {
     const unpinned = scenario();
     const fsA = makeFs();

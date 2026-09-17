@@ -162,10 +162,19 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
-          # Never GitHub's "latest": `appstrate self-update`, `bootstrap.sh`
-          # and `bootstrap-runner.sh` resolve `releases/latest` and expect a
-          # platform `v*` tag carrying the CLI binaries. Every non-`v*`
-          # release published before this line was "latest" until the next
-          # `v*` tag and broke all three in the meantime (cli@1.0.0-beta.56:
+          # Never GitHub's "latest". `appstrate self-update`, `bootstrap.sh`
+          # and `bootstrap-runner.sh` resolve "latest" by LISTING the Releases
+          # API and taking the newest platform `v<semver>` tag — they no longer
+          # follow `releases/latest`, precisely because every non-`v*` release
+          # published before this line became "latest" until the next `v*` tag
+          # and broke all three (cli@1.0.0-beta.56:
           # `vcli@1.0.0-beta.56/checksums.txt.minisig` → 404).
+          #
+          # The flag still matters, so do NOT drop it: "latest" remains visible
+          # wherever nothing lists — the residual `releases/latest/download`
+          # redirect the firecracker guest-artifact resolver still uses when
+          # `FIRECRACKER_ARTIFACTS_VERSION` is unset
+          # (`apps/api/src/modules/firecracker/runner/artifacts.ts`), and the
+          # GitHub UI / repo sidebar, where an npm tag would be shown to humans
+          # as the project's current release.
           make_latest: false

@@ -27,6 +27,7 @@ import {
   daemonUrls,
   firecrackerUrls,
   downloadDaemon,
+  resolveDaemonReleaseVersion,
 } from "../src/lib/runner/download.ts";
 import {
   resolveRunnerArch,
@@ -131,8 +132,16 @@ function fakeHttp(opts: {
   binary?: Uint8Array;
   sha?: string;
   health?: { status: number; body: unknown };
+  /**
+   * Tag names the fake GitHub Releases API lists (newest first). A dev CLI
+   * resolves its daemon version through that listing (same resolver as
+   * `self-update`) instead of `releases/latest/download`, so the fake has to
+   * answer it — including the non-`v*` npm tags that must be skipped.
+   */
+  releaseTags?: string[];
 }): RunnerHttp {
   const binary = opts.binary ?? new Uint8Array([1, 2, 3]);
+  const releaseTags = opts.releaseTags ?? ["cli@1.0.0-beta.56", "v9.9.9", "core@9.0.0"];
   return {
     async fetchToFile(_url, _dest, onProgress) {
       // The daemon binary streams through here; return its on-the-fly digest so
@@ -143,7 +152,18 @@ function fakeHttp(opts: {
     async fetchBinary() {
       return binary;
     },
-    async fetchText() {
+    async fetchText(url) {
+      // The Releases listing (version resolution) vs the signed checksums
+      // manifest — the only two things the runner installer fetches as text.
+      if (url.startsWith("https://api.github.com/")) {
+        // Page 1 carries every tag; page 2+ is empty. A page shorter than the
+        // API maximum ends the walk, so only page 1 is ever requested here.
+        return JSON.stringify(
+          url.includes("page=1")
+            ? releaseTags.map((tag) => ({ tag_name: tag, draft: false, prerelease: false }))
+            : [],
+        );
+      }
       return opts.sha ?? "";
     },
     async getJson() {
@@ -491,15 +511,42 @@ describe("parseSha256", () => {
 });
 
 describe("url builders", () => {
-  it("daemonUrls: latest vs pinned", () => {
-    expect(daemonUrls("latest", "x86_64").binary).toContain(
-      "/latest/download/appstrate-runner-x86_64",
-    );
+  it("daemonUrls: builds a pinned release path", () => {
     const pinned = daemonUrls("1.2.3", "aarch64");
     expect(pinned.binary).toContain("/download/v1.2.3/appstrate-runner-aarch64");
     expect(pinned.checksums).toBe(`${APPSTRATE_RELEASE_BASE}/download/v1.2.3/checksums.txt`);
     expect(pinned.checksumsSig).toBe(`${pinned.checksums}.minisig`);
   });
+
+  it("daemonUrls: refuses `latest` instead of building releases/latest/download", () => {
+    // GitHub's "latest" is the newest non-prerelease Release whatever its tag —
+    // a `cli@`/`core@`/`afps-shared@` one carries no runner assets and 404s.
+    // The resolver below is the only supported way to spell "newest".
+    expect(() => daemonUrls("latest", "x86_64")).toThrow(/requires a pinned release version/);
+  });
+
+  it("resolveDaemonReleaseVersion: lists releases for `latest`, passes a pin through", async () => {
+    const http = fakeHttp({
+      releaseTags: ["cli@1.0.0-beta.56", "v2.0.0", "v10.1.0", "core@9.0.0"],
+    });
+    // Highest platform `v*` semver wins — NOT the first one listed (creation
+    // order and version order diverge when a hotfix is cut for an older line).
+    expect(await resolveDaemonReleaseVersion("latest", http)).toBe("10.1.0");
+    // A pin never hits the network.
+    expect(
+      await resolveDaemonReleaseVersion("1.4.2", {
+        fetchText: () => Promise.reject(new Error("must not fetch")),
+      }),
+    ).toBe("1.4.2");
+  });
+
+  it("resolveDaemonReleaseVersion: fails clearly when no platform v* release exists", async () => {
+    const http = fakeHttp({ releaseTags: ["cli@1.0.0-beta.56", "core@9.0.0"] });
+    await expect(resolveDaemonReleaseVersion("latest", http)).rejects.toThrow(
+      /No platform v\* release/,
+    );
+  });
+
   it("firecrackerUrls: tarball + sha + inner paths (VMM and jailer from ONE archive)", () => {
     const u = firecrackerUrls("1.16.0", "x86_64");
     expect(u.tarball).toContain("/v1.16.0/firecracker-v1.16.0-x86_64.tgz");
@@ -529,6 +576,50 @@ describe("downloadDaemon", () => {
     // FIXED hidden name — no pid suffix, so a retry after a crash overwrites
     // the previous partial file instead of accumulating hidden orphans.
     expect(out.stagedPath).toBe("/usr/local/bin/.appstrate-runner-x86_64.download");
+  });
+
+  it("resolves a dev `latest` to a pinned release before building any asset URL", async () => {
+    const bytes = new Uint8Array([9, 8, 7, 6]);
+    const sha = sha256Hex(bytes);
+    const base = fakeHttp({
+      binary: bytes,
+      sha: `${sha}  appstrate-runner-x86_64`,
+      releaseTags: ["cli@1.0.0-beta.56", "v3.2.1"],
+    });
+    const urls: string[] = [];
+    const http: RunnerHttp = {
+      ...base,
+      fetchToFile: (url, dest, onProgress) => {
+        urls.push(url);
+        return base.fetchToFile(url, dest, onProgress);
+      },
+      fetchBinary: (url) => {
+        urls.push(url);
+        return base.fetchBinary(url);
+      },
+      fetchText: (url) => {
+        urls.push(url);
+        return base.fetchText(url);
+      },
+    };
+    const { fs } = fakeFs();
+    const { exec } = fakeExec();
+    await downloadDaemon({
+      http,
+      exec,
+      fs,
+      version: "latest",
+      arch: "x86_64",
+      destPath: TEST_DAEMON_DEST,
+    });
+    // Exactly one listing call, then only pinned `download/v3.2.1/...` paths —
+    // `releases/latest/download` is never built (a non-`v*` release marked
+    // latest carries no runner assets and would 404 all three).
+    expect(urls.filter((u) => u.startsWith("https://api.github.com/"))).toHaveLength(1);
+    expect(urls.some((u) => u.includes("/latest/download/"))).toBe(false);
+    for (const asset of ["appstrate-runner-x86_64", "checksums.txt", "checksums.txt.minisig"]) {
+      expect(urls).toContain(`${APPSTRATE_RELEASE_BASE}/download/v3.2.1/${asset}`);
+    }
   });
 
   it("throws on a sha256 mismatch and removes the staged file", async () => {

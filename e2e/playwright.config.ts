@@ -35,7 +35,28 @@ export default defineConfig({
   webServer: {
     command: "cd .. && bun --hot apps/api/src/index.ts",
     url: E2E_BASE_URL,
-    reuseExistingServer: true,
+    // Reuse an already-listening server ONLY in CI.
+    //
+    // Playwright applies the `env:` map below only when it starts the server
+    // ITSELF. Reusing one means the suite runs against whatever that process
+    // was configured with — and at the default port that process is the
+    // developer's own `bun run dev`, whose `PGLITE_DATA_DIR` /
+    // `FS_STORAGE_PATH` are the API defaults `./data/pglite` and
+    // `./data/storage`. The suite would then seed its users and orgs straight
+    // into the developer's database, and aborting the run mid-flight (killing
+    // `bun run dev`) corrupts `data/pglite` with no warning.
+    //
+    // Defaulting `E2E_PORT` to a dedicated port instead was rejected: it moves
+    // the collision without closing the reuse path — a server left over from an
+    // aborted run, or a second checkout, is still reused with data directories
+    // nobody pinned. Gating on `CI` closes it categorically: locally the suite
+    // always boots its own server under the pinned directories, and a busy port
+    // fails loudly ("… is already used by another process") naming the fix
+    // instead of silently writing to the developer's data.
+    //
+    // CI (GitHub Actions and every runner this repo uses) sets `CI`, so the CI
+    // behaviour is byte-for-byte what it was.
+    reuseExistingServer: !!process.env.CI,
     timeout: 120_000,
     // Playwright already spreads `process.env` underneath this map, so only the
     // keys the suite pins are listed. The port-derived values match the API's own
