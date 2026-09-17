@@ -51,7 +51,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "Create a custom space role",
       description:
-        "Define an organization-scoped bundle of space-level permissions. Requires the `custom_roles` feature. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop.",
+        "Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -93,7 +93,7 @@ export const rolesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/CustomRoleFeatureForbidden" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "409": {
           description: "A role with this key already exists (`role_key_taken`)",
           content: {
@@ -150,7 +150,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "Update a custom space role",
       description:
-        "Rename, re-describe or re-scope a bundle. Requires the `custom_roles` feature. The `srl_` id never changes, so assignments follow the edit.",
+        "Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }, ROLE_ID_PARAM],
       requestBody: {
         required: true,
@@ -181,7 +181,7 @@ export const rolesPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/CustomRoleFeatureForbidden" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "A role with this key already exists (`role_key_taken`)",
@@ -198,7 +198,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "Delete a custom space role",
       description:
-        "Never requires the `custom_roles` feature: removing a leftover bundle is what an EE \u2192 OSS downgrade needs, and it is the one verb that only ever shrinks what a bundle reaches. Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
+        "Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }, ROLE_ID_PARAM],
       responses: {
         "204": { description: "Role deleted", headers: REQUEST_ID_ONLY_HEADERS },

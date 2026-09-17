@@ -17,7 +17,7 @@ import {
   type PermissionDenialContext,
 } from "@appstrate/core/permissions";
 import type { AppstrateModule } from "@appstrate/core/module";
-import { getTestApp, setFeatureFlag } from "../../helpers/app.ts";
+import { getTestApp } from "../../helpers/app.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { viewAsWire, type ViewAsPersona as ViewAsSnapshot } from "../../../src/lib/view-as.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -107,15 +107,6 @@ async function expectOpened(response: Response): Promise<Response> {
   expect(response.status, response.status === 200 ? "" : await response.text()).toBe(200);
   await response.body?.cancel();
   return response;
-}
-
-async function withFeature(name: string, on: boolean, run: () => Promise<void>): Promise<void> {
-  const restore = setFeatureFlag(name, on);
-  try {
-    await run();
-  } finally {
-    restore();
-  }
 }
 
 /** Registers a denial handler that records `pick(ctx)`; the suite's `afterEach` unregisters it. */
@@ -300,35 +291,33 @@ describe("view as role", () => {
   // ─── 3. The persona only ever removes ─────────────────────────────
 
   it("never grants a permission the real caller lacks, custom bundles included", async () => {
-    await withFeature("custom_roles", true, async () => {
-      const role = await seedSpaceRole({
-        orgId: owner.orgId,
-        key: "auditor",
-        permissions: ["space-settings:write", "agents:read"],
-      });
-      const view = persona("member", `custom:${role.id}`);
-
-      const [previewed] = await listedSpaces(view);
-      expect(previewed?.role).toMatchObject({ kind: "custom", key: "auditor" });
-      expect(previewed?.permissions).toContain("space-settings:write");
-      expect(previewed?.permissions).not.toContain("agents:write");
-
-      const [real] = await listedSpaces();
-      const realPermissions = new Set(real?.permissions);
-      expect(previewed?.permissions.filter((p) => !realPermissions.has(p))).toEqual([]);
-      expect(previewed!.permissions.length).toBeLessThan(real!.permissions.length);
-
-      // The org listing is narrowed the same way, and the org role it reports is
-      // the persona's — the SPA derives its top-level gates from this row.
-      const [previewedOrg] = await listedOrgs("/api/orgs", view);
-      const [realOrg] = await listedOrgs("/api/orgs");
-      expect(previewedOrg?.role).toBe("member");
-      expect(realOrg?.role).toBe("owner");
-      expect(realOrg?.permissions).toContain("members:remove");
-      expect(previewedOrg?.permissions).not.toContain("members:remove");
-      const realOrgPermissions = new Set(realOrg?.permissions);
-      expect(previewedOrg?.permissions.filter((p) => !realOrgPermissions.has(p))).toEqual([]);
+    const role = await seedSpaceRole({
+      orgId: owner.orgId,
+      key: "auditor",
+      permissions: ["space-settings:write", "agents:read"],
     });
+    const view = persona("member", `custom:${role.id}`);
+
+    const [previewed] = await listedSpaces(view);
+    expect(previewed?.role).toMatchObject({ kind: "custom", key: "auditor" });
+    expect(previewed?.permissions).toContain("space-settings:write");
+    expect(previewed?.permissions).not.toContain("agents:write");
+
+    const [real] = await listedSpaces();
+    const realPermissions = new Set(real?.permissions);
+    expect(previewed?.permissions.filter((p) => !realPermissions.has(p))).toEqual([]);
+    expect(previewed!.permissions.length).toBeLessThan(real!.permissions.length);
+
+    // The org listing is narrowed the same way, and the org role it reports is
+    // the persona's — the SPA derives its top-level gates from this row.
+    const [previewedOrg] = await listedOrgs("/api/orgs", view);
+    const [realOrg] = await listedOrgs("/api/orgs");
+    expect(previewedOrg?.role).toBe("member");
+    expect(realOrg?.role).toBe("owner");
+    expect(realOrg?.permissions).toContain("members:remove");
+    expect(previewedOrg?.permissions).not.toContain("members:remove");
+    const realOrgPermissions = new Set(realOrg?.permissions);
+    expect(previewedOrg?.permissions.filter((p) => !realOrgPermissions.has(p))).toEqual([]);
   });
 
   // ─── 4. Refusals, never a fall-back ───────────────────────────────
@@ -447,26 +436,12 @@ describe("view as role", () => {
     });
 
     it("refuses a custom role that belongs to another organization", async () => {
-      await withFeature("custom_roles", true, async () => {
-        const other = await createTestContext({ orgSlug: "view-as-foreign" });
-        const foreign = await seedSpaceRole({ orgId: other.orgId, key: "foreign" });
-        const refused = await listSpaces(persona("member", `custom:${foreign.id}`));
-        await expectProblem(refused, 404, { code: "view_as_not_found" });
-        const mine = await seedSpaceRole({ orgId: owner.orgId, key: "mine" });
-        expect((await listSpaces(persona("member", `custom:${mine.id}`))).status).toBe(200);
-      });
-    });
-
-    it("refuses a custom role where the custom_roles feature is off", async () => {
-      const role = await seedSpaceRole({ orgId: owner.orgId, key: "ungated" });
-      await withFeature("custom_roles", false, async () => {
-        const response = await listSpaces(persona("member", `custom:${role.id}`));
-        // A view-as refusal, not the role routes' `feature_unavailable`: every
-        // way a persona is turned down must be a code the client drops it on.
-        await expectProblem(response, 403, { code: "view_as_forbidden" });
-        // A preset preview stays available on the same deployment.
-        expect((await listSpaces(persona("member", "preset:viewer"))).status).toBe(200);
-      });
+      const other = await createTestContext({ orgSlug: "view-as-foreign" });
+      const foreign = await seedSpaceRole({ orgId: other.orgId, key: "foreign" });
+      const refused = await listSpaces(persona("member", `custom:${foreign.id}`));
+      await expectProblem(refused, 404, { code: "view_as_not_found" });
+      const mine = await seedSpaceRole({ orgId: owner.orgId, key: "mine" });
+      expect((await listSpaces(persona("member", `custom:${mine.id}`))).status).toBe(200);
     });
   });
 

@@ -43,7 +43,7 @@ import {
 } from "../../src/lib/modules/module-loader.ts";
 import { setModulePermissionsProvider } from "@appstrate/core/permissions";
 import { setPrincipalPermissionsProviders } from "@appstrate/core/principal-permissions";
-import { getAppConfig, initAppConfig } from "../../src/lib/app-config.ts";
+import { initAppConfig } from "../../src/lib/app-config.ts";
 import { notFound } from "../../src/lib/errors.ts";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
 import { createResponseValidationMiddleware } from "./response-validation.ts";
@@ -99,27 +99,6 @@ interface GetTestAppOptions {
 }
 
 let cachedApp: Hono<AppEnv> | null = null;
-
-/**
- * Turn a module-contributed feature flag on (or off) for the duration of a
- * test, returning the restore function.
- *
- * Production merges these flags into `AppConfig` once, at boot, from the loaded
- * modules (`applyModuleFeatures`) — and the test harness deliberately never
- * boots. A test that needs `features.custom_roles` on and off in the SAME file
- * therefore has nothing to reach for, which is why this seam exists: it writes
- * the same object the routes read (`getAppConfig().features`), so what is
- * exercised is the real gate, not a stand-in.
- */
-export function setFeatureFlag(name: string, value: boolean): () => void {
-  const features = getAppConfig().features as Record<string, boolean | undefined>;
-  const previous = features[name];
-  features[name] = value;
-  return () => {
-    if (previous === undefined) delete features[name];
-    else features[name] = previous;
-  };
-}
 
 // Initialize boot-time singletons that core routes depend on.
 initSystemProxies(); // initializes from SYSTEM_PROXIES env var (empty array in test)

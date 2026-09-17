@@ -9,8 +9,8 @@
  * one, a preset key next to a free one.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { getTestApp, setFeatureFlag } from "../../helpers/app.ts";
+import { describe, it, expect, beforeEach } from "bun:test";
+import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
@@ -45,22 +45,11 @@ interface RoleWire {
 
 describe("custom space roles", () => {
   let owner: TestContext;
-  let restoreFlag: () => void;
 
   beforeEach(async () => {
     await truncateAll();
     owner = await createTestContext({ orgSlug: "roles" });
-    restoreFlag = setFeatureFlag("custom_roles", true);
   });
-
-  afterEach(() => {
-    restoreFlag();
-  });
-
-  const flag = (on: boolean) => {
-    restoreFlag();
-    restoreFlag = setFeatureFlag("custom_roles", on);
-  };
 
   /** Org-scoped request as `ctx` (owner by default); a body is sent as JSON. */
   const req = (method: string, path: string, body?: unknown, ctx: TestContext = owner) =>
@@ -369,101 +358,6 @@ describe("custom space roles", () => {
       // The control: an invitation naming ANOTHER role does not hold this one.
       const other = await createRole({ key: "unpromised" });
       expect((await del(other.id)).status).toBe(204);
-    });
-  });
-
-  describe("features.custom_roles gate", () => {
-    it("authoring 403s without the flag and succeeds with it", async () => {
-      const role = await seedSpaceRole({ orgId: owner.orgId, key: "support" });
-      flag(false);
-
-      await expectProblem(await post(validBody({ key: "gated" })), 403, {
-        code: "feature_unavailable",
-      });
-      expect((await patch(role.id, { name: "Nope" })).status).toBe(403);
-
-      // Reading never depends on the flag — the presets and the existing
-      // bundles stay visible in OSS.
-      expect(await reads(owner)).toEqual([200, 200]);
-
-      // The control: the same two calls with the flag back on.
-      flag(true);
-      expect((await post(validBody({ key: "gated" }))).status).toBe(201);
-      expect((await patch(role.id, { name: "Yes" })).status).toBe(200);
-    });
-
-    it("granting a bundle 403s without the flag, on every path that grants one", async () => {
-      const role = await createRole({ key: "support", permissions: ["agents:read"] });
-      const target = await memberContext(owner, "guest");
-      const spacePath = `/api/spaces/${owner.defaultSpaceId}/members`;
-      flag(false);
-
-      await expectProblem(
-        await req("POST", spacePath, { userId: target.user.id, custom_role_id: role.id }),
-        403,
-        { code: "feature_unavailable" },
-      );
-      await expectProblem(await invite(role.id), 403, { code: "feature_unavailable" });
-
-      // The discriminator is the BUNDLE, not the route: a preset goes through
-      // the same two calls untouched.
-      expect(
-        (await req("POST", spacePath, { userId: target.user.id, preset_role: "viewer" })).status,
-      ).toBe(201);
-      expect(
-        (await req("PATCH", `${spacePath}/${target.user.id}`, { custom_role_id: role.id })).status,
-      ).toBe(403);
-      expect(
-        (await req("PATCH", `${spacePath}/${target.user.id}`, { preset_role: "operator" })).status,
-      ).toBe(200);
-
-      // The control: the same custom grant with the flag back on.
-      flag(true);
-      expect(
-        (await req("PATCH", `${spacePath}/${target.user.id}`, { custom_role_id: role.id })).status,
-      ).toBe(200);
-    });
-
-    it("stops offering an ungrantable bundle in the space catalog, still lists it in the org one", async () => {
-      const role = await createRole({ key: "support", permissions: ["agents:read"] });
-      const catalog = async () => {
-        const res = await req("GET", `/api/spaces/${owner.defaultSpaceId}/roles`);
-        expect(res.status).toBe(200);
-        return ((await res.json()) as { data: RoleWire[] }).data;
-      };
-      const orgCatalog = async () => {
-        const res = await req("GET", "/api/roles");
-        return ((await res.json()) as { data: RoleWire[] }).data;
-      };
-
-      expect((await catalog()).some((r) => r.id === role.id)).toBe(true);
-
-      flag(false);
-      const offered = await catalog();
-      expect(offered.some((r) => r.id === role.id)).toBe(false);
-      // The presets are the control: the listing itself did not go empty.
-      expect(offered.map((r) => r.key)).toEqual([...SPACE_ROLE_PRESETS]);
-      // The org catalogue is where a leftover is found and deleted, so it keeps it.
-      expect((await orgCatalog()).some((r) => r.id === role.id)).toBe(true);
-    });
-
-    it("lets a leftover bundle be cleaned up with the flag off", async () => {
-      const role = await createRole({ key: "support", permissions: ["agents:read"] });
-      const target = await memberContext(owner, "guest");
-      const spacePath = `/api/spaces/${owner.defaultSpaceId}/members`;
-      expect(
-        (await req("POST", spacePath, { userId: target.user.id, custom_role_id: role.id })).status,
-      ).toBe(201);
-      flag(false);
-
-      // Held: DELETE names how many holders stand in the way rather than 403ing
-      // on the feature.
-      await expectProblem(await del(role.id), 409, { code: "role_in_use" });
-      // Moving the holder onto a preset is the un-gated half of assignment.
-      expect(
-        (await req("PATCH", `${spacePath}/${target.user.id}`, { preset_role: "viewer" })).status,
-      ).toBe(200);
-      expect((await del(role.id)).status).toBe(204);
     });
   });
 

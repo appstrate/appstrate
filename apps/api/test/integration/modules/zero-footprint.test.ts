@@ -13,13 +13,26 @@
  *   3. OpenAPI spec has no module paths / components / tags
  *   4. The default buildAppConfig() has no module feature flags set
  *
- * If this test fails, a module has leaked into core. Do not mask it by
+ * A failure in 1-4 means a module has LEAKED INTO core. Do not mask it by
  * adding special cases here — fix the leak.
+ *
+ * And the mirror of all four, which fails for the opposite reason:
+ *
+ *   5. Custom space roles work with no module mounted (RBAC spec §9)
+ *
+ * A failure there means core has come to DEPEND ON a module — a licence gate
+ * put back over routes the Apache-2.0 platform owns. Fix the gate, not the
+ * test.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { buildAppConfig } from "../../../src/lib/app-config.ts";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
@@ -113,6 +126,83 @@ describe("zero-footprint invariant (no modules loaded)", () => {
     it("base config has no billing flag — only @appstrate/module-ee contributes it", () => {
       const cfg = buildAppConfig();
       expect(cfg.features.billing).toBeUndefined();
+    });
+  });
+
+  /**
+   * The OTHER direction of the same invariant: what a module must NOT be
+   * needed for.
+   *
+   * `/api/roles` was licensed by `@appstrate/module-ee`'s `custom_roles`
+   * feature flag until custom space roles became open-source (RBAC spec §9).
+   * Every assertion below answered `403 feature_unavailable` under that gate,
+   * and this app mounts NO module at all — so green here is the whole claim
+   * "a deployment running nothing but the Apache-2.0 platform can define,
+   * edit, grant and preview a bundle". A licence gate put back over any of the
+   * four turns this red.
+   */
+  describe("custom space roles need no module", () => {
+    const orgReq = (method: string, path: string, body?: unknown, as: TestContext = ctx) =>
+      app.request(path, {
+        method,
+        headers: {
+          ...authHeaders(as),
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+
+    it("defines, edits, grants and previews a bundle with zero modules mounted", async () => {
+      const created = await orgReq("POST", "/api/roles", {
+        key: "support",
+        name: "Support",
+        permissions: ["agents:read"],
+      });
+      expect(created.status, await created.clone().text()).toBe(201);
+      const role = (await created.json()) as { id: string };
+
+      expect((await orgReq("PATCH", `/api/roles/${role.id}`, { name: "Support L2" })).status).toBe(
+        200,
+      );
+
+      // Granting was the second half of what the flag licensed — defining a
+      // bundle nobody may be given would have been a hollow win.
+      const target = await memberContext(ctx, "guest");
+      const granted = await orgReq("POST", `/api/spaces/${ctx.defaultSpaceId}/members`, {
+        userId: target.user.id,
+        custom_role_id: role.id,
+      });
+      expect(granted.status, await granted.clone().text()).toBe(201);
+
+      // And previewing one: the persona refusal used to read the same flag.
+      const preview = await app.request("/api/spaces", {
+        headers: authHeaders(ctx, {
+          "X-View-As": `org_role=member; space=${ctx.defaultSpaceId}; role=custom:${role.id}`,
+        }),
+      });
+      expect(preview.status, await preview.clone().text()).toBe(200);
+      expect(preview.headers.get("X-View-As-Active")).toBe("1");
+
+      // The control, green on BOTH sides of this change: DELETE was never
+      // gated, so a red here says the harness stopped reaching the router —
+      // not that a licence came back.
+      const refused = await orgReq("DELETE", `/api/roles/${role.id}`);
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({ code: "role_in_use", member_count: 1 });
+    });
+
+    it("still refuses an org member, who holds no `roles:write`", async () => {
+      // The half that must stay red. "Open-source" is not "everyone": the
+      // `roles:*` permissions are now the WHOLE gate, so they have to hold.
+      const member = await memberContext(ctx, "member");
+      const refused = await orgReq(
+        "POST",
+        "/api/roles",
+        { key: "sneak", name: "Sneak", permissions: ["agents:read"] },
+        member,
+      );
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ code: "forbidden" });
     });
   });
 
