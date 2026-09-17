@@ -28,7 +28,7 @@ Organization ──┬── space_roles (org-defined permission bundles)
 A space is also the **unit of access**, not only of scoping: who reaches it is
 answered by `spaces.visibility` (`open` / `closed` / `private`), `spaces.default_role`
 and the `space_members` row for `(space, user)` — a preset (`admin` / `builder` /
-`operator` / `viewer`) or one of the org's `space_roles` bundles. Owners and
+`operator` / `runner` / `viewer`) or one of the org's `space_roles` bundles. Owners and
 admins reach every TEAM space by org role and are never rows; a **personal**
 space is the one exception and answers to its owner alone ("Personal spaces"
 below). The resolver and the vocabulary live in
