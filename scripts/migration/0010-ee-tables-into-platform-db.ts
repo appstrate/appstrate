@@ -286,6 +286,17 @@ async function planTables(src: SQL, prefix: SourcePrefix): Promise<TablePlan[]> 
  * `OFFSET`: under one REPEATABLE READ snapshot both are correct, but keyset
  * costs an index seek per page instead of re-walking every row already copied.
  * Values cross as text and are cast to the TARGET's type on the way in.
+ *
+ * `ORDER BY` IS QUALIFIED WITH THE TABLE, and that is load-bearing. Every
+ * column is selected as `"c"::text`, and a cast KEEPS the output name — so a
+ * bare `ORDER BY "llm_usage_id"` binds to the SELECT-list output (text), while
+ * the `WHERE (pk) > ($1::integer)` beside it can only see the input column
+ * (integer). Ordering would then be lexicographic and the cursor numeric: page
+ * 1 ends at the text-largest id ("9287"), page 2 asks for ids numerically above
+ * 9287, and every row between the two — 109 of 717 on the production ledger —
+ * is never selected at all. `"table"."c"` cannot resolve to an output name, so
+ * both halves read the same column. The loss is silent: the copy reports the
+ * rows it saw, and only the final source-vs-target count catches it.
  */
 async function copyTable(src: SQL, tx: SQL, plan: TablePlan): Promise<number> {
   if (!plan.source) return 0;
@@ -296,7 +307,9 @@ async function copyTable(src: SQL, tx: SQL, plan: TablePlan): Promise<number> {
   const nameList = cols.map((c) => `"${c.name}"`).join(", ");
 
   const pk = await primaryKeyOf(src, plan.source);
-  const keyList = pk.map((n) => `"${n}"`).join(", ");
+  // Qualified on purpose — see the note above. An unqualified name here binds
+  // to the `::text` output column in ORDER BY and to the real one in WHERE.
+  const keyList = pk.map((n) => `"${plan.source}"."${n}"`).join(", ");
   const keyCast = pk.map((n, i) => `$${i + 1}::${cols.find((c) => c.name === n)!.type}`).join(", ");
 
   let last: string[] | null = null;
