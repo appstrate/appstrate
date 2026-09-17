@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.58] - 2026-09-17
+
 ### Added
 
 - **The per-type package index carries `icon` and `keywords`.** Both are read
