@@ -21,7 +21,6 @@ import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { splitPackageRef } from "../../lib/package-paths";
-import { useAuth } from "../../hooks/use-auth";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useCreateVersion } from "../../hooks/use-packages";
@@ -75,7 +74,6 @@ export function SharePackageDialog({
   canPublish: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { user: currentUser } = useAuth();
   const orgId = useCurrentOrgId();
   const { data: shares, isLoading } = usePackageShares(packageId, open);
   const { data: spaces } = useSpaces(open);
@@ -97,21 +95,14 @@ export function SharePackageDialog({
   const offered = useMemo(() => new Set((shares ?? []).map(shareTargetHandle)), [shares]);
 
   /**
-   * The home's OWNER is a no-op target as surely as the home space itself: a
-   * person resolves server-side to their personal space, and offering a package
-   * to the space it already lives in is `409 share_target_is_home`.
-   *
-   * A personal space's owner is deliberately not named on the wire — and does
-   * not have to be: such a space is reached by its owner ALONE, so a home space
-   * this caller can enter and that is `personal` is this caller's own. That is
-   * the one member to drop, and the only one this projection can identify.
+   * The home's OWNER is a no-op target as surely as the home space itself — a
+   * person resolves server-side to their personal space — but this projection
+   * cannot identify them: a personal space's owner is deliberately not named on
+   * the wire. So the picker may still offer one, and the `409
+   * share_target_is_home` branch below is what says so, in the reader's own
+   * language.
    */
-  const homeSpace = (spaces ?? []).find((candidate) => candidate.id === homeSpaceId);
-  const homeOwnerId =
-    homeSpace?.personal && homeSpace.access === "member" ? currentUser?.id : undefined;
-  const members = (org?.members ?? []).filter(
-    (member) => !offered.has(member.userId) && member.userId !== homeOwnerId,
-  );
+  const members = (org?.members ?? []).filter((member) => !offered.has(member.userId));
   // A share destination is a space the caller reaches that is neither the
   // package's home nor their OWN personal space: the first already has it, and
   // the second is reached by activating it, not by offering it to yourself.
