@@ -67,9 +67,11 @@ export async function assertSpaceAssignmentsValid(
   if (roleIds.length === 0) return;
   // Naming a bundle in a deferred grant is granting one, just later — so the
   // bundle has to EXIST in this organization at the moment the grant is
-  // authored (an invitation, an OAuth signup policy), not only when it is
-  // applied. A deleted role is refused where it is written rather than
-  // stranding the invitee at the door.
+  // AUTHORED (an invitation, an OAuth signup policy), where a typo or a stale
+  // id is still legible and fixable by whoever wrote it. A role deleted
+  // BETWEEN authoring and acceptance is the other case, and it is handled at
+  // the door by `applySpaceAssignments`: skipped for an invitation, refused
+  // for an SSO signup.
   const liveRoles = await tx
     .select({ id: spaceRoles.id })
     .from(spaceRoles)
