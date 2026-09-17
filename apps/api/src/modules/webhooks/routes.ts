@@ -32,7 +32,7 @@ import {
   webhookEventSchema,
 } from "./service.ts";
 import type { WebhookInfo } from "@appstrate/shared-types";
-import { ApiError, forbidden } from "../../lib/errors.ts";
+import { ApiError, forbidden, notFound } from "../../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { enterSpaceContext, makePermissionGuard } from "@appstrate/core/permissions";
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
@@ -42,16 +42,26 @@ import { parseListPagination } from "../../lib/list-query.ts";
 
 /**
  * Assert that a space belongs to the given org.
- * Throws `forbidden` if the space does not exist or belongs to another org.
+ *
+ * Throws the platform's UNIFORM space 404 — worded exactly as `getSpace`,
+ * `assertSpaceInScope` and `applySpacePermissions` word it (`services/spaces.ts`,
+ * `middleware/space-context.ts`) — whether the space does not exist or is one
+ * this caller may not see. A `forbidden` here made the route an existence
+ * oracle: a nonexistent id answered 403, while a LIVE personal space of another
+ * member passed this check (the row does belong to the org) and was refused
+ * further down by `enterSpaceContext` with a 404. Two different answers told an
+ * org owner or admin exactly which ids are somebody's private space — the thing
+ * every other space read is careful never to say (RBAC spec §3.6).
  *
  * Delegates to the canonical `validateSpaceInOrg` — same SELECT, plus the
  * `assertSpaceId` shape guard this copy did not have. Both call sites already
  * assert the shape with a `spaceId` param name, so that guard is a backstop
- * here rather than the primary diagnostic.
+ * here rather than the primary diagnostic; its 400 stays a 400, because a
+ * malformed id is not a hidden row.
  */
 async function assertSpaceBelongsToOrg(spaceId: string, orgId: string): Promise<void> {
   if (!(await validateSpaceInOrg(spaceId, orgId))) {
-    throw forbidden("spaceId must belong to the current organization");
+    throw notFound(`Space '${spaceId}' not found in this organization`);
   }
 }
 
@@ -175,7 +185,10 @@ export function createWebhooksRouter() {
       const data = await readJsonBody(c, createWebhookSchema);
 
       // The BODY's space decides the permission. A caller with no webhook authority
-      // anywhere gets one 403 for every failure, so the route is not a space oracle.
+      // anywhere gets one 403 for every failure (the `catch` below re-proves the
+      // coarse grant before letting the space verdict through), and a caller who
+      // HAS it gets the same 404 for a space that does not exist and for one it
+      // may not see — the route is a space oracle at neither tier.
       if (data.level === "space") {
         assertSpaceId(data.spaceId, "spaceId");
         try {

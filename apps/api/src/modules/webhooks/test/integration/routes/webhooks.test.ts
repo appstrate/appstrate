@@ -10,7 +10,11 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
-import { seedApiKey, seedSpace } from "../../../../../../test/helpers/seed.ts";
+import {
+  seedApiKey,
+  seedSpace,
+  seedUnreachableSpace,
+} from "../../../../../../test/helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -685,5 +689,85 @@ describe("webhooks vs org-webhooks (level-dependent guard)", () => {
       });
       expect(removed.status).toBe(204);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// `?spaceId=` must not be an existence oracle. Every space read in the
+// platform answers a space it may not see with ONE sentence and ONE status
+// (`getSpace`, `requireSpaceFromParam`, `applySpacePermissions`), so that a
+// refusal never says "this id exists". This route validated the filter's
+// space itself, and used to answer 403 for an unknown id while a LIVE
+// personal space of another member — a row that does belong to the org —
+// got past that check and was refused 404 further down. The pair of answers
+// was the leak (RBAC spec §3.6).
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("GET /api/webhooks?spaceId= is not a space existence oracle", () => {
+  let ctx: TestContext;
+
+  // Well-formed (`spc_` + a canonical UUID, so `assertSpaceId` passes and the
+  // 400 path is out of the picture) and seeded by nothing: no such row exists.
+  const ABSENT_SPACE_ID = "spc_00000000-0000-4000-8000-000000000000";
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "webhook-oracle" });
+  });
+
+  const list = (spaceId: string, headers: Record<string, string>) =>
+    app.request(`/api/webhooks?spaceId=${spaceId}`, { headers });
+
+  /**
+   * The problem body with everything REQUEST-specific neutralised: the two
+   * per-request members (`requestId`, `instance`), and the id the caller itself
+   * put in the query, which the uniform 404 echoes back — echoing the caller's
+   * own input tells it nothing it did not already know. Everything else —
+   * `status`, `code`, `type`, `title` and the sentence around the id — has to
+   * match, and that is what the comparison below asserts.
+   */
+  async function normalisedProblem(res: Response, spaceId: string) {
+    const body = (await res.json()) as Record<string, unknown>;
+    delete body.requestId;
+    delete body.instance;
+    if (typeof body.detail === "string") {
+      body.detail = body.detail.replaceAll(spaceId, "<spaceId>");
+    }
+    return body;
+  }
+
+  it("404s a well-formed spaceId that names no space at all", async () => {
+    const res = await list(ABSENT_SPACE_ID, authHeaders(ctx));
+    expect(res.status).toBe(404);
+  });
+
+  it("answers another member's LIVE personal space with the SAME body", async () => {
+    // `seedUnreachableSpace` is the fixture the placement tests use for this:
+    // a private space owned by somebody else, which an org owner reaches in no
+    // other way. The row exists and belongs to the org — that is the whole
+    // point, since it is the case that used to get a different status.
+    const personalSpaceId = await seedUnreachableSpace(ctx.orgId, "Stranger's space");
+
+    const absent = await list(ABSENT_SPACE_ID, authHeaders(ctx));
+    const personal = await list(personalSpaceId, authHeaders(ctx));
+
+    expect(personal.status).toBe(404);
+    expect(personal.status).toBe(absent.status);
+    // The assertion that closes the oracle: statuses alone would still pass if
+    // the two refusals carried different sentences or codes.
+    expect(await normalisedProblem(personal, personalSpaceId)).toEqual(
+      await normalisedProblem(absent, ABSENT_SPACE_ID),
+    );
+  });
+
+  it("still 403s a caller holding no webhook grant at all", async () => {
+    // The positive control. Without it the two cases above would pass just as
+    // well if the route answered 404 to everyone: the missing PERMISSION is not
+    // a missing space, and it keeps its own status. The 403 is raised by the
+    // route guard, before the filter's space is ever looked up.
+    const asMember = await memberContext(ctx, "member");
+    const res = await list(ABSENT_SPACE_ID, orgOnlyHeaders(asMember));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { detail: string }).detail).toContain("org-webhooks:read");
   });
 });
