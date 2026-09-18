@@ -57,7 +57,12 @@ interface ValidationFieldError {
   code: string;
   title?: string;
   message: string;
-  candidate_connection_ids?: string[];
+  candidate_connections?: {
+    id: string;
+    label: string | null;
+    account_id: string;
+    owned_by_actor: boolean;
+  }[];
   connect_url?: string;
   expires_at?: number;
   package_id?: string;
@@ -124,7 +129,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     expect(err).toBeDefined();
     expect(err!.code).toBe("must_choose_connection");
     // The remedy the caller is handed — it must be actionable on THIS route.
-    expect(err!.candidate_connection_ids!.sort()).toEqual([conn1, conn2].sort());
+    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([conn1, conn2].sort());
   });
 
   it("launches when connection_overrides names a candidate, persisting the pick and its snapshot", async () => {

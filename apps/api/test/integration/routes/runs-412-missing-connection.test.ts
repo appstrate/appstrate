@@ -21,7 +21,7 @@
  *         title: <human-readable>,
  *         message: <human-readable>,
  *         // optional smuggles:
- *         candidateConnectionIds?: string[],
+ *         candidateConnections?: { id, label, accountId, ownedByActor }[],
  *         connection_id?, missing_scopes?, owned_by_actor?,
  *         auth_key?, required_scopes? }
  *     ] }
@@ -136,7 +136,12 @@ interface ValidationFieldError {
   code: string;
   title?: string;
   message: string;
-  candidate_connection_ids?: string[];
+  candidate_connections?: {
+    id: string;
+    label: string | null;
+    account_id: string;
+    owned_by_actor: boolean;
+  }[];
   connection_id?: string;
   missing_scopes?: string[];
   owned_by_actor?: boolean;
@@ -171,18 +176,23 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
-  async function seedConnection(integrationId: string, userId: string): Promise<string> {
+  async function seedConnection(
+    integrationId: string,
+    userId: string,
+    overrides?: { label?: string; accountId?: string },
+  ): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: integrationId,
         authKey: "primary",
-        accountId: `acct-${userId.slice(0, 6)}`,
+        accountId: overrides?.accountId ?? `acct-${userId.slice(0, 6)}`,
         spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
         scopesGranted: [],
+        ...(overrides?.label !== undefined ? { label: overrides.label } : {}),
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -304,7 +314,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     }
   });
 
-  it("emits 412 with must_choose_connection + candidateConnectionIds when actor has >1 candidate", async () => {
+  it("emits 412 with must_choose_connection + candidate_connections when actor has >1 candidate", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
@@ -318,8 +328,14 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     // Seed TWO connections for the same actor + integration. No pin / no
     // override exists, so the resolver enters the fallback layer with 2
     // candidates and surfaces must_choose_connection.
-    const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
-    const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
+    const conn1 = await seedConnection(INTEGRATION, ctx.user.id, {
+      label: "web server",
+      accountId: "root@web-01",
+    });
+    const conn2 = await seedConnection(INTEGRATION, ctx.user.id, {
+      label: "database",
+      accountId: "root@db-01",
+    });
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
@@ -335,10 +351,16 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     expect(err).toBeDefined();
     expect(err!.code).toBe("must_choose_connection");
 
-    // The candidate_connection_ids smuggle is the modal's source of truth for
-    // rendering the per-actor picker dropdown.
-    expect(err!.candidate_connection_ids).toBeDefined();
-    expect(err!.candidate_connection_ids!.sort()).toEqual([conn1, conn2].sort());
+    // End-to-end: the candidates reach the wire carrying what tells them apart,
+    // so a caller with no picker (API, MCP) chooses from the 412 alone instead
+    // of fetching the connection list to learn which uuid is which account.
+    expect(err!.candidate_connections).toBeDefined();
+    expect([...err!.candidate_connections!].sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+      [
+        { id: conn1, label: "web server", account_id: "root@web-01", owned_by_actor: true },
+        { id: conn2, label: "database", account_id: "root@db-01", owned_by_actor: true },
+      ].sort((a, b) => a.id.localeCompare(b.id)),
+    );
   });
 
   it("must_choose retry: posting connection_overrides exits the 412 loop", async () => {
@@ -803,7 +825,7 @@ describe("POST /api/agents/:scope/:name/run — 412 missing_integration_connecti
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(err).toBeDefined();
     expect(err!.code).toBe("must_choose_connection");
-    expect(err!.candidate_connection_ids!.sort()).toEqual([conn1, conn2].sort());
+    expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([conn1, conn2].sort());
   });
 
   it("keeps a bare dependency INERT when the integration declares no default_tools", async () => {

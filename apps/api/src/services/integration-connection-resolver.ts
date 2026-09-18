@@ -49,6 +49,7 @@ import {
   manifestAuthKeySet,
   manifestHasRequiredAuth,
   type IntegrationManifest,
+  type ConnectionCandidate,
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type ConnectionResolutionResult,
@@ -450,14 +451,19 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   }
 
   if (healthy.length > 1) {
-    // >1 healthy — caller must pick. Surface the LIVE candidate ids so the UI
-    // renders a picker (label + accountId + shared/owned badge). The picker
-    // writes a member pin, so the next run skips this branch and resolves via
-    // layer 5.
+    // >1 healthy — caller must pick. Surface the LIVE candidates, each with the
+    // fields that tell them apart (label, accountId, owned/shared), not just
+    // their ids: a caller with no picker — an API client, an MCP model reading
+    // the 412 — chooses from the error alone instead of fetching the connection
+    // list to learn which uuid is which account. The dashboard is not that
+    // caller: its
+    // modal embeds the shared picker, whose candidate list is a superset (it
+    // also offers the dead rows, with a renew button). That picker writes a
+    // member pin, so the next run skips this branch and resolves via layer 5.
     return errorOf(args, {
       code: "must_choose_connection",
       message: `Multiple connections available for ${args.integrationId} — pick one.`,
-      candidateConnectionIds: healthy.map((c) => c.id),
+      candidateConnections: healthy.map((c) => candidateOf(args, c)),
     });
   }
 
@@ -531,18 +537,38 @@ function oauthScopesForAuth(args: ResolveOneArgs, authKey: string): string[] {
   });
 }
 
+/**
+ * Whose account a row is. Relayed on the two connection-bound connect-flow
+ * codes because both remedies re-consent THAT row: the UI offers the repair
+ * only to its owner, and the connect-offer mint refuses to sign claims against
+ * a colleague's credential (`connectOfferTarget`). Also rides on every
+ * `must_choose_connection` candidate, where it is a disambiguator rather than
+ * a permission: "my account" vs "the one the org shares" is often the only
+ * thing separating two otherwise identical rows.
+ */
+function isOwnedByActor(args: ResolveOneArgs, conn: ConnectionRow): boolean {
+  return (
+    (args.actorUserId !== null && conn.userId === args.actorUserId) ||
+    (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId)
+  );
+}
+
+/** Project a candidate row onto the picker-facing shape carried by the 412. */
+function candidateOf(args: ResolveOneArgs, conn: ConnectionRow): ConnectionCandidate {
+  return {
+    id: conn.id,
+    label: conn.label,
+    accountId: conn.accountId,
+    ownedByActor: isOwnedByActor(args, conn),
+  };
+}
+
 function checkHealth(
   args: ResolveOneArgs,
   conn: ConnectionRow,
   source: ResolvedConnection["source"],
 ): ResolveOneResult {
-  // Whose account this row is. Relayed on both connection-bound connect-flow
-  // codes because both remedies re-consent THIS row: the UI offers the repair
-  // only to its owner, and the connect-offer mint refuses to sign claims
-  // against a colleague's credential (`connectOfferTarget`).
-  const ownedByActor =
-    (args.actorUserId !== null && conn.userId === args.actorUserId) ||
-    (args.actorEndUserId !== null && conn.endUserId === args.actorEndUserId);
+  const ownedByActor = isOwnedByActor(args, conn);
 
   if (conn.needsReconnection) {
     // A reconnect is a connect flow, so it carries the same relay as the other
@@ -794,10 +820,19 @@ export function translateResolutionError(e: ConnectionResolutionError): Resoluti
     code: e.code,
     title,
     message: e.message,
-    // Smuggle the candidate ids on must_choose_connection so the modal
-    // can render a picker.
-    ...(e.candidateConnectionIds && e.candidateConnectionIds.length > 0
-      ? { candidate_connection_ids: e.candidateConnectionIds }
+    // Smuggle the candidates on must_choose_connection so a caller with no
+    // picker of its own names its choice straight from the error, without a
+    // second round-trip through the connection list to learn which uuid is
+    // which.
+    ...(e.candidateConnections && e.candidateConnections.length > 0
+      ? {
+          candidate_connections: e.candidateConnections.map((c) => ({
+            id: c.id,
+            label: c.label,
+            account_id: c.accountId,
+            owned_by_actor: c.ownedByActor,
+          })),
+        }
       : {}),
     // The connect-flow relay, on every code a connect flow can clear: the
     // kickoff computes no scopes of its own, so it forwards `required_scopes`
