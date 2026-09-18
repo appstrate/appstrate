@@ -10,18 +10,34 @@
  *   3. Requests NOT matching the strategy fall through to core auth
  *   4. Core API key auth (Bearer ask_) still works when strategies don't claim
  *   5. A strategy-set `endUser` flows through to `c.get("endUser")`
+ *   6. A strategy that misdeclares its `principalKind` is a 500, not a bucket
+ *   7. Identity-shaped gates read that kind, never the transport that carried it
  *
  * This is the key validation that Phase 0's extension point is wired
  * correctly from contract → loader → middleware → route.
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestOrg, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 import { db } from "@appstrate/db/client";
-import { endUsers } from "@appstrate/db/schema";
+import { endUsers, integrationConnections } from "@appstrate/db/schema";
 import { prefixedId } from "@appstrate/db/ids";
-import type { AppstrateModule, AuthStrategy } from "@appstrate/core/module";
+import type { AppstrateModule, AuthResolution, AuthStrategy } from "@appstrate/core/module";
+
+/**
+ * Tokens that resolve to the `"valid"` shape carrying ONE deliberate defect in
+ * its principal declaration. `principalKind` is required and must agree with
+ * `endUser`, so the type system refuses each of them — which is precisely why
+ * the pipeline's own runtime check has to be what answers.
+ */
+const MISDECLARED = ["no-kind", "kind-without-enduser", "enduser-without-kind"] as const;
+
+/** The external identity the `"admin"` token impersonates; seeded where a test needs the row. */
+const STUB_END_USER_ID = "eu_stub_admin_placeholder";
 
 // Test context is seeded once per test so the stub strategy can resolve to
 // real DB rows. We capture it via a module-level reference because the
@@ -45,15 +61,51 @@ const stubStrategy: AuthStrategy = {
           name: currentCtx.user.name,
         },
         authMethod: "stub-deferred",
+        principalKind: "user",
         permissions: [],
         deferOrgResolution: true,
       };
     }
-    if (token !== "valid" && token !== "admin") return null;
+    if (token === "dashboard") {
+      // The `oauth2-dashboard` shape: an org-bound DELEGATE with NO pinned
+      // space — authority over the org, never the person behind it.
+      if (!currentCtx) throw new Error("currentCtx not seeded — test setup bug");
+      return {
+        user: {
+          id: currentCtx.user.id,
+          email: currentCtx.user.email,
+          name: currentCtx.user.name,
+        },
+        orgId: currentCtx.orgId,
+        orgSlug: currentCtx.org.slug,
+        orgRole: "admin",
+        authMethod: "stub-dashboard",
+        principalKind: "delegate",
+        permissions: ["agents:read", "spaces:read", "integrations:read", "runs:read"],
+      };
+    }
+    if (token === "dashboard-unbound") {
+      // The same delegate with nothing to be bound BY: no org, no role, no
+      // space, and NOT deferring — the pipeline writes its ceiling verbatim and
+      // it reaches the org listings with nothing to filter by.
+      if (!currentCtx) throw new Error("currentCtx not seeded — test setup bug");
+      return {
+        user: {
+          id: currentCtx.user.id,
+          email: currentCtx.user.email,
+          name: currentCtx.user.name,
+        },
+        authMethod: "stub-dashboard-unbound",
+        principalKind: "delegate",
+        permissions: ["spaces:read"],
+      };
+    }
+    const misdeclared = MISDECLARED.find((t) => t === token);
+    if (token !== "valid" && token !== "admin" && !misdeclared) return null;
     if (!currentCtx) {
       throw new Error("currentCtx not seeded — test setup bug");
     }
-    return {
+    const resolution: AuthResolution = {
       user: {
         id: currentCtx.user.id,
         email: currentCtx.user.email,
@@ -63,19 +115,46 @@ const stubStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "admin",
       authMethod: "stub-strategy",
+      // "admin" is the branch carrying `endUser` below — the two must agree.
+      principalKind: token === "admin" ? "end_user" : "delegate",
       spaceId: currentCtx.defaultSpaceId,
-      permissions: ["runs:read", "runs:write", "runs:cancel", "agents:read", "end-users:read"],
+      // `spaces:write` is here so `POST /api/spaces` is refused by the KIND
+      // rather than by the ceiling, which would refuse it either way.
+      permissions: [
+        "runs:read",
+        "runs:write",
+        "runs:cancel",
+        "agents:read",
+        "end-users:read",
+        "spaces:write",
+      ],
       // Exercise the endUser pass-through when token is "admin"
       endUser:
         token === "admin"
           ? {
-              id: "eu_stub_admin_placeholder",
+              id: STUB_END_USER_ID,
               spaceId: currentCtx.defaultSpaceId,
               name: "Stub Admin",
               email: "stub-admin@test.com",
             }
           : undefined,
     };
+    if (!misdeclared) return resolution;
+    const defect: Record<string, unknown> =
+      misdeclared === "no-kind"
+        ? { principalKind: undefined }
+        : misdeclared === "kind-without-enduser"
+          ? { principalKind: "end_user", endUser: undefined }
+          : {
+              principalKind: "user",
+              endUser: {
+                id: "eu_stub_contract",
+                spaceId: currentCtx.defaultSpaceId,
+                name: "Contract",
+                email: "contract@test.com",
+              },
+            };
+    return { ...resolution, ...defect } as unknown as AuthResolution;
   },
 };
 
@@ -227,6 +306,310 @@ describe("module auth strategy pipeline", () => {
         body: JSON.stringify({ name: "Renamed By Owner" }),
       });
       expect(res.status).toBe(200);
+    });
+  });
+
+  // ── Shared observations: the two listings a credential's reach shows up in ──
+
+  /** One connection row on a freshly seeded integration, owned by user or end-user. */
+  async function connectionIn(opts: {
+    orgId: string;
+    spaceId: string;
+    integrationId: string;
+    endUserId?: string;
+  }): Promise<string> {
+    await seedPackage({
+      id: opts.integrationId,
+      orgId: opts.orgId,
+      homeSpaceId: opts.spaceId,
+      type: "integration",
+      source: "local",
+    });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: opts.integrationId,
+        authKey: "primary",
+        accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+        spaceId: opts.spaceId,
+        userId: opts.endUserId ? null : currentCtx!.user.id,
+        endUserId: opts.endUserId ?? null,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  /** Same observation as `me.test.ts` CRIT-03: which connection ids surface. */
+  async function connectionIds(token: string): Promise<string[]> {
+    const res = await app.request("/api/me/connections", {
+      headers: { "X-Test-Strategy": token },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ connections: Array<{ connection_id: string }> }>;
+    };
+    return body.data.flatMap((g) => g.connections.map((x) => x.connection_id));
+  }
+
+  async function orgIds(path: string, token: string): Promise<string[]> {
+    const res = await app.request(path, { headers: { "X-Test-Strategy": token } });
+    expect(res.status, await res.clone().text()).toBe(200);
+    return ((await res.json()) as { data: Array<{ id: string }> }).data.map((o) => o.id);
+  }
+
+  // ── The delegate that is NOT an API key ───────────────────────────────────
+  //
+  // Every gate below asked `authMethod === "api_key"`, so this stub — a
+  // delegate by another transport, and an `admin` at that — walked through all
+  // of them. Each one asks "is this the person?", so the kind must answer.
+  describe("a delegate that is not an API key", () => {
+    const delegate = { "X-Test-Strategy": "valid" };
+    const json = { ...delegate, "Content-Type": "application/json" };
+
+    it("cannot read or rewrite the dashboard user's own identity record", async () => {
+      expect((await app.request("/api/profile", { headers: delegate })).status).toBe(403);
+
+      const renamed = await app.request("/api/profile", {
+        method: "PATCH",
+        headers: json,
+        body: JSON.stringify({ displayName: "Renamed By A Delegate" }),
+      });
+      expect(renamed.status).toBe(403);
+
+      const password = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ newPassword: "NotYourPassword123!" }),
+      });
+      expect(password.status).toBe(403);
+    });
+
+    it("cannot complete the onboarding step that renames the user", async () => {
+      const res = await app.request("/api/welcome/setup", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ displayName: "Onboarded By A Delegate" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("cannot make the two decisions a person makes, nor open the org-wide map", async () => {
+      const space = await app.request("/api/spaces", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ name: "Delegated Space" }),
+      });
+      expect(space.status).toBe(403);
+
+      const org = await app.request("/api/orgs", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ name: "Delegated Org", slug: "delegated-org" }),
+      });
+      expect(org.status).toBe(403);
+
+      // The stub resolves to `admin`, which passes the role half of
+      // `mayOpenOrganizationLibrary` — only the kind can refuse this one.
+      expect((await app.request("/api/library", { headers: delegate })).status).toBe(403);
+    });
+
+    it("sees only its bound org in both listings, where a `user` sees both", async () => {
+      await createTestOrg(currentCtx!.user.id);
+
+      for (const path of ["/api/orgs", "/api/me/orgs"]) {
+        expect(await orgIds(path, "valid")).toEqual([currentCtx!.orgId]);
+        expect(await orgIds(path, "deferred")).toHaveLength(2);
+      }
+    });
+
+    it("gets the bound connection view, where a `user` gets the global one", async () => {
+      const here = await connectionIn({
+        orgId: currentCtx!.orgId,
+        spaceId: currentCtx!.defaultSpaceId,
+        integrationId: "@strat/here",
+      });
+      const other = await createTestOrg(currentCtx!.user.id);
+      const elsewhere = await connectionIn({
+        orgId: other.org.id,
+        spaceId: other.defaultSpaceId,
+        integrationId: "@strat/elsewhere",
+      });
+
+      expect(await connectionIds("valid")).toEqual([here]);
+      expect((await connectionIds("deferred")).sort()).toEqual([here, elsewhere].sort());
+    });
+
+    it("control: a `user` by another transport still reads its own profile", async () => {
+      const res = await app.request("/api/profile", {
+        headers: { "X-Test-Strategy": "deferred" },
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+    });
+  });
+
+  // ── The org-bound delegate with no pinned space (`oauth2-dashboard`) ───────
+  //
+  // Org authority and nothing else: it holds `admin`, and the three reads below
+  // are the ones that would hand it the person's own half of the org.
+  describe("an org-bound delegate with no pinned space", () => {
+    const dashboard = { "X-Test-Strategy": "dashboard" };
+
+    it("is a 404 on the subject's own personal space, where their session is served", async () => {
+      // Pins the refusal rather than a regression: `callerPersonalOwnerId` is
+      // `null` for anything that is not the person, before and after.
+      const personal = await ensurePersonalSpaceFor(currentCtx!.orgId, currentCtx!.user.id);
+      const asDelegate = await app.request("/api/agents", {
+        headers: { ...dashboard, "X-Space-Id": personal.id },
+      });
+      expect(asDelegate.status).toBe(404);
+
+      const asUser = await app.request("/api/agents", {
+        headers: {
+          Cookie: currentCtx!.cookie,
+          "X-Org-Id": currentCtx!.orgId,
+          "X-Space-Id": personal.id,
+        },
+      });
+      expect(asUser.status, await asUser.clone().text()).toBe(200);
+    });
+
+    it("cannot open the org-wide map its `admin` role would otherwise reach", async () => {
+      expect((await app.request("/api/library", { headers: dashboard })).status).toBe(403);
+    });
+
+    it("is bound to its org in the listing and in its connections", async () => {
+      const here = await connectionIn({
+        orgId: currentCtx!.orgId,
+        spaceId: currentCtx!.defaultSpaceId,
+        integrationId: "@strat/dash-here",
+      });
+      const other = await createTestOrg(currentCtx!.user.id);
+      await connectionIn({
+        orgId: other.org.id,
+        spaceId: other.defaultSpaceId,
+        integrationId: "@strat/dash-elsewhere",
+      });
+
+      expect(await orgIds("/api/orgs", "dashboard")).toEqual([currentCtx!.orgId]);
+      // Org-bound, not space-bound: it pins no space, so the whole org answers.
+      expect(await connectionIds("dashboard")).toEqual([here]);
+    });
+  });
+
+  // ── The delegate bound to nothing at all ──────────────────────────────────
+  //
+  // `/api/orgs` and `/api/me/orgs` skip org context by design, so this one
+  // reaches `getUserOrganizations` with no id to narrow by. The only safe
+  // answer is to refuse; on `main` it read every org the subject belongs to.
+  describe("a delegate with no org binding", () => {
+    it("is refused both org listings, where an unbound `user` is served", async () => {
+      await createTestOrg(currentCtx!.user.id);
+
+      for (const path of ["/api/orgs", "/api/me/orgs"]) {
+        const refused = await app.request(path, {
+          headers: { "X-Test-Strategy": "dashboard-unbound" },
+        });
+        expect(refused.status, await refused.clone().text()).toBe(401);
+        // The same absence of an org on a `user` is the ordinary pre-org-picker
+        // call, and still lists both.
+        expect(await orgIds(path, "deferred")).toHaveLength(2);
+      }
+    });
+  });
+
+  // ── The end-user, whatever role its credential carries ────────────────────
+  //
+  // The `"admin"` token carries `orgRole: "admin"` AND an `endUser`. On `main`
+  // every gate below read `authMethod`, saw `stub-strategy`, and let it write.
+  describe("an end-user, whatever role its credential carries", () => {
+    const impersonated = { "X-Test-Strategy": "admin" };
+    const json = { ...impersonated, "Content-Type": "application/json" };
+
+    it("makes none of the decisions that belong to a person", async () => {
+      const org = await app.request("/api/orgs", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ name: "End User Org", slug: "end-user-org" }),
+      });
+      expect(org.status).toBe(403);
+
+      const space = await app.request("/api/spaces", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ name: "End User Space" }),
+      });
+      expect(space.status).toBe(403);
+
+      const renamed = await app.request("/api/profile", {
+        method: "PATCH",
+        headers: json,
+        body: JSON.stringify({ displayName: "Renamed By An End User" }),
+      });
+      expect(renamed.status).toBe(403);
+
+      const password = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ newPassword: "NotYourPassword123!" }),
+      });
+      expect(password.status).toBe(403);
+    });
+
+    it("sees only the connections of the space its credential pins", async () => {
+      await db.insert(endUsers).values({
+        id: STUB_END_USER_ID,
+        spaceId: currentCtx!.defaultSpaceId,
+        orgId: currentCtx!.orgId,
+        name: "Stub Admin",
+        email: "stub-admin@test.com",
+      });
+      const pinned = await connectionIn({
+        orgId: currentCtx!.orgId,
+        spaceId: currentCtx!.defaultSpaceId,
+        integrationId: "@strat/eu-pinned",
+        endUserId: STUB_END_USER_ID,
+      });
+      const sibling = await seedSpace({ orgId: currentCtx!.orgId, name: "Sibling" });
+      await connectionIn({
+        orgId: currentCtx!.orgId,
+        spaceId: sibling.id,
+        integrationId: "@strat/eu-elsewhere",
+        endUserId: STUB_END_USER_ID,
+      });
+
+      // Same org, a second space: on `main` the global view returned both.
+      expect(await connectionIds("admin")).toEqual([pinned]);
+    });
+  });
+
+  // ── The principal contract: a misdeclared kind fails loud ──────────────────
+  //
+  // The kind is DECLARED now, not inferred from the transport, so a missing or
+  // self-contradictory declaration is a programming error with no safe default:
+  // bucketing it is how a server-minted bearer once stopped being its user.
+  // The positive control is the suite's first test — the well-declared
+  // `delegate` (`"valid"`) reaching `/api/agents` with a 200.
+  describe("a strategy that misdeclares its principal", () => {
+    const request = (token: string) =>
+      app.request("/api/agents", {
+        headers: { "X-Test-Strategy": token, "X-Space-Id": currentCtx!.defaultSpaceId },
+      });
+
+    it("500s a resolution that declares no kind at all", async () => {
+      await expectProblem(await request("no-kind"), 500, { code: "internal_error" });
+    });
+
+    it("500s either half of an `end_user` disagreement", async () => {
+      await expectProblem(await request("kind-without-enduser"), 500, { code: "internal_error" });
+      await expectProblem(await request("enduser-without-kind"), 500, { code: "internal_error" });
+    });
+
+    it("tells the caller nothing about the throw", async () => {
+      const body = await expectProblem(await request("no-kind"), 500, { code: "internal_error" });
+      expect(body.detail).toBe("An internal error occurred");
+      expect(JSON.stringify(body)).not.toContain("stub-test-strategy");
     });
   });
 });

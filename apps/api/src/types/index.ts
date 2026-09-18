@@ -85,6 +85,8 @@ export type AppEnv = {
      * `"oidc"`, `"mtls"`).
      */
     authMethod: string;
+    /** Declared by the strategy, or by core for its two paths — see `PrincipalKind`. */
+    principalKind: import("@appstrate/core/module").PrincipalKind;
     apiKeyId: string | null;
     spaceId: string; // from API key auth or resolved by space-context middleware (X-Space-Id)
     /**

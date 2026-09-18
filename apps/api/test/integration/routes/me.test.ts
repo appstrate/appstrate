@@ -547,7 +547,7 @@ describe("Me API (/api/me)", () => {
   //
   // An API key authenticates as its CREATOR, but the key itself is bound to
   // one org + one space. `listMeConnections(actor, authority)` now takes
-  // a required authority: `api_key` → `space_scoped` with the key's own
+  // a required authority: `api_key` → `bound` with the key's own
   // orgId/spaceId. Pre-fix, the key inherited the creator's cross-org
   // `user_global` view — a leaked key could enumerate (and destructively
   // delete) the creator's connections in EVERY org they belong to.

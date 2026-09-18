@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import type { Context } from "hono";
 import { and, eq } from "drizzle-orm";
 import { ApiError } from "@appstrate/core/api-errors";
+import type { PrincipalKind } from "@appstrate/core/module";
 import { packages, spacePackages } from "@appstrate/db/schema";
 import {
   assertCatalogPackageAccess,
@@ -61,14 +62,16 @@ function space(id: string, permissions: string[]) {
 
 /**
  * The caller. `permissions` is the coarse guard the route pipeline would have
- * set for the current space; `orgRole` and `authMethod` shape the reach
- * `packageAccessSpaces` would have resolved, which is what the home rule reads.
+ * set for the current space; `orgRole`, `authMethod` and `principalKind` shape the
+ * reach `packageAccessSpaces` would have resolved, which is what the home rule
+ * reads. A caller left unqualified is the person over a cookie session.
  */
 function caller(
   opts: {
     orgRole: "owner" | "admin" | "member" | "guest";
     permissions: string[];
     authMethod?: string;
+    principalKind?: PrincipalKind;
   },
   /**
    * The caller's reach, seeded into the per-request memo `packageAccessSpaces`
@@ -80,6 +83,7 @@ function caller(
     orgId: ctx.orgId,
     orgRole: opts.orgRole,
     authMethod: opts.authMethod ?? "session",
+    principalKind: opts.principalKind ?? "user",
     permissions: new Set(opts.permissions),
     ...(accessible
       ? {
@@ -465,6 +469,7 @@ describe("assertPackageShareAccess", () => {
           orgRole: "owner",
           permissions: [...BUILDER_SKILLS, "skills:share"],
           authMethod: "api_key",
+          principalKind: "delegate",
         },
         accessible,
       );

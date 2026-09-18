@@ -47,6 +47,7 @@ import { getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
@@ -74,24 +75,21 @@ const router = new Hono<AppEnv>();
  * Derive the authority boundary of the presented credential for the
  * `/me/connections` surface (list + delete).
  *
- * An API key authenticates as its CREATOR (`c.get("user")` is the key's
- * creator), but the key itself is bound to one org + one space and its
- * bearer is a long-lived secret that may be handed to a third-party
- * space. The cross-org/cross-space view is an interactive-dashboard
- * feature — it must never be reachable with an API key, or a leaked key
- * could enumerate (and destructively delete) the creator's connections in
- * every org they belong to. The API-key auth branch always pins both ids
- * on the context; their absence under `api_key` is an auth-pipeline bug,
- * so fail closed rather than fall back to the global view.
+ * `user_global` is the `user` principal — the person themselves, by any
+ * transport. Every other kind is `bound`: an API key (org + space), a
+ * third-party OAuth client (org only), an end-user token (org + space). Each
+ * authenticates as its issuer, but its bearer is a credential that may be held
+ * by somebody else, so the cross-org dashboard view must never be reachable
+ * with one — a leaked key could otherwise enumerate (and destructively delete)
+ * the creator's connections in every org they belong to. On `main` an end-user
+ * token took the global view. The org id is always pinned for a bound
+ * credential; its absence is an auth-pipeline bug, so fail closed.
  */
 function getMeConnectionAuthority(c: Context<AppEnv>): MeConnectionAuthority {
-  if (c.get("authMethod") !== "api_key") return { kind: "user_global" };
+  if (isUserPrincipal(c)) return { kind: "user_global" };
   const orgId = c.get("orgId");
-  const spaceId = c.get("spaceId");
-  if (!orgId || !spaceId) {
-    throw unauthorized("API key is missing its org/space binding");
-  }
-  return { kind: "space_scoped", orgId, spaceId };
+  if (!orgId) throw unauthorized("Credential is missing its organization binding");
+  return { kind: "bound", orgId, spaceId: c.get("spaceId") };
 }
 
 /**
@@ -137,10 +135,16 @@ router.get("/orgs", async (c) => {
   const user = c.get("user");
   if (!user) throw unauthorized("Authentication required");
 
-  // API keys are bound to a single org — filter at the DB level so a
-  // compromised key cannot enumerate every org the creator belongs to.
-  // Same rule as `GET /api/orgs` keeps the two paths in lockstep.
-  const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
+  // A delegate is bound to a single org — filter at the DB level so a
+  // compromised key cannot enumerate every org the creator belongs to. No
+  // binding is an auth-pipeline bug, and the unfiltered listing is the very
+  // enumeration above: fail closed. Same rule as `GET /api/orgs` keeps the two
+  // paths in lockstep.
+  const orgId = c.get("orgId");
+  if (!isUserPrincipal(c) && !orgId) {
+    throw unauthorized("Credential is missing its organization binding");
+  }
+  const orgIdFilter = isUserPrincipal(c) ? undefined : orgId;
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
   // Once for the listing: the persona names one org, and one this listing
   // cannot place is refused rather than ignored.
@@ -176,9 +180,9 @@ router.get("/orgs", async (c) => {
  * they're a member of — the connection list belongs to the user, not to any
  * org/space, so org context is skipped entirely.
  *
- * For an API key: hard-scoped to the key's bound (org, space) pair —
- * the key authenticates as its creator, but its bearer must not be able to
- * enumerate the creator's connections in other orgs/spaces
+ * For every other kind: hard-scoped to its binding — its org, and its space
+ * when it pins one. Such a credential authenticates as its issuer, but its
+ * bearer must not be able to enumerate the issuer's connections elsewhere
  * (see {@link getMeConnectionAuthority}). Source-grouped (one group per
  * package) in both cases.
  */
@@ -297,10 +301,10 @@ router.delete("/integration-pins", requireSpaceContext(), async (c) => {
  *
  * Space context is implicit — the connection row carries `space_id`,
  * we re-derive scope from it instead of asking the SPA to send a header
- * for a per-row operation. EXCEPT for API-key callers: the key is bound to
- * one (org, space) and a delete outside that boundary is refused (a
- * leaked key must not be able to destroy the creator's credentials in other
- * orgs/spaces), so the key's own scope is used instead of the row-derived one.
+ * for a per-row operation. EXCEPT for a bound credential: a delete outside its
+ * binding is refused (a leaked key must not be able to destroy the creator's
+ * credentials in other orgs/spaces), so its own scope is used instead of the
+ * row-derived one.
  */
 router.delete("/connections/:connectionId", async (c) => {
   const connectionId = c.req.param("connectionId")!;
@@ -333,14 +337,14 @@ router.delete("/connections/:connectionId", async (c) => {
 
   // Scope selection depends on the credential's authority:
   //
-  //   - API key (`space_scoped`): the key is bound to one (org, space).
-  //     A connection outside that space short-circuits to 204 (same
-  //     non-disclosure as the "row not found" branch — a probing key learns
-  //     nothing), and the delete itself runs under the KEY'S `SpaceScope`, so
-  //     the service's space∈org assertion and its `spaceId` WHERE filter
-  //     both enforce the boundary in SQL.
+  //   - A bound credential: when it pins a space, a connection outside that
+  //     space short-circuits to 204 (same non-disclosure as the "row not
+  //     found" branch — a probing key learns nothing). The delete then runs
+  //     under the CREDENTIAL's `SpaceScope`, so the service's space∈org
+  //     assertion and its `spaceId` WHERE filter both enforce the binding in
+  //     SQL; an org-only credential is held to its org by that same assertion.
   //
-  //   - Interactive user credential (`user_global`): pass an `ActorScope`
+  //   - A `user` principal (`user_global`): pass an `ActorScope`
   //     (spaceId only, no orgId) deliberately. `/me/connections` is an
   //     actor-ownership boundary, not a space∈org one: a connection belongs to
   //     its owner regardless of which org the caller is currently scoped to.
@@ -352,11 +356,11 @@ router.delete("/connections/:connectionId", async (c) => {
   //     a different org. Ownership is still fully enforced downstream by the
   //     actor filter.
   let scope: SpaceScope | ActorScope;
-  if (authority.kind === "space_scoped") {
-    if (row.spaceId !== authority.spaceId) {
+  if (authority.kind === "bound") {
+    if (authority.spaceId && row.spaceId !== authority.spaceId) {
       return c.body(null, 204);
     }
-    scope = { orgId: authority.orgId, spaceId: authority.spaceId };
+    scope = { orgId: authority.orgId, spaceId: row.spaceId };
   } else {
     scope = { spaceId: row.spaceId } satisfies ActorScope;
   }

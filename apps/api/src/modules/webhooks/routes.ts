@@ -148,15 +148,22 @@ export function createWebhooksRouter() {
   // `/x/*` matches `/x` too, so this covers the collection and every by-id route.
   router.use("/api/webhooks/*", enterCallerSpace);
 
-  // Issue #172 (extension) — webhooks are space-scoped (or org-level
-  // and span every space). API keys must never reach a webhook outside their
-  // bound space, so we narrow their scope to `SpaceScope`; sessions
-  // keep `OrgScope` (full org reach) and decide filtering via query params.
-  // Building the scope here (rather than passing two strings) is what makes
-  // it impossible at the type level to forget the space-scoping downstream.
+  // Issue #172 (extension) — webhooks are space-scoped (or org-level and span
+  // every space). A pinned credential — a key or an end-user token — must never
+  // reach a webhook outside its space, so we narrow it to `SpaceScope`; a caller
+  // that pins none keeps `OrgScope` (full org reach) and filters via query
+  // params. Keyed on the pinned space, NOT on `authMethod === "api_key"`, for
+  // the reason `pinnedSpaceScopeGuard` is (issue #1313): an end-user token pins
+  // a space too. Safe here because nothing on `/api/webhooks*` writes `spaceId`
+  // for a session — the route family is not in `SPACE_SCOPED_PREFIXES` and the
+  // space-context applier deliberately never writes that key, so it only ever
+  // holds the CREDENTIAL's own space. Building the scope here (rather than
+  // passing two strings) is what makes it impossible at the type level to
+  // forget the space-scoping downstream.
   function webhookScope(c: Context<AppEnv>): OrgScope | SpaceScope {
-    if (c.get("authMethod") === "api_key") {
-      return { orgId: c.get("orgId"), spaceId: c.get("spaceId") };
+    const pinnedSpaceId = c.get("spaceId");
+    if (pinnedSpaceId) {
+      return { orgId: c.get("orgId"), spaceId: pinnedSpaceId };
     }
     return getOrgScope(c);
   }
@@ -201,15 +208,16 @@ export function createWebhooksRouter() {
       }
       await assertWebhookPermission(c, data.level, "write");
 
-      // API keys cannot create org-level webhooks (would span foreign spaces)
-      // and cannot create space-level webhooks targeting another space.
-      const isApiKey = c.get("authMethod") === "api_key";
-      if (isApiKey) {
+      // A pinned credential — a key or an end-user token — cannot create an
+      // org-level webhook (it would span foreign spaces) nor a space-level one
+      // targeting another space. Same key as `webhookScope` above.
+      const pinnedSpaceId = c.get("spaceId");
+      if (pinnedSpaceId) {
         if (data.level !== "space") {
-          throw forbidden("API keys cannot create org-level webhooks");
+          throw forbidden("A space-pinned credential cannot create org-level webhooks");
         }
-        if (data.spaceId !== c.get("spaceId")) {
-          throw forbidden("API key scope does not include this space");
+        if (data.spaceId !== pinnedSpaceId) {
+          throw forbidden("Credential scope does not include this space");
         }
       }
 

@@ -12,7 +12,9 @@
  *     leaves the process (no persistence, no transmission);
  *   - tokens are short-lived and carry exactly the caller's identity
  *     (already authenticated by the platform pipeline on the /api/chat
- *     request) — no privilege amplification;
+ *     request) — no privilege amplification; the strategy therefore declares
+ *     `principalKind: "user"`, so personal spaces and per-principal grants reach
+ *     the engine's turn exactly as they reach the caller's own request;
  *   - the token embeds its OWN least-privilege scope: the minter decides
  *     the exact permission set and whether the first-party-loopback
  *     capability is granted. Nothing else on the platform accepts this
@@ -202,6 +204,7 @@ export const chatLoopbackStrategy: AuthStrategy = {
       orgId: claims.orgId,
       orgRole: claims.orgRole as AuthResolution["orgRole"],
       authMethod: CHAT_LOOPBACK_AUTH_METHOD,
+      principalKind: "user",
       // Only granted when the token itself carries the capability (the inference
       // bearer). The MCP bearer sets it false, so core never lets it reach the
       // subscription LLM gateway. Safe to set true for the inference bearer: it

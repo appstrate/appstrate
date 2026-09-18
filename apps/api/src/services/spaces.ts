@@ -445,8 +445,8 @@ export type SpaceAdminAct = "delete" | "convert-to-team" | "sweep";
  * sweeper reaches {@link deleteSpace} directly with `actor: "sweeper"`.
  *
  * `caller.userId` is the principal's PERSONAL-SPACE identity
- * (`callerPersonalOwnerId`), not simply the authenticated user: `null` for an
- * API key or a role preview, which own no personal space. The key CREATOR's id
+ * (`callerPersonalOwnerId`), not simply the authenticated user: `null` for a
+ * delegate or a role preview, which own no personal space. The key CREATOR's id
  * would make a key answer a named 409 on a space it 404s on everywhere else —
  * the oracle this function exists to close.
  */

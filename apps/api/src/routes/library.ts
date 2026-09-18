@@ -3,12 +3,13 @@
 import { Hono } from "hono";
 import { forbidden } from "../lib/errors.ts";
 import { callerOrgRole } from "../lib/view-as.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import { getPackageLibrary } from "../services/package-library.ts";
 import type { AppEnv } from "../types/index.ts";
 
 /**
- * Who may open the ORGANIZATION-wide library page — a session-borne owner or
- * admin, never an API key (RBAC spec §6.10).
+ * Who may open the ORGANIZATION-wide library page — the person's own
+ * credential holding owner or admin, never a delegate (RBAC spec §6.10).
  *
  * This is a PAGE gate and nothing more: the map it guards spans every space of
  * the organization, which is an administrator's view by definition. It confers
@@ -17,19 +18,21 @@ import type { AppEnv } from "../types/index.ts";
  * per-space page `GET /api/spaces/{id}/library` serves the same projection to
  * whoever reads that one space.
  *
- * An API key is refused because it is pinned to a single space: an
+ * A delegate is refused because it is pinned to a single space: an
  * organization map is not a thing a space-pinned credential asks for.
  */
 function mayOpenOrganizationLibrary(c: Parameters<typeof callerOrgRole>[0]): boolean {
   const orgRole = callerOrgRole(c);
-  return c.get("authMethod") !== "api_key" && (orgRole === "owner" || orgRole === "admin");
+  return isUserPrincipal(c) && (orgRole === "owner" || orgRole === "admin");
 }
 
 export function createLibraryRouter() {
   const router = new Hono<AppEnv>();
   router.get("/", async (c) => {
     if (!mayOpenOrganizationLibrary(c))
-      throw forbidden("The organization library requires an owner or admin");
+      throw forbidden(
+        "The organization library requires the user's own credential holding owner or admin",
+      );
     return c.json(await getPackageLibrary(c));
   });
   return router;

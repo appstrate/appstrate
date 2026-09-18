@@ -20,9 +20,10 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "List orgs the authenticated caller belongs to",
       description:
-        "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see " +
-        "every org the user is a member of. API keys see only their bound org. OIDC end-user " +
-        "JWTs see the single org owning their space. " +
+        "Returns every org the caller can access. The user's own credential (cookie session, CLI " +
+        "or instance token) sees every org they are a member of. A delegated credential — an API " +
+        "key, a third-party OAuth client — sees only its bound org, as does an OIDC end-user JWT " +
+        "(the org owning its space). " +
         "**Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
       parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
@@ -95,10 +96,10 @@ export const mePaths = {
       summary: "List the caller's connections across every org/space",
       description:
         "Unified user-scope view of the caller's integration connections under a " +
-        "single shape, grouped by source package. For interactive user credentials " +
-        "(cookie session, dashboard/instance JWT) it crosses orgs/spaces by " +
-        "design — does NOT require `X-Org-Id`. For an API key the list is scoped " +
-        "to the key's bound organization and space only.",
+        "single shape, grouped by source package. For the user's own credential " +
+        "(cookie session, CLI or instance token) it crosses orgs/spaces by " +
+        "design — does NOT require `X-Org-Id`. For a delegated or end-user credential " +
+        "the list is scoped to its bound organization, and to its space when it pins one.",
       responses: {
         "200": {
           description: "Connection groups",
@@ -346,8 +347,8 @@ export const mePaths = {
         "Intent is destructive: 'I never want to use this credential anywhere again'. " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
-        "With an API key, only connections inside the key's bound organization and " +
-        "space can be deleted (204 with no effect otherwise).",
+        "With a delegated or end-user credential, only connections inside its bound " +
+        "organization (and space, when it pins one) can be deleted (204 with no effect otherwise).",
       parameters: [
         {
           name: "connectionId",

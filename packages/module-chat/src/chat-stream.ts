@@ -213,6 +213,12 @@ export async function handleChatStream(
   deps: ChatPlatformDeps,
   runEngine: ChatEngine = runPiChat,
 ): Promise<Response> {
+  // The loopback strategy declares `principalKind: "user"` for whatever it verifies, so a token
+  // may only ever be minted from one — `chat:*` is neither key- nor end-user-grantable today, and
+  // this refuses rather than silently widens if that ever changes.
+  if (c.get("principalKind") !== "user") {
+    throw new Error(`chat loopback minted for a ${c.get("principalKind")} principal`);
+  }
   const orgId = c.get("orgId");
   const user = c.get("user");
   // The space the router entered — the session's space, and the scope of every

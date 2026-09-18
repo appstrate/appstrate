@@ -87,6 +87,7 @@ function fakeContext(opts: {
     user: opts.user,
     // What `enterSpaceContext` writes on every `/api/chat/*` route.
     space: { id: opts.spaceId },
+    principalKind: "user",
     orgRole: "member",
     permissions: [],
   };

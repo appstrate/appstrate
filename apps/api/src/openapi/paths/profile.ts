@@ -86,7 +86,8 @@ export const profilePaths = {
         "Set a password for the current user when none exists yet (account created via social sign-in). " +
         "Creates the email/password credential so the user can also sign in with email. " +
         "Fails with 409 when a password is already set — use the Better Auth change-password flow instead. " +
-        "Session authentication only; API keys are rejected.",
+        "The user's own credential only (session, CLI or instance token); delegated credentials — " +
+        "API keys, third-party OAuth clients — and end-user tokens are refused.",
       requestBody: {
         required: true,
         content: {

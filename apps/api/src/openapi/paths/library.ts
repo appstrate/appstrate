@@ -122,7 +122,7 @@ const organizationLibraryPaths = {
         "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its " +
         "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there " +
         "(`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). " +
-        "Members, guests and API keys cannot access this administrative " +
+        "Members, guests and delegated credentials cannot access this administrative " +
         "endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the " +
         "caller can enter, and each package type also requires that type's read permission in the space. " +
         "Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` " +

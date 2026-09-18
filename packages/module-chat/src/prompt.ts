@@ -17,6 +17,7 @@
 
 import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
+import type { PrincipalKind } from "@appstrate/core/module";
 import { logger } from "./logger.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
 
@@ -30,6 +31,11 @@ export type ChatEnv = {
   Variables: {
     user: { id: string; email: string; name: string };
     orgId: string;
+    /**
+     * What the caller's credential IS, as the auth pipeline resolved it. The
+     * loopback minter is the one reader: it refuses anything but `"user"`.
+     */
+    principalKind: PrincipalKind;
     /**
      * Space the router entered (`enterSpaceContext`, mounted on every
      * `/api/chat/*` route). Always set: entering is what makes the space-level

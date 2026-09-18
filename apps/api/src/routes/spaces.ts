@@ -58,6 +58,7 @@ import {
 } from "../lib/space-role.ts";
 import { applySpacePermissions } from "../middleware/space-context.ts";
 import { validateSpaceInOrg } from "../lib/space-lookup.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import {
   activatePackage,
   deactivatePackage,
@@ -387,11 +388,11 @@ export function createSpacesRouter() {
     // personal space in its own transaction; this is the net for a member
     // provisioned before the feature existed — `scripts/migration/0015` does
     // them in bulk, and this makes the script optional for anyone who logs in.
-    // Only for a principal that HAS one — a session, or the same human through
-    // a CLI device-flow / MCP instance token (`callerPersonalOwnerId`). An API
-    // key or an end-user must not create one for the key's creator behind
-    // their back. `ensurePersonalSpace` reads before it writes, so the common
-    // case costs one indexed lookup and no row lock.
+    // Only for a principal that HAS one — any `user` principal, whatever the
+    // transport (`callerPersonalOwnerId`). A delegate or an end-user must not
+    // create one for the credential's creator behind their back.
+    // `ensurePersonalSpace` reads before it writes, so the common case costs
+    // one indexed lookup and no row lock.
     const personalOwnerId = callerPersonalOwnerId(c);
     if (personalOwnerId) await ensurePersonalSpaceFor(orgId, personalOwnerId);
     const entries = await listSpacesForPrincipal(
@@ -415,8 +416,8 @@ export function createSpacesRouter() {
 
   // POST /api/spaces — create a new space
   router.post("/", requirePermission("spaces", "write"), async (c) => {
-    if (c.get("authMethod") === "api_key") {
-      throw forbidden("API keys cannot create spaces");
+    if (!isUserPrincipal(c)) {
+      throw forbidden("Only the user's own credential can create spaces");
     }
     const orgId = c.get("orgId");
     const user = c.get("user");
@@ -564,17 +565,17 @@ export function createSpacesRouter() {
   // separates 404 from 409 on either is `assertSpaceAdminAct`, the one place
   // that decision is made for all three routes.
   //
-  // Both are audited and both refuse an API KEY: a key holds `spaces:write`
+  // Both are audited and both refuse a DELEGATE: a key holds `spaces:write`
   // and `spaces:delete` legitimately (it provisions spaces headlessly), but
-  // converting somebody's personal space is a decision about a person, not an
-  // automation step — the same line `POST /api/spaces` draws. The guard is on
-  // the transport, so a human's OAuth dashboard or instance token does reach
-  // them; it is their own credential by another carrier.
+  // creating, converting or sweeping a space is a person's decision, not an
+  // automation step — the same line `POST /api/spaces` draws. So the act
+  // answers to the person's own credential; the privacy refusal is a separate
+  // question, and `callerPersonalOwnerId` is the one that makes it.
 
   // POST /api/spaces/:id/convert-to-team — the transfer.
   router.post("/:id/convert-to-team", requirePermission("spaces", "write"), async (c) => {
-    if (c.get("authMethod") === "api_key") {
-      throw forbidden("API keys cannot convert a personal space");
+    if (!isUserPrincipal(c)) {
+      throw forbidden("Only the user's own credential can convert a personal space");
     }
     const orgId = c.get("orgId");
     const spaceId = c.req.param("id")!;
@@ -594,8 +595,8 @@ export function createSpacesRouter() {
   // POST /api/spaces/:id/sweep-now — run the offboarding routine immediately,
   // instead of waiting for the rest of the 30-day window.
   router.post("/:id/sweep-now", requirePermission("spaces", "delete"), async (c) => {
-    if (c.get("authMethod") === "api_key") {
-      throw forbidden("API keys cannot delete a personal space");
+    if (!isUserPrincipal(c)) {
+      throw forbidden("Only the user's own credential can delete a personal space");
     }
     const orgId = c.get("orgId");
     const spaceId = c.req.param("id")!;

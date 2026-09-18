@@ -58,6 +58,9 @@ function caller(): Context<AppEnv> {
     orgId: home.orgId,
     orgRole: "owner",
     authMethod: "session",
+    // The refusals below come from the standing held in the FOREIGN org, not
+    // from what kind of credential this is.
+    principalKind: "user",
     user: { id: home.user.id },
     permissions: new Set(["agents:read"]),
   };

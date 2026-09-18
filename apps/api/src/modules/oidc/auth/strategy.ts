@@ -10,17 +10,20 @@
  * - **`user`**: instance-level token. Load the Better Auth user row and
  *   return a partial `AuthResolution` (no org, no role). The auth pipeline
  *   defers org resolution to the `X-Org-Id` middleware (same as session
- *   auth). `authMethod: "oauth2-instance"`.
+ *   auth). `authMethod: "oauth2-instance"`, `principalKind: "user"` — the token
+ *   IS the human, by another transport.
  *
  * - **`dashboard_user`**: load the Better Auth user row, re-verify that the
  *   user is still a member of the token's `org_id`, and emit the current
  *   `org_role` from the DB (not the stale claim — prevents role escalation
  *   after a demotion). Core routes see a normal dashboard user with
- *   `authMethod: "oauth2-dashboard"`.
+ *   `authMethod: "oauth2-dashboard"`, `principalKind: "delegate"` — a third-party
+ *   client under a scope ceiling; the ceiling names permissions, never the
+ *   person's private space, so the token is their authority, not their identity.
  *
  * - **`end_user`**: load the `end_users` row, verify profile is active,
- *   and emit with `endUser` populated. Core's strict end-user filter kicks
- *   in automatically.
+ *   and emit with `endUser` populated and `principalKind: "end_user"`. Core's
+ *   strict end-user filter kicks in automatically.
  *
  * Fast no-match path: return `null` immediately unless the header carries a
  * bearer token starting with `ey`. Any JWT is candidate for verification, but
@@ -193,6 +196,7 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
     },
     orgId: boundOrgId,
     authMethod: "oauth2-instance",
+    principalKind: "user",
     permissions: [],
     deferOrgResolution: true,
   };
@@ -249,6 +253,7 @@ async function resolveDashboardUser(claims: AccessTokenClaims): Promise<AuthReso
     orgId: claims.orgId,
     orgRole: role,
     authMethod: "oauth2-dashboard",
+    principalKind: "delegate",
     permissions,
   };
 }
@@ -318,6 +323,7 @@ async function resolveEndUser(claims: AccessTokenClaims): Promise<AuthResolution
     // End-users have their token's allowlist and pinned space, not an org
     // membership. A synthetic role would invoke the space-membership resolver.
     authMethod: "oauth2-end-user",
+    principalKind: "end_user",
     spaceId: endUser.spaceId,
     permissions,
     endUser: {
