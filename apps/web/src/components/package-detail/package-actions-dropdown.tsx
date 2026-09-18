@@ -218,6 +218,13 @@ export function PackageActionsDropdown({
         type={type}
         homeSpaceId={homeSpaceId}
         canPublish={!!homeWritable}
+        // Co-authoring a package homed in a personal space starts by moving it
+        // out — the space itself is never converted. One dialog hands over to
+        // the other rather than stacking on top of it.
+        onMoveHome={() => {
+          setShareOpen(false);
+          setMoveHomeOpen(true);
+        }}
       />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
