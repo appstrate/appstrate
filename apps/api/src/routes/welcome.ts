@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setDisplayName } from "../services/profile.ts";
 
@@ -17,11 +18,11 @@ const router = new Hono<AppEnv>();
 
 // POST /api/welcome/setup — set display name after invitation
 router.post("/welcome/setup", async (c) => {
-  // Issue #172 (extension) — same-class as PATCH /api/profile: this
-  // mutates the BA-owned `user.name`. API key callers (customer
-  // integrations) must not be able to rename the dashboard owner.
-  if (c.get("authMethod") === "api_key") {
-    throw forbidden("API keys cannot complete dashboard onboarding");
+  // Issue #172 (extension) — same-class as PATCH /api/profile: this mutates
+  // the BA-owned `user.name`, so it answers to the person's own credential
+  // only; a delegate must not be able to rename them.
+  if (!isUserPrincipal(c)) {
+    throw forbidden("Only the user's own credential can complete dashboard onboarding");
   }
   const currentUser = c.get("user");
   if (!currentUser?.id) {

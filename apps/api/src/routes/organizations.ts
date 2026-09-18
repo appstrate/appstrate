@@ -8,6 +8,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
   getUserOrganizations,
@@ -115,10 +116,10 @@ const router = new Hono<AppEnv>();
 // GET /api/orgs — list orgs for the current user (no org context needed)
 router.get("/", async (c) => {
   const user = c.get("user");
-  // API keys see only their bound org — filter at the DB level so a
+  // A delegate sees only its bound org — filter at the DB level so a
   // compromised key cannot cause enumeration queries across every org the
   // creator belongs to.
-  const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
+  const orgIdFilter = isUserPrincipal(c) ? undefined : c.get("orgId");
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
   // A persona naming an org this listing cannot place is refused, not ignored.
   await resolveListingViewAs(c, orgs);
@@ -146,8 +147,8 @@ router.get("/", async (c) => {
 
 // POST /api/orgs — create an organization (no org context needed)
 router.post("/", async (c) => {
-  if (c.get("authMethod") === "api_key") {
-    throw forbidden("API keys cannot create organizations");
+  if (!isUserPrincipal(c)) {
+    throw forbidden("Only the user's own credential can create organizations");
   }
   const user = c.get("user");
   // Self-hosting closed mode (issue #228): when org creation is disabled

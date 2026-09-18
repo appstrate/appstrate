@@ -46,12 +46,12 @@ import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
  * is made explicitly at the callsite and lands in the SQL `WHERE` — a caller
  * cannot "forget" to scope an API key.
  *
- *   - `user_global`: an interactive user credential (cookie session, OAuth
- *     dashboard/instance JWT). Cross-org, cross-space by design — that is the
- *     dashboard connections-management feature.
- *   - `space_scoped`: a space-bound credential (API key). The key
- *     authenticates as its creator, but its blast radius is one org + one
- *     space; the listing is filtered to that pair at the DB level.
+ *   - `user_global`: a `user` principal (cookie session, OAuth dashboard or
+ *     instance token, chat loopback). Cross-org, cross-space by design — that
+ *     is the dashboard connections-management feature.
+ *   - `space_scoped`: a `delegate` (the API key). It authenticates as its
+ *     creator, but its blast radius is one org + one space; the listing is
+ *     filtered to that pair at the DB level.
  */
 export type MeConnectionAuthority =
   { kind: "user_global" } | { kind: "space_scoped"; orgId: string; spaceId: string };

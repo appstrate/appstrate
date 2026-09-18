@@ -17,8 +17,8 @@
  *   user is still a member of the token's `org_id`, and emit the current
  *   `org_role` from the DB (not the stale claim — prevents role escalation
  *   after a demotion). Core routes see a normal dashboard user with
- *   `authMethod: "oauth2-dashboard"`, `principalKind: "delegate"` — a credential
- *   the user issued to a third-party client, under a scope ceiling.
+ *   `authMethod: "oauth2-dashboard"`, `principalKind: "user"` — the person,
+ *   through a client they authorized, under the token's scope ceiling.
  *
  * - **`end_user`**: load the `end_users` row, verify profile is active,
  *   and emit with `endUser` populated and `principalKind: "end_user"`. Core's
@@ -252,7 +252,7 @@ async function resolveDashboardUser(claims: AccessTokenClaims): Promise<AuthReso
     orgId: claims.orgId,
     orgRole: role,
     authMethod: "oauth2-dashboard",
-    principalKind: "delegate",
+    principalKind: "user",
     permissions,
   };
 }

@@ -19,7 +19,9 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestOrg, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import { seedIntegrationConnection } from "../../helpers/run-connection-fixtures.ts";
 import { db } from "@appstrate/db/client";
 import { endUsers } from "@appstrate/db/schema";
 import { prefixedId } from "@appstrate/db/ids";
@@ -78,7 +80,16 @@ const stubStrategy: AuthStrategy = {
       // "admin" is the branch carrying `endUser` below — the two must agree.
       principalKind: token === "admin" ? "end_user" : "delegate",
       spaceId: currentCtx.defaultSpaceId,
-      permissions: ["runs:read", "runs:write", "runs:cancel", "agents:read", "end-users:read"],
+      // `spaces:write` is here so `POST /api/spaces` is refused by the KIND
+      // rather than by the ceiling, which would refuse it either way.
+      permissions: [
+        "runs:read",
+        "runs:write",
+        "runs:cancel",
+        "agents:read",
+        "end-users:read",
+        "spaces:write",
+      ],
       // Exercise the endUser pass-through when token is "admin"
       endUser:
         token === "admin"
@@ -257,6 +268,119 @@ describe("module auth strategy pipeline", () => {
         body: JSON.stringify({ name: "Renamed By Owner" }),
       });
       expect(res.status).toBe(200);
+    });
+  });
+
+  // ── The delegate that is NOT an API key ───────────────────────────────────
+  //
+  // Every gate below asked `authMethod === "api_key"`, so this stub — a
+  // delegate by another transport, and an `admin` at that — walked through all
+  // of them. Each one asks "is this the person?", so the kind must answer.
+  describe("a delegate that is not an API key", () => {
+    const delegate = { "X-Test-Strategy": "valid" };
+    const json = { ...delegate, "Content-Type": "application/json" };
+
+    async function connectionIn(ctx: TestContext, integrationId: string): Promise<string> {
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+        type: "integration",
+        source: "local",
+      });
+      return seedIntegrationConnection(ctx, integrationId);
+    }
+
+    async function connectionIds(token: string): Promise<string[]> {
+      const res = await app.request("/api/me/connections", {
+        headers: { "X-Test-Strategy": token },
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ connections: Array<{ connection_id: string }> }>;
+      };
+      return body.data.flatMap((g) => g.connections.map((x) => x.connection_id));
+    }
+
+    it("cannot read or rewrite the dashboard user's own identity record", async () => {
+      expect((await app.request("/api/profile", { headers: delegate })).status).toBe(403);
+
+      const renamed = await app.request("/api/profile", {
+        method: "PATCH",
+        headers: json,
+        body: JSON.stringify({ displayName: "Renamed By A Delegate" }),
+      });
+      expect(renamed.status).toBe(403);
+
+      const password = await app.request("/api/profile/password", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ newPassword: "NotYourPassword123!" }),
+      });
+      expect(password.status).toBe(403);
+    });
+
+    it("cannot complete the onboarding step that renames the user", async () => {
+      const res = await app.request("/api/welcome/setup", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ displayName: "Onboarded By A Delegate" }),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("cannot make the two decisions a person makes, nor open the org-wide map", async () => {
+      const space = await app.request("/api/spaces", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ name: "Delegated Space" }),
+      });
+      expect(space.status).toBe(403);
+
+      const org = await app.request("/api/orgs", {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ name: "Delegated Org", slug: "delegated-org" }),
+      });
+      expect(org.status).toBe(403);
+
+      // The stub resolves to `admin`, which passes the role half of
+      // `mayOpenOrganizationLibrary` — only the kind can refuse this one.
+      expect((await app.request("/api/library", { headers: delegate })).status).toBe(403);
+    });
+
+    it("sees only its bound org in both listings, where a `user` sees both", async () => {
+      await createTestOrg(currentCtx!.user.id);
+      const orgIds = async (path: string, token: string): Promise<string[]> => {
+        const res = await app.request(path, { headers: { "X-Test-Strategy": token } });
+        expect(res.status, await res.clone().text()).toBe(200);
+        return ((await res.json()) as { data: Array<{ id: string }> }).data.map((o) => o.id);
+      };
+
+      for (const path of ["/api/orgs", "/api/me/orgs"]) {
+        expect(await orgIds(path, "valid")).toEqual([currentCtx!.orgId]);
+        expect(await orgIds(path, "deferred")).toHaveLength(2);
+      }
+    });
+
+    it("gets the space-scoped connection view, where a `user` gets the global one", async () => {
+      const here = await connectionIn(currentCtx!, "@strat/here");
+      const other = await createTestOrg(currentCtx!.user.id);
+      const elsewhere = await connectionIn(
+        { ...currentCtx!, orgId: other.org.id, defaultSpaceId: other.defaultSpaceId },
+        "@strat/elsewhere",
+      );
+
+      // Same observation as `me.test.ts` CRIT-03: which connection ids surface.
+      expect(await connectionIds("valid")).toEqual([here]);
+      expect((await connectionIds("deferred")).sort()).toEqual([here, elsewhere].sort());
+    });
+
+    it("admits a `user` that is not a cookie session either", async () => {
+      const res = await app.request("/api/profile", {
+        headers: { "X-Test-Strategy": "deferred" },
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
     });
   });
 

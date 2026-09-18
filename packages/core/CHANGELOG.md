@@ -11,12 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING: `AuthResolution.principalKind` is a new REQUIRED member** (type
   `PrincipalKind`, with the tuple `PRINCIPAL_KINDS`, in `@appstrate/core/module`).
-  A credential declares WHAT it is — the platform user, a delegate they issued,
-  or an external end-user (RBAC spec §7) — instead of every gate inferring it
-  from `authMethod` and `deferOrgResolution`; a strategy fails to compile until
-  it declares one, and the pipeline throws on a missing or unknown value, or on
-  an `"end_user"`/`endUser` disagreement, never bucketing it by default.
-  `deferOrgResolution` is now pipeline ordering only and carries no authority.
+  A credential declares WHAT it is — the platform user by any transport; a
+  delegate with no user session behind it, with its own life and ceiling (an
+  API key): their authority, not their privacy; or an external end-user (RBAC
+  spec §7) — instead of every gate inferring it from `authMethod` and
+  `deferOrgResolution`; a strategy fails to compile until it declares one, and
+  the pipeline throws on a missing or unknown value, or on an
+  `"end_user"`/`endUser` disagreement, never bucketing it by default. The
+  platform's identity-shaped gates (`/api/profile`, `/api/welcome/setup`, space
+  and organization creation, the org listings, the organization library,
+  `/me/connections` authority) now read the kind, so ANY delegate strategy is
+  refused there, not only `authMethod === "api_key"`. `deferOrgResolution` is
+  now pipeline ordering only and carries no authority.
 
 ## [10.0.0] — 2026-09-17
 

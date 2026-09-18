@@ -958,10 +958,11 @@ export interface AuthStrategyRequest {
  * What a credential IS, never how it arrived: declared by the strategy that
  * minted it, never inferred from `authMethod` or `deferOrgResolution`.
  *
- * - `"user"` — the platform user themselves, by any transport: their personal
- *   spaces, their per-principal grants, their memberships.
- * - `"delegate"` — a credential they issued with its own life and ceiling (API
- *   key, third-party OAuth client): their authority, not their privacy.
+ * - `"user"` — the platform user themselves, by any transport (cookie session,
+ *   OAuth token, server-minted loopback): their personal spaces, their
+ *   per-principal grants, their memberships.
+ * - `"delegate"` — a credential with no user session behind it, with its own
+ *   life and ceiling (an API key): their authority, not their privacy.
  * - `"end_user"` — an external identity; `endUser` MUST be set, and conversely.
  */
 export const PRINCIPAL_KINDS = ["user", "delegate", "end_user"] as const;

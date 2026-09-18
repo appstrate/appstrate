@@ -47,6 +47,7 @@ import { getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
@@ -74,22 +75,22 @@ const router = new Hono<AppEnv>();
  * Derive the authority boundary of the presented credential for the
  * `/me/connections` surface (list + delete).
  *
- * An API key authenticates as its CREATOR (`c.get("user")` is the key's
- * creator), but the key itself is bound to one org + one space and its
- * bearer is a long-lived secret that may be handed to a third-party
- * space. The cross-org/cross-space view is an interactive-dashboard
- * feature — it must never be reachable with an API key, or a leaked key
- * could enumerate (and destructively delete) the creator's connections in
- * every org they belong to. The API-key auth branch always pins both ids
- * on the context; their absence under `api_key` is an auth-pipeline bug,
- * so fail closed rather than fall back to the global view.
+ * A delegate — today the API key — authenticates as its CREATOR
+ * (`c.get("user")` is the key's creator), but it is bound to one org + one
+ * space and its bearer is a long-lived secret that may be handed to a
+ * third-party space. The cross-org/cross-space view is an interactive-dashboard
+ * feature — it must never be reachable with a delegate, or a leaked key could
+ * enumerate (and destructively delete) the creator's connections in every org
+ * they belong to. The delegate branch always pins both ids on the context;
+ * their absence is an auth-pipeline bug, so fail closed rather than fall back
+ * to the global view.
  */
 function getMeConnectionAuthority(c: Context<AppEnv>): MeConnectionAuthority {
-  if (c.get("authMethod") !== "api_key") return { kind: "user_global" };
+  if (isUserPrincipal(c)) return { kind: "user_global" };
   const orgId = c.get("orgId");
   const spaceId = c.get("spaceId");
   if (!orgId || !spaceId) {
-    throw unauthorized("API key is missing its org/space binding");
+    throw unauthorized("Credential is missing its org/space binding");
   }
   return { kind: "space_scoped", orgId, spaceId };
 }
@@ -137,10 +138,10 @@ router.get("/orgs", async (c) => {
   const user = c.get("user");
   if (!user) throw unauthorized("Authentication required");
 
-  // API keys are bound to a single org — filter at the DB level so a
+  // A delegate is bound to a single org — filter at the DB level so a
   // compromised key cannot enumerate every org the creator belongs to.
   // Same rule as `GET /api/orgs` keeps the two paths in lockstep.
-  const orgIdFilter = c.get("authMethod") === "api_key" ? c.get("orgId") : undefined;
+  const orgIdFilter = isUserPrincipal(c) ? undefined : c.get("orgId");
   const orgs = await getUserOrganizations(user.id, orgIdFilter);
   // Once for the listing: the persona names one org, and one this listing
   // cannot place is refused rather than ignored.
