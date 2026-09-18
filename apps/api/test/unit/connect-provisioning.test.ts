@@ -417,12 +417,19 @@ describe("the generated dispatcher, run as sshd would run it", () => {
    * `ssh_write_file` all die with an opaque "Connection closed".
    */
   it.each([
+    // Measured, not guessed: the first is what Debian 12 / OpenSSH 9.2 hands
+    // the forced command, the SECOND is what Ubuntu 24.04 / OpenSSH 9.6 hands
+    // it — same path, trailing space — and the fourth is the `Subsystem sftp
+    // internal-sftp -f AUTHPRIV -l INFO` many distributions ship. A glob on
+    // the whole string matched only the first.
     "/usr/lib/openssh/sftp-server",
+    "/usr/lib/openssh/sftp-server ",
     "/usr/lib/ssh/sftp-server",
-    "/usr/libexec/sftp-server",
+    "internal-sftp -f AUTHPRIV -l INFO",
+    "/usr/libexec/sftp-server -e",
     "internal-sftp",
     "sftp-server",
-  ])("routes the sftp subsystem (%s) instead of refusing it", async (subsystem) => {
+  ])("routes the sftp subsystem (%p) instead of refusing it", async (subsystem) => {
     const run = await runScript(await dispatcherFor('["hostname"]'), {
       SSH_ORIGINAL_COMMAND: subsystem,
     });
