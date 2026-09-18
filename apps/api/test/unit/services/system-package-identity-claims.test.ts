@@ -349,6 +349,25 @@ const CASES: Record<string, Case> = {
   // 200 with `{"ok": false}` on a bad token, so the manifest declares none and
   // identity is read straight off the `oauth.v2.access` token response — the
   // first of the three layers `extractIdentity` is handed.
+  /**
+   * The one mapping whose source is NOT a third-party payload: an SSH identity
+   * is the credential bag the platform itself assembled, and it is COMPOSITE —
+   * a Unix account ON a host. `@appstrate/ssh` is built to carry several
+   * connections to the same machine (each key gets its own dispatcher), so a
+   * host-only key would give two of them the same account id.
+   */
+  "@appstrate/ssh": {
+    authKey: "primary",
+    source: {
+      host: "vps.example.com",
+      port: "22",
+      user: "appstrate",
+      host_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5",
+      read_only: "1",
+    },
+    accountId: "appstrate@vps.example.com",
+    source_doc: "the platform's own credential bag — services/connect/provisioning.ts",
+  },
   "@appstrate/slack": {
     authKey: "primary",
     source: {
@@ -416,6 +435,13 @@ const CASES: Record<string, Case> = {
   },
 };
 
+/** The `identity_claims` map one auth declares, or `{}`. */
+function identityClaimsOf(manifest: IntegrationManifest, authKey: string): Record<string, string> {
+  const auths = (manifest as { auths?: Record<string, { identity_claims?: unknown }> }).auths;
+  const claims = auths?.[authKey]?.identity_claims;
+  return claims && typeof claims === "object" ? (claims as Record<string, string>) : {};
+}
+
 /** Every shipped package that declares `identity_claims`, keyed by packageId. */
 async function loadDeclaring(): Promise<
   Map<string, { manifest: IntegrationManifest; authKeys: string[] }>
@@ -475,16 +501,30 @@ describe("system-package identity_claims → accountId", () => {
     expect(fellBack).toEqual([]);
   });
 
-  it("populates the declared side-claims, not just the account key", async () => {
+  /**
+   * `sub` is the claim `required_identity_claims` most often names, so an empty
+   * one makes that gate reject the connection outright.
+   *
+   * Checked only where the mapping DECLARES it. This used to be unconditional,
+   * on the premise that every mapping in the repo was OAuth-shaped and carried
+   * a subject; `@appstrate/ssh` falsified that — an SSH identity is a Unix
+   * account on a host, there is no IdP and no subject. Making the condition
+   * explicit is the fix: the assertion now states what it actually depends on.
+   *
+   * Deliberately NOT widened to "every declared claim resolves". That is the
+   * stronger rule and probably the right one, but it currently reports six
+   * pre-existing fixtures whose declared `picture` / `email` never populate —
+   * unrelated to this change, and one of them (`@appstrate/jira#email`) may be
+   * a real broken accessor rather than a thin fixture. Worth its own pass.
+   */
+  it("populates a declared `sub`, not just the account key", async () => {
     const declaring = await loadDeclaring();
     const empty: string[] = [];
     for (const [packageId, testCase] of Object.entries(CASES)) {
       const pkg = declaring.get(packageId);
       if (!pkg) continue;
+      if (!("sub" in identityClaimsOf(pkg.manifest, testCase.authKey))) continue;
       const { identityClaims } = extractIdentity(pkg.manifest, testCase.authKey, testCase.source);
-      // `sub` is declared by every mapping in this repo and is the claim
-      // `required_identity_claims` most often names, so an empty one would
-      // make that gate reject the connection outright.
       if (identityClaims.sub === undefined || identityClaims.sub === "") empty.push(packageId);
     }
     expect(empty).toEqual([]);

@@ -1882,7 +1882,7 @@ export function extractIdentity(
   const mapping = auth.identity_claims ?? {};
   const claims: Record<string, unknown> = {};
   for (const [outKey, accessor] of Object.entries(mapping)) {
-    claims[outKey] = readPath(source, accessor);
+    claims[outKey] = resolveAccessor(source, accessor);
   }
   const accountId =
     (typeof claims.accountId === "string" && claims.accountId) ||
@@ -1990,6 +1990,41 @@ function readPath(source: Record<string, unknown>, accessor: string): unknown {
     }
   }
   return cur;
+}
+
+/** `{$credential.<field>}` — the same grammar the `delivery` blocks interpolate with. */
+const CREDENTIAL_REF_RE = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
+
+/**
+ * Resolve one `identity_claims` accessor against the credential bag.
+ *
+ * Two forms, both current. A bare path (`$.email`) reads one value — what every
+ * OAuth auth declares, where the IdP already hands back a single identifier. A
+ * TEMPLATE interpolates several credential fields using the same
+ * `{$credential.<field>}` grammar `delivery.{http,env,files}` uses, so a
+ * manifest states it once and the same way in both places.
+ *
+ * The template form exists because some identities are composite and a single
+ * path cannot express one: an SSH connection is a Unix account ON a host, and
+ * `@appstrate/ssh` is explicitly built to carry several connections to the same
+ * machine (that is why each key gets its own dispatcher). Naming one by its
+ * host alone would give two of them the same identity. Nothing about that is
+ * SSH-specific — mtls and a database endpoint are the same shape.
+ *
+ * Fail-closed: if any referenced field is missing or empty the whole accessor
+ * yields `""`, exactly as a missing path does, so the caller falls back to
+ * `"default"` rather than minting a half-rendered `"@host"`.
+ */
+function resolveAccessor(source: Record<string, unknown>, accessor: string): unknown {
+  if (!accessor.includes("{$credential.")) return readPath(source, accessor);
+  let complete = true;
+  const rendered = accessor.replace(CREDENTIAL_REF_RE, (_match, field: string) => {
+    const value = source[field];
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+    complete = false;
+    return "";
+  });
+  return complete ? rendered : "";
 }
 
 // ─────────────────────────────────────────────

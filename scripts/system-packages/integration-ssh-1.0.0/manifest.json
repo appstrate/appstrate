@@ -32,6 +32,9 @@
     "primary": {
       "type": "custom",
       "authorized_uris": ["ssh://**"],
+      "identity_claims": {
+        "account_id": "{$credential.user}@{$credential.host}"
+      },
       "credentials": {
         "schema": {
           "type": "object",
