@@ -25,7 +25,7 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 ## Upgrading
 
-1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.58`, not `v1.0.0-beta.58`).
+1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.59`, not `v1.0.0-beta.59`).
 2. Redeploy.
 
 `appstrate-migrate` runs the platform's schema migrations before the application starts (`depends_on: service_completed_successfully`), and `@appstrate/module-ee` migrates its own `ee_*` tables at `init()`. A release that needs more than that says so in `CHANGELOG.md`, and the procedure lives in **`scripts/migration/README.md`** — read it before changing the version, not after.

@@ -1,0 +1,23 @@
+-- `packages_org_package_has_home` is VALIDATED: the rows that predate the CHECK
+-- answer for it too.
+--
+-- WHY NOT IN 0067. That file adds the constraint `NOT VALID`, which already
+-- governs every INSERT and UPDATE — the half the rollout window needed. The
+-- scan could not join it: runbook step 3 applies the migrations BEFORE
+-- `scripts/migration/0014` fills `home_space_id` at step 4, so it would have
+-- met every row still NULL and rolled the deploy back on `23514`. The other
+-- half of `docs/NO_TRANSITIONAL_CODE.md` §2's pattern therefore lands one
+-- release later, tracked as https://github.com/appstrate/appstrate/issues/1450.
+--
+-- Where `0014` ran this changes nothing — that script ends with this very
+-- statement, so the constraint is already validated and Postgres returns
+-- without a scan — and a fresh database conforms by construction. That fresh
+-- install is the point: `0014` is an operator script and never runs there, so
+-- without this file the constraint would stay `NOT VALID` for ever. On a
+-- deployment that skipped `0014` it raises `23514` on the rows that prove it —
+-- the intended failure. The scan takes only SHARE UPDATE EXCLUSIVE: no reader
+-- and no writer waits on it, only a concurrent schema change on `packages`.
+--
+-- ROLLBACK: nothing to undo — `0067`'s `DROP CONSTRAINT` remains the whole one.
+
+ALTER TABLE "packages" VALIDATE CONSTRAINT "packages_org_package_has_home";
