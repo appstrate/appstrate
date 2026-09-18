@@ -8,349 +8,56 @@ See `docs/NO_TRANSITIONAL_CODE.md` for why the split exists — both halves of t
 `documents` → `files` rename were botched by ignoring it, each costing a
 production incident.
 
-## Release beta.58 — THE runbook
+## Release beta.58 — shipped
 
-**This is the sequence that runs, and it is the only one.** The four per-subject
-sections further down explain why each file exists and what it checks; none of
-them is a runbook of its own any more, and none of them says when to start the
-application. That is step 5 here, once, after everything.
+**Filed as done, 2026-09-18.** This page carried that release's runbook in the
+present imperative for as long as it was the next thing to happen. It has
+happened: `ghcr.io/appstrate/appstrate:1.0.0-beta.58` is what production runs,
+and a runbook kept past its window reads as live instruction to whoever opens
+this file for the NEXT release. The runbook itself is in git history; what
+survives here is the state it left, read back off production on 2026-09-18.
 
-Production's `drizzle.__drizzle_migrations` watermark is **0055** (read
-2026-09-17). The twelve migrations `0056` … `0067` are ALL unapplied, and
-`packages/db/src/migrate.ts` applies the whole pending set in **one
-transaction**. There is no subset: no "`0056`–`0059` now, the rest later", no
-release that froze part of it, and no per-file `psql -f`. Everything below
-follows from that single fact, and it is what retires the old "one release or
-two" branch — see step 4c.
+| Read back                            | Value                                                   |
+| ------------------------------------ | ------------------------------------------------------- |
+| `drizzle.__drizzle_migrations`       | **68** rows — `0000` … `0067`, the whole pending batch  |
+| `drizzle.ee_migrations`              | 8 — the commercial module's own journal, self-applied   |
+| `ee_billing_accounts`                | 31, with 717 claimed ledger rows                        |
+| `org_members` by role                | 31 owner / 16 admin / 1 member / **2 guest** / 0 viewer |
+| `oauth_clients.self_service IS NULL` | 0                                                       |
+| `packages_org_package_has_home`      | `convalidated = true`                                   |
+| personal spaces                      | 6, against 50 memberships                               |
 
-### 1. Pre-flight — BEFORE the window
+What that establishes, per script, without re-deriving it from a plan:
 
-Read-only against the replica (`ssh appstrate`), plus ONE configuration change
-that must land before anything is stopped — and one that must **not**, which is
-why 1c below is a warning rather than an action.
+- **`0010` ran.** The commercial module's seven `ee_*` tables are in the
+  platform database under their own journal, and 31 billing accounts came
+  across. This was the one irreversible step of the release: `0010` is
+  idempotent BY REFUSAL, so a target already holding billing rows is refused
+  for good.
+- **`0008` + `0012` + `0017` ran.** No row reads `viewer` and two read `guest`.
+- **`0011` ran**, or had nothing to fold: no `oauth_clients` row is left NULL.
+- **`0014` ran**, and validated `0067`'s `NOT VALID` check as it ends by doing.
+  Every org package that is not `ephemeral` has a home.
+- **`0009` and `0013` were not needed.** Their preconditions are the unique
+  indexes `uq_org_invitations_pending` and `uq_org_models_unaliased_binding`,
+  both of which exist — and the batch that creates them applies in ONE
+  transaction, so it could not have committed had either pre-flight counted a
+  duplicate.
+- **`0015` has not run, by design.** It is the one step that belongs outside
+  the window: `provisionMember` creates a personal space at every membership
+  door and `GET /api/spaces` repairs the caller's own, so what `0015` buys is
+  the members who do not log in soon. 6 of 50 exist because 6 members have been
+  through a door since. Pre-flight the space count before running it.
 
-**1a. Dump.** Non-negotiable, and it is the only rollback several of these
-migrations have:
+**What it owed, and no longer does: `0068`.** Production never waited on it —
+`0014` validated `0067`'s check there. A FRESH install did, since the drizzle
+tree alone never validates it. `0068_packages_org_home_validate.sql` shipped in
+`v1.0.0-beta.59` (#1467) and closes it; the reasoning, and why it could not ride
+in beta.58's own batch, is under **Shipped in the follow-up release** below.
 
-```sh
-docker exec <pg> pg_dump -U appstrate -d appstrate --no-owner --no-privileges \
-  -Fc -f /tmp/pre-beta58.dump
-```
-
-Restore it into a throwaway `postgres:16-alpine` and rehearse steps 3 and 4
-end to end. Every script in this release is marked UNMEASURED in the Log; this
-is what measures them.
-
-**1b. `TRUST_PROXY` — the platform REFUSES TO BOOT without it.** Production runs
-`TRUST_PROXY=false`, `NODE_ENV=production`, `APP_URL=https://app.appstrate.com`.
-`packages/env/src/index.ts` now rejects exactly that combination: a production
-`APP_URL` that is not plain-http loopback is served through a reverse proxy, and
-`TRUST_PROXY=false` there collapses every client to the proxy's own address, so
-per-IP rate limits and audit records all land in one bucket. Behind Coolify →
-Traefik the value is one hop:
-
-```
-TRUST_PROXY=1
-```
-
-Set it **in the Coolify resource's environment configuration, not in a `.env`
-file** — Coolify regenerates that file on every deploy, so a value written there
-is gone the next time. Forget it and the container fails env validation at boot
-and crash-loops: the platform never binds a port, and nothing in the loop names
-the release.
-
-**1c. `MODULES` — do NOT touch it here. It is step 5.** Production runs
-`MODULES=oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/cloud`.
-Against the NEW image that last specifier resolves to nothing: there is no
-built-in under `apps/api/src/modules/` and no workspace under
-`packages/module-*` by that name. `apps/api/src/lib/modules/module-loader.ts`
-throws `Module "@appstrate/cloud" could not be loaded: …`, and every declared
-module is required, so the throw is fatal. The billing module is now in-tree and
-its specifier is `@appstrate/module-ee`.
-
-**But the new value is fatal against the build that is SERVING right now**, and
-in exactly the same way. Production runs beta.57, whose tree carries no
-`packages/module-ee` — the in-tree move ships in THIS release. Write
-`@appstrate/module-ee` into the Coolify configuration while beta.57 is up and
-the loader throws `Module "@appstrate/module-ee" could not be loaded: …` at the
-next restart or redeploy — which is not a hypothetical, because Coolify
-regenerates the `.env` from that configuration on every deploy. That is the
-crash-loop of the paragraph above, taken the other way round: env validation
-never completes, no port is bound, and nothing in the loop names the release.
-The value and the build that understands it have to arrive together, so the
-`MODULES` edit belongs at **step 5**, with the new image, and nowhere earlier.
-
-**Same for `CLOUD_DATABASE_URL`: it stays until step 4 is done.** The new build
-reads nothing by that name — `@appstrate/module-ee` opens `DATABASE_URL` — so
-removing it is part of the same step 5 edit and not one minute sooner. Its
-VALUE is what step 4 feeds `0010` as `EE_SOURCE_DATABASE_URL`, and it is the
-only pointer to the 31 billing accounts still sitting in `appstrate_cloud`.
-Copy it somewhere before editing anything, and delete the key only once `0010`
-has committed and refused its second run.
-
-**1d. Counts that decide whether an extra script runs.** All four were read on
-production on 2026-09-17; re-read them, because the window is later than this
-page.
-
-| Query                                                                                                        | Measured 2026-09-17                      | Non-zero ⇒                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| duplicate pending `(org_id, email)` pairs — "Detail — RBAC rollout", point 1                                 | **0**                                    | run `0009` at step 2b                                                                                                                             |
-| duplicate un-aliased `org_models` bindings — "Detail — Duplicate model bindings", point 1                    | **1** — two rows, both `aliased = false` | **`0013` IS REQUIRED at step 2b.** Without it `0062`'s `CREATE UNIQUE INDEX` raises `23505` and rolls the whole twelve-migration transaction back |
-| the four `viewer` counts — "Detail — RBAC rollout", point 2                                                  | **0 / 0 / 0 / 0**                        | see step 4c                                                                                                                                       |
-| `oauth_clients` with `token_endpoint_auth_method IS NULL` — "Detail — OAuth-provider 1.7.3 rollout", point 1 | **0** of 10 clients                      | decide per client BEFORE the new image ships, and **keep the rows**; `0057` overwrites them and nothing reconstructs the list                     |
-
-**1e. The two accounts moved off `viewer` by hand.** The four zeros above do NOT
-mean there is nothing to repair. On 2026-09-09 two members were moved off
-`viewer` by hand, to `member`, because `guest` did not exist in the type yet;
-production holds 31 `owner`, 16 `admin` and exactly **2 `member`**, and those two
-are the accounts. `member` is strictly wider than what they had — with
-`spaces.default_role = 'operator'` it is write access in every open space — and
-`0008` cannot see them. `scripts/migration/0017-restore-handmoved-viewers.sql`
-is what repairs it, at step 4. Confirm the two pairs are still `member`:
-
-```sql
-SELECT org_id, user_id, role::text FROM org_members
-WHERE (org_id, user_id) IN (
-  ('48b0854c-6f42-406c-a3c7-bbdd285a0355', 'GlaICg7JIo1yAVuc9TzCzBZ7kUMpjU4i'),
-  ('e569c4fb-1721-4406-8cfd-9b362ecf7043', 'bSPoyUV0lTPO77jcsGODhQ3cAFclTKXV')
-);
-```
-
-Anything other than `member` → `0017` leaves that row alone and names it; read
-its notices rather than editing the file.
-
-**1f. Personal-spaces pre-flights.** Run points 2, 3 and 4 of
-"Detail — Personal spaces & sharing rollout" below — which organization packages
-`0014` has to guess a home for,
-what the two new `ON DELETE RESTRICT` edges will make undeletable, and how many
-spaces `0015` would create. The first is the only one that may need a decision
-from a package's author, so it is the one to start early.
-
-**1g. The billing database that has to move.** The deployment runs
-`@appstrate/cloud` against a database of its own, `appstrate_cloud`, named by
-`CLOUD_DATABASE_URL`. `@appstrate/module-ee` does not open a second URL: its
-tables live in the platform database. `scripts/migration/0010` is what carries
-them across, at step 4, and it is the ONLY thing that does.
-
-Counts read on production on 2026-09-17, against `appstrate_cloud` — re-read
-them, and keep the numbers: step 4's dry run prints a per-table plan to compare
-against.
-
-**These numbers are ESTIMATES, and `0010` prints exact ones.** They come from
-`pg_stat_user_tables.n_live_tup`, which is what the last `ANALYZE`/autovacuum
-left behind — the planner's approximation, not a count. `0010` runs
-`SELECT count(*)` per table on both sides. A dry run that prints 957 against the
-956 below is the estimate being stale, not a row that appeared; what has to
-agree exactly is the script's OWN pair, source vs target, which is the check it
-exits non-zero on. Use the table below to recognise the shape of the data — six
-tables, one of them the 31 billing accounts — not as an equality to enforce.
-
-| Table                    | Rows (est.) |
-| ------------------------ | ----------- |
-| `cloud_usage_records`    | 956         |
-| `cloud_billed_llm_usage` | 717         |
-| `cloud_stripe_events`    | 418         |
-| `cloud_billing_accounts` | **31**      |
-| `cloud_free_tier_claims` | 18          |
-| `cloud_billing_cursor`   | 1           |
-
-```sql
--- volumes, ESTIMATED (this is where the table above comes from)
-SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY 2 DESC, 1;
-
--- the source's LEVEL, which is what 0010 grades: the newest stamp, not a row
--- count. Drizzle's journal table carries `id`, `hash` and `created_at` — no
--- tag — so the stamp is the whole identification, matched against the `when`
--- of an entry in packages/module-ee/drizzle/migrations/meta/_journal.json.
--- Production holds this journal; `drizzle.ee_migrations` is the one a source
--- that already ran the renamed module would hold, and 0010 reads both.
-SELECT max(created_at) AS newest_stamp FROM drizzle.__drizzle_migrations;
-```
-
-**`0010` does not count journal rows.** It reads the source's LEVEL: it takes
-`max(created_at)` across `drizzle.__drizzle_migrations` and `drizzle.ee_migrations`
-— whichever of the two the source holds — and looks that stamp up in the
-module's own `meta/_journal.json`, where each entry carries a `when`. A stamp
-matching no entry is refused outright ("a history this script does not know"),
-and so is a source holding neither journal, or one whose matched entry has an
-`idx` below `REQUIRED_SOURCE_IDX` — the `idx` of
-`0003_normalize_free_subscription_status`, its `REQUIRED_SOURCE_TAG`. So a
-journal with rows deleted, or re-seeded with the same tags at other stamps, is
-graded on the stamp and not on how many rows it has; counting them here tells
-you what to expect, never whether the script will accept the source. The prefix
-must be `cloud_*` — `0004` (billing managers) and `0005` (the rename to `ee_*`)
-ship in THIS release, so no deployment ever ran them against a database of its
-own, and a source mixing both prefixes is refused too.
-
-### 2. Stop the platform
-
-**2a.** Stop it. Nothing may serve traffic from here until step 5: between the
-drizzle batch and `0014`, every organization package is homeless, which locks
-every non-owner author and every API key out of their own packages; between the
-batch and `0016`, every installation outside its package's home is invisible.
-
-**2b.** Run `0013` **now**, before the batch — step 1d counted **1** duplicate
-un-aliased binding on production, so it is not optional. `0009` only if step 1d
-re-counts a non-zero (it read **0** on 2026-09-17). Both exist because `0056` and `0062` create unique indexes that a
-duplicate row makes raise `23505`, which rolls the entire twelve-migration
-transaction back.
-
-### 3. Apply the drizzle batch — all twelve, and nothing else
-
-Not by starting the application. A one-shot migrator, so a bad migration fails
-with its own exit code and log before anything binds a port:
-
-```sh
-# The `migrate` service already exists in the deployed compose
-# (examples/self-hosting/docker-compose.yml) and does exactly this:
-docker compose -f <deployed compose> run --rm migrate
-
-# Equivalently, straight at the release's image:
-docker run --rm --network <compose network> \
-  -e DATABASE_URL="postgresql://appstrate:<password>@postgres:5432/appstrate" \
-  ghcr.io/appstrate/appstrate:<APPSTRATE_VERSION> \
-  bun packages/db/src/migrate.ts
-```
-
-Two invariants, both load-bearing: the image tag MUST be the one the platform
-will run — a mismatched pair applies a migration set the running code does not
-expect — and nothing else may write the journal at the same time.
-
-`bun run db:migrate` is the ROOT script (`package.json`) and is the DEV escape
-hatch: it shells out to `drizzle-kit`, which the runtime image does not ship.
-Inside a container the entry point is `bun packages/db/src/migrate.ts`.
-
-Verify by the journal, never by "the last PR merged":
-
-```sql
-SELECT count(*) AS applied, max(created_at) AS last
-FROM drizzle.__drizzle_migrations;
-```
-
-Record the count BEFORE step 3 and check it grew by exactly **12**. A watermark
-that reports nothing pending while columns are missing is a real failure mode
-here — see `0004-oauth-resources-watermark-drift.sql`.
-
-### 4. Operator scripts — this order, all of them
-
-**`0010` first, and it is not SQL.** It moves the commercial module's billing
-tables out of the database they had to themselves and into the platform
-database. Step 5a switches `MODULES` from `@appstrate/cloud` to
-`@appstrate/module-ee`; without this the module boots against SEVEN EMPTY
-`ee_*` tables it creates itself, and 31 organizations lose their billing
-account — credits, Stripe customer and subscription — while the metering cursor
-restarts from zero. Worse, it is then unrecoverable by this script: `0010` is
-idempotent BY REFUSAL, and a target already holding billing rows is refused for
-good.
-
-```sh
-# dry run first — it prints a per-table plan and changes nothing
-EE_SOURCE_DATABASE_URL=<postgresql://…/appstrate_cloud> \
-DATABASE_URL=<postgresql://…/appstrate> \
-  bun scripts/migration/0010-ee-tables-into-platform-db.ts
-
-# then, once the plan shows the six tables of step 1g at about its volumes
-# (those are estimates; the equality the script enforces is source vs target)
-EE_SOURCE_DATABASE_URL=… DATABASE_URL=… \
-  bun scripts/migration/0010-ee-tables-into-platform-db.ts --apply
-
-# and again without --apply: the second run MUST refuse. A refusal here is the
-# receipt that the first one committed.
-```
-
-Then the SQL ones:
-
-```sh
-for s in \
-  0008-org-viewer-to-guest \
-  0012-org-invitation-history-viewer-to-guest \
-  0017-restore-handmoved-viewers \
-  0011-oauth-clients-self-service-fold \
-  0014-packages-home-space-backfill \
-  0016-package-shares-backfill
-do
-  docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
-    -f - < "scripts/migration/$s.sql" || break
-done
-```
-
-Run them one at a time and read each one's notices; the loop above is the order,
-not a way to skip looking. What each is for, and why it sits where it does:
-
-- **`0008`, `0012`** — the `viewer` rows. Step 1d read four zeros, so both match
-  nothing on THIS database, and their printed counts are therefore all zero —
-  which is what a run that did nothing prints too. **They do not discriminate
-  here**; they are run because a fresh count is cheaper than assuming step 1d
-  still holds, not because their output proves anything. Neither reads the
-  other's marker.
-- **`0017`** — the two hand-moved accounts of step 1e. This is the one that has
-  work to do on this database.
-- **`0011`** — `oauth_clients.self_service`, folded out of the `metadata` JSON
-  that `0057` leaves behind. **Before** step 5, not after: the API refuses to
-  boot past `0057` until this has run (`assertSelfServiceFoldApplied`,
-  `apps/api/src/lib/boot.ts`). Running it here means that refusal never fires.
-- **`0014`, `0016`, in that order** — `0014` gives every organization package a
-  home and validates `0067`'s `NOT VALID` CHECK; `0016` then reads those homes to
-  write the `package_shares` row that keeps every out-of-home installation
-  placed. `0016` opens with a guard that refuses to run before `0014`, because
-  its `<>` home test against a NULL home matches nothing and would report
-  success on an empty backfill.
-
-**4c. Why there is no "two releases" branch.** The old RBAC runbook offered
-shipping `0056` + `0008` + `0012` in one release and `0059` in the next, for a
-database still holding `viewer` rows. That branch has no artefact: since
-beta.57 the twelve migrations are all unapplied and all ship together, so no
-published image carries `0056` without `0059`, and nothing can run between them.
-It becomes reachable only from some FUTURE release that has already frozen
-`0056`–`0058` on a deployment — there is none today. On this database the hand
-move of 2026-09-09 **is** the path that was taken, and `0017` is the restore it
-always owed; it is not an alternative to the branch, it is what the branch would
-have avoided needing.
-
-### 5. Switch `MODULES`, then start the platform
-
-**5a. The environment edit step 1c held back.** In the Coolify resource's
-environment configuration — not in a `.env` file, which is regenerated on every
-deploy — and only now, with the new image about to run:
-
-```
-MODULES=oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee
-```
-
-`@appstrate/cloud` out, `@appstrate/module-ee` in — one edit, both halves, since
-either specifier alone is fatal to the build that does not carry it. Delete
-`CLOUD_DATABASE_URL` in the same edit: step 4 has finished with it, and nothing
-in the new build reads it. If `CLOUD_RECONCILIATION_{INTERVAL_SECONDS,REPLAY_WINDOW,BATCH_SIZE}`
-were set, re-spell them `EE_RECONCILIATION_*` here too — the old keys are
-unknown to the new schema and are dropped silently, reverting to the defaults.
-`TRUST_PROXY=1` is already in place from step 1b.
-
-**5b. Start it.** Only now. Rolling the application back alone is unsupported: the older build
-omits the now-required chat-session space (`0056`), reads a personal space as an
-ordinary private one (`0064`), and writes `home_space_id = NULL` against a CHECK
-that refuses it (`0067`). Roll forward, or restore the dump from step 1a.
-
-### 6. Validate
-
-- **Lot 0** — the home rule and the placement rule: "Personal spaces & sharing"
-  § "Validate lot 0".
-- **Lot 1** — personal spaces: same section, § "Validate lot 1".
-- **RBAC** — zero org-member `viewer`s, zero pending `viewer` invitations, zero
-  `oauth_clients.signup_role = 'viewer'` (the step 1d query, re-run; `::text` on
-  every `org_role` comparison, since the value no longer parses as one).
-- **`0017`** — both accounts read `guest` and hold one `viewer` `space_members`
-  row per team space of their organization. The re-check query is in that file's
-  header.
-- Deleted spaces or custom roles named in an OAuth signup assignment need the
-  client's configuration updated before new users can join; signup fails without
-  creating partial org/space memberships, and existing members keep
-  authenticating. Invitation acceptance keeps its skip-and-log behaviour for
-  deleted targets.
-
-### 7. Later, and only if you want to — `0015`
-
-After step 6 passes, never inside the window. See "Personal spaces & sharing"
-§ "Run `0015`".
+The per-subject sections below are not runbooks and never were. They explain
+what each script does and what it checks, which is what the next release reads
+them for.
 
 ## The split
 
@@ -395,7 +102,7 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
 ## Detail — RBAC rollout (drizzle `0056` + `0059`, scripts `0008` + `0009` + `0012` + `0017`)
 
 **Not a runbook.** The order lives in "Release beta.58" above: these files are its
-step 2b (`0009`) and its step 4 (`0008`, `0012`, `0017`). What follows is what
+before the drizzle batch (`0009`) and after it (`0008`, `0012`, `0017`). What follows is what
 each one is for and which query decides whether it has work.
 
 One thing to confirm on the rehearsal copy before anything else: every
@@ -414,7 +121,7 @@ organization that has chat sessions has a default space, because `0056` promotes
    ) d;
    ```
 
-   Non-zero → run `0009-org-invitations-dedupe-pending.sql` at step 2b of the
+   Non-zero → run `0009-org-invitations-dedupe-pending.sql` before the drizzle batch of the
    runbook, and re-run the query until it prints 0. Measured 2026-09-17: **0**.
 
 2. **Pre-flight — the four `viewer` counts.** `0059` recreates `org_role` without
@@ -503,7 +210,7 @@ organization that has chat sessions has a default space, because `0056` promotes
 ## Detail — OAuth-provider 1.7.3 rollout (drizzle `0057`, script `0011`)
 
 **Not a runbook.** `0011` is step 4 of "Release beta.58"; the pre-flight below is
-its step 1d, and it is the one that cannot wait for the window.
+its pre-flight, and it is the one that cannot wait for the window.
 
 1. **Pre-flight, before the 1.7.3 image is deployed.** 1.7.3 reads a stored
    NULL `token_endpoint_auth_method` as `client_secret_basic` and then refuses
@@ -537,7 +244,7 @@ its step 1d, and it is the one that cannot wait for the window.
    is downgraded to a public one.
 
 2. **`0057_oauth_provider_1_7_3.sql`** is part of the twelve-migration batch
-   (runbook step 3), not a batch of its own. Its section D drops
+   (the release's one drizzle batch), not a batch of its own. Its section D drops
    `oauth_clients.public` and `type`; an older build still serving inserts
    clients with those columns and fails 42703, so roll forward rather than
    leaving both builds live.
@@ -570,7 +277,7 @@ the validation lists the runbook points at.
 These five migrations are NOT a batch of their own: production's watermark is
 `0055`, so they arrive inside the same twelve-migration transaction as `0056` …
 `0062`. Nothing here needs a new environment variable — `TRUST_PROXY` and
-`MODULES` (runbook steps 1b and 5a) are owed by the release, not by these files.
+`MODULES` are owed by the release's own configuration steps, not by these files.
 
 `0016` is second because it reads what `0014` writes. It gives every
 `space_packages` row that sits outside its package's home the `package_shares`
@@ -592,8 +299,9 @@ Read the header of each file too — it is the authority on what that file touch
 
 ### 1. Rehearse
 
-The dump is runbook step 1a; restore it into a throwaway `postgres:16-alpine`
-and run the whole of runbook steps 3 and 4 against it, not just these three
+Take the release's pre-flight dump, restore it into a throwaway
+`postgres:16-alpine` and run the whole drizzle batch and every operator script
+of the release against it, not just these three
 files. Record the counts; production volume is UNMEASURED for all three scripts
 until this is done.
 
@@ -719,7 +427,8 @@ refusals rather than cascades. Know what they will refuse:
 
 ### 4. Pre-flight — how many spaces `0015` would create
 
-Only if you intend to run `0015` (runbook step 7, the last one). It inserts ONE `spaces` row per
+Only if you intend to run `0015`, which comes after the release is deployed
+and validated, never inside the window. It inserts ONE `spaces` row per
 membership:
 
 ```sql
@@ -730,14 +439,14 @@ The commercial module counts spaces for nothing today, so there is no quota to
 breach; the number matters to a self-hosted operator who has imposed a per-space
 ceiling of their own. Skipping `0015` entirely is a supported choice.
 
-### 5. What `0014` and `0016` print — the window itself is runbook step 4
+### 5. What `0014` and `0016` print — inside the window, after the drizzle batch
 
 Both run with the platform stopped, `0014` first, for the reason in step 2:
 nothing may serve traffic while `home_space_id` exists unbackfilled, and nothing
 may serve traffic while installations outside their home have no share placing
-them. The commands, and the four other scripts that share the window, are in
-"Release beta.58" step 4 — there is no separate stop-migrate-start here, and the
-drizzle batch it follows is the full twelve, not `0063`–`0067`.
+them. The four other scripts that share the window are listed under **Release
+beta.58** above — there is no separate stop-migrate-start here, and the drizzle
+batch this pair follows is the release's whole pending set, not `0063`–`0067`.
 
 `0014` prints `no_home_before` split four ways, the ambiguous list, and
 `no_home_after` — **which must be 0**: every organization package now has a home,
@@ -905,8 +614,8 @@ a fresh install, where `0014` never runs, kept
 `pg_constraint.convalidated = false` for ever, and
 `docs/NO_TRANSITIONAL_CODE.md` §2's pattern (`ADD … NOT VALID` in one migration,
 `VALIDATE` in a later one) was left half-written. It could not be closed in THIS
-release: runbook step 3 applies the whole pending batch, `0067` included, BEFORE
-`0014` runs at step 4 — so a `VALIDATE` inside that batch would have scanned
+release: the batch applies every pending migration, `0067` included, BEFORE
+the operator scripts run — so a `VALIDATE` inside that batch would have scanned
 `packages` while every `home_space_id` was still NULL, raised `23514` and rolled
 the whole transaction back, the deploy failing on the very migration meant to
 confirm it. **The shape recurs**: when a constraint's precondition is an
@@ -962,8 +671,8 @@ instead where one exists, and prefer rolling forward.
 
 ## Detail — Duplicate model bindings (script `0013`, drizzle `0062`)
 
-**Not a runbook.** The count below is runbook step 1d; `0013`, if it is needed at
-all, is runbook step 2b — with the platform stopped and before the batch.
+**Not a runbook.** The count below belongs to the release's pre-flight; `0013`,
+if it is needed at all, runs with the platform stopped and before the batch.
 
 1. **Pre-flight, before any drizzle migration.** `0062` creates
    `uq_org_models_unaliased_binding`, so a database holding two un-aliased
@@ -983,8 +692,8 @@ all, is runbook step 2b — with the platform stopped and before the batch.
 
    Zero → nothing to do; go straight to the drizzle batch.
 
-2. Non-zero → run `0013-org-models-dedupe-bindings.sql` at runbook step 2b,
-   BEFORE the drizzle batch. It keeps the oldest row of each binding, repoints
+2. Non-zero → run `0013-org-models-dedupe-bindings.sql` with the platform
+   stopped, BEFORE the drizzle batch. It keeps the oldest row of each binding, repoints
    `organizations.default_model_id`, `space_packages.model_id`,
    `package_schedules.model_id_override` and `llm_usage.model` at it, then
    deletes the younger copies — in one transaction, so no pointer is ever left
@@ -994,8 +703,8 @@ all, is runbook step 2b — with the platform stopped and before the batch.
    moves.
 
 3. Check `duplicate_bindings_after` prints 0 and all four `dangling_*` counts
-   print 0, then go on to the drizzle batch — runbook step 3, which applies all
-   twelve pending migrations in one transaction, `0062` among them.
+   print 0, then go on to the drizzle batch, which applies every pending migration
+   in one transaction, `0062` among them.
 
 4. From this release on, `POST /api/models` answers `409 model_already_added`
    (carrying `existing_model_id`) instead of minting a second row, and
@@ -1004,21 +713,21 @@ all, is runbook step 2b — with the platform stopped and before the batch.
 
 ## Log
 
-| #    | date        | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ---- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0001 | 2026-08-26  | `files.id` `doc_` → `file_` and every reference                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 521 / 25 / 64 / 59                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 0002 | 2026-08-26  | `chat_messages`: `document://file_` → `appfile://file_`, finishing 0001's write 4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 59                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 0003 | 2026-08-28  | `app_` → `spc_` space ids (+18 FK columns), `applications:*` scopes, `end_user:` realms, `level` vocabulary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 10750 id rows (33 `spaces` + 10717 across the 18 columns) / 32 scopes / 1+1 realms / 16 reasons / 1 `level`; 17 FKs dropped + restored                                                                                                                                                                                                                                                                                                                                                                                  |
-| 0004 | not applied | oauth `resources` columns (0006) on a watermark-drifted DB — not rehearsed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | unmeasured                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 0005 | 2026-08-28  | AFPS `delivery.http.prefix`: bare auth scheme → separator-carrying (`"Bearer"` → `"Bearer "`), both manifest stores — **one deploy with the `integrationManifestSchema` (1d) gate**; run it FIRST, both spellings render alike under the old code                                                                                                                                                                                                                                                                                                                                                                         | 126 `package_versions` / 77 `packages.draft_manifest`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 0007 | not applied | skills: quote the `description:` lines `yaml` cannot parse, so their drafts are savable again under the SKILL.md frontmatter gate — **run after deploying the gate**; `.ts`, dry-run by default, `--apply` to write                                                                                                                                                                                                                                                                                                                                                                                                       | 17 of 66 skills fixable, 3 need a manual edit (2 `name`, 1 over-long description) — counted on production, NOT rehearsed                                                                                                                                                                                                                                                                                                                                                                                                |
-| 0008 | not applied | org role `viewer` → `guest` + an explicit `viewer` `space_members` row in every space that exists; pending invitations and legacy OAuth signup clients carry the same current-space snapshot — **run between drizzle `0056` and bringing the new version up**; viewers are locked out in between                                                                                                                                                                                                                                                                                                                          | unmeasured — the script prints before/after counts and aborts if any survives. This deployment ran it on nothing: production held 2 viewer members (2 orgs, 1 space each) and 2 accepted viewer invitations on 2026-09-09, moved off `viewer` by hand so the whole rollout could ship as one release — see step 3                                                                                                                                                                                                       |
-| 0009 | not applied | `org_invitations`: cancel older duplicate pending rows per (org, email) so drizzle `0056` can create `uq_org_invitations_pending` — **run before the drizzle batch when the rollout pre-flight counts any**; a duplicate pair needs two creates that raced                                                                                                                                                                                                                                                                                                                                                                | unmeasured — prints the duplicate-pair count before/after, after must be 0                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 0010 | not applied | the commercial module's billing tables out of the database it used to run on and into the platform database, under the `drizzle.ee_migrations` journal — **run with the platform stopped, before deploying the release that moves the module in-tree**; the source prefix is detected and its level READ from its own journal (`cloud_*` at `0003` is production's), reads `EE_SOURCE_DATABASE_URL` + `DATABASE_URL`, `.ts`, dry-run by default, `--apply` to copy. A target the module has already booted against is NOT a problem: the watermark `init()` seeds in `ee_billing_cursor` is replaced by the source's      | unmeasured — prints the per-table source/target counts and exits non-zero on any mismatch; refuses a mixed prefix, a source below `0003` or with no journal, an unknown `ee_`/`cloud_` table, a source-only column, or a target holding billing rows in any table but the seeded cursor (exit 1, nothing written), so a second `--apply` refuses rather than double-counting. That last refusal prints both sides' counts and never tells anyone to empty a database — the source is the only record of what was copied |
-| 0011 | not applied | `oauth_clients.self_service` set from the `metadata` JSON key `selfService`, which drizzle `0057` leaves behind when it adds the column — **run after the drizzle batch**, which the API refuses to boot past until this has run; rows whose `metadata` is not valid JSON are skipped, not rewritten                                                                                                                                                                                                                                                                                                                      | unmeasured — prints the count it will fold before and after, after must be 0                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| 0012 | not applied | `org_invitations` reading `viewer` with a status other than `pending` — the history `0008` deliberately leaves alone — mapped to `guest`, so drizzle `0059` can recreate the type without the value; **run right after `0008`**                                                                                                                                                                                                                                                                                                                                                                                           | unmeasured — prints the history and pending counts before and after, history after must be 0                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| 0013 | not applied | `org_models`: keep the oldest un-aliased row per (org, credential, model), repoint `organizations.default_model_id` / `space_packages.model_id` / `package_schedules.model_id_override` / `llm_usage.model` at it and delete the younger copies, so drizzle `0062` can create `uq_org_models_unaliased_binding` — **run before the drizzle batch when the pre-flight above counts any**; a duplicate needs two `POST /api/models` for the same pair                                                                                                                                                                       | unmeasured — prints the duplicate-binding count before/after (after must be 0) and the four dangling-reference counts (all must be 0)                                                                                                                                                                                                                                                                                                                                                                                   |
-| 0014 | not applied | every organization package given a `home_space_id` — its ONE write-authority space (drizzle `0063` adds the column NULL everywhere, i.e. admin-only): exactly one installation → that space, several → the oldest `installed_at` **printed for review before `COMMIT`**, none → the organization's DEFAULT space (drizzle `0067` forbids a homeless organization package, and `0014` ends by `VALIDATE`ing that check); **run between the drizzle batch and bringing the new version up**, the `0008` shape; serving traffic in between costs every non-owner author and every API key write access to their own packages | unmeasured — prints the NULL-home count before and after (after must be **0**) and the ambiguous list in between                                                                                                                                                                                                                                                                                                                                                                                                        |
-| 0015 | not applied | one personal space per existing `org_members` row (`spaces.owner_user_id`, drizzle `0064`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the space count first** — it inserts one row per membership, and nothing counts spaces for a quota today                                                                                                               | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0                                                                                                                                                                                                                                                                                                                                                                                                         |
-| 0016 | not applied | one `package_shares` row (`shared_by` NULL) per `space_packages` row sitting outside its package's home, so the placement rule drizzle `0063` + `0065` carry — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                         | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0                                                                                                                                                                                                                                                                                                                                                                         |
-| 0017 | not applied | the 2 org members moved off `viewer` **by hand** on 2026-09-09 (to `member`, the only value available before drizzle `0056` added `guest`) given the shape `0008` writes for a real viewer: one `viewer` `space_members` row per TEAM space of their org, then `member` → `guest`. `0008` cannot see them — its `WHERE role::text = 'viewer'` is the empty set — while `member` + `spaces.default_role = 'operator'` is write access in every open space; **run inside the window, right after `0008` and `0012`**                                                                                                        | 2 pairs counted on production read-only 2026-09-17 (31 `owner` / 16 `admin` / **2 `member`** / 0 `viewer`), NOT rehearsed against a restored dump — prints the per-pair role before and after and aborts on any uncovered (user, team space) pair                                                                                                                                                                                                                                                                       |
+| #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0001 | 2026-08-26          | `files.id` `doc_` → `file_` and every reference                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 521 / 25 / 64 / 59                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 0002 | 2026-08-26          | `chat_messages`: `document://file_` → `appfile://file_`, finishing 0001's write 4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 59                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 0003 | 2026-08-28          | `app_` → `spc_` space ids (+18 FK columns), `applications:*` scopes, `end_user:` realms, `level` vocabulary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 10750 id rows (33 `spaces` + 10717 across the 18 columns) / 32 scopes / 1+1 realms / 16 reasons / 1 `level`; 17 FKs dropped + restored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 0004 | not applied         | oauth `resources` columns (0006) on a watermark-drifted DB — not rehearsed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | unmeasured                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 0005 | 2026-08-28          | AFPS `delivery.http.prefix`: bare auth scheme → separator-carrying (`"Bearer"` → `"Bearer "`), both manifest stores — **one deploy with the `integrationManifestSchema` (1d) gate**; run it FIRST, both spellings render alike under the old code                                                                                                                                                                                                                                                                                                                                                                         | 126 `package_versions` / 77 `packages.draft_manifest`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 0007 | not applied         | skills: quote the `description:` lines `yaml` cannot parse, so their drafts are savable again under the SKILL.md frontmatter gate — **run after deploying the gate**; `.ts`, dry-run by default, `--apply` to write                                                                                                                                                                                                                                                                                                                                                                                                       | 17 of 66 skills fixable, 3 need a manual edit (2 `name`, 1 over-long description) — counted on production, NOT rehearsed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 0008 | 2026-09-17          | org role `viewer` → `guest` + an explicit `viewer` `space_members` row in every space that exists; pending invitations and legacy OAuth signup clients carry the same current-space snapshot — **run between drizzle `0056` and bringing the new version up**; viewers are locked out in between                                                                                                                                                                                                                                                                                                                          | unmeasured — the script prints before/after counts and aborts if any survives. This deployment ran it on nothing: production held 2 viewer members (2 orgs, 1 space each) and 2 accepted viewer invitations on 2026-09-09, moved off `viewer` by hand so the whole rollout could ship as one release — see step 3. **Ran in the beta.58 window.** Read back 2026-09-18: 0 `viewer`, 2 `guest` — the end state this file shares with `0012` and `0017`; the per-script counts it printed were not captured                                                                                                                                                                                                    |
+| 0009 | not needed          | `org_invitations`: cancel older duplicate pending rows per (org, email) so drizzle `0056` can create `uq_org_invitations_pending` — **run before the drizzle batch when the rollout pre-flight counts any**; a duplicate pair needs two creates that raced                                                                                                                                                                                                                                                                                                                                                                | unmeasured — prints the duplicate-pair count before/after, after must be 0. **Not run.** Its precondition, `uq_org_invitations_pending`, exists — and the batch that creates it applies in ONE transaction, so it could not have committed had the pre-flight counted a duplicate                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 0010 | 2026-09-17          | the commercial module's billing tables out of the database it used to run on and into the platform database, under the `drizzle.ee_migrations` journal — **run with the platform stopped, before deploying the release that moves the module in-tree**; the source prefix is detected and its level READ from its own journal (`cloud_*` at `0003` is production's), reads `EE_SOURCE_DATABASE_URL` + `DATABASE_URL`, `.ts`, dry-run by default, `--apply` to copy. A target the module has already booted against is NOT a problem: the watermark `init()` seeds in `ee_billing_cursor` is replaced by the source's      | unmeasured — prints the per-table source/target counts and exits non-zero on any mismatch; refuses a mixed prefix, a source below `0003` or with no journal, an unknown `ee_`/`cloud_` table, a source-only column, or a target holding billing rows in any table but the seeded cursor (exit 1, nothing written), so a second `--apply` refuses rather than double-counting. That last refusal prints both sides' counts and never tells anyone to empty a database — the source is the only record of what was copied. **Ran in the beta.58 window**, and it is the release's one irreversible step. Read back 2026-09-18: `drizzle.ee_migrations` at 8, 31 `ee_billing_accounts`, 717 claimed ledger rows |
+| 0011 | 2026-09-17          | `oauth_clients.self_service` set from the `metadata` JSON key `selfService`, which drizzle `0057` leaves behind when it adds the column — **run after the drizzle batch**, which the API refuses to boot past until this has run; rows whose `metadata` is not valid JSON are skipped, not rewritten                                                                                                                                                                                                                                                                                                                      | unmeasured — prints the count it will fold before and after, after must be 0. **Ran, or had nothing to fold.** Read back 2026-09-18: 0 `oauth_clients` rows left NULL                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 0012 | 2026-09-17          | `org_invitations` reading `viewer` with a status other than `pending` — the history `0008` deliberately leaves alone — mapped to `guest`, so drizzle `0059` can recreate the type without the value; **run right after `0008`**                                                                                                                                                                                                                                                                                                                                                                                           | unmeasured — prints the history and pending counts before and after, history after must be 0. **Ran in the beta.58 window.** Read back 2026-09-18: 0 rows read `viewer`, in history or pending                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 0013 | not needed          | `org_models`: keep the oldest un-aliased row per (org, credential, model), repoint `organizations.default_model_id` / `space_packages.model_id` / `package_schedules.model_id_override` / `llm_usage.model` at it and delete the younger copies, so drizzle `0062` can create `uq_org_models_unaliased_binding` — **run before the drizzle batch when the pre-flight above counts any**; a duplicate needs two `POST /api/models` for the same pair                                                                                                                                                                       | unmeasured — prints the duplicate-binding count before/after (after must be 0) and the four dangling-reference counts (all must be 0). **Not run.** Its precondition, `uq_org_models_unaliased_binding`, exists, and the batch is one transaction — same argument as `0009`                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 0014 | 2026-09-17          | every organization package given a `home_space_id` — its ONE write-authority space (drizzle `0063` adds the column NULL everywhere, i.e. admin-only): exactly one installation → that space, several → the oldest `installed_at` **printed for review before `COMMIT`**, none → the organization's DEFAULT space (drizzle `0067` forbids a homeless organization package, and `0014` ends by `VALIDATE`ing that check); **run between the drizzle batch and bringing the new version up**, the `0008` shape; serving traffic in between costs every non-owner author and every API key write access to their own packages | unmeasured — prints the NULL-home count before and after (after must be **0**) and the ambiguous list in between. **Ran in the beta.58 window.** Read back 2026-09-18: `packages_org_package_has_home` is `convalidated = true`, which `0014` is what does, so every org package that is not `ephemeral` has a home                                                                                                                                                                                                                                                                                                                                                                                          |
+| 0015 | not run — by design | one personal space per existing `org_members` row (`spaces.owner_user_id`, drizzle `0064`) — **run AFTER the release is deployed and validated, never inside the window**: `provisionMember` creates them at every membership door and `GET /api/spaces` repairs the caller's own, so nothing is degraded while this has not run; what it buys is the members who do not log in soon. **Pre-flight the space count first** — it inserts one row per membership, and nothing counts spaces for a quota today                                                                                                               | unmeasured — prints the membership count and the missing-personal-space count before and after; after must be 0. **Deliberately outstanding.** Read back 2026-09-18: 6 personal spaces against 50 memberships, the 6 created by `provisionMember` at a membership door rather than by this script. Pre-flight the space count before running it                                                                                                                                                                                                                                                                                                                                                              |
+| 0016 | 2026-09-17          | one `package_shares` row (`shared_by` NULL) per `space_packages` row sitting outside its package's home, so the placement rule drizzle `0063` + `0065` carry — a package is readable from its home and from the spaces it is shared into, never from the fact that somebody installed it — does not hide every pre-existing team installation at the first request; **run inside the window, right after `0014`**, whose `home_space_id` it reads                                                                                                                                                                         | unmeasured — prints the installations-outside-home count and the without-share count before, and the without-share count after, which must be 0. **Ran in the beta.58 window.** Read back 2026-09-18: 4 `package_shares` rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 0017 | 2026-09-17          | the 2 org members moved off `viewer` **by hand** on 2026-09-09 (to `member`, the only value available before drizzle `0056` added `guest`) given the shape `0008` writes for a real viewer: one `viewer` `space_members` row per TEAM space of their org, then `member` → `guest`. `0008` cannot see them — its `WHERE role::text = 'viewer'` is the empty set — while `member` + `spaces.default_role = 'operator'` is write access in every open space; **run inside the window, right after `0008` and `0012`**                                                                                                        | 2 pairs counted on production read-only 2026-09-17 (31 `owner` / 16 `admin` / **2 `member`** / 0 `viewer`), NOT rehearsed against a restored dump — prints the per-pair role before and after and aborts on any uncovered (user, team space) pair. **Ran in the beta.58 window**, right after `0008` and `0012`; the end-state witness is the one in `0008`'s row                                                                                                                                                                                                                                                                                                                                            |

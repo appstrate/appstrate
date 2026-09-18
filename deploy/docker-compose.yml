@@ -1,59 +1,37 @@
 # Appstrate — production Docker Compose
 #
-# This directory holds the DEPLOYMENT, not the product. Every service PULLS a
-# published image; nothing here is built. The billing module used to live in a
-# repository of its own (`appstrate/cloud`), layered onto the OSS image by a
-# Dockerfile — it now ships inside `ghcr.io/appstrate/appstrate` as
-# `packages/module-ee`, opt-in through `MODULES`, so one tag is the whole
-# deployment and the deployment is one file in this monorepo.
+# The DEPLOYMENT, not the product: every service PULLS a published image and
+# nothing here is built. `MODULES` below names the billing module, which ships
+# inside `ghcr.io/appstrate/appstrate` and is inert until it is named.
 #
 # Coolify:  one application resource, build pack `dockercompose`,
-#           git_repository `appstrate/appstrate`, docker_compose_location
-#           `/deploy/docker-compose.yml`, watch_paths the same path. The
-#           resource UUID is deliberately not written here — it names the
-#           volumes, and a stale one in a comment is worse than none.
+#           git_repository `appstrate/appstrate`, docker_compose_location and
+#           watch_paths both `/deploy/docker-compose.yml`. The resource UUID is
+#           deliberately not written here — it names the volumes, and a stale
+#           one in a comment is worse than none.
 # Manual:   cp .env.example .env && docker compose up -d
 # Upgrade:  set APPSTRATE_VERSION, then `docker compose pull && up -d`.
 #
+# `.env.example` is the operator contract. Under Coolify the `environment:`
+# blocks are NOT: Coolify injects every variable configured on the resource into
+# every service whatever this file lists. The blocks are maintained for a RAW
+# `docker compose` run, which is the only reader that depends on them.
+#
 # NOT the self-hosting example. `examples/self-hosting/docker-compose.yml`
-# teaches a stock install: different project name, different service names
-# (`postgres`, not `appstrate-postgres`) and an `internal: true` data network.
-# The two files overlap and are deliberately NOT merged — Coolify's
+# teaches a stock install, and the two are deliberately not merged: Coolify's
 # `docker_compose_domains` maps THESE service names to app.appstrate.com and
-# storage.appstrate.com, so renaming one deletes the routing, and an internal
-# network on `appstrate` would cut its egress to the model providers. Keep a
-# change that belongs in both in step by hand.
+# storage.appstrate.com, so renaming one deletes the routing, and that file's
+# `internal: true` data network would cut this one's egress to the model
+# providers. A change belonging in both is carried across by hand.
 #
-# WHAT THIS BLOCK CANNOT TELL YOU — under Coolify the `environment:` blocks
-# below are NOT the contract. Coolify injects every variable configured on the
-# resource into every service, whatever this file lists: measured 2026-09-18,
-# CONNECT_SESSION_SECRET and UPLOAD_SIGNING_SECRET are hard-required by
-# `packages/env/src/index.ts`, were absent from this file for months, and
-# production booted anyway. The blocks are the contract for a RAW
-# `docker compose` run, and that is who they are maintained for.
-#
-# Required environment variables:
-#   POSTGRES_PASSWORD, BETTER_AUTH_SECRET, CONNECTION_ENCRYPTION_KEY,
-#   RUN_TOKEN_SECRET, UPLOAD_SIGNING_SECRET, CONNECT_SESSION_SECRET,
-#   MINIO_ROOT_PASSWORD, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
-#   STRIPE_PRICE_ID_STARTER, STRIPE_PRICE_ID_PRO
-#
-# `name:` IS LOAD-BEARING off Coolify, and inert under it: Coolify overrides the
-# project name with the resource UUID, so the volumes are
-# `<uuid>_{pgdata,redisdata,miniodata}` whatever this says. A raw
-# `docker compose` run does key its volumes on it.
-#
-# It read `appstrate-cloud` until the deployment was rebuilt on a fresh Coolify
-# resource with volumes of its own, which is what freed the name. It is NOT
-# `appstrate`: `examples/self-hosting/docker-compose.yml` already claims that
-# one, and two compose files sharing a project name share its volumes — someone
-# running both on one host would have the example's Postgres and this file's
-# Postgres fighting over `appstrate_pgdata`. `-prod` keeps them apart and says
-# which of the two this is.
-#
-# The top-level `volumes:` keys are load-bearing the same way, and under
-# Coolify MORE so: `<uuid>_pgdata` is derived from the key `pgdata`. Renaming
-# one there does not rename a volume, it orphans it.
+# `name:` is inert under Coolify — it overrides the project name with the
+# resource UUID, so the volumes are `<uuid>_{pgdata,redisdata,miniodata}`
+# whatever this says — and load-bearing off it, where a raw `docker compose`
+# run keys its volumes on it. It is not `appstrate` because the self-hosting
+# example claims that one, and two compose files sharing a project name share
+# its volumes. The top-level `volumes:` keys are load-bearing the same way, and
+# under Coolify more so: renaming `pgdata` there orphans a volume, it does not
+# rename one.
 
 name: appstrate-prod
 
@@ -105,11 +83,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # MinIO comes from quay.io, its own registry, NOT from Docker Hub. An
-  # anonymous `docker pull minio/minio:latest` there answers "pull access
-  # denied … repository does not exist or may require 'docker login'", which
-  # fails the whole `docker compose pull` and therefore the whole deploy.
-  # Official images (postgres, redis) are unaffected and stay on Docker Hub.
+  # quay.io, NOT Docker Hub: an anonymous `docker pull minio/minio` there
+  # answers "pull access denied", which fails the whole `docker compose pull`
+  # and therefore the whole deploy. postgres and redis are official and stay.
   appstrate-minio:
     image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
@@ -171,10 +147,9 @@ services:
     entrypoint: ["true"]
     restart: "no"
 
-  # Per-integration MCP runner images. The sidecar `docker create`s one of
-  # these per local AFPS integration (resolved from RUNNER_IMAGE_* below).
-  # Pre-pulled so the first integration boot doesn't block on — or fail at —
-  # an on-demand pull.
+  # Per-integration MCP runner images: the sidecar `docker create`s one per
+  # local AFPS integration (resolved from RUNNER_IMAGE_* below). Pre-pulled so
+  # the first integration boot does not block on — or fail at — a cold pull.
   appstrate-mcp-runner-node:
     image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.59}
     entrypoint: ["true"]
@@ -204,13 +179,12 @@ services:
 
   appstrate:
     image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.59}
-    # Browser traffic is routed by the Coolify proxy to container port 3000 —
-    # no host port needed for that. The mapping below exists for the remote
-    # run-plane (RUN_ADAPTER=firecracker-remote): microVM guests have no DNS
-    # and reach the platform sink via an IPv4-literal host port
-    # (FIRECRACKER_RUNNER_PLATFORM_URL on the runner daemon). Defaults to
-    # loopback-only, so a stock deploy exposes nothing beyond the host —
-    # set PLATFORM_SINK_BIND to a private interface IP to serve guests.
+    # Browser traffic reaches port 3000 through the Coolify proxy and needs no
+    # host port. This mapping serves the remote run-plane
+    # (RUN_ADAPTER=firecracker-remote): microVM guests have no DNS and reach the
+    # platform sink at an IPv4-literal host port. Loopback-only by default, so a
+    # stock deploy exposes nothing — set PLATFORM_SINK_BIND to a private
+    # interface IP to serve guests.
     ports:
       - "${PLATFORM_SINK_BIND:-127.0.0.1}:${PLATFORM_SINK_PORT:-3310}:3000"
     restart: unless-stopped
@@ -219,26 +193,12 @@ services:
     #
     # Only values THIS FILE computes: a service hostname, an image ref bound to
     # ${APPSTRATE_VERSION}, a mirror of the `ports:`/`volumes:` above, or one
-    # variable remapped onto another. Nothing an operator sets — those reach the
-    # container through `env_file` below, and listing them here is not merely
-    # redundant, it is HARMFUL.
-    #
-    # Coolify materialises EVERY key named in this block. A bare `- FOO` is
-    # rewritten into `FOO: ''` in the compose it generates, so "unset, let the
-    # Zod schema default apply" becomes "set to the empty string" — a state the
-    # schema never sees during a raw run and is not written to survive.
-    # Measured 2026-09-18, after it took production down: `EE_RECONCILIATION_
-    # BATCH_SIZE` arrived as `''`, `z.coerce.number("")` is 0, the module's own
-    # `.min(1)` refused it and the platform crash-looped. Of 19 names then in
-    # this block, 12 were unsafe that way — 7 refusing to boot and, worse, 4
-    # degrading in SILENCE: `EE_RECONCILIATION_INTERVAL_SECONDS` would have read
-    # 0 (metering paused) and `EE_RECONCILIATION_REPLAY_WINDOW` 0 (the replay
-    # window off, i.e. the silent revenue loss its own comment forbids
-    # optimising away). The `.min(1)` floor is the only reason any of it was
-    # visible.
-    #
-    # So: an operator-set variable is named here ONLY if this file has to
-    # compute its value. `deploy/.env.example` is the operator contract.
+    # variable remapped onto another. Everything an operator sets arrives
+    # through `env_file` below, and naming it here too is not redundant, it is
+    # HARMFUL: Coolify materialises every key this block names, so a bare
+    # `- FOO` is rewritten into `FOO: ''` and "unset, let the schema default
+    # apply" becomes "set to the empty string". `verify:compose-defaults`
+    # (class 6) refuses a bare name here for that reason.
     env_file:
       - .env
     environment:
@@ -257,10 +217,9 @@ services:
       # RUN_ADAPTER: the code default is `process`, for OSS dev. A containerised
       # deployment must run agents in Docker.
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
-      # MODULES: the code default is the OSS set and does NOT name
-      # `@appstrate/module-ee`. This deployment is the one that bills, so it
-      # carries its own list. Drift here is what #513 was, so the value is
-      # deliberate and reviewed, not copied.
+      # MODULES: the code default is the OSS set and does not name the billing
+      # module. This deployment is the one that bills, so it carries its own
+      # list — reviewed, not copied. Drift here is what #513 was.
       - MODULES=${MODULES:-oidc,webhooks,core-providers,mcp,@appstrate/module-codex,@appstrate/module-claude-code,@appstrate/module-chat,@appstrate/module-ee}
       # ── Bound to ${APPSTRATE_VERSION} ──
       # Without these the sidecar falls back to bare `appstrate-*:latest` tags
