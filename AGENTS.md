@@ -39,16 +39,16 @@ bun run dev
 
 ### Commands
 
-| Command                  | Description                                                                                                                                                                                                    |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                                                                                           |
-| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                                                                                             |
-| `bun test`               | Run all tests (bun:test). Docker-dependent tests skip unless `TEST_DOCKER=1` — always on in CI                                                                                                                 |
-| `bun run check`          | The quality gate — far more than the three turbo tasks the command line shows. Its task list lives in § "Development Workflow" — that copy is the one kept in step with `package.json`; do not re-list it here |
-| `bun run build`          | Build everything (turbo build)                                                                                                                                                                                 |
-| `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                                                                                                |
-| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                                                                                             |
-| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)                                                                                                                                                   |
+| Command                  | Description                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                        |
+| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                          |
+| `bun test`               | Run all tests (bun:test). Docker-dependent tests skip unless `TEST_DOCKER=1` — always on in CI                                              |
+| `bun run check`          | The quality gate — 21 task names in one turbo invocation. The list, and the steps that lie: § "Quality Gate — and the signals it lies with" |
+| `bun run build`          | Build everything (turbo build)                                                                                                              |
+| `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                             |
+| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                          |
+| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)                                                                                |
 
 ### Docker Compose (Tier 1-3)
 
@@ -71,7 +71,7 @@ Every service in `docker-compose.dev.yml` sits behind a `profiles:` gate, so `do
 | Docker client  | **`fetch()` + unix socket** — NOT dockerode (socket bugs with Bun). See `services/docker.ts`                                                                                                                                                                                                                 |
 | Database       | **PostgreSQL 16** + Drizzle ORM (postgres.js). PGlite (embedded WASM Postgres) when `DATABASE_URL` is absent                                                                                                                                                                                                 |
 | DB security    | **No RLS** — app-level security, all queries filter by `orgId` (+ `spaceId` for space-scoped resources)                                                                                                                                                                                                      |
-| Logging        | **`@appstrate/core/logger`** (pino JSON to stdout) — no `console.*` calls; `apps/api` re-exports it as `lib/logger.ts`                                                                                                                                                                                       |
+| Logging        | **`@appstrate/core/logger`** (pino JSON to stdout) — no `console.*` calls; `apps/api` builds its instance from it in `lib/logger.ts` — import that one there                                                                                                                                                 |
 | Auth           | **Better Auth** cookie sessions + `X-Org-Id` + `X-Space-Id` headers. Email/password + optional Google/GitHub social (opt-in via env). Optional email verification (opt-in via SMTP env). API key (`ask_` prefix) tried first, then cookie. `Appstrate-User` header for end-user impersonation (API key only) |
 | Validation     | **Zod 4** for all request body/query validation + JSONB safe narrowing. **AJV** only for dynamic manifest schemas                                                                                                                                                                                            |
 | Env validation | **`@appstrate/env`** (Zod schema) is the single source of truth — not `.env.example`. Full table: `docs/ENV.md`                                                                                                                                                                                              |
@@ -338,8 +338,8 @@ loudly.
 its steps report false green or false red locally, and each one below has cost
 real time. Establish which you are looking at BEFORE changing code.
 
-The tasks, in the order `package.json` lists them — **21 task names, not the three** the command
-line shows, and this is the copy kept in step with it: `turbo typecheck lint format:check` plus
+The tasks, in the order `package.json` lists them — **21 task names** in one turbo invocation, and
+this is the copy kept in step with it: `turbo typecheck lint format:check` plus
 `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
 `verify:release-version`, `verify:env-docs`, `verify:workflows`, `detect:breaking`,
 `build:system-packages:check`, `lint:manifest-casing`, `conformance:check`,
@@ -496,7 +496,7 @@ Everything else has a schema default. To list the current key set:
 grep -oE '^    [A-Z][A-Z0-9_]*:' packages/env/src/index.ts | tr -d ' :' | sort
 ```
 
-Most-touched optional vars: `MODULES` (its default enables the OSS modules; the subscription modules `@appstrate/module-codex` and `@appstrate/module-claude-code` are opt-in), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for every documented var with defaults and full notes — most of them the `@appstrate/env` Zod schema's key set, the rest read straight from `process.env` by modules, the sidecar or the agent container. **Nothing recognises a renamed env var — not the platform, not the CLI.** `RETIRED_ENV_RENAMES`, its boot guard and the two RETIRED-name doc tables were all deleted under `docs/NO_TRANSITIONAL_CODE.md` §4. An `.env` carrying a pre-rename spelling has that key stripped as unknown and the setting falls back to its default, silently; correcting it is an operator task announced in the release notes. Do not re-add a rename table anywhere, the installer included — §4 records why the installer is not a loophole. `bun run verify:env-docs` (in `bun run check`) holds the documented table complete against both the schema and `.env.example` and prints the counts — read its success line, not this sentence.
+Most-touched optional vars: `MODULES` (a fixed default set — neither all the OSS modules nor none of them, so read its `.default(...)`; `firecracker`, `@appstrate/module-observability` and the two subscription modules sit outside it), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for every documented var with defaults and full notes — most of them the `@appstrate/env` Zod schema's key set, the rest read straight from `process.env` by modules, the sidecar or the agent container. **Nothing recognises a renamed env var — not the platform, not the CLI.** `RETIRED_ENV_RENAMES`, its boot guard and the two RETIRED-name doc tables were all deleted under `docs/NO_TRANSITIONAL_CODE.md` §4. An `.env` carrying a pre-rename spelling has that key stripped as unknown and the setting falls back to its default, silently; correcting it is an operator task announced in the release notes. Do not re-add a rename table anywhere, the installer included — §4 records why the installer is not a loophole. `bun run verify:env-docs` (in `bun run check`) holds the documented table complete against both the schema and `.env.example` and prints the counts — read its success line, not this sentence.
 
 `MODULES` is the var most often mis-quoted from memory — read its `.default(...)` in the schema
 rather than any doc, this one included.

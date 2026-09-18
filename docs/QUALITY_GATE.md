@@ -92,7 +92,7 @@ component file nothing imports. Either way the reason travels with the entry,
 written at its call site in `knip.config.ts` — that file's rule 2 states the
 first shape; the second is argued at the `ignoreIssues` entry itself. The live
 carve-outs are `ignoreExportsUsedInFile`, `ignoreIssues`, `ignoreBinaries` and
-three `ignoreDependencies` blocks; read their prose before adding a fourth `ignoreDependencies` block.
+three `ignoreDependencies` blocks; read their prose before adding a fourth of those.
 They are deliberately NOT re-listed here — a second copy of that list would
 drift from the config, and the config is where the justification has to live
 anyway. What is forbidden is the other use: silencing a finding you have not
