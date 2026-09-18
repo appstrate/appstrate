@@ -387,7 +387,7 @@ loudly.
 
 ## Testing
 
-Full guide (commands and tiers, `bunfig.toml` preload and module auto-discovery, directory layout, conventions table, helpers): skill **`testing`** (`.claude/skills/testing/SKILL.md`).
+The skill **`testing`** (`.claude/skills/testing/SKILL.md`) owns the full guide — tiers and the `bunfig.toml` preload, module auto-discovery, directory layout, the conventions table, DB isolation and cleanup. What follows is the short form: the commands, the helpers, and the rules that get broken most.
 
 ### Running Tests
 
