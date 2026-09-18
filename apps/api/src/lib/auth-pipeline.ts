@@ -18,6 +18,7 @@
 
 import type { Context, Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
+import { PRINCIPAL_KINDS } from "@appstrate/core/module";
 import { parseBearer } from "@appstrate/core/bearer";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -136,6 +137,19 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       for (const strategy of strategies) {
         const resolution = await strategy.authenticate(strategyReq);
         if (!resolution) continue;
+        // A strategy that misdeclares its principal is a programming error, not
+        // a client error: a plain `Error` (→ 500) rather than a default bucket.
+        if (!(PRINCIPAL_KINDS as readonly string[]).includes(resolution.principal)) {
+          throw new Error(
+            `auth strategy '${strategy.id}' declares no principal kind (got ${JSON.stringify(resolution.principal)})`,
+          );
+        }
+        if ((resolution.principal === "end_user") !== Boolean(resolution.endUser)) {
+          throw new Error(
+            `auth strategy '${strategy.id}': principal '${resolution.principal}' and endUser ${resolution.endUser ? "present" : "absent"} disagree`,
+          );
+        }
+        c.set("principal", resolution.principal);
         c.set("user", resolution.user);
         if (resolution.orgId !== undefined) c.set("orgId", resolution.orgId);
         if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
@@ -205,6 +219,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       c.set("scopeCeiling", keyCeiling);
       c.set("permissions", applyOrgPermissions(c, keyInfo.creatorRole));
       c.set("authMethod", "api_key");
+      c.set("principal", "delegate");
       c.set("apiKeyId", keyInfo.keyId);
       c.set("spaceId", keyInfo.spaceId);
 
@@ -242,6 +257,8 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           userAgent: c.req.header("user-agent") || "unknown",
         });
         c.set("endUser", endUser);
+        // An impersonated end-user is an outsider, not the key's delegation.
+        c.set("principal", "end_user");
       }
 
       return next();
@@ -269,6 +286,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       name: session.user.name ?? "",
     });
     c.set("authMethod", "session");
+    c.set("principal", "user");
     // Resolve the user's realm so the realm guard middleware below can
     // reject cookie sessions minted for a non-platform audience (OIDC
     // end-users) from hitting platform routes. The realm is denormalized

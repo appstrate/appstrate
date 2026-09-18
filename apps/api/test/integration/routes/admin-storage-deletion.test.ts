@@ -59,6 +59,9 @@ const oidcLikeStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "owner",
       authMethod: "oauth2-dashboard",
+      // The real `oauth2-dashboard` kind: the user's authority under a scope
+      // ceiling, which this surface refuses however generous the scopes.
+      principal: "delegate",
       spaceId: currentCtx.defaultSpaceId,
       // Deliberately generous: the point is that NO scope set substitutes for
       // an authentic platform session on this surface.

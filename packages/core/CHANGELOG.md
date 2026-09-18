@@ -41,6 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `AuthResolution.principal` is a new REQUIRED member** (type
+  `PrincipalKind`, also new alongside the tuple `PRINCIPAL_KINDS` in
+  `@appstrate/core/module`). A credential now DECLARES what it is —
+  `"user"` the platform user themselves by any transport, `"delegate"` a
+  credential they issued with its own life and ceiling (API key, third-party
+  OAuth client), `"end_user"` an external identity — instead of every gate
+  inferring it from `authMethod` and `deferOrgResolution`. A strategy that
+  omits the member or declares an unknown value is refused by the auth
+  pipeline with a thrown error: a misdeclared strategy is a programming error,
+  never a silent default bucket. `"end_user"` and `endUser` must agree in both
+  directions — one without the other is the same refusal. An existing strategy
+  fails to compile until it declares its kind. `deferOrgResolution` keeps its
+  meaning but loses every authority one: it orders the pipeline (org and
+  permissions come from the `X-Org-Id` middleware later) and answers nothing
+  about who the caller is.
+
 - `createS3Storage` bounds buffered `uploadFile` / `downloadFile` operations to
   30 seconds, including SDK retries and response-body reads. The deadline
   aborts the request and cancels the body reader, releasing stalled connections.

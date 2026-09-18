@@ -45,6 +45,7 @@ const stubStrategy: AuthStrategy = {
           name: currentCtx.user.name,
         },
         authMethod: "stub-deferred",
+        principal: "user",
         permissions: [],
         deferOrgResolution: true,
       };
@@ -63,6 +64,7 @@ const stubStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "admin",
       authMethod: "stub-strategy",
+      principal: token === "admin" ? "end_user" : "delegate",
       spaceId: currentCtx.defaultSpaceId,
       permissions: ["runs:read", "runs:write", "runs:cancel", "agents:read", "end-users:read"],
       // Exercise the endUser pass-through when token is "admin"

@@ -42,6 +42,7 @@ const endUserStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       // No `orgRole` on purpose — an end-user is not an org member.
       authMethod: "stub-end-user",
+      principal: "end_user",
       spaceId: pinnedSpaceId,
       permissions: ["agents:read"],
       endUser: {

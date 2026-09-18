@@ -40,7 +40,7 @@ import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts"
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "10.0.0";
+export const CORE_VERSION = "11.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
@@ -955,6 +955,22 @@ export interface AuthStrategyRequest {
 }
 
 /**
+ * What a credential IS, never how it arrived: declared by the strategy that
+ * minted it, never inferred from `authMethod` or `deferOrgResolution`.
+ *
+ * - `"user"` — the platform user themselves, by any transport (cookie session,
+ *   CLI device-flow token, MCP instance token, server-minted chat loopback):
+ *   reaches their personal spaces, takes their per-principal grants, may invoke
+ *   their membership in another org.
+ * - `"delegate"` — a credential the user issued with its own life and ceiling
+ *   (API key, third-party OAuth `dashboard_user` client): their authority, not
+ *   their privacy.
+ * - `"end_user"` — an external identity; `endUser` MUST be set, and conversely.
+ */
+export const PRINCIPAL_KINDS = ["user", "delegate", "end_user"] as const;
+export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
+
+/**
  * Resolution returned by a successful `AuthStrategy.authenticate()` call.
  * Mirrors the shape the core auth middleware sets on `c` via `c.set(...)`.
  *
@@ -974,6 +990,12 @@ export interface AuthResolution {
    * to the core values `"session" | "api_key"`.
    */
   authMethod: string;
+  /**
+   * What this credential is (see `PrincipalKind`). Required: the auth pipeline
+   * refuses a strategy that omits it or declares an unknown value rather than
+   * bucketing it, and refuses `"end_user"` without `endUser` (or the reverse).
+   */
+  principal: PrincipalKind;
   /**
    * Optional space binding. End-user strategies (API-key impersonation,
    * OIDC end_user flow) pin this so core's strict end-user filter has the
@@ -999,11 +1021,11 @@ export interface AuthResolution {
    */
   firstPartyLoopback?: boolean;
   /**
-   * When true, the auth pipeline defers org resolution to the `X-Org-Id`
-   * middleware (same path as session auth) and derives permissions from
-   * `orgRole` after org-context resolves. Strategies that authenticate a
-   * platform user without binding to a specific org at token-verification
-   * time should set this to `true`.
+   * Pipeline ordering only: when true, org and permissions come from the
+   * `X-Org-Id` middleware later instead of at token-verification time (same
+   * path as session auth). Set it on a strategy that authenticates without
+   * binding to one org. It says NOTHING about who the caller is — that is
+   * `principal`, and no gate may read this flag as an authority signal.
    */
   deferOrgResolution?: boolean;
 }
