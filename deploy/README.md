@@ -17,7 +17,7 @@ It used to be a repository of its own, `appstrate/cloud`, holding the billing mo
 
 |                 | `deploy/`                                  | `examples/self-hosting/`                                 |
 | --------------- | ------------------------------------------ | -------------------------------------------------------- |
-| project `name:` | `appstrate-cloud`                          | `appstrate`                                              |
+| project `name:` | `appstrate-prod`                           | `appstrate`                                              |
 | services        | `appstrate-postgres`, `appstrate-minio`, … | `postgres`, `minio`, …                                   |
 | networks        | none (Coolify supplies one)                | `appstrate-data` (`internal: true`) + `appstrate-public` |
 
@@ -34,9 +34,13 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 ## Production
 
-Deployed by Coolify, resource `i52ng4cu0qbow9dabgt8b37i`. Four facts worth writing down, because each one is easy to break:
+Deployed by Coolify as a single `dockercompose` application resource. Its UUID is not written here on purpose: the UUID names the volumes, and a stale one in a document is worse than none — read it off the resource.
 
-- **The volumes are keyed on the Coolify resource UUID**, not on this file's `name:` — `<uuid>_pgdata`, `<uuid>_redisdata`, `<uuid>_miniodata`. Coolify overrides the compose project name with the UUID, which is why repointing the resource at this repository moved no data. `name:` is inert there but **not** for a raw `docker compose` run, which keys its volumes on it: it stays `appstrate-cloud`, repository or no repository. The top-level `volumes:` keys are load-bearing the same way — `<uuid>_pgdata` is derived from the key `pgdata`, so renaming it there orphans a volume rather than renaming one.
+Five facts worth writing down, because each one is easy to break:
+
+- **The volumes are keyed on the Coolify resource UUID**, not on this file's `name:` — `<uuid>_pgdata`, `<uuid>_redisdata`, `<uuid>_miniodata`. Coolify overrides the compose project name with the UUID (it passes `--project-name <uuid>`), so the UUID is what the data is attached to. Two consequences, in opposite directions: repointing an EXISTING resource at another repository moves no data, and standing up a NEW resource gives you empty volumes however faithfully you copy this file. A new resource is a data migration, not a configuration change.
+
+- **`name:` is inert under Coolify and load-bearing off it.** A raw `docker compose` run keys its volumes on it. It reads `appstrate-prod`, not `appstrate`, because `examples/self-hosting/docker-compose.yml` already claims that name and two compose files sharing a project name share its volumes. The top-level `volumes:` keys are load-bearing the same way, and under Coolify more so — `<uuid>_pgdata` derives from the key `pgdata`, so renaming it there orphans a volume rather than renaming one.
 
 - **Coolify injects every variable configured on the resource into every service**, whatever the `environment:` blocks in this file list. Measured 2026-09-18: `CONNECT_SESSION_SECRET` and `UPLOAD_SIGNING_SECRET` are hard-required by `packages/env/src/index.ts`, were absent from this compose for months, and production booted anyway. Those blocks are the contract for a **raw** `docker compose` run — which is who they are maintained for, and why they are kept complete even though production does not read them.
 
@@ -48,4 +52,4 @@ Deployed by Coolify, resource `i52ng4cu0qbow9dabgt8b37i`. Four facts worth writi
 
 Set `APPSTRATE_VERSION` back and redeploy — but only where the release was an image swap. Once a release has applied migrations, the older build no longer matches the schema and rolling the application back alone is unsupported. The rollback is then the pre-deployment dump. The runbook says which case a given release is.
 
-To roll the _source_ back rather than the version, point `git_repository` at `appstrate/cloud` and redeploy. An archived repository is read-only, not gone: Coolify can still clone it, and the volumes never moved, so this is a configuration revert and not a restore. That is the reason the repository is archived rather than deleted.
+To roll back further than the version — to the deployment this one replaced — there is no configuration revert available: that deployment was a different Coolify resource with volumes of its own. The rollback is its volumes if they still exist, and otherwise the pre-migration dump. Keep both until a full release has gone out on this resource without incident.

@@ -7,9 +7,11 @@
 # `packages/module-ee`, opt-in through `MODULES`, so one tag is the whole
 # deployment and the deployment is one file in this monorepo.
 #
-# Coolify:  resource `i52ng4cu0qbow9dabgt8b37i`, git_repository
-#           `appstrate/appstrate`, docker_compose_location
-#           `/deploy/docker-compose.yml`, watch_paths the same path.
+# Coolify:  one application resource, build pack `dockercompose`,
+#           git_repository `appstrate/appstrate`, docker_compose_location
+#           `/deploy/docker-compose.yml`, watch_paths the same path. The
+#           resource UUID is deliberately not written here — it names the
+#           volumes, and a stale one in a comment is worse than none.
 # Manual:   cp .env.example .env && docker compose up -d
 # Upgrade:  set APPSTRATE_VERSION, then `docker compose pull && up -d`.
 #
@@ -36,17 +38,24 @@
 #   MINIO_ROOT_PASSWORD, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 #   STRIPE_PRICE_ID_STARTER, STRIPE_PRICE_ID_PRO
 #
-# `name:` IS LOAD-BEARING off Coolify. Under Coolify the project is the
-# resource UUID and the volumes are `<uuid>_{pgdata,redisdata,miniodata}`, so
-# this value is inert there — but a raw `docker compose` run keys its volumes
-# on it, and renaming it would strand their data. It stays, `appstrate-cloud`
-# and all: the repository is gone, the volumes it named are not.
+# `name:` IS LOAD-BEARING off Coolify, and inert under it: Coolify overrides the
+# project name with the resource UUID, so the volumes are
+# `<uuid>_{pgdata,redisdata,miniodata}` whatever this says. A raw
+# `docker compose` run does key its volumes on it.
+#
+# It read `appstrate-cloud` until the deployment was rebuilt on a fresh Coolify
+# resource with volumes of its own, which is what freed the name. It is NOT
+# `appstrate`: `examples/self-hosting/docker-compose.yml` already claims that
+# one, and two compose files sharing a project name share its volumes — someone
+# running both on one host would have the example's Postgres and this file's
+# Postgres fighting over `appstrate_pgdata`. `-prod` keeps them apart and says
+# which of the two this is.
 #
 # The top-level `volumes:` keys are load-bearing the same way, and under
 # Coolify MORE so: `<uuid>_pgdata` is derived from the key `pgdata`. Renaming
 # one there does not rename a volume, it orphans it.
 
-name: appstrate-cloud
+name: appstrate-prod
 
 services:
   # ── Infrastructure ──────────────────────────────────────────────────
