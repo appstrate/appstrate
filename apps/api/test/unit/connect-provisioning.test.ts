@@ -20,7 +20,11 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
-import { provisionCredentials, readProvisioning } from "../../src/services/connect/provisioning.ts";
+import {
+  provisionCredentials,
+  readProvisioning,
+  type HandoffStep,
+} from "../../src/services/connect/provisioning.ts";
 
 const SSH_AUTH = {
   type: "custom",
@@ -33,6 +37,20 @@ const SSH_AUTH = {
 };
 
 const ctx = { integrationId: "@appstrate/ssh" };
+
+/**
+ * The handoff is a LIST of typed steps, so the tests reach into it by role
+ * rather than by field name: there is one block to run now and one kept for the
+ * teardown, and which index they land on is not the contract.
+ */
+function shellOf(res: { display: { steps: readonly HandoffStep[] } }, deferred: boolean): string {
+  const step = res.display.steps.find((s) => s.kind === "command" && !!s.deferred === deferred);
+  if (!step || step.kind !== "command")
+    throw new Error(`no ${deferred ? "teardown" : "install"} step`);
+  return step.shell;
+}
+const installShell = (res: { display: { steps: readonly HandoffStep[] } }) => shellOf(res, false);
+const revokeShell = (res: { display: { steps: readonly HandoffStep[] } }) => shellOf(res, true);
 
 describe("readProvisioning", () => {
   it("returns null for an auth that declares nothing", () => {
@@ -190,7 +208,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
 
   it("installs the very key it minted — the two halves cannot drift", async () => {
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    expect(res.display.install_command).toMatch(
+    expect(installShell(res)).toMatch(
       /restrict,command="\/usr\/local\/bin\/appstrate-dispatch-[0-9a-f]{12}"/,
     );
   });
@@ -203,8 +221,8 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     const a = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
     const b = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
     const pathOf = (script: string) => /appstrate-dispatch-[0-9a-f]{12}/.exec(script)?.[0];
-    expect(pathOf(a.display.install_command)).toBeDefined();
-    expect(pathOf(a.display.install_command)).not.toBe(pathOf(b.display.install_command));
+    expect(pathOf(installShell(a))).toBeDefined();
+    expect(pathOf(installShell(a))).not.toBe(pathOf(installShell(b)));
   });
 
   it("renders one exact-match arm per allowed verb, and a refusing default", async () => {
@@ -213,7 +231,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
       { ...base, allowed_verbs: '["hostname", "disk_usage"]' },
       stubCtx,
     ))!;
-    const script = res.display.install_command;
+    const script = installShell(res);
     expect(script).toContain("    hostname) exec hostname ;;");
     expect(script).toContain("    disk_usage) exec df -h / ;;");
     // Not requested — must not be reachable on the target either.
@@ -244,7 +262,7 @@ describe("provisionCredentials — what gets minted and rendered", () => {
 
   it("points the fingerprint check at the key type it actually pinned", async () => {
     const ed = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    expect(ed.display.install_command).toContain("/etc/ssh/ssh_host_ed25519_key.pub");
+    expect(installShell(ed)).toContain("/etc/ssh/ssh_host_ed25519_key.pub");
 
     // An sshd too old for ed25519 pins RSA — and reading an ed25519 file there
     // would silently skip the only machine-in-the-middle check there is.
@@ -260,8 +278,8 @@ describe("provisionCredentials — what gets minted and rendered", () => {
         }),
       },
     ))!;
-    expect(rsa.display.install_command).toContain("/etc/ssh/ssh_host_rsa_key.pub");
-    expect(rsa.display.install_command).not.toContain("ed25519_key.pub");
+    expect(installShell(rsa)).toContain("/etc/ssh/ssh_host_rsa_key.pub");
+    expect(installShell(rsa)).not.toContain("ed25519_key.pub");
   });
 
   it("refuses to install a key on an account that cannot run a forced command", async () => {
@@ -269,21 +287,47 @@ describe("provisionCredentials — what gets minted and rendered", () => {
     // recommend nologin, which refuses every verb — and the failure only
     // surfaced mid-run, as a verb that ran and produced nothing.
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    expect(res.display.install_command).toContain("*/nologin|*/false)");
+    expect(installShell(res)).toContain("*/nologin|*/false)");
+  });
+
+  /**
+   * The handoff is data, and its SHAPE is the contract the SPA renders against:
+   * a list of typed steps with no SSH in it. A second provisioning kind adds
+   * steps, not a front-end branch — which is only true while nothing here
+   * depends on their order or their count.
+   */
+  it("describes the handoff as typed steps, not named fields", async () => {
+    const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
+    expect(res.display.steps.map((s) => s.kind)).toEqual(["command", "value", "command"]);
+
+    const commands = res.display.steps.filter((s) => s.kind === "command");
+    // Exactly one of the two blocks is for later: the teardown. Shipping both
+    // as "do this now" is how a removal command becomes a removal nobody runs.
+    expect(commands.filter((s) => s.kind === "command" && s.deferred)).toHaveLength(1);
+
+    // Every step is renderable: a label, and the payload its kind promises.
+    for (const step of res.display.steps) {
+      expect(step.label.length).toBeGreaterThan(0);
+      if (step.kind === "command") expect(step.shell.length).toBeGreaterThan(0);
+      else expect(step.value.length).toBeGreaterThan(0);
+    }
+
+    // The fingerprint moved from a bespoke field to a `value` step — and it is
+    // still the scanned one, not the minted key's.
+    const value = res.display.steps.find((s) => s.kind === "value");
+    expect(value && value.kind === "value" && value.value).toBe(
+      "SHA256:e9BAhcGr5z9zvM6nYcXrEt2BkBrTfpCQ/QSvw/h2INc",
+    );
   });
 
   it("hands back the block that takes the key back off the target", async () => {
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
-    const keyBase64 = /restrict,command="[^"]+" ssh-ed25519 (\S+)/.exec(
-      res.display.install_command,
-    )?.[1];
+    const keyBase64 = /restrict,command="[^"]+" ssh-ed25519 (\S+)/.exec(installShell(res))?.[1];
     expect(keyBase64).toBeDefined();
     // Matched on the key's own base64 with `grep -F`, so it removes exactly
     // this connection's line — deleting the connection here cannot do it.
-    expect(res.display.revoke_command).toContain(`grep -vF '${keyBase64}'`);
-    expect(res.display.revoke_command).toMatch(
-      /rm -f "\$tmp" \/usr\/local\/bin\/appstrate-dispatch-/,
-    );
+    expect(revokeShell(res)).toContain(`grep -vF '${keyBase64}'`);
+    expect(revokeShell(res)).toMatch(/rm -f "\$tmp" \/usr\/local\/bin\/appstrate-dispatch-/);
   });
 
   it("ignores a client-supplied private key, host key or read-only flag", async () => {
@@ -356,7 +400,7 @@ describe("the generated install script", () => {
   it("is valid POSIX shell", async () => {
     const res = (await provisionCredentials(SSH_AUTH, { ...base }, stubCtx))!;
     const file = join(await mkdtemp(join(tmpdir(), "ssh-install-")), "install.sh");
-    await writeFile(file, res.display.install_command + "\n");
+    await writeFile(file, installShell(res) + "\n");
     const proc = Bun.spawn(["sh", "-n", file], { stdout: "pipe", stderr: "pipe" });
     const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
     expect(`${code} ${stderr}`.trim()).toBe("0");
@@ -367,7 +411,7 @@ describe("the generated install script", () => {
     // both are the shape that breaks a forced command. The guard runs before
     // the first `install`, so this is safe to execute unprivileged.
     const res = (await provisionCredentials(SSH_AUTH, { ...base, user: "nobody" }, stubCtx))!;
-    const run = await runScript(res.display.install_command);
+    const run = await runScript(installShell(res));
     expect(run.code).toBe(1);
     expect(run.stderr).toContain("shell de login");
     expect(run.stderr).not.toContain("authorized_keys");
@@ -381,7 +425,7 @@ describe("the generated dispatcher, run as sshd would run it", () => {
       { ...base, ...(allowed_verbs === undefined ? {} : { allowed_verbs }) },
       stubCtx,
     ))!;
-    return extractDispatcher(res.display.install_command);
+    return extractDispatcher(installShell(res));
   };
 
   it("runs an allowed verb", async () => {

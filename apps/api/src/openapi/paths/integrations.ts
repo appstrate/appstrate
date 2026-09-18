@@ -1049,22 +1049,36 @@ export const integrationsPaths = {
                   provisioned: {
                     type: "object",
                     description:
-                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: the material the platform minted that must now reach the target host. Public halves only — the private key is sealed in the connection\'s envelope and is never returned. Shown once; nothing persists it.',
-                    required: ["host_fingerprint", "install_command", "revoke_command"],
+                      'Present when the auth declares `_meta["dev.appstrate/provisioning"]`: what the user must now do with the material the platform minted. Public halves only — the private key is sealed in the connection\'s envelope and is never returned. Returned once; nothing persists it.',
+                    required: ["steps"],
                     properties: {
-                      host_fingerprint: {
-                        type: "string",
+                      steps: {
+                        type: "array",
                         description:
-                          "`SHA256:…` of the TARGET's host key, for the user to compare against their own machine.",
-                      },
-                      install_command: {
-                        type: "string",
-                        description: "A shell block to paste on the target host.",
-                      },
-                      revoke_command: {
-                        type: "string",
-                        description:
-                          "The shell block that undoes the install. Deleting the connection destroys the private half and nothing else — the platform cannot reach the target to take its key out of `authorized_keys`.",
+                          "Ordered handoff steps. A list rather than named fields so a new provisioning kind ships without a front-end branch.",
+                        items: {
+                          type: "object",
+                          required: ["kind", "label"],
+                          properties: {
+                            kind: { type: "string", enum: ["command", "value"] },
+                            label: { type: "string" },
+                            note: { type: "string" },
+                            shell: {
+                              type: "string",
+                              description:
+                                "`kind: command` — shell to run on the target. Never executed by the platform.",
+                            },
+                            deferred: {
+                              type: "boolean",
+                              description:
+                                "`kind: command` — to be run later, when the connection is deleted, not now.",
+                            },
+                            value: {
+                              type: "string",
+                              description: "`kind: value` — a value to read or compare.",
+                            },
+                          },
+                        },
                       },
                     },
                   },

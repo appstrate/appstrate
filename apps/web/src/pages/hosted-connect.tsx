@@ -5,6 +5,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { initialCredentialValues } from "../components/integration-connect/credential-schema";
+import { HandoffSteps, type HandoffStep } from "../components/integration-connect/handoff-steps";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
@@ -47,9 +48,7 @@ type Phase = "loading" | "form" | "submitting" | "done" | "provisioned" | "error
  * the private half never leaves the server.
  */
 interface Provisioned {
-  host_fingerprint: string;
-  install_command: string;
-  revoke_command: string;
+  steps: HandoffStep[];
 }
 
 export function HostedConnectPage() {
@@ -58,7 +57,6 @@ export function HostedConnectPage() {
   const [context, setContext] = useState<ConnectContext | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [provisioned, setProvisioned] = useState<Provisioned | null>(null);
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Technical reason behind a context-load failure (HTTP status or network
   // error). Shown under the generic body so an invalid/expired link, a removed
@@ -179,57 +177,7 @@ export function HostedConnectPage() {
               </p>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold">
-                  {t("integration.connect.provisioned.installLabel")}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-testid="copy-install-command"
-                  onClick={() => {
-                    void navigator.clipboard
-                      .writeText(provisioned.install_command)
-                      .then(() => setCopied(true))
-                      // Clipboard access can be denied (permissions, insecure
-                      // context). The block is selectable either way, so the
-                      // failure only costs the confirmation.
-                      .catch(() => setCopied(false));
-                  }}
-                >
-                  {copied ? t("integration.connect.provisioned.copied") : t("btn.copy")}
-                </Button>
-              </div>
-              <pre className="bg-muted/40 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[11px] leading-relaxed whitespace-pre">
-                {provisioned.install_command}
-              </pre>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-xs font-semibold">
-                {t("integration.connect.provisioned.fingerprintLabel")}
-              </span>
-              <p className="font-mono text-xs break-all" data-testid="host-fingerprint">
-                {provisioned.host_fingerprint}
-              </p>
-              <p className="text-muted-foreground text-xs">
-                {t("integration.connect.provisioned.fingerprintHint")}
-              </p>
-            </div>
-
-            <details className="space-y-1">
-              <summary className="cursor-pointer text-xs font-semibold">
-                {t("integration.connect.provisioned.revokeLabel")}
-              </summary>
-              <p className="text-muted-foreground text-xs">
-                {t("integration.connect.provisioned.revokeHint")}
-              </p>
-              <pre className="bg-muted/40 mt-1 max-h-48 overflow-auto rounded-md border p-3 font-mono text-[11px] leading-relaxed whitespace-pre">
-                {provisioned.revoke_command}
-              </pre>
-            </details>
+            <HandoffSteps steps={provisioned.steps} />
 
             <Button
               type="button"

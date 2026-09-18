@@ -22,9 +22,6 @@
       },
       {
         "label": "Indiquez ci-dessous l'hôte, le port et ce compte. Appstrate génère la paire de clés lui-même : rien à coller, et la clé privée n'est ni affichée ni saisie nulle part — elle naît chiffrée dans le trousseau."
-      },
-      {
-        "label": "À la création, une commande d'installation s'affiche. Collez-la sur le serveur : elle installe la clé publique avec restrict + command= et dépose le dispatcher, qui n'exécute que les verbes de la liste et le sous-système sftp en lecture seule. Elle imprime aussi l'empreinte de l'hôte — comparez-la avec celle affichée à l'écran. Le même écran donne la commande de retrait : gardez-la, supprimer la connexion dans Appstrate ne retire pas la clé de votre serveur."
       }
     ]
   },

@@ -54,18 +54,38 @@ export interface ProvisionResult {
   display: ProvisionDisplay;
 }
 
+/**
+ * One thing the user has to do, or check, once the platform has minted its half.
+ *
+ * Steps are DATA, not three named fields, because every provisioner hands back
+ * a different set of them and the SPA must not grow a branch per kind: it
+ * renders the list, and a new `kind` of provisioning ships without touching the
+ * front end. Two shapes, both with a consumer today — a block to run, and a
+ * value to read. A prose step would be a third with none: publisher prose is
+ * already `setup_guide` (AFPS §7.10) with its own renderer.
+ *
+ * Labels and notes are SERVER text, like `setup_guide`'s, not i18n keys: the
+ * step's content is the provisioner's to word, and half of it (a shell block) is
+ * generated anyway.
+ */
+export type HandoffStep =
+  | {
+      kind: "command";
+      label: string;
+      /** Shell to run on the target. Copied, never executed by the platform. */
+      shell: string;
+      note?: string;
+      /**
+       * Not now — kept for when the connection is deleted. The platform cannot
+       * reach the target to undo anything itself, so a teardown block that is
+       * only ever shown once is a teardown nobody performs.
+       */
+      deferred?: boolean;
+    }
+  | { kind: "value"; label: string; value: string; note?: string };
+
 export interface ProvisionDisplay {
-  /** `SHA256:…` of the TARGET's host key, for the user to compare. */
-  host_fingerprint: string;
-  /** A single shell block to paste on the target; installs the key + dispatcher. */
-  install_command: string;
-  /**
-   * The block that undoes it. Deleting the connection destroys the private
-   * half here and nothing else: the platform cannot reach the target to take
-   * its own key out of `authorized_keys`, so the only way that line ever goes
-   * away is someone pasting this.
-   */
-  revoke_command: string;
+  steps: readonly HandoffStep[];
 }
 
 /** The submitted, not-yet-persisted credential bag. */
@@ -360,15 +380,37 @@ async function provisionSshKeyPair(
       read_only: "1",
     },
     display: {
-      host_fingerprint: scan.fingerprint,
-      install_command: renderInstallCommand(
-        user,
-        keyPair.publicKey,
-        verbs,
-        hostKeyPubFile(scan.hostKey),
-        dispatchPath,
-      ),
-      revoke_command: renderRevokeCommand(user, keyPair.publicKey, dispatchPath),
+      steps: [
+        {
+          kind: "command",
+          label: "À coller sur le serveur cible (en root, ou avec sudo)",
+          shell: renderInstallCommand(
+            user,
+            keyPair.publicKey,
+            verbs,
+            hostKeyPubFile(scan.hostKey),
+            dispatchPath,
+          ),
+        },
+        {
+          kind: "value",
+          label: "Empreinte de l'hôte, épinglée",
+          value: scan.fingerprint,
+          note:
+            "La commande ci-dessus imprime l'empreinte du serveur en dernière ligne. " +
+            "Si elle diffère de celle-ci, quelqu'un s'est intercalé : supprimez la connexion.",
+        },
+        {
+          kind: "command",
+          deferred: true,
+          label: "Retirer cette clé plus tard",
+          shell: renderRevokeCommand(user, keyPair.publicKey, dispatchPath),
+          note:
+            "Gardez ce bloc. Supprimer la connexion dans Appstrate détruit la moitié privée et " +
+            "rien d'autre — Appstrate ne peut pas atteindre votre serveur pour retirer sa clé " +
+            "d'authorized_keys.",
+        },
+      ],
     },
   };
 }
