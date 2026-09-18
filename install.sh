@@ -96,12 +96,12 @@ _appstrate_bootstrap() {
   esac
 
   # Default version pinned by `publish-installer.yml` at publish time —
-  # rewriting `v1.0.0-beta.57` so `curl get.appstrate.dev | bash`
+  # rewriting `v1.0.0-beta.59` so `curl get.appstrate.dev | bash`
   # downloads the binary matching the release that published this script.
   # Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
   # release). When the placeholder is still present (local dev / unrendered
   # copy), fall back to `latest` so the script stays runnable out of tree.
-  _DEFAULT_VERSION="v1.0.0-beta.57"
+  _DEFAULT_VERSION="v1.0.0-beta.59"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
   # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
@@ -120,15 +120,6 @@ _appstrate_bootstrap() {
   # Rotation SOP: docs/adr/ADR-006-cli-device-flow-monorepo.md.
   APPSTRATE_MINISIGN_PUBKEY="RWT6xCZCCP/yHolAgDuDqBssxUflw7gInlZlaXEfQ4cFi5XN0KCtKr0e"
 
-  if [ "$VERSION" = "latest" ]; then
-    URL_BASE="https://github.com/appstrate/appstrate/releases/latest/download"
-  else
-    URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
-  fi
-  URL="${URL_BASE}/${ASSET}"
-  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
-  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
-
   # ─── Helpers ────────────────────────────────────────────────────────────────
 
   TMPDIR=$(mktemp -d)
@@ -138,21 +129,42 @@ _appstrate_bootstrap() {
   log() { printf '\033[0;36m→\033[0m  %s\n' "$*"; }
   err() { printf '\033[0;31m✗\033[0m  %s\n' "$*" >&2; }
 
-  # ─── Retired env vars ───────────────────────────────────────────────────────
-  #
-  # APPSTRATE_AUTO_INSTALL=1 selected unattended mode; `--yes` says the same
-  # thing. Ignoring it silently would flip an Ansible / cloud-init run that
-  # still sets it into the two-step path — binary dropped, nothing installed,
-  # exit 0. Fail here instead, before the first download. An explicitly
-  # blanked value carries no intent, so it is a no-op (same rule as
-  # `RETIRED_ENV_RENAMES` in `@appstrate/env`).
-  if [ -n "${APPSTRATE_AUTO_INSTALL:-}" ]; then
-    err "APPSTRATE_AUTO_INSTALL is retired and is no longer read."
-    err "  Pass --yes instead:"
-    err "    curl -fsSL https://get.appstrate.dev | bash -s -- --yes"
-    err "  CI=true|1|yes and a non-TTY stdout also select unattended mode."
-    exit 1
-  fi
+  # Newest platform `v<semver>` GitHub Release, resolved by listing — not
+  # `releases/latest`. GitHub's "latest" is whichever non-prerelease Release
+  # was created last, whatever its tag: a `cli@` / `core@` / `afps-shared@`
+  # Release published without `make_latest: false`, or created by hand, would
+  # be handed back and carries no CLI binary (`checksums.txt.minisig` 404).
+  # Only `v*` Releases ship the assets this script downloads. Drafts and
+  # prereleases are skipped, same as `releases/latest`. Pages of 30 are walked
+  # (5 at most) until one holds a `v*` Release. No jq: the three fields are
+  # grepped in document order (tag_name precedes draft/prerelease in GitHub's
+  # payload) and awk decides once it holds all three. Creation order within a
+  # page, unlike the CLI's highest-semver pick: BSD sort has no -V and a
+  # semver comparator in awk is not worth it for a path the rendered installer
+  # never takes (it pins `v1.0.0-beta.59`).
+  resolve_latest_platform_release() {
+    local page fields tag
+    for page in 1 2 3 4 5; do
+      # shellcheck disable=SC2086 # CURL_OPTS is word-split on purpose (see its definition)
+      fields=$(curl $CURL_OPTS -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/appstrate/appstrate/releases?per_page=30&page=${page}" |
+        grep -oE '"(tag_name|draft|prerelease)": *("[^"]*"|true|false)') || true
+      [ -z "$fields" ] && return 1
+      tag=$(printf '%s\n' "$fields" | awk -F': *' '
+          $1 ~ /tag_name/   { gsub(/"/, "", $2); tag = $2; draft = ""; pre = "" }
+          $1 ~ /"draft"/    { draft = $2 }
+          $1 ~ /prerelease/ { pre = $2 }
+          tag != "" && draft != "" && pre != "" {
+            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+/ && draft == "false" && pre == "false") { print tag; exit }
+            tag = ""
+          }')
+      if [ -n "$tag" ]; then
+        printf '%s\n' "$tag"
+        return 0
+      fi
+    done
+    return 1
+  }
 
   have_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
   have_shasum() { command -v shasum >/dev/null 2>&1; }
@@ -540,6 +552,21 @@ _appstrate_bootstrap() {
   fi
 
   # ─── Download + verify ──────────────────────────────────────────────────────
+
+  # Resolved here, past the SOURCE_ONLY return above: a test harness that
+  # sources this script must define the helpers without a network call.
+  if [ "$VERSION" = "latest" ]; then
+    VERSION=$(resolve_latest_platform_release || true)
+    if [ -z "$VERSION" ]; then
+      err "No platform v* release found among the newest GitHub Releases. Pin one with APPSTRATE_VERSION=vX.Y.Z."
+      exit 1
+    fi
+    log "Resolved latest platform release: $VERSION"
+  fi
+  URL_BASE="https://github.com/appstrate/appstrate/releases/download/${VERSION}"
+  URL="${URL_BASE}/${ASSET}"
+  CHECKSUMS_URL="${URL_BASE}/checksums.txt"
+  CHECKSUMS_SIG_URL="${URL_BASE}/checksums.txt.minisig"
 
   log "Downloading Appstrate CLI ($OS/$ARCH, $VERSION)"
   curl $CURL_OPTS "$URL" -o "$TMPDIR/$ASSET"
