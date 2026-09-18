@@ -250,15 +250,16 @@ const CASES: Record<string, Case> = {
   },
   "@appstrate/mcpemails": {
     authKey: "oauth",
-    // `sub` is the only claim always present: the upstream userinfo endpoint
-    // adds `email`/`email_verified` only when the token carries `openid` or
-    // `email`, so the account key reads the id, not the address.
+    // The upstream userinfo endpoint returns `email`/`email_verified` only
+    // when the token carries `openid` or `email` — both are in
+    // `default_scopes` for exactly this reason: the connection label IS the
+    // account id, and `sub` alone would render a bare UUID in the UI.
     source: {
       sub: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
       email: "pierre@example.com",
       email_verified: true,
     },
-    accountId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    accountId: "pierre@example.com",
     source_doc: "github.com/Albretsen/MCPEmails — apps/web/app/api/oauth/userinfo/route.ts",
   },
   "@appstrate/microsoft-outlook": {

@@ -22,7 +22,7 @@
       "userinfo_endpoint": "https://mcpemails.com/api/oauth/userinfo",
       "default_scopes": ["openid", "email", "read:email"],
       "identity_claims": {
-        "accountId": "$.sub",
+        "accountId": "$.email",
         "sub": "$.sub",
         "email": "$.email"
       },
@@ -32,7 +32,7 @@
         {
           "value": "openid",
           "label": "Identity",
-          "description": "Upstream treats openid and email as identity scopes, kept apart from the tool scopes: they gate nothing, and without one of them /api/oauth/userinfo returns the opaque user id alone, so the connection would be labelled by id rather than by address."
+          "description": "Upstream treats openid and email as identity scopes, kept apart from the tool scopes: they gate nothing, and without one of them /api/oauth/userinfo returns the opaque user id alone. Both are in default_scopes because the connection label IS the account id, so dropping them costs a readable name."
         },
         {
           "value": "email",
