@@ -149,7 +149,7 @@ window.
 > address. Without it the limiter degrades to a single global counter
 > shared by every visitor — the brute-force window remains far below
 > the entropy floor (132 bits) but the rate-limit signal in your SIEM
-> becomes noise. See the `TRUST_PROXY` row in the root `CLAUDE.md` env
+> becomes noise. See the `TRUST_PROXY` row in the root `AGENTS.md` env
 > table for hop semantics.
 
 ```env

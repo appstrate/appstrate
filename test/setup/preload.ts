@@ -460,7 +460,7 @@ setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
 
 // ─── Global auto-reset for process-wide singletons ────────────
 // Both resets below cover state that is process-wide, and `bun test` runs the
-// whole suite as a single process (see the "Testing" header in CLAUDE.md), so
+// whole suite as a single process (see the "Testing" header in AGENTS.md), so
 // leaving either to individual files means every file has to remember it.
 //
 // `setPermissionDenialHandler` writes a module-level singleton inside

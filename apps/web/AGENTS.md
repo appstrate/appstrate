@@ -1,6 +1,6 @@
 # Frontend (`@appstrate/web`)
 
-Conventions for `apps/web` and `packages/ui`. Root guide: `../../CLAUDE.md`.
+Conventions for `apps/web` and `packages/ui`. Root guide: `../../AGENTS.md`.
 
 - **i18n**: `i18next` + `react-i18next`. Default `fr`, supported `fr`/`en`. Namespaces `common`/`agents`/`settings`/`chat`/`files`. Locales in `apps/web/src/locales/{lang}/`.
 - **Styling**: Tailwind 4 (`@tailwindcss/vite` + `tailwind-merge`). Single `styles.css`, `@import "tailwindcss"` + custom `@theme inline` dark theme. Utility classes only.

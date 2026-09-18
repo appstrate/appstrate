@@ -210,7 +210,7 @@ services:
   # Pinned by digest (tecnativa/docker-socket-proxy:0.3.0). Verbs enabled match
   # what the platform actually uses: create/start/stop/inspect/logs containers,
   # pull images, and manage the per-run isolated networks/volumes it provisions
-  # (see the run architecture in CLAUDE.md). Tighten further if your deployment
+  # (see the run architecture in AGENTS.md). Tighten further if your deployment
   # doesn't need a given group.
   #
   # To enable:

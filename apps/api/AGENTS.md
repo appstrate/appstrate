@@ -1,6 +1,6 @@
 # Backend (`@appstrate/api`)
 
-Conventions for `apps/api`. Root guide: `../../CLAUDE.md`. Module authoring: `src/modules/README.md`.
+Conventions for `apps/api`. Root guide: `../../AGENTS.md`. Module authoring: `src/modules/README.md`.
 
 - **Multi-tenant**: DB queries filter by `orgId`, and space-scoped resources (agents, runs, schedules, end-users, api-keys, notifications, packages, files, uploads) additionally by `spaceId`. Org roles are `owner`/`admin`/`member`/`guest`; inside a space the caller holds a space role (preset `admin`/`builder`/`operator`/`viewer`, or an org-defined `space_roles` bundle) resolved from `space_members`. Two documented exceptions: `integration_connections` has **no** `org_id` column at all (space-scoped + per-actor owner; the org tier is enforced by `assertSpaceInScope` in the service, not by a predicate), and `webhooks` is polymorphic across levels — see below and `SECURITY.md` → Layer 6.
 - **Service layer**: function-based (no classes). `services/state/` (runs, notifications, package-persistence) is the central data-access layer. Drizzle via `import { db } from "@appstrate/db/client"` + schema from `@appstrate/db/schema`.

@@ -1,7 +1,7 @@
 # Architecture
 
 Design notes for Appstrate's internal subsystems. Each document is the canonical
-reference for its topic — the code and top-level `CLAUDE.md` link here rather than
+reference for its topic — the code and top-level `AGENTS.md` link here rather than
 duplicating the detail.
 
 ## Run execution

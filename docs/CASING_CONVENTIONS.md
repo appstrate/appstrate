@@ -570,7 +570,7 @@ The `/audit-casing` skill dispatches parallel opus sub-agents to verify every di
 
 ## Related files
 
-- `/Users/pierrecabriere/Dev/appstrate/appstrate/CLAUDE.md` — references this doc
+- `AGENTS.md` (repo root) — references this doc
 - `/Users/pierrecabriere/Dev/appstrate/CLAUDE.md` — workspace root, references this doc
 - `/Users/pierrecabriere/Dev/appstrate/appstrate/.claude/commands/audit-casing.md` — automated audit skill
 - `/Users/pierrecabriere/Dev/appstrate/afps-spec/spec.md` — AFPS canonical spec (snake_case authority)

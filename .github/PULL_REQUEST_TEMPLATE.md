@@ -12,6 +12,6 @@
 
 ## Checklist
 
-- [ ] `bun run check` passes (the full 18-task gate — see `CLAUDE.md`)
+- [ ] `bun run check` passes (the full gate — task list in `AGENTS.md`)
 - [ ] `bun test` passes
 - [ ] I have read the [Contributing Guide](../CONTRIBUTING.md)

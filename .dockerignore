@@ -53,6 +53,7 @@ docs/
 scripts/
 .github/
 .husky/
+AGENTS.md
 CLAUDE.md
 CONTRIBUTING.md
 CHANGELOG.md

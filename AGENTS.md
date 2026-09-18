@@ -211,7 +211,6 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 
 ### Docker Integration
 
-- Docker client: `fetch()` + unix socket -- NOT dockerode (socket bugs with Bun)
 - Sidecars are spawned per-run; image pre-pull at orchestrator init absorbs cold-pull (20-45s) off the first run
 - Credential isolation: agent calls sidecar proxy, never sees raw credentials
 - Multiplexed stream headers: `[stream_type(1), 0(3), size(4)]` parsed in `streamLogs()`
@@ -285,10 +284,7 @@ Tier 0 (zero-install) requires only Bun.
 
 ### Backend Patterns
 
-- No build step: backend ships as `.ts`, Bun resolves directly
-- Logging: `lib/logger.ts` (pino JSON) -- never `console.*`
-- Auth: Better Auth cookie sessions + `X-Org-Id` header for org context
-- API key auth (`ask_*` prefix) tried first, then cookie fallback
+- Auth: cookie session + `X-Org-Id` / `X-Space-Id`, API key (`ask_*`) tried first — § Stack has the full rule
 - Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
 - Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`pinnedSpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
 - Rate limiting: Redis-backed, keyed by `method:path:identity`

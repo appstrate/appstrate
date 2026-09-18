@@ -1,6 +1,6 @@
 # Run Cost Tracking
 
-Extracted from `CLAUDE.md` Backend section. Canonical read path + ingestion chains for `runs.cost`.
+Extracted from the root `AGENTS.md`. Canonical read path + ingestion chains for `runs.cost`.
 
 ## The two invariants
 
