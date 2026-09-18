@@ -434,16 +434,15 @@ const jwtStrategy: AuthStrategy = {
       orgRole: "admin",
       authMethod: "my-jwt",
       // REQUIRED: what this credential IS, never how it arrived. `"end_user"`
-      // because this resolution carries `endUser` below — the pipeline refuses
-      // the two disagreeing. A token standing for the platform user themselves
-      // declares `"user"` (personal spaces and per-principal grants follow);
-      // one the user issued, with a ceiling of its own, declares `"delegate"`.
-      principal: "end_user",
+      // here because the resolution carries `endUser` below.
+      principalKind: "end_user",
       spaceId: payload.space_id,
       permissions: ["runs:read", "runs:write"],
       // Optional end-user impersonation. `EndUserContext` is exactly
       // `{ id, spaceId, name?, email? }` — core has no end-user role
-      // vocabulary, so there is no `role` field to set here.
+      // vocabulary, so there is no `role` field to set here. Drop this block
+      // and the declaration above must become `"delegate"` or `"user"`: the
+      // pipeline refuses the two disagreeing.
       endUser: {
         id: payload.enduser_id,
         spaceId: payload.space_id,
@@ -466,7 +465,7 @@ const myModule: AppstrateModule = {
 
 **Ordering.** Strategies are tried in module load order (topological sort by `manifest.dependencies`). First non-null resolution wins. Core auth (API key + cookie) runs only when every strategy has returned `null`.
 
-**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `principal`, `spaceId`, `permissions` (as a string set), optional `endUser`. `principal` is REQUIRED and declares what the credential is — `"user"` (the platform user themselves, by any transport), `"delegate"` (a credential they issued, with a ceiling of its own) or `"end_user"` (an external identity, set iff `endUser` is) — and it is the only input the personal-space, per-principal-grant and cross-org gates read (RBAC spec §7). The pipeline refuses a strategy that omits it or declares an unknown value rather than bucketing it, and the optional `deferOrgResolution` says nothing about identity: it is pipeline ordering only. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
+**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `principalKind`, `spaceId`, `permissions` (as a string set), optional `endUser`. `principalKind` is REQUIRED and declares what the credential is — `"user"` (the platform user themselves, by any transport), `"delegate"` (a credential they issued, with a ceiling of its own) or `"end_user"` (an external identity, set iff `endUser` is) — and it is what the personal-space, per-principal-grant and cross-organization gates read, they and nothing else (RBAC spec §7). The pipeline refuses a strategy that omits it or declares an unknown value rather than bucketing it. Other questions keep other inputs: the `api_key` refusals on administrative routes ask whether the caller is an automation and read `authMethod`, and the optional `deferOrgResolution` says only WHEN org and permissions get resolved. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
 
 **`permissions` type.** `readonly string[]` at the contract layer (not the typed `Permission[]` union) to keep the core RBAC catalog out of `@appstrate/core`. Use permission strings that match core's `resource:action` vocabulary — `requirePermission()` guards will 403 on unknown strings at request time.
 

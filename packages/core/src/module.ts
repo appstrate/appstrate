@@ -958,13 +958,10 @@ export interface AuthStrategyRequest {
  * What a credential IS, never how it arrived: declared by the strategy that
  * minted it, never inferred from `authMethod` or `deferOrgResolution`.
  *
- * - `"user"` — the platform user themselves, by any transport (cookie session,
- *   CLI device-flow token, MCP instance token, server-minted chat loopback):
- *   reaches their personal spaces, takes their per-principal grants, may invoke
- *   their membership in another org.
- * - `"delegate"` — a credential the user issued with its own life and ceiling
- *   (API key, third-party OAuth `dashboard_user` client): their authority, not
- *   their privacy.
+ * - `"user"` — the platform user themselves, by any transport: their personal
+ *   spaces, their per-principal grants, their memberships.
+ * - `"delegate"` — a credential they issued with its own life and ceiling (API
+ *   key, third-party OAuth client): their authority, not their privacy.
  * - `"end_user"` — an external identity; `endUser` MUST be set, and conversely.
  */
 export const PRINCIPAL_KINDS = ["user", "delegate", "end_user"] as const;
@@ -991,11 +988,10 @@ export interface AuthResolution {
    */
   authMethod: string;
   /**
-   * What this credential is (see `PrincipalKind`). Required: the auth pipeline
-   * refuses a strategy that omits it or declares an unknown value rather than
-   * bucketing it, and refuses `"end_user"` without `endUser` (or the reverse).
+   * Required. The pipeline throws on a missing or unknown value, and on an
+   * `"end_user"`/`endUser` disagreement in either direction.
    */
-  principal: PrincipalKind;
+  principalKind: PrincipalKind;
   /**
    * Optional space binding. End-user strategies (API-key impersonation,
    * OIDC end_user flow) pin this so core's strict end-user filter has the
@@ -1021,11 +1017,9 @@ export interface AuthResolution {
    */
   firstPartyLoopback?: boolean;
   /**
-   * Pipeline ordering only: when true, org and permissions come from the
-   * `X-Org-Id` middleware later instead of at token-verification time (same
-   * path as session auth). Set it on a strategy that authenticates without
-   * binding to one org. It says NOTHING about who the caller is — that is
-   * `principal`, and no gate may read this flag as an authority signal.
+   * Pipeline ordering only: org and permissions come from the `X-Org-Id`
+   * middleware later instead of at token-verification time. Says nothing about
+   * who the caller is — that is `principalKind`, and no gate may read this.
    */
   deferOrgResolution?: boolean;
 }

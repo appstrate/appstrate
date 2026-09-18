@@ -642,7 +642,7 @@ describe("personal spaces — the write rules", () => {
     const values: Record<string, unknown> = {
       orgId: owner.orgId,
       user: member.user,
-      principal: "end_user",
+      principalKind: "end_user",
     };
     const stub = {
       get: (key: string) => values[key],
@@ -663,7 +663,7 @@ describe("personal spaces — the write rules", () => {
 
     // And the guard against the old `!orgRole` proxy returning: the same team
     // space, a `user` principal with no role, is a bug rather than a caller.
-    values.principal = "user";
+    values.principalKind = "user";
     await expect(applySpacePermissions(stub, teamRow)).rejects.toThrow(
       /reached a space with no org role/,
     );

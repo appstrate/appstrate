@@ -10,7 +10,7 @@
  *   3. Requests NOT matching the strategy fall through to core auth
  *   4. Core API key auth (Bearer ask_) still works when strategies don't claim
  *   5. A strategy-set `endUser` flows through to `c.get("endUser")`
- *   6. A strategy that misdeclares its `principal` is a 500, not a bucket
+ *   6. A strategy that misdeclares its `principalKind` is a 500, not a bucket
  *
  * This is the key validation that Phase 0's extension point is wired
  * correctly from contract → loader → middleware → route.
@@ -27,7 +27,7 @@ import type { AppstrateModule, AuthResolution, AuthStrategy } from "@appstrate/c
 
 /**
  * Tokens that resolve to the `"valid"` shape carrying ONE deliberate defect in
- * its principal declaration. `principal` is required and must agree with
+ * its principal declaration. `principalKind` is required and must agree with
  * `endUser`, so the type system refuses each of them — which is precisely why
  * the pipeline's own runtime check has to be what answers.
  */
@@ -55,7 +55,7 @@ const stubStrategy: AuthStrategy = {
           name: currentCtx.user.name,
         },
         authMethod: "stub-deferred",
-        principal: "user",
+        principalKind: "user",
         permissions: [],
         deferOrgResolution: true,
       };
@@ -75,10 +75,8 @@ const stubStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "admin",
       authMethod: "stub-strategy",
-      // "valid" models a ceiling-limited credential (refused a role preview,
-      // 403 on org:delete); "admin" models the external identity the endUser
-      // block below carries — the two must agree.
-      principal: token === "admin" ? "end_user" : "delegate",
+      // "admin" is the branch carrying `endUser` below — the two must agree.
+      principalKind: token === "admin" ? "end_user" : "delegate",
       spaceId: currentCtx.defaultSpaceId,
       permissions: ["runs:read", "runs:write", "runs:cancel", "agents:read", "end-users:read"],
       // Exercise the endUser pass-through when token is "admin"
@@ -95,11 +93,11 @@ const stubStrategy: AuthStrategy = {
     if (!misdeclared) return resolution;
     const defect: Record<string, unknown> =
       misdeclared === "no-kind"
-        ? { principal: undefined }
+        ? { principalKind: undefined }
         : misdeclared === "kind-without-enduser"
-          ? { principal: "end_user", endUser: undefined }
+          ? { principalKind: "end_user", endUser: undefined }
           : {
-              principal: "user",
+              principalKind: "user",
               endUser: {
                 id: "eu_stub_contract",
                 spaceId: currentCtx.defaultSpaceId,

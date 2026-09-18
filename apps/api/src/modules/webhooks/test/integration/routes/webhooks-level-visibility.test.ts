@@ -59,7 +59,7 @@ const permsStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "admin",
       authMethod: "webhook-perms-strategy",
-      principal: "user",
+      principalKind: "user",
       spaceId: currentCtx.defaultSpaceId,
       permissions: raw.split(","),
     };

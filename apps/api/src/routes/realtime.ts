@@ -258,7 +258,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   c.set("orgRole", role);
   // The denial audit names the transport; `callerPersonalOwnerId` reads the kind.
   c.set("authMethod", "session");
-  c.set("principal", "user");
+  c.set("principalKind", "user");
 
   const persona = await validateViewAs({
     raw: viewAsRaw,
@@ -281,7 +281,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     // The personal-space identity, not simply the session user: under a role
     // preview it is `null`, so the previewer's OWN personal space stops being
     // streamable through a persona that has none (RBAC spec §3.6). The context
-    // keys it reads — `user`, `principal`, `viewAs` — are all set above.
+    // keys it reads — `user`, `principalKind`, `viewAs` — are all set above.
     callerPersonalOwnerId(c, orgId),
   );
   if (!grants) {

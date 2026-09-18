@@ -10,18 +10,18 @@
  * - **`user`**: instance-level token. Load the Better Auth user row and
  *   return a partial `AuthResolution` (no org, no role). The auth pipeline
  *   defers org resolution to the `X-Org-Id` middleware (same as session
- *   auth). `authMethod: "oauth2-instance"`, `principal: "user"` — the token
+ *   auth). `authMethod: "oauth2-instance"`, `principalKind: "user"` — the token
  *   IS the human, by another transport.
  *
  * - **`dashboard_user`**: load the Better Auth user row, re-verify that the
  *   user is still a member of the token's `org_id`, and emit the current
  *   `org_role` from the DB (not the stale claim — prevents role escalation
  *   after a demotion). Core routes see a normal dashboard user with
- *   `authMethod: "oauth2-dashboard"`, `principal: "delegate"` — a credential
+ *   `authMethod: "oauth2-dashboard"`, `principalKind: "delegate"` — a credential
  *   the user issued to a third-party client, under a scope ceiling.
  *
  * - **`end_user`**: load the `end_users` row, verify profile is active,
- *   and emit with `endUser` populated and `principal: "end_user"`. Core's
+ *   and emit with `endUser` populated and `principalKind: "end_user"`. Core's
  *   strict end-user filter kicks in automatically.
  *
  * Fast no-match path: return `null` immediately unless the header carries a
@@ -195,10 +195,7 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
     },
     orgId: boundOrgId,
     authMethod: "oauth2-instance",
-    // Two distinct statements: `principal` says WHOSE authority this is (the
-    // human's own, hence personal spaces and per-principal grants reach it);
-    // `deferOrgResolution` only says WHEN org/permissions get resolved.
-    principal: "user",
+    principalKind: "user",
     permissions: [],
     deferOrgResolution: true,
   };
@@ -255,11 +252,7 @@ async function resolveDashboardUser(claims: AccessTokenClaims): Promise<AuthReso
     orgId: claims.orgId,
     orgRole: role,
     authMethod: "oauth2-dashboard",
-    // A third-party OAuth client acting for the user carries their authority
-    // under a scope ceiling, not their privacy: it reaches what they granted
-    // it, never their personal spaces. Behaviour preserved from before the
-    // field existed — declared here instead of inferred from `authMethod`.
-    principal: "delegate",
+    principalKind: "delegate",
     permissions,
   };
 }
@@ -329,7 +322,7 @@ async function resolveEndUser(claims: AccessTokenClaims): Promise<AuthResolution
     // End-users have their token's allowlist and pinned space, not an org
     // membership. A synthetic role would invoke the space-membership resolver.
     authMethod: "oauth2-end-user",
-    principal: "end_user",
+    principalKind: "end_user",
     spaceId: endUser.spaceId,
     permissions,
     endUser: {

@@ -389,8 +389,9 @@ export function createSpacesRouter() {
     // them in bulk, and this makes the script optional for anyone who logs in.
     // Only for a principal that HAS one — any `user` principal, whatever the
     // transport (`callerPersonalOwnerId`). A delegate or an end-user must not
-    // create one for the credential's creator behind their back. `ensurePersonalSpace` reads before it writes, so the common
-    // case costs one indexed lookup and no row lock.
+    // create one for the credential's creator behind their back.
+    // `ensurePersonalSpace` reads before it writes, so the common case costs
+    // one indexed lookup and no row lock.
     const personalOwnerId = callerPersonalOwnerId(c);
     if (personalOwnerId) await ensurePersonalSpaceFor(orgId, personalOwnerId);
     const entries = await listSpacesForPrincipal(
@@ -566,9 +567,10 @@ export function createSpacesRouter() {
   // Both are audited and both refuse an API KEY: a key holds `spaces:write`
   // and `spaces:delete` legitimately (it provisions spaces headlessly), but
   // converting somebody's personal space is a decision about a person, not an
-  // automation step — the same line `POST /api/spaces` draws. The guard is on
-  // the transport, so a human's OAuth dashboard or instance token does reach
-  // them; it is their own credential by another carrier.
+  // automation step — the same line `POST /api/spaces` draws. The guard is
+  // transport-shaped because the question is automation versus a person's
+  // decision, not privacy: an instance token reaches them, and the privacy
+  // refusal itself is `callerPersonalOwnerId`, `null` for a delegate.
 
   // POST /api/spaces/:id/convert-to-team — the transfer.
   router.post("/:id/convert-to-team", requirePermission("spaces", "write"), async (c) => {

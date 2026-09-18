@@ -85,12 +85,8 @@ export type AppEnv = {
      * `"oidc"`, `"mtls"`).
      */
     authMethod: string;
-    /**
-     * What the credential IS — declared by the auth strategy, or set by core
-     * for its own two paths (API key, cookie session). The ONLY input every
-     * "is this the human / a delegate / an outsider" gate reads.
-     */
-    principal: import("@appstrate/core/module").PrincipalKind;
+    /** Declared by the strategy, or by core for its two paths — see `PrincipalKind`. */
+    principalKind: import("@appstrate/core/module").PrincipalKind;
     apiKeyId: string | null;
     spaceId: string; // from API key auth or resolved by space-context middleware (X-Space-Id)
     /**

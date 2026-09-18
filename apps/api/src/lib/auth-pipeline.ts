@@ -139,17 +139,17 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (!resolution) continue;
         // A strategy that misdeclares its principal is a programming error, not
         // a client error: a plain `Error` (→ 500) rather than a default bucket.
-        if (!(PRINCIPAL_KINDS as readonly string[]).includes(resolution.principal)) {
+        if (!(PRINCIPAL_KINDS as readonly string[]).includes(resolution.principalKind)) {
           throw new Error(
-            `auth strategy '${strategy.id}' declares no principal kind (got ${JSON.stringify(resolution.principal)})`,
+            `auth strategy '${strategy.id}' declares no principal kind (got ${JSON.stringify(resolution.principalKind)})`,
           );
         }
-        if ((resolution.principal === "end_user") !== Boolean(resolution.endUser)) {
+        if ((resolution.principalKind === "end_user") !== Boolean(resolution.endUser)) {
           throw new Error(
-            `auth strategy '${strategy.id}': principal '${resolution.principal}' and endUser ${resolution.endUser ? "present" : "absent"} disagree`,
+            `auth strategy '${strategy.id}': principal '${resolution.principalKind}' and endUser ${resolution.endUser ? "present" : "absent"} disagree`,
           );
         }
-        c.set("principal", resolution.principal);
+        c.set("principalKind", resolution.principalKind);
         c.set("user", resolution.user);
         if (resolution.orgId !== undefined) c.set("orgId", resolution.orgId);
         if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
@@ -164,7 +164,10 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         if (resolution.orgRole !== undefined) {
           const ceiling = new Set<string>(resolution.permissions);
           c.set("scopeCeiling", ceiling);
-          c.set("permissions", applyOrgPermissions(c, resolution.orgRole));
+          c.set(
+            "permissions",
+            applyOrgPermissions(c, resolution.orgRole, await principalGrants(c, resolution.orgId)),
+          );
         } else if (!resolution.deferOrgResolution) {
           // No org role and not deferring: the strategy's list IS the whole
           // answer (an OIDC end-user token's fixed allowlist), empty included.
@@ -219,7 +222,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       c.set("scopeCeiling", keyCeiling);
       c.set("permissions", applyOrgPermissions(c, keyInfo.creatorRole));
       c.set("authMethod", "api_key");
-      c.set("principal", "delegate");
+      c.set("principalKind", "delegate");
       c.set("apiKeyId", keyInfo.keyId);
       c.set("spaceId", keyInfo.spaceId);
 
@@ -258,7 +261,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         });
         c.set("endUser", endUser);
         // An impersonated end-user is an outsider, not the key's delegation.
-        c.set("principal", "end_user");
+        c.set("principalKind", "end_user");
       }
 
       return next();
@@ -286,7 +289,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       name: session.user.name ?? "",
     });
     c.set("authMethod", "session");
-    c.set("principal", "user");
+    c.set("principalKind", "user");
     // Resolve the user's realm so the realm guard middleware below can
     // reject cookie sessions minted for a non-platform audience (OIDC
     // end-users) from hitting platform routes. The realm is denormalized
@@ -405,8 +408,8 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     if (orgRole) {
       // Preview eligibility is judged against the REAL org role, before the write.
       await resolveViewAs(c, c.get("orgId"), orgRole);
-      // Session + `deferOrgResolution` is exactly the population eligible for
-      // per-principal grants (`lib/principal-permissions.ts`).
+      // Eligibility is the declared kind — `principalGrants` decides; this
+      // middleware only covers the late-resolving population.
       const granted = await principalGrants(c, c.get("orgId"));
       c.set("permissions", applyOrgPermissions(c, orgRole, granted));
     }

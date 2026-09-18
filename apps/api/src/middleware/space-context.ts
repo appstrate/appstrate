@@ -76,16 +76,16 @@ export async function applySpacePermissions(
 ): Promise<void> {
   // An end-user belongs to a space, never to a person (RBAC spec §3.6): a
   // personal space is a 404 for it whatever else it carries.
-  if (c.get("principal") === "end_user" && space.ownerUserId !== null) {
+  if (c.get("principalKind") === "end_user" && space.ownerUserId !== null) {
     throw notFound(`Space '${space.id}' not found in this organization`);
   }
   if (!c.get("orgRole")) {
     // Only an end-user token resolves without an org role — its strategy's
     // fixed allowlist is the whole answer (§7.2). Anything else here is a
     // pipeline bug, not a caller to accommodate.
-    if (c.get("principal") !== "end_user") {
+    if (c.get("principalKind") !== "end_user") {
       throw new Error(
-        `applySpacePermissions: ${c.get("principal")} principal reached a space with no org role`,
+        `applySpacePermissions: ${c.get("principalKind")} principal reached a space with no org role`,
       );
     }
     return;

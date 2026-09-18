@@ -426,7 +426,7 @@ export function callerOrgRole(c: Context<AppEnv>, orgId = c.get("orgId")): OrgRo
  * creator's private drafts.
  *
  * A personal space is a member's private half, so it answers to that member's
- * own credential — `principal: "user"`, whatever the transport — and to nothing
+ * own credential — `principalKind: "user"`, whatever the transport — and to nothing
  * else: a delegate (API key, OAuth dashboard client) carries the creator's
  * authority, not their privacy, and an end-user is not a member at all.
  *

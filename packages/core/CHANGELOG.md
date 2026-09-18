@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `AuthResolution.principalKind` is a new REQUIRED member** (type
+  `PrincipalKind`, with the tuple `PRINCIPAL_KINDS`, in `@appstrate/core/module`).
+  A credential declares WHAT it is — the platform user, a delegate they issued,
+  or an external end-user (RBAC spec §7) — instead of every gate inferring it
+  from `authMethod` and `deferOrgResolution`; a strategy fails to compile until
+  it declares one, and the pipeline throws on a missing or unknown value, or on
+  an `"end_user"`/`endUser` disagreement, never bucketing it by default.
+  `deferOrgResolution` is now pipeline ordering only and carries no authority.
+
+## [10.0.0] — 2026-09-17
+
 ### Added
 
 - New action `share` on the `agents`, `skills`, `mcp-servers` and `integrations` resources of `CoreResources` (`@appstrate/core/permissions`), hence the permission strings `agents:share`, `skills:share`, `mcp-servers:share` and `integrations:share`. It offers a package to another space — its AUDIENCE (`package_shares`), never its activation, which stays the recipient's own act on `space_packages`. `CORE_RESOURCE_ACTIONS` mirrors it, so `SPACE_LEVEL_PERMISSIONS` and the custom-role validator pick the four strings up on their own; the platform grants them to the `admin` and `builder` presets (both derived from the catalog) and to no API key. A module with an exhaustive `Record<CoreAction<"agents">, …>` gains a key.
@@ -40,22 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New export `reportPermissionDenial(c, required)` (`@appstrate/core/permissions`): fires the denial audit hook for a refusal decided outside `makePermissionGuard` (a disjunction of permission strings); `makePermissionGuard` now calls it.
 
 ### Changed
-
-- **BREAKING: `AuthResolution.principal` is a new REQUIRED member** (type
-  `PrincipalKind`, also new alongside the tuple `PRINCIPAL_KINDS` in
-  `@appstrate/core/module`). A credential now DECLARES what it is —
-  `"user"` the platform user themselves by any transport, `"delegate"` a
-  credential they issued with its own life and ceiling (API key, third-party
-  OAuth client), `"end_user"` an external identity — instead of every gate
-  inferring it from `authMethod` and `deferOrgResolution`. A strategy that
-  omits the member or declares an unknown value is refused by the auth
-  pipeline with a thrown error: a misdeclared strategy is a programming error,
-  never a silent default bucket. `"end_user"` and `endUser` must agree in both
-  directions — one without the other is the same refusal. An existing strategy
-  fails to compile until it declares its kind. `deferOrgResolution` keeps its
-  meaning but loses every authority one: it orders the pipeline (org and
-  permissions come from the `X-Org-Id` middleware later) and answers nothing
-  about who the caller is.
 
 - `createS3Storage` bounds buffered `uploadFile` / `downloadFile` operations to
   30 seconds, including SDK retries and response-body reads. The deadline
