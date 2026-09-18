@@ -262,8 +262,10 @@ export interface SpaceMemberRemoval {
   /** False when there was no explicit row — the caller renders that as 404. */
   removed: boolean;
   /**
-   * The implicit standing the deleted row was hiding, resolved under the same
-   * lock as the removal. `null` means the target reaches the space no longer.
+   * The standing the target holds with NO explicit row, resolved under the
+   * removal's lock. It is what the deleted row was hiding — and, when
+   * `removed` is false, what they already held. `null` means they reach the
+   * space no longer.
    */
   accessAfter: SpaceRoleRef | null;
 }
@@ -271,10 +273,8 @@ export interface SpaceMemberRemoval {
 /**
  * Remove an explicit row, and report the implicit standing it leaves behind.
  *
- * BOTH bounds live here, not at the route: the row they rest on and the DELETE
- * that acts on it must be one statement's worth of truth. The lock is the grant
- * path's — org promotion/removal take it before touching space memberships — so
- * neither role asserted here can change under the delete.
+ * Both bounds live here, not at the route: the rows they rest on and the DELETE
+ * that acts on them must be one statement's worth of truth.
  *
  *  - the **grant** bound, on `accessAfter`: dropping an explicit restriction can
  *    hand out the open space's default role, so the caller must have been able
@@ -287,6 +287,17 @@ export interface SpaceMemberRemoval {
  *
  * Grant first, so a caller who may not touch this target learns nothing about
  * whether the row exists.
+ *
+ * What the lock covers, precisely: `lockOrgMemberForSpaceGrant` is the lock org
+ * promotion and removal take before touching space memberships, so the ORG ROLE
+ * and the MEMBER ROW cannot move under the delete. The SPACE row is the request
+ * pipeline's (`c.get("space")`), pinned for the request like everywhere else —
+ * `applySpacePermissions` resolved the caller's own ceiling from that same row,
+ * so re-reading it here would judge the bound against a space the permission
+ * that admitted the request was never checked against. A concurrent
+ * `PATCH /api/spaces/{id}` widening `default_role` is therefore NOT serialized
+ * against this removal — a property of every space-scoped write in the
+ * platform, not of this one.
  *
  * @throws 403 when the caller could not have granted the standing left behind,
  *   or the one being dropped.

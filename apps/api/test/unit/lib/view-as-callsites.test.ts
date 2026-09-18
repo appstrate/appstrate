@@ -84,16 +84,13 @@ describe("persona-sensitive call sites", () => {
           'SSE runs outside the pipeline and has no `c.get("user")`; it overlays explicitly',
         ],
         [
-          "apps/api/src/routes/spaces.ts",
-          "reads the TARGET member's row to report what access it leaves behind, not the caller's",
-        ],
-        [
           "apps/api/src/services/scheduler.ts",
           "background fires revalidate the saved actor's live grants; no request persona survives into a schedule",
         ],
         [
           "apps/api/src/services/space-members.ts",
-          "reads the TARGET member's row inside the write transaction, not the caller's",
+          "reads the TARGET member's row inside the write transaction, not the caller's — " +
+            "including the one a removal reports `access_after` from (#1439)",
         ],
         [
           "apps/api/src/services/spaces.ts",

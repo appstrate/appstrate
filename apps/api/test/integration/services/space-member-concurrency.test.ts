@@ -207,9 +207,11 @@ describeRequiresPostgres("the removal's grant bound is judged under the lock", (
     }
 
     // 403 on the standing the COMMITTED role leaves behind — preset `admin`.
-    // Judged before the lock this read `member`, cleared the bound on the
-    // `operator` default, and reported the row the promotion had swept as
-    // merely missing (404).
+    // The grant bound refuses before the manage bound is ever reached, since
+    // the promotion swept the row. Before #1439 the role was read outside the
+    // lock: it said `member`, the bound cleared on the `operator` default, and
+    // the swept row came back as merely missing (404). Deleting the assertion
+    // reproduces exactly that, which is how this test was shown to discriminate.
     await expect(removal).resolves.toMatchObject({ status: 403 });
   });
 });
