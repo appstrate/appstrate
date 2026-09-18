@@ -897,31 +897,40 @@ buys is the members who will not log in soon — their space exists before someo
 shares a package to them. Idempotent; a second run inserts zero rows and
 `missing_personal_space_after` must print 0.
 
-### Next release — `0068 … VALIDATE CONSTRAINT`, and why it is not in this one
+### Shipped in the follow-up release — `0068 … VALIDATE CONSTRAINT`
 
-`0067` adds `packages_org_package_has_home` `NOT VALID` and `0014` — an operator
-script — is what validates it, so the drizzle tree by itself never does: a fresh
-install keeps `pg_constraint.convalidated = false` for ever, and
+`0067` adds `packages_org_package_has_home` `NOT VALID`, and `0014` — an
+operator script — is what validates it, so the drizzle tree by itself never did:
+a fresh install, where `0014` never runs, kept
+`pg_constraint.convalidated = false` for ever, and
 `docs/NO_TRANSITIONAL_CODE.md` §2's pattern (`ADD … NOT VALID` in one migration,
-`VALIDATE` in a later one) is left half-written. It cannot be closed HERE:
-runbook step 3 applies the whole pending batch, `0067` included, BEFORE `0014`
-runs at step 4 — so a `0068 … VALIDATE CONSTRAINT` inside that batch would scan
-`packages` while every `home_space_id` is still NULL, raise `23514` and roll the
-whole transaction back, the deploy failing on the very migration meant to
-confirm it. The FOLLOW-UP release must therefore carry
-`0068_packages_org_home_validate.sql`, whose only statement is
-`ALTER TABLE "packages" VALIDATE CONSTRAINT "packages_org_package_has_home";`.
-By then `0014` has committed: it is a no-op on a database that ran it and on a
-fresh one, idempotent on replay, and on a deployment that skipped `0014` it fails
-loudly with `23514` — which is the intended failure, not an accident.
+`VALIDATE` in a later one) was left half-written. It could not be closed in THIS
+release: runbook step 3 applies the whole pending batch, `0067` included, BEFORE
+`0014` runs at step 4 — so a `VALIDATE` inside that batch would have scanned
+`packages` while every `home_space_id` was still NULL, raised `23514` and rolled
+the whole transaction back, the deploy failing on the very migration meant to
+confirm it. **The shape recurs**: when a constraint's precondition is an
+operator script that runs after the batch, its `VALIDATE` belongs in the NEXT
+release, never in the one that adds the constraint.
 
-**Where this debt is recorded.** In `0067`'s own header, under "THE REMAINING
-HALF", the way `0056` records its `viewer` window in its header, and as
-https://github.com/appstrate/appstrate/issues/1450. This page is not the record:
-it is a release runbook, and a runbook gets filed as done. Do not let `0067`'s
-paragraph on `pg_constraint.convalidated` — which is about how to READ the
-rollout state, not about whether the `VALIDATE` is still owed — close the
-subject in a reviewer's mind.
+**It shipped** as `packages/db/drizzle/0068_packages_org_home_validate.sql` in
+`v1.0.0-beta.59`, one statement —
+`ALTER TABLE "packages" VALIDATE CONSTRAINT "packages_org_package_has_home";`.
+Where `0014` has committed it is a no-op: production, read read-only on
+2026-09-18, already carries `pg_constraint.convalidated = true`, and the
+statement itself was rehearsed there inside a transaction that was then rolled
+back, which succeeded. Its real job is the fresh-install path, where `0014`
+never runs and the constraint would otherwise stay `NOT VALID` for ever; on a
+deployment that somehow skipped `0014` it fails loudly with `23514` — the
+intended failure, not an accident.
+
+**Where this is recorded.** In `0067`'s own header, under "THE REMAINING HALF",
+the way `0056` records its `viewer` window, and in `0068`'s header, which
+carries the closing half. Neither is to be edited now that the debt is paid: a
+shipped migration is never rewritten, and the reasoning those two headers carry
+is what the next reader of this shape needs. Issue #1450 is closed by
+`v1.0.0-beta.59`; this page is not the record — it is a release runbook, and a
+runbook gets filed as done.
 
 ### Rollback — what is actually reversible
 

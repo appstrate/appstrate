@@ -6,6 +6,186 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.59] - 2026-09-18
+
+### Added
+
+- **MCP Emails — one MCP surface over Gmail, Fastmail, iCloud, Yahoo, Zoho,
+  Yandex and any IMAP/SMTP account the member has connected upstream.**
+  `@appstrate/mcpemails@1.0.0` is a system integration backed by the hosted
+  [MCP Emails](https://mcpemails.com) server, and it joins the DCR-based
+  remote-MCP family (`notion-mcp`, `canva-mcp`, `clickup-mcp`):
+  `source.kind: remote` + `streamable-http` against
+  `https://mcpemails.com/api/mcp`, and an `oauth` auth the sidecar fills with
+  the actor's access token. RFC 9728 protected-resource discovery, RFC 8414 AS
+  metadata, RFC 7591 DCR as a public client and RFC 7636 PKCE (S256) — no OAuth
+  app is registered by hand: the operator installs the connector and each member
+  clicks Connect. The manifest was read off the live server and the AGPL source
+  rather than the marketing page, which disagrees with the code in two places
+  that would have cost real scopes — `search:email` is vestigial (no tool
+  requires it; `read:email` already gates the search action) and the surface is
+  26 tools, not the 23 the docs advertise. `accountId` maps to `$.sub` rather
+  than `$.email`, because userinfo returns the address only when the token
+  carries `openid` or `email`; both are in `default_scopes`, so a connection is
+  still labelled by address. There are no webhooks and no server-initiated
+  events, so an agent that must react to new mail polls `email_read` with
+  `action: "list"`.
+
+- **The production compose ships in this repository, as `deploy/`, and
+  `appstrate/cloud` is retired.** That repository had held no product code since
+  the billing module came in-tree as `@appstrate/module-ee`; its
+  `docker-compose.yml` now lives at `deploy/docker-compose.yml`, with
+  `deploy/.env.example` and a runbook beside it, under the project name
+  `appstrate-prod`. It is deliberately NOT merged with
+  `examples/self-hosting/docker-compose.yml`, which teaches a stock install: the
+  project name, the service names Coolify's domain routing points at
+  (`appstrate-postgres`, `appstrate-minio`, … against `postgres`, `minio`, …)
+  and the `internal: true` network the example uses — which on `appstrate` would
+  cut its egress to the model providers — all differ, and the top-level
+  `volumes:` keys are load-bearing as well. Each file points at the other, so a
+  change that belongs in both is carried across by hand.
+
+  Moving it in-tree put it under the three `bun run check` gates that glob every
+  tracked `*docker-compose*.yml`. None had ever run on it, and three failed.
+  `verify:env-docs` caught the expensive one: its `.env.example` omitted
+  `CONNECT_SESSION_SECRET`, `RUN_TOKEN_SECRET` and `UPLOAD_SIGNING_SECRET`, all
+  three hard-required with no default, so a raw `docker compose up` from that
+  file could not boot and had not been able to for months.
+  `verify:compose-defaults` found ten YAML defaults restating the Zod schema's
+  own, plus only four of `@appstrate/module-ee`'s eight variables forwarded.
+  `verify:release-version` now holds its sixteen image refs to the release like
+  every other shipped compose. And `SIDECAR_POOL_SIZE`, deleted from the platform
+  along with the sidecar pool, had survived here configuring nothing — removed.
+
+  **Operators:** Coolify names the volumes after the RESOURCE uuid, not after the
+  repository, and that cuts both ways. Repointing an EXISTING resource at this
+  file moves, renames and orphans nothing; standing up a NEW one hands you empty
+  volumes however faithfully the compose is copied, and is therefore a data
+  migration rather than a configuration change. `deploy/README.md` says so,
+  because the file reads like a configuration artifact and that is exactly the
+  wrong intuition to bring to it. The resource UUID is written nowhere on
+  purpose — a value that has to be correct to be useful is worse than absent once
+  it is stale — so read it off the resource.
+
+### Changed
+
+- **BREAKING (modules): every principal DECLARES what it is, and
+  `@appstrate/core` goes to 11.0.0.** `AuthResolution` carries a required
+  `principalKind`: `"user"` for the platform user by any transport, `"delegate"`
+  for their authority under a ceiling of its own (an API key, a third-party
+  OAuth client), `"end_user"` for an external identity, set iff `endUser` is. A
+  strategy that omits it, declares an unknown value or contradicts `endUser` is
+  refused by the pipeline with a thrown error — never a default bucket — so an
+  out-of-tree auth strategy fails to compile until it declares one. What it
+  replaces was a proxy: `callerPersonalOwnerId` inferred "is this credential the
+  human themselves?" from the transport (`authMethod === "session"`, the
+  `deferOrgResolution` pipeline flag), copied into four gates asking four
+  different questions, with `!orgRole` standing in for "end-user" and some twenty
+  routes asking "is this the person?" through `authMethod === "api_key"`. The
+  extension point was open — a module may contribute an auth strategy — while the
+  authority model was a closed enumeration, so the first contributed principal
+  landed in the most restricted bucket on four unrelated gates, with four
+  symptoms and only one of them visible. Every gate that asks who the caller is
+  now reads `isUserPrincipal`; the three other inputs survive with the question
+  each actually answers (`api_key` about the key object, `session` about the
+  first-party cookie transport, `deferOrgResolution` about when the pipeline
+  resolves), and the webhooks scope and `/me/connections` read the credential's
+  binding rather than a kind.
+
+  **A third-party OAuth client and an OIDC end-user token are now refused on the
+  profile and its password, on onboarding, on space and organization creation and
+  on the organization library — exactly like an API key**, and the organization
+  listings bind a delegate to its organization and fail closed without one.
+
+- **Migration `0068` validates `packages_org_package_has_home`.** `0067` added
+  that CHECK as `NOT VALID`, which governs every write from the moment it applies
+  while leaving the inherited rows unbacked; `0068` runs the
+  `ALTER TABLE packages VALIDATE CONSTRAINT` that finishes the job (#1450). It is
+  a no-op on a deployment that has already run
+  `scripts/migration/0014-packages-home-space-backfill.sql`, which ends by
+  validating the constraint itself — it is the fresh install that would otherwise
+  carry the constraint marked `NOT VALID` forever.
+
+### Fixed
+
+- **A chat turn in a personal space no longer 404s (#1456).** The turn failed on
+  its first MCP call with a 404 naming a space that exists, in the right
+  organization, owned by the session's author: the chat module's server-minted
+  loopback bearer is neither a cookie session nor the `deferOrgResolution`
+  pipeline, so the transport proxy the gate used answered "not the person" for
+  the person. A turn in the caller's own personal space now works and carries
+  their per-principal grants. The mechanism is the required `principalKind`
+  above.
+
+- **Operator variables no longer travel through the production compose's
+  `environment:` block — the defect that took production down during the
+  cutover.** Coolify MATERIALISES every key that block names: a bare `- FOO`
+  becomes `FOO: ''` in the compose it generates, so the form the rest of the repo
+  uses — name the variable, omit the value, let the Zod schema's default apply —
+  is not merely unnecessary there, it is unavailable, because "unset" cannot be
+  expressed. `z.coerce.number("")` is 0, `@appstrate/module-ee`'s own `.min(1)`
+  refused it, the module failed to initialize and the platform crash-looped.
+  Probing `""` against the real schema of all nineteen bare names the file
+  carried found twelve unsafe: seven refuse to boot (`APP_URL`, `TRUST_PROXY`,
+  `LOG_LEVEL`, `USERCONTENT_URL`, `FILE_RETENTION_DAYS`, `SMTP_PORT`,
+  `EE_RECONCILIATION_BATCH_SIZE`) and four degrade in silence, which is the worse
+  half — `EE_RECONCILIATION_INTERVAL_SECONDS` 300 → 0 pauses metering,
+  `EE_RECONCILIATION_REPLAY_WINDOW` 200 → 0 disables the scan that exists to
+  catch unbilled usage nobody sees, `EE_RECONCILIATION_MAX_GAP_SECONDS` 86400 → 0
+  resumes over any gap, and `S3_PUBLIC_ENDPOINT` goes from undefined to `""`.
+  That one `.min(1)` floor is the only reason any of it surfaced; without it
+  billing would have stopped without a word. The block now carries only what the
+  file COMPUTES — a service hostname, an image ref bound to
+  `${APPSTRATE_VERSION}`, a mirror of `ports:`/`volumes:`, one variable remapped
+  onto another, and the two deliberate overrides (`RUN_ADAPTER`, `MODULES`) whose
+  YAML value differs from the code default on purpose. Everything else arrives
+  through `env_file`, which Coolify adds to every service and which the file now
+  declares itself, so a raw `docker compose` run uses the identical mechanism.
+
+- **A credential delivered through `delivery.files` is readable by the runner
+  again.** `docker cp <hostdir> <container>:/` stamps every copied entry with the
+  HOST-side ownership — the uid the sidecar runs as — while all four runner
+  images declare `USER runner:runner` (uid 1001) and the default mode for
+  `delivery.files` is `0400`. A delivered secret therefore landed as
+  `-r-------- 1 <sidecar uid> 0` and the runner could not read its own file. It
+  hit every owner-only mode on all four runners, including the cert+key pair of
+  `mtls`, which is today's only production consumer of `delivery.files`. Chowning
+  the staged file is not available (it needs privileges the sidecar does not
+  have, and macOS refuses it anyway), so the staged mirror is streamed as an
+  in-memory USTAR archive through `docker cp -`, where uid and gid are nothing
+  but header fields. **The staged modes are kept exactly as they are** —
+  relaxing `0400` to something world-readable would have made the symptom
+  disappear by throwing away the protection the mode exists to provide. Staging
+  itself is unchanged: path safety checks, parent directories and their modes
+  still come from `stageFileMountsOnHost`, and only the transport differs. The
+  reason it went unseen is that the existing tests covered staging and never
+  exercised CONSUMPTION inside a container.
+
+- **An `mcp-server` whose `entry_point` is written `./server.js` imports again.**
+  `checkCompanionFiles` resolved `manifest.server.entry_point` through an exact
+  `files.has()`, while MCPB manifests conventionally spell the path explicitly
+  relative and zip entries are stored flat — two spellings that never meet. No
+  `mcp-server` package of this repository could be installed through
+  `POST /api/packages/import`, the shipped reference package
+  `@appstrate/bun-toolkit-server` (`"./server.ts"`) included, while the on-disk
+  system-package loader accepted the very same archive: the front door was
+  deciding the package's validity. Either spelling resolves now, and ONLY a
+  leading `./` is normalized — `..` segments and absolute paths stay unresolved,
+  so the lookup cannot leave the archive root, and a genuinely absent payload
+  still reports `MCP_SERVER_MISSING_ENTRY_POINT` with the declared path.
+
+- **`scripts/migration/0010` ordered its pages by the text cast instead of by the
+  key.** A cast keeps the output name, so `ORDER BY` bound to the `::text`
+  SELECT-list output while the `WHERE` beside it saw the input column —
+  lexicographic ordering against a numeric cursor. Page 1 ended at 9287 and page
+  2 asked for the ids numerically above it, so 109 of the 717 billing-ledger rows
+  were never selected, and the transaction committed. Found by rehearsing the
+  beta.58 window against a `pg_dump` restore of production; the fix qualifies the
+  key with its table, which cannot resolve to an output name. **No production
+  data was lost** — the legacy database and the platform each hold the same 717
+  rows, verified. Re-run on a fresh restore: 717/717, every table matches, and a
+  second run still refuses with exit 1 as the runbook requires.
+
 ## [1.0.0-beta.58] - 2026-09-17
 
 ### Added
