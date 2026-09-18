@@ -1,5 +1,9 @@
 # Quality gate — the `verify:dead-code` (knip) forensics
 
+`verify:dead-code` runs `knip-bun` over every workspace as one of the task names of `bun run check`
+(turbo reports it as `//#verify:dead-code`). It fails on an exported symbol with no reader, a file
+nothing reaches, or a declared dependency nothing imports.
+
 Extracted from the root `AGENTS.md` § "Quality Gate — and the signals it lies with", which keeps the
 short version. This file holds the full record: what knip does and does not derive, which hypotheses
 were measured and refuted, and the only two shapes of `ignore*` that qualify. Read it before touching
@@ -9,8 +13,9 @@ were measured and refuted, and the only two shapes of `ignore*` that qualify. Re
 
 Public exports of the **published** packages are out of scope by design — their readers live out of
 tree — and exactly two scoped packages here are published on an ongoing basis: `@appstrate/core` and
-`@appstrate/afps-shared`, the only two with a publish workflow
-(`.github/workflows/publish-core.yml`, `publish-afps-shared.yml`). `@appstrate/afps-runtime` carries
+`@appstrate/afps-shared`, the only two SCOPED packages with a publish
+workflow (`.github/workflows/publish-core.yml`, `publish-afps-shared.yml`) — `apps/cli` publishes
+too, but unscoped as `appstrate`, through `publish-cli.yml`. `@appstrate/afps-runtime` carries
 `publishConfig` but is **not** published (no workflow, no tag, a `0.0.0` npm placeholder) and stays
 private by decision; `@appstrate/runner-pi` and the `@appstrate/module-*` packages are absent from
 npm entirely — `@appstrate/module-ee` is additionally `"private": true` and source-available, never
@@ -19,14 +24,6 @@ published anywhere; `@appstrate/ui` is the inverse case — `"private": true` he
 `publish-ui.yml`, nothing republishes it, and it is treated as private. So a release tag alone
 proves nothing — the live signal is the workflow, and the ground truth is `npm view <pkg> versions`,
 never the manifest's `publishConfig`.
-
-A workspace that declares `entry` replaces even knip's filename defaults, so it must re-declare
-every `exports`/`bin`/`main` target or its whole subtree reads as dead — the cause of a ~161-finding
-false red fixed on 2026-08-23. That re-declaration is derived by `manifestEntries()` in
-`knip.config.ts`, so a manifest edit cannot silently desynchronise from it; what stays hand-written
-is the half no manifest implies (Docker CMDs, fixtures, operator scripts). The next section records
-what knip itself derives from a manifest, which changed between the pinned versions and is the
-reason that explicit list is kept rather than deleted.
 
 ## `verify:dead-code` (knip) — what it does and does not derive
 
@@ -39,8 +36,8 @@ untouched `main` as well as on any branch. None of it was real, and because the
 `pre-push` hook runs `bun run check`, it blocked every local push.
 
 The cause was read out of knip 5.88.1's `dist/` — the version pinned when this
-was diagnosed. The pin is now **6.32.2**, and each claim below was re-verified
-against that `dist/`:
+was diagnosed. Each claim below was re-verified against **6.32.2**'s
+`dist/`; `package.json` declares the range `^6.34.0` today — read the version there, not here:
 
 - `ConfigurationChief.js` is the **only** place entry defaults are produced, and
   they are filename patterns: `{index,cli,main}.{exts}` at the package root and
@@ -95,17 +92,17 @@ component file nothing imports. Either way the reason travels with the entry,
 written at its call site in `knip.config.ts` — that file's rule 2 states the
 first shape; the second is argued at the `ignoreIssues` entry itself. The live
 carve-outs are `ignoreExportsUsedInFile`, `ignoreIssues`, `ignoreBinaries` and
-three `ignoreDependencies` blocks; read their prose before adding a fourth.
+three `ignoreDependencies` blocks; read their prose before adding a fourth `ignoreDependencies` block.
 They are deliberately NOT re-listed here — a second copy of that list would
 drift from the config, and the config is where the justification has to live
 anyway. What is forbidden is the other use: silencing a finding you have not
 explained.
 
-An earlier version of this section blamed `git worktree`, on the strength of one
+An earlier version of this record blamed `git worktree`, on the strength of one
 clone that came back clean. That was wrong. Measured and refuted since, each
 independently: worktree vs `git clone`, `--frozen-lockfile` vs a plain
-`bun install`, the knip version (5.88.1 on both sides at the time; the pin is
-6.32.2 today), the presence of a `.env`,
+`bun install`, the knip version (5.88.1 on both sides at the time; a 6.x
+range today), the presence of a `.env`,
 the turbo cache (the task is `"cache": false`, and CI logs `cache bypass`), and
 the bun version (1.3.11 local vs the `packageManager`-pinned 1.3.14 — tested at
 1.3.14, identical output). CI was green throughout with the same config, and
